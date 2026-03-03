@@ -1,0 +1,39 @@
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+    - gosimple
+    - gocritic
+    - revive
+    - misspell
+    - gofmt
+    - goimports
+    - bodyclose
+    - noctx
+    - sqlclosecheck
+
+linters-settings:
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment
+  revive:
+    rules:
+      - name: unexported-return
+        disabled: true
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0

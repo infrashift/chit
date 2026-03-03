@@ -1,0 +1,1958 @@
+openapi: "3.1.0"
+info:
+  title: Chit API
+  version: "0.1.0"
+  description: |
+    REST API for Chit, a stripped-down team messaging server.
+
+    ## Authentication
+    All endpoints except `/system/ping` and `/system/config/client` require
+    authentication via Ory Oathkeeper. The authenticated user's Kratos identity
+    ID is forwarded in the `X-User-Id` header. On first request the server
+    auto-provisions a local User record from the Kratos identity.
+
+    ## Pagination
+    List endpoints accept `page` (0-indexed) and `per_page` (default 60)
+    query parameters.
+
+    ## IDs
+    All resource IDs are UUIDv7 strings.
+
+    ## Timestamps
+    All `*_at` fields are Unix millisecond timestamps (int64).
+
+servers:
+  - url: /api/v1
+    description: Default API prefix
+
+tags:
+  - name: System
+    description: Health checks and client configuration
+  - name: Users
+    description: User management and lookup
+  - name: Teams
+    description: Team CRUD and membership
+  - name: Channels
+    description: Channel CRUD, DM/GM creation, membership, and read tracking
+  - name: Posts
+    description: Message CRUD, pinning, and retrieval
+  - name: Threads
+    description: Thread views, following, and read tracking
+  - name: Tags
+    description: Tag CRUD and post-tag associations
+  - name: Search
+    description: Full-text search across posts via ZincSearch
+  - name: WebSocket
+    description: Real-time event streaming
+
+paths:
+  # ──────────────────────────── System ────────────────────────────
+  /system/ping:
+    get:
+      operationId: system_ping
+      summary: Health check
+      description: Returns OK if the server is running. No authentication required.
+      tags: [System]
+      responses:
+        "200":
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+              example:
+                status: OK
+
+  /system/config/client:
+    get:
+      operationId: system_client_config
+      summary: Client configuration
+      description: |
+        Returns public configuration values that clients need at startup,
+        such as the server version and whether Vault encryption is enabled.
+        No authentication required.
+      tags: [System]
+      responses:
+        "200":
+          description: Client configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    type: string
+                    example: "0.1.0"
+                  vault_enabled:
+                    type: boolean
+                    example: false
+
+  # ──────────────────────────── Users ─────────────────────────────
+  /users:
+    post:
+      operationId: create_user
+      summary: Create a user
+      description: |
+        Creates a new local user record. Typically called internally during
+        auto-provisioning from Kratos identity. The request body should
+        contain kratos_id, username, display_name, and email.
+      tags: [Users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    get:
+      operationId: search_users
+      summary: Search users
+      description: |
+        Search users by username or display name. Returns a paginated list
+        of users matching the search term. Email is redacted from results.
+      tags: [Users]
+      parameters:
+        - name: term
+          in: query
+          description: Search term to match against username or display_name
+          schema:
+            type: string
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PerPageParam"
+      responses:
+        "200":
+          description: List of matching users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /users/me:
+    get:
+      operationId: get_me
+      summary: Get current user
+      description: Returns the full profile of the authenticated user, including email.
+      tags: [Users]
+      responses:
+        "200":
+          description: Current user profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    put:
+      operationId: update_me
+      summary: Update current user
+      description: |
+        Updates the authenticated user's profile. Only `display_name` and
+        `username` can be changed. Other fields are ignored.
+      tags: [Users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                display_name:
+                  type: string
+                  maxLength: 100
+                username:
+                  type: string
+                  pattern: "^[a-z0-9][a-z0-9._-]{0,62}[a-z0-9]$"
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /users/{id}:
+    get:
+      operationId: get_user
+      summary: Get user by ID
+      description: Returns a user's public profile. Email is redacted.
+      tags: [Users]
+      parameters:
+        - $ref: "#/components/parameters/UserIdParam"
+      responses:
+        "200":
+          description: User profile (email redacted)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /users/username/{username}:
+    get:
+      operationId: get_user_by_username
+      summary: Get user by username
+      description: Look up a user by their unique username. Email is redacted.
+      tags: [Users]
+      parameters:
+        - name: username
+          in: path
+          required: true
+          description: The unique username to look up
+          schema:
+            type: string
+      responses:
+        "200":
+          description: User profile (email redacted)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /users/ids:
+    post:
+      operationId: get_users_by_ids
+      summary: Get users by IDs
+      description: |
+        Batch-fetch multiple users by their IDs. Useful for resolving user
+        references in posts and channel members. Email is redacted.
+      tags: [Users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: string
+                format: uuid
+              example:
+                - "0192d4c1-7e2a-7000-8000-000000000001"
+                - "0192d4c1-7e2a-7000-8000-000000000002"
+      responses:
+        "200":
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ──────────────────────────── Teams ─────────────────────────────
+  /teams:
+    post:
+      operationId: create_team
+      summary: Create a team
+      description: |
+        Creates a new team. The authenticated user becomes the team creator
+        and is automatically added as a team member with `team_admin team_user`
+        roles.
+      tags: [Teams]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTeamRequest"
+      responses:
+        "201":
+          description: Team created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Team"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    get:
+      operationId: get_all_teams
+      summary: List all teams
+      description: Returns a paginated list of all teams.
+      tags: [Teams]
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PerPageParam"
+      responses:
+        "200":
+          description: Paginated team list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Team"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /teams/{id}:
+    get:
+      operationId: get_team
+      summary: Get team by ID
+      tags: [Teams]
+      parameters:
+        - $ref: "#/components/parameters/TeamIdParam"
+      responses:
+        "200":
+          description: Team details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Team"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: update_team
+      summary: Update a team
+      description: |
+        Updates a team's display_name, description, or type.
+        The team name (URL slug) cannot be changed after creation.
+      tags: [Teams]
+      parameters:
+        - $ref: "#/components/parameters/TeamIdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTeamRequest"
+      responses:
+        "200":
+          description: Updated team
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Team"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: delete_team
+      summary: Delete a team
+      description: Soft-deletes a team by setting delete_at.
+      tags: [Teams]
+      parameters:
+        - $ref: "#/components/parameters/TeamIdParam"
+      responses:
+        "200":
+          description: Team deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /users/me/teams:
+    get:
+      operationId: get_my_teams
+      summary: Get teams for current user
+      description: Returns all teams the authenticated user is a member of.
+      tags: [Teams]
+      responses:
+        "200":
+          description: List of teams
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Team"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /teams/{id}/members:
+    post:
+      operationId: add_team_member
+      summary: Add a team member
+      description: Adds a user to a team with default `team_user` role.
+      tags: [Teams]
+      parameters:
+        - $ref: "#/components/parameters/TeamIdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Team member added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamMember"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    get:
+      operationId: get_team_members
+      summary: Get team members
+      description: Returns a paginated list of members for a team.
+      tags: [Teams]
+      parameters:
+        - $ref: "#/components/parameters/TeamIdParam"
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PerPageParam"
+      responses:
+        "200":
+          description: List of team members
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TeamMember"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /teams/{id}/members/{user_id}:
+    delete:
+      operationId: remove_team_member
+      summary: Remove a team member
+      tags: [Teams]
+      parameters:
+        - $ref: "#/components/parameters/TeamIdParam"
+        - name: user_id
+          in: path
+          required: true
+          description: ID of the user to remove
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Member removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ──────────────────────────── Channels ──────────────────────────
+  /channels:
+    post:
+      operationId: create_channel
+      summary: Create a channel
+      description: |
+        Creates a new Open or Private channel within a team. The creator is
+        automatically added as a channel member and granted Keto `member`
+        relation for authorization. A `channel_created` WebSocket event is
+        broadcast to team members.
+      tags: [Channels]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateChannelRequest"
+      responses:
+        "201":
+          description: Channel created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Channel"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /channels/{id}:
+    get:
+      operationId: get_channel
+      summary: Get channel by ID
+      tags: [Channels]
+      parameters:
+        - $ref: "#/components/parameters/ChannelIdParam"
+      responses:
+        "200":
+          description: Channel details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Channel"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: update_channel
+      summary: Update a channel
+      description: |
+        Updates a channel's display_name, header, or purpose.
+        Broadcasts a `channel_updated` WebSocket event.
+      tags: [Channels]
+      parameters:
+        - $ref: "#/components/parameters/ChannelIdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateChannelRequest"
+      responses:
+        "200":
+          description: Updated channel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Channel"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: delete_channel
+      summary: Delete a channel
+      description: Soft-deletes a channel. Broadcasts a `channel_deleted` WebSocket event.
+      tags: [Channels]
+      parameters:
+        - $ref: "#/components/parameters/ChannelIdParam"
+      responses:
+        "200":
+          description: Channel deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /teams/{id}/channels:
+    get:
+      operationId: get_channels_for_team
+      summary: Get channels for a team
+      description: Returns all channels (Open and Private) belonging to a team.
+      tags: [Channels]
+      parameters:
+        - $ref: "#/components/parameters/TeamIdParam"
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PerPageParam"
+      responses:
+        "200":
+          description: List of channels
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Channel"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /users/me/teams/{id}/channels:
+    get:
+      operationId: get_my_channels
+      summary: Get my channels in a team
+      description: Returns channels the authenticated user is a member of within a specific team.
+      tags: [Channels]
+      parameters:
+        - $ref: "#/components/parameters/TeamIdParam"
+      responses:
+        "200":
+          description: List of channels the user belongs to
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Channel"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /channels/direct:
+    post:
+      operationId: create_direct_channel
+      summary: Create a direct message channel
+      description: |
+        Creates a 1:1 DM channel between exactly two users. The channel name
+        is deterministically generated from the sorted user IDs. Both users
+        are added as members and granted Keto relations. If the DM already
+        exists, the existing channel is returned.
+      tags: [Channels]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: string
+                format: uuid
+              minItems: 2
+              maxItems: 2
+              description: Exactly 2 user IDs
+              example:
+                - "0192d4c1-7e2a-7000-8000-000000000001"
+                - "0192d4c1-7e2a-7000-8000-000000000002"
+      responses:
+        "201":
+          description: DM channel created or returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Channel"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /channels/group:
+    post:
+      operationId: create_group_channel
+      summary: Create a group message channel
+      description: |
+        Creates a group message channel with 3-8 members. All provided users
+        are added as members with Keto relations.
+      tags: [Channels]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: string
+                format: uuid
+              minItems: 3
+              maxItems: 8
+              description: 3-8 user IDs
+      responses:
+        "201":
+          description: Group channel created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Channel"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /channels/{id}/members:
+    post:
+      operationId: add_channel_member
+      summary: Add a channel member
+      description: |
+        Adds a user to a channel. Creates a Keto `member` relation and
+        broadcasts a `user_added` WebSocket event to the channel.
+      tags: [Channels]
+      parameters:
+        - $ref: "#/components/parameters/ChannelIdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Channel member added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelMember"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    get:
+      operationId: get_channel_members
+      summary: Get channel members
+      tags: [Channels]
+      parameters:
+        - $ref: "#/components/parameters/ChannelIdParam"
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PerPageParam"
+      responses:
+        "200":
+          description: List of channel members
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChannelMember"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /channels/{id}/members/{user_id}:
+    delete:
+      operationId: remove_channel_member
+      summary: Remove a channel member
+      description: |
+        Removes a user from a channel. Deletes the Keto relation and
+        broadcasts a `user_removed` WebSocket event.
+      tags: [Channels]
+      parameters:
+        - $ref: "#/components/parameters/ChannelIdParam"
+        - name: user_id
+          in: path
+          required: true
+          description: ID of the user to remove
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Member removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /channels/{id}/members/me/view:
+    post:
+      operationId: view_channel
+      summary: Mark channel as viewed
+      description: |
+        Updates the authenticated user's `last_viewed_at` timestamp for a
+        channel, clearing the unread indicator in the client.
+      tags: [Channels]
+      parameters:
+        - $ref: "#/components/parameters/ChannelIdParam"
+      responses:
+        "200":
+          description: Channel marked as viewed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ──────────────────────────── Posts ─────────────────────────────
+  /posts:
+    post:
+      operationId: create_post
+      summary: Create a post
+      description: |
+        Creates a new message in a channel. If `root_id` is set, the post
+        is a thread reply and the parent thread metadata is updated
+        automatically (reply count, participants, last reply time). The
+        replying user is auto-followed on the thread.
+
+        If Vault encryption is enabled, the content is encrypted at rest.
+        A `posted` WebSocket event is broadcast to the channel.
+      tags: [Posts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePostRequest"
+      responses:
+        "201":
+          description: Post created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /posts/{id}:
+    get:
+      operationId: get_post
+      summary: Get post by ID
+      description: Returns a single post. Encrypted content is decrypted transparently.
+      tags: [Posts]
+      parameters:
+        - $ref: "#/components/parameters/PostIdParam"
+      responses:
+        "200":
+          description: Post details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: update_post
+      summary: Update a post
+      description: |
+        Updates a post's content. Sets edit_at timestamp. If Vault encryption
+        is enabled, the new content is re-encrypted. Broadcasts a `post_edited`
+        WebSocket event.
+      tags: [Posts]
+      parameters:
+        - $ref: "#/components/parameters/PostIdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+                  maxLength: 65535
+                  description: Updated message content (markdown)
+      responses:
+        "200":
+          description: Updated post
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Post"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: delete_post
+      summary: Delete a post
+      description: Soft-deletes a post. Broadcasts a `post_deleted` WebSocket event.
+      tags: [Posts]
+      parameters:
+        - $ref: "#/components/parameters/PostIdParam"
+      responses:
+        "200":
+          description: Post deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /posts/{id}/pin:
+    post:
+      operationId: pin_post
+      summary: Pin a post
+      description: Pins a post in its channel. Broadcasts a `post_pinned` WebSocket event.
+      tags: [Posts]
+      parameters:
+        - $ref: "#/components/parameters/PostIdParam"
+      responses:
+        "200":
+          description: Post pinned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /posts/{id}/unpin:
+    post:
+      operationId: unpin_post
+      summary: Unpin a post
+      description: Unpins a post. Broadcasts a `post_unpinned` WebSocket event.
+      tags: [Posts]
+      parameters:
+        - $ref: "#/components/parameters/PostIdParam"
+      responses:
+        "200":
+          description: Post unpinned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /channels/{id}/posts:
+    get:
+      operationId: get_channel_posts
+      summary: Get posts in a channel
+      description: |
+        Returns a paginated list of posts in a channel, ordered by creation
+        time (newest first). Encrypted content is decrypted transparently.
+        Supports cursor-based pagination via `before`, `after`, and `since`
+        query parameters in addition to page/per_page.
+      tags: [Posts]
+      parameters:
+        - $ref: "#/components/parameters/ChannelIdParam"
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PerPageParam"
+        - name: before
+          in: query
+          description: Return posts before this post ID (cursor)
+          schema:
+            type: string
+            format: uuid
+        - name: after
+          in: query
+          description: Return posts after this post ID (cursor)
+          schema:
+            type: string
+            format: uuid
+        - name: since
+          in: query
+          description: Return posts created after this Unix millisecond timestamp
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Post list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /channels/{id}/pinned:
+    get:
+      operationId: get_pinned_posts
+      summary: Get pinned posts in a channel
+      description: Returns all pinned posts in a channel.
+      tags: [Posts]
+      parameters:
+        - $ref: "#/components/parameters/ChannelIdParam"
+      responses:
+        "200":
+          description: Pinned posts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ──────────────────────────── Threads ───────────────────────────
+  /posts/{id}/thread:
+    get:
+      operationId: get_thread
+      summary: Get a thread
+      description: |
+        Returns the root post and all replies in a thread. Includes thread
+        metadata (reply count, participants, last reply time) and all post
+        content decrypted.
+      tags: [Threads]
+      parameters:
+        - $ref: "#/components/parameters/PostIdParam"
+      responses:
+        "200":
+          description: Thread with all posts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ThreadResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /users/me/teams/{id}/threads:
+    get:
+      operationId: get_my_threads
+      summary: Get my threads in a team
+      description: |
+        Returns threads the authenticated user is following within a team,
+        including unread status. Paginated, defaulting to 25 per page.
+      tags: [Threads]
+      parameters:
+        - $ref: "#/components/parameters/TeamIdParam"
+        - $ref: "#/components/parameters/PageParam"
+        - name: per_page
+          in: query
+          description: Number of items per page (default 25)
+          schema:
+            type: integer
+            default: 25
+            minimum: 1
+            maximum: 200
+      responses:
+        "200":
+          description: List of followed threads
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserThreadList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /users/me/teams/{team_id}/threads/{id}/read:
+    put:
+      operationId: mark_thread_as_read
+      summary: Mark thread as read
+      description: |
+        Updates the user's `last_viewed_at` for a thread, clearing the
+        unread indicator.
+      tags: [Threads]
+      parameters:
+        - name: team_id
+          in: path
+          required: true
+          description: Team ID (for scoping)
+          schema:
+            type: string
+            format: uuid
+        - name: id
+          in: path
+          required: true
+          description: Thread root post ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Thread marked as read
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /users/me/teams/{team_id}/threads/{id}/following:
+    put:
+      operationId: update_thread_following
+      summary: Follow or unfollow a thread
+      description: |
+        Sets whether the authenticated user is following a thread. Following
+        a thread means the user will see it in their "My Threads" view and
+        receive notifications for new replies.
+      tags: [Threads]
+      parameters:
+        - name: team_id
+          in: path
+          required: true
+          description: Team ID (for scoping)
+          schema:
+            type: string
+            format: uuid
+        - name: id
+          in: path
+          required: true
+          description: Thread root post ID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [following]
+              properties:
+                following:
+                  type: boolean
+                  description: Whether to follow (true) or unfollow (false)
+      responses:
+        "200":
+          description: Thread following updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ──────────────────────────── Tags ──────────────────────────────
+  /tags:
+    post:
+      operationId: create_tag
+      summary: Create a tag
+      description: Creates a new tag that can be applied to posts.
+      tags: [Tags]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 50
+                  description: Unique tag name
+                  example: "bug"
+      responses:
+        "201":
+          description: Tag created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tag"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    get:
+      operationId: get_all_tags
+      summary: List all tags
+      tags: [Tags]
+      responses:
+        "200":
+          description: All tags
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Tag"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /posts/{id}/tags:
+    post:
+      operationId: add_tag_to_post
+      summary: Add a tag to a post
+      description: Associates an existing tag with a post (message).
+      tags: [Tags]
+      parameters:
+        - $ref: "#/components/parameters/PostIdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tag_id]
+              properties:
+                tag_id:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Tag added to post
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    get:
+      operationId: get_tags_for_post
+      summary: Get tags for a post
+      tags: [Tags]
+      parameters:
+        - $ref: "#/components/parameters/PostIdParam"
+      responses:
+        "200":
+          description: Tags associated with the post
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Tag"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /posts/{id}/tags/{tag_id}:
+    delete:
+      operationId: remove_tag_from_post
+      summary: Remove a tag from a post
+      tags: [Tags]
+      parameters:
+        - $ref: "#/components/parameters/PostIdParam"
+        - name: tag_id
+          in: path
+          required: true
+          description: Tag ID to remove
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Tag removed from post
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ──────────────────────────── Search ────────────────────────────
+  /teams/{id}/posts/search:
+    post:
+      operationId: search_posts_in_team
+      summary: Search posts in a team
+      description: |
+        Full-text search across posts within a team using ZincSearch.
+        Returns matching posts with content decrypted.
+      tags: [Search]
+      parameters:
+        - $ref: "#/components/parameters/TeamIdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchRequest"
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /channels/{id}/posts/search:
+    post:
+      operationId: search_posts_in_channel
+      summary: Search posts in a channel
+      description: Full-text search across posts within a specific channel.
+      tags: [Search]
+      parameters:
+        - $ref: "#/components/parameters/ChannelIdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchRequest"
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ──────────────────────────── WebSocket ─────────────────────────
+  /websocket:
+    get:
+      operationId: handle_web_socket
+      summary: WebSocket connection
+      description: |
+        Upgrades the HTTP connection to a WebSocket for real-time event
+        streaming. Events include: posted, post_edited, post_deleted,
+        post_pinned, post_unpinned, typing, channel_created,
+        channel_updated, channel_deleted, user_added, user_removed,
+        thread_updated, status_change.
+
+        Clients can send `typing` actions via the WebSocket.
+        The server sends periodic ping frames for keepalive.
+      tags: [WebSocket]
+      responses:
+        "101":
+          description: Switching Protocols (WebSocket upgrade)
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+# ═══════════════════════════════════════════════════════════════════
+# Components
+# ═══════════════════════════════════════════════════════════════════
+components:
+  # ──────── Reusable Parameters ───────
+  parameters:
+    PageParam:
+      name: page
+      in: query
+      description: Page number (0-indexed)
+      schema:
+        type: integer
+        default: 0
+        minimum: 0
+    PerPageParam:
+      name: per_page
+      in: query
+      description: Number of items per page
+      schema:
+        type: integer
+        default: 60
+        minimum: 1
+        maximum: 200
+    UserIdParam:
+      name: id
+      in: path
+      required: true
+      description: User ID (UUIDv7)
+      schema:
+        type: string
+        format: uuid
+    TeamIdParam:
+      name: id
+      in: path
+      required: true
+      description: Team ID (UUIDv7)
+      schema:
+        type: string
+        format: uuid
+    ChannelIdParam:
+      name: id
+      in: path
+      required: true
+      description: Channel ID (UUIDv7)
+      schema:
+        type: string
+        format: uuid
+    PostIdParam:
+      name: id
+      in: path
+      required: true
+      description: Post ID (UUIDv7)
+      schema:
+        type: string
+        format: uuid
+
+  # ──────── Reusable Responses ────────
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AppError"
+    Unauthorized:
+      description: Missing or invalid authentication
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AppError"
+    Forbidden:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AppError"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AppError"
+    Conflict:
+      description: Resource already exists
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AppError"
+
+  # ──────── Schemas ───────────────────
+  schemas:
+    StatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "OK"
+
+    AppError:
+      type: object
+      description: Structured error returned by all endpoints on failure
+      properties:
+        id:
+          type: string
+          description: Error identifier (usually the handler name)
+        message:
+          type: string
+          description: Human-readable error message
+        detailed_error:
+          type: string
+          description: Additional error details (may be empty)
+        status_code:
+          type: integer
+          description: HTTP status code
+      example:
+        id: createPost
+        message: invalid request body
+        detailed_error: ""
+        status_code: 400
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        kratos_id:
+          type: string
+          format: uuid
+          description: Ory Kratos identity ID
+        username:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9._-]{0,62}[a-z0-9]$"
+        display_name:
+          type: string
+          maxLength: 100
+        email:
+          type: string
+          format: email
+          description: Only visible to the user themselves; redacted for other users
+        roles:
+          type: string
+          description: Space-separated role list (e.g. "system_user")
+        create_at:
+          type: integer
+          format: int64
+          description: Unix millisecond timestamp
+        update_at:
+          type: integer
+          format: int64
+        delete_at:
+          type: integer
+          format: int64
+          description: "0 if not deleted"
+      example:
+        id: "0192d4c1-7e2a-7000-8000-000000000001"
+        kratos_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        username: "jdoe"
+        display_name: "Jane Doe"
+        email: ""
+        roles: "system_user"
+        create_at: 1700000000000
+        update_at: 1700000000000
+        delete_at: 0
+
+    CreateUserRequest:
+      type: object
+      required: [kratos_id, username, display_name, email]
+      properties:
+        kratos_id:
+          type: string
+          format: uuid
+        username:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9._-]{0,62}[a-z0-9]$"
+        display_name:
+          type: string
+          maxLength: 100
+        email:
+          type: string
+          format: email
+
+    Team:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$"
+          description: URL-safe team slug (immutable after creation)
+        display_name:
+          type: string
+          maxLength: 64
+        description:
+          type: string
+          maxLength: 255
+        type:
+          type: string
+          enum: ["O", "I"]
+          description: "O = Open (anyone can join), I = Invite-only"
+        creator_id:
+          type: string
+          format: uuid
+        create_at:
+          type: integer
+          format: int64
+        update_at:
+          type: integer
+          format: int64
+        delete_at:
+          type: integer
+          format: int64
+      example:
+        id: "0192d4c1-7e2a-7000-8000-000000000010"
+        name: "engineering"
+        display_name: "Engineering"
+        description: "Engineering team discussions"
+        type: "O"
+        creator_id: "0192d4c1-7e2a-7000-8000-000000000001"
+        create_at: 1700000000000
+        update_at: 1700000000000
+        delete_at: 0
+
+    CreateTeamRequest:
+      type: object
+      required: [name, display_name]
+      properties:
+        name:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$"
+        display_name:
+          type: string
+          maxLength: 64
+        description:
+          type: string
+          maxLength: 255
+        type:
+          type: string
+          enum: ["O", "I"]
+          default: "O"
+
+    UpdateTeamRequest:
+      type: object
+      properties:
+        display_name:
+          type: string
+          maxLength: 64
+        description:
+          type: string
+          maxLength: 255
+        type:
+          type: string
+          enum: ["O", "I"]
+
+    TeamMember:
+      type: object
+      properties:
+        team_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        roles:
+          type: string
+          description: Space-separated role list (e.g. "team_user team_admin")
+        create_at:
+          type: integer
+          format: int64
+        delete_at:
+          type: integer
+          format: int64
+      example:
+        team_id: "0192d4c1-7e2a-7000-8000-000000000010"
+        user_id: "0192d4c1-7e2a-7000-8000-000000000001"
+        roles: "team_user"
+        create_at: 1700000000000
+        delete_at: 0
+
+    Channel:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        team_id:
+          type: string
+          format: uuid
+          description: Null for DM and Group channels
+        creator_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          description: URL-safe channel slug (auto-generated for DM/Group)
+        display_name:
+          type: string
+          maxLength: 64
+        header:
+          type: string
+          maxLength: 1024
+          description: Channel header (markdown)
+        purpose:
+          type: string
+          maxLength: 250
+        type:
+          type: string
+          enum: ["O", "P", "D", "G"]
+          description: "O = Open, P = Private, D = Direct Message, G = Group Message"
+        total_msg_count:
+          type: integer
+          format: int64
+        last_post_at:
+          type: integer
+          format: int64
+        create_at:
+          type: integer
+          format: int64
+        update_at:
+          type: integer
+          format: int64
+        delete_at:
+          type: integer
+          format: int64
+      example:
+        id: "0192d4c1-7e2a-7000-8000-000000000020"
+        team_id: "0192d4c1-7e2a-7000-8000-000000000010"
+        creator_id: "0192d4c1-7e2a-7000-8000-000000000001"
+        name: "general"
+        display_name: "General"
+        header: "Welcome to the general channel"
+        purpose: "General discussion"
+        type: "O"
+        total_msg_count: 42
+        last_post_at: 1700000060000
+        create_at: 1700000000000
+        update_at: 1700000000000
+        delete_at: 0
+
+    CreateChannelRequest:
+      type: object
+      required: [team_id, name, display_name, type]
+      properties:
+        team_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$"
+        display_name:
+          type: string
+          maxLength: 64
+        header:
+          type: string
+          maxLength: 1024
+        purpose:
+          type: string
+          maxLength: 250
+        type:
+          type: string
+          enum: ["O", "P"]
+          description: "O = Open, P = Private"
+
+    UpdateChannelRequest:
+      type: object
+      properties:
+        display_name:
+          type: string
+          maxLength: 64
+        header:
+          type: string
+          maxLength: 1024
+        purpose:
+          type: string
+          maxLength: 250
+
+    ChannelMember:
+      type: object
+      properties:
+        channel_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        roles:
+          type: string
+        last_viewed_at:
+          type: integer
+          format: int64
+        msg_count:
+          type: integer
+          format: int64
+        mention_count:
+          type: integer
+          format: int64
+        notify_props:
+          type: object
+          additionalProperties: true
+        create_at:
+          type: integer
+          format: int64
+
+    Post:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        channel_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        root_id:
+          type: string
+          format: uuid
+          description: Set when this post is a thread reply; references the root post
+        content:
+          type: string
+          maxLength: 65535
+          description: Message content (markdown). Decrypted transparently if Vault is enabled.
+        type:
+          type: string
+          description: Post type (empty for normal messages)
+        props:
+          type: object
+          additionalProperties: true
+          description: Arbitrary key-value metadata
+        hashtags:
+          type: string
+          description: Space-separated hashtags extracted from content
+        is_pinned:
+          type: boolean
+        edit_at:
+          type: integer
+          format: int64
+          description: "0 if never edited"
+        create_at:
+          type: integer
+          format: int64
+        update_at:
+          type: integer
+          format: int64
+        delete_at:
+          type: integer
+          format: int64
+      example:
+        id: "0192d4c1-7e2a-7000-8000-000000000030"
+        channel_id: "0192d4c1-7e2a-7000-8000-000000000020"
+        user_id: "0192d4c1-7e2a-7000-8000-000000000001"
+        root_id: ""
+        content: "Hello, world!"
+        type: ""
+        props: {}
+        hashtags: ""
+        is_pinned: false
+        edit_at: 0
+        create_at: 1700000060000
+        update_at: 1700000060000
+        delete_at: 0
+
+    CreatePostRequest:
+      type: object
+      required: [channel_id, content]
+      properties:
+        channel_id:
+          type: string
+          format: uuid
+        content:
+          type: string
+          maxLength: 65535
+          description: Message content (markdown)
+        root_id:
+          type: string
+          format: uuid
+          description: Set to reply to a thread (root post ID)
+        props:
+          type: object
+          additionalProperties: true
+
+    PostList:
+      type: object
+      properties:
+        order:
+          type: array
+          items:
+            $ref: "#/components/schemas/Post"
+          description: Posts in display order
+
+    Thread:
+      type: object
+      properties:
+        post_id:
+          type: string
+          format: uuid
+          description: Root post ID
+        channel_id:
+          type: string
+          format: uuid
+        reply_count:
+          type: integer
+        last_reply_at:
+          type: integer
+          format: int64
+        participants:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: User IDs who have replied to this thread
+
+    ThreadMembership:
+      type: object
+      properties:
+        post_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        following:
+          type: boolean
+        last_viewed_at:
+          type: integer
+          format: int64
+        unread_mention_count:
+          type: integer
+
+    ThreadResponse:
+      type: object
+      description: A thread with its metadata and all posts (root + replies)
+      properties:
+        thread:
+          $ref: "#/components/schemas/Thread"
+        posts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Post"
+
+    UserThreadList:
+      type: object
+      properties:
+        threads:
+          type: array
+          items:
+            $ref: "#/components/schemas/ThreadResponse"
+        total:
+          type: integer
+          format: int64
+          description: Total number of threads the user is following
+
+    Tag:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 50
+      example:
+        id: "0192d4c1-7e2a-7000-8000-000000000040"
+        name: "bug"
+
+    MessageTag:
+      type: object
+      properties:
+        message_id:
+          type: string
+          format: uuid
+        tag_id:
+          type: string
+          format: uuid
+
+    SearchRequest:
+      type: object
+      required: [terms]
+      properties:
+        terms:
+          type: string
+          description: Search query
+        page:
+          type: integer
+          default: 0
+        per_page:
+          type: integer
+          default: 60
+
+    WebSocketEvent:
+      type: object
+      description: Event pushed to clients over WebSocket
+      properties:
+        event:
+          type: string
+          enum:
+            - posted
+            - post_edited
+            - post_deleted
+            - post_pinned
+            - post_unpinned
+            - typing
+            - channel_created
+            - channel_updated
+            - channel_deleted
+            - user_added
+            - user_removed
+            - thread_updated
+            - status_change
+        data:
+          type: object
+          additionalProperties: true
+        broadcast:
+          $ref: "#/components/schemas/WebSocketBroadcast"
+        seq:
+          type: integer
+          format: int64
+
+    WebSocketBroadcast:
+      type: object
+      description: Controls which clients receive a WebSocket event
+      properties:
+        channel_id:
+          type: string
+          format: uuid
+        team_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+          description: If set, only this user receives the event

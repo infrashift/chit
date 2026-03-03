@@ -1,0 +1,40 @@
+{
+  "$id": "https://schemas.chit.infrashift.com/identity.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Chit Identity",
+  "type": "object",
+  "properties": {
+    "traits": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "title": "Email",
+          "ory.sh/kratos": {
+            "credentials": {
+              "password": {
+                "identifier": true
+              }
+            }
+          }
+        },
+        "username": {
+          "type": "string",
+          "title": "Username",
+          "minLength": 2,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,62}[a-z0-9]$"
+        },
+        "display_name": {
+          "type": "string",
+          "title": "Display Name",
+          "minLength": 1,
+          "maxLength": 100
+        }
+      },
+      "required": ["email", "username", "display_name"],
+      "additionalProperties": false
+    }
+  }
+}

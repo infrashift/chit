@@ -1,0 +1,330 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chit-postgres-init
+data:
+  init-databases.sql: |
+    CREATE DATABASE kratos;
+    CREATE DATABASE keto;
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chit-kratos-config
+data:
+  kratos.yml: |
+    version: v1.3.0
+
+    serve:
+      public:
+        base_url: http://localhost:4433/
+        cors:
+          enabled: true
+      admin:
+        base_url: http://localhost:4434/
+
+    selfservice:
+      default_browser_return_url: http://localhost:4455/
+      allowed_return_urls:
+        - http://localhost:4455/
+
+      methods:
+        password:
+          enabled: true
+
+      flows:
+        registration:
+          enabled: true
+          ui_url: http://localhost:4455/auth/registration
+          after:
+            password:
+              hooks: []
+
+        login:
+          ui_url: http://localhost:4455/auth/login
+
+        settings:
+          ui_url: http://localhost:4455/auth/settings
+
+        verification:
+          enabled: false
+
+        recovery:
+          enabled: false
+
+    identity:
+      default_schema_id: default
+      schemas:
+        - id: default
+          url: file:///etc/kratos/identity.schema.json
+
+    log:
+      level: info
+      format: json
+
+    hashers:
+      argon2:
+        parallelism: 1
+        memory: 128MB
+        iterations: 2
+        salt_length: 16
+        key_length: 16
+
+  identity.schema.json: |
+    {
+      "$id": "https://schemas.chit.infrashift.com/identity.schema.json",
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Chit Identity",
+      "type": "object",
+      "properties": {
+        "traits": {
+          "type": "object",
+          "properties": {
+            "email": {
+              "type": "string",
+              "format": "email",
+              "title": "Email",
+              "ory.sh/kratos": {
+                "credentials": {
+                  "password": {
+                    "identifier": true
+                  }
+                }
+              }
+            },
+            "username": {
+              "type": "string",
+              "title": "Username",
+              "minLength": 2,
+              "maxLength": 64,
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,62}[a-z0-9]$"
+            },
+            "display_name": {
+              "type": "string",
+              "title": "Display Name",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          "required": ["email", "username", "display_name"],
+          "additionalProperties": false
+        }
+      }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chit-oathkeeper-config
+data:
+  oathkeeper.yml: |
+    serve:
+      proxy:
+        port: 4455
+      api:
+        port: 4456
+
+    access_rules:
+      matching_strategy: glob
+      repositories:
+        - file:///etc/oathkeeper/access-rules.yml
+
+    authenticators:
+      bearer_token:
+        enabled: true
+        config:
+          check_session_url: http://localhost:4433/sessions/whoami
+          preserve_path: true
+          extra_from: "@this"
+          subject_from: "identity.id"
+          force_method: GET
+          token_from:
+            header: X-Session-Token
+          forward_http_headers:
+            - X-Session-Token
+      noop:
+        enabled: true
+
+    authorizers:
+      allow:
+        enabled: true
+
+    mutators:
+      header:
+        enabled: true
+        config:
+          headers:
+            X-User-Id: "{{ print .Subject }}"
+      noop:
+        enabled: true
+
+    log:
+      level: info
+      format: json
+
+  access-rules.yml: |
+    - id: "chit-api"
+      upstream:
+        url: "http://localhost:8065"
+      match:
+        url: "http://localhost:4455/api/v1/<**>"
+        methods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+      authenticators:
+        - handler: bearer_token
+        - handler: noop
+      authorizer:
+        handler: allow
+      mutators:
+        - handler: header
+
+    - id: "kratos-public"
+      upstream:
+        url: "http://localhost:4433"
+      match:
+        url: "http://localhost:4455/kratos/<**>"
+        methods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+      authenticators:
+        - handler: noop
+      authorizer:
+        handler: allow
+      mutators:
+        - handler: noop
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chit-keto-config
+data:
+  keto.yml: |
+    version: v0.12.0
+
+    serve:
+      read:
+        host: 0.0.0.0
+        port: 4466
+      write:
+        host: 0.0.0.0
+        port: 4467
+
+    namespaces:
+      - id: 0
+        name: chit/channel
+
+    log:
+      level: info
+      format: json
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: chit-dev
+  labels:
+    app: chit
+spec:
+  containers:
+    - name: postgres
+      image: docker.io/library/postgres:17-alpine
+      env:
+        - name: POSTGRES_USER
+          value: chit
+        - name: POSTGRES_PASSWORD
+          value: chit
+        - name: POSTGRES_DB
+          value: chit
+      volumeMounts:
+        - name: pgdata
+          mountPath: /var/lib/postgresql/data
+        - name: pg-init
+          mountPath: /docker-entrypoint-initdb.d
+
+    - name: kratos
+      image: docker.io/oryd/kratos:v1.3
+      args:
+        - serve
+        - --config
+        - /etc/kratos/kratos.yml
+        - --dev
+        - --watch-courier
+      env:
+        - name: DSN
+          value: postgres://chit:chit@localhost:5432/kratos?sslmode=disable
+      volumeMounts:
+        - name: kratos-config
+          mountPath: /etc/kratos
+
+    - name: oathkeeper
+      image: docker.io/oryd/oathkeeper:v0.40
+      args:
+        - serve
+        - --config
+        - /etc/oathkeeper/oathkeeper.yml
+      volumeMounts:
+        - name: oathkeeper-config
+          mountPath: /etc/oathkeeper
+
+    - name: keto
+      image: docker.io/oryd/keto:v0.12
+      args:
+        - serve
+        - -c
+        - /etc/keto/keto.yml
+      env:
+        - name: DSN
+          value: postgres://chit:chit@localhost:5432/keto?sslmode=disable
+      volumeMounts:
+        - name: keto-config
+          mountPath: /etc/keto
+
+    - name: vault
+      image: docker.io/hashicorp/vault:1.17
+      env:
+        - name: VAULT_DEV_ROOT_TOKEN_ID
+          value: dev-only-token
+        - name: VAULT_DEV_LISTEN_ADDRESS
+          value: "0.0.0.0:8200"
+      securityContext:
+        capabilities:
+          add:
+            - IPC_LOCK
+
+    - name: zincsearch
+      image: public.ecr.aws/zinclabs/zincsearch:latest
+      env:
+        - name: ZINC_FIRST_ADMIN_USER
+          value: admin
+        - name: ZINC_FIRST_ADMIN_PASSWORD
+          value: admin
+        - name: ZINC_DATA_PATH
+          value: /data
+      volumeMounts:
+        - name: zincdata
+          mountPath: /data
+
+  volumes:
+    - name: pgdata
+      persistentVolumeClaim:
+        claimName: chit-pgdata
+    - name: zincdata
+      persistentVolumeClaim:
+        claimName: chit-zincdata
+    - name: pg-init
+      configMap:
+        name: chit-postgres-init
+    - name: kratos-config
+      configMap:
+        name: chit-kratos-config
+    - name: oathkeeper-config
+      configMap:
+        name: chit-oathkeeper-config
+    - name: keto-config
+      configMap:
+        name: chit-keto-config

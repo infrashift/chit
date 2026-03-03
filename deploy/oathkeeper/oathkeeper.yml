@@ -1,0 +1,43 @@
+serve:
+  proxy:
+    port: 4455
+  api:
+    port: 4456
+
+access_rules:
+  matching_strategy: glob
+  repositories:
+    - file:///etc/oathkeeper/access-rules.yml
+
+authenticators:
+  bearer_token:
+    enabled: true
+    config:
+      check_session_url: http://localhost:4433/sessions/whoami
+      preserve_path: true
+      extra_from: "@this"
+      subject_from: "identity.id"
+      force_method: GET
+      token_from:
+        header: X-Session-Token
+      forward_http_headers:
+        - X-Session-Token
+  noop:
+    enabled: true
+
+authorizers:
+  allow:
+    enabled: true
+
+mutators:
+  header:
+    enabled: true
+    config:
+      headers:
+        X-User-Id: "{{ print .Subject }}"
+  noop:
+    enabled: true
+
+log:
+  level: info
+  format: json
