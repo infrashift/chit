@@ -14,6 +14,7 @@ const (
 	WebSocketEventUserRemoved    = "user_removed"
 	WebSocketEventThreadUpdated  = "thread_updated"
 	WebSocketEventStatusChange   = "status_change"
+	WebSocketEventMentioned      = "mentioned"
 )
 
 // WebSocketEvent is sent to clients over WebSocket connections.

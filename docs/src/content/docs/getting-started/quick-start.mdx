@@ -1,0 +1,99 @@
+---
+title: Quick Start
+description: Get the full Chit stack running in under five minutes.
+---
+
+This guide walks you through starting the complete Chit stack using Podman
+Kube, running migrations, and verifying the server.
+
+## 1. Start the infrastructure pod
+
+```bash
+make kube-up
+```
+
+This runs `podman kube play --network host deploy/chit.kube.yml`, which starts:
+
+- PostgreSQL 17
+- Ory Kratos (identity)
+- Ory Oathkeeper (auth proxy)
+- Ory Keto (authorization)
+- HashiCorp Vault (encryption)
+- ZincSearch (full-text search)
+
+## 2. Run Ory schema migrations
+
+```bash
+make kube-migrate
+```
+
+This applies Kratos and Keto database migrations against the running PostgreSQL
+instance.
+
+## 3. Run Chit schema migrations
+
+```bash
+make migrate-up
+```
+
+This applies the Chit application schema (users, teams, channels, posts, etc.)
+using golang-migrate.
+
+## 4. Configure the environment
+
+```bash
+cp .env.example .env
+```
+
+The defaults in `.env.example` are configured for the local Podman Kube pod.
+No changes are needed for local development.
+
+## 5. Build and run the server
+
+```bash
+make run
+```
+
+The server starts on `:8065` by default.
+
+## 6. Verify
+
+```bash
+curl http://localhost:8065/api/v1/system/ping
+```
+
+Expected response:
+
+```json
+{"status": "OK"}
+```
+
+## 7. Register a user
+
+Create an identity via Kratos:
+
+```bash
+curl -s -X POST http://localhost:4433/self-service/registration?flow=api \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "method": "password",
+    "traits": {
+      "email": "alice@example.com",
+      "username": "alice",
+      "name": "Alice"
+    },
+    "password": "securepassword123!"
+  }'
+```
+
+On first authenticated request through Oathkeeper, Chit auto-provisions a
+local user record from the Kratos identity.
+
+## Next steps
+
+- [Architecture Overview](/chit/architecture/overview/) — understand the
+  layered design
+- [REST API Reference](/chit/api-reference/rest-api/) — explore available
+  endpoints
+- [WebSocket Protocol](/chit/api-reference/websocket-protocol/) — connect for
+  real-time events

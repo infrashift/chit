@@ -33,3 +33,9 @@ tmp/
 
 # Claude Code
 .claude/
+
+# Docs
+docs/node_modules/
+docs/dist/
+docs/.astro/
+docs/.bun/

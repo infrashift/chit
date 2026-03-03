@@ -394,6 +394,18 @@ func (s *mockChannelStore) IncrementMsgCount(_ string, _ int64) error {
 	return nil
 }
 
+func (s *mockChannelStore) IncrementMentionCount(channelID, userID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, m := range s.members[channelID] {
+		if m.UserID == userID {
+			m.MentionCount++
+			return nil
+		}
+	}
+	return nil
+}
+
 // ─── Mock PostStore ──────────────────────────────────────────────
 
 type mockPostStore struct {
@@ -575,6 +587,16 @@ func (s *mockThreadStore) IncrementReplyCount(postID string, timestamp int64, _ 
 }
 
 func (s *mockThreadStore) MarkAsRead(_, _ string, _ int64) error {
+	return nil
+}
+
+func (s *mockThreadStore) IncrementMentionCount(postID, userID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := postID + ":" + userID
+	if m, ok := s.memberships[key]; ok {
+		m.UnreadMentionCount++
+	}
 	return nil
 }
 

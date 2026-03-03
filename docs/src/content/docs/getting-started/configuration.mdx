@@ -1,0 +1,81 @@
+---
+title: Configuration
+description: Environment variable configuration for the Chit server.
+---
+
+Chit uses [koanf](https://github.com/knadh/koanf) to load configuration from
+environment variables. All variables use the `CHIT_` prefix.
+
+Copy the example file to get started:
+
+```bash
+cp .env.example .env
+```
+
+## Variable Groups
+
+### Server
+
+| Variable | Description |
+|---|---|
+| `CHIT_LISTEN_ADDRESS` | Address and port to bind (e.g., `:8065`) |
+| `CHIT_LOG_LEVEL` | Log verbosity: `debug`, `info`, `warn`, `error` |
+| `CHIT_LOG_FORMAT` | Log output format: `json` or `text` |
+
+### Database
+
+| Variable | Description |
+|---|---|
+| `CHIT_DATABASE_URL` | PostgreSQL connection string |
+| `CHIT_DB_MAX_OPEN_CONN` | Maximum open connections |
+| `CHIT_DB_MAX_IDLE_CONN` | Maximum idle connections |
+
+### Pub/Sub
+
+| Variable | Description |
+|---|---|
+| `CHIT_PUBSUB_BACKEND` | Backend: `pgnotify` (default) or `nats` |
+| `CHIT_NATS_URL` | NATS server URL (when using NATS backend) |
+
+### Ory Stack
+
+| Variable | Description |
+|---|---|
+| `CHIT_TRUSTED_PROXY_HEADER` | Header containing the authenticated user ID |
+| `CHIT_KRATOS_ADMIN_URL` | Kratos admin API URL |
+| `CHIT_KETO_READ_URL` | Keto read API URL |
+| `CHIT_KETO_WRITE_URL` | Keto write API URL |
+
+### Vault
+
+| Variable | Description |
+|---|---|
+| `CHIT_VAULT_ENABLED` | Enable Vault Transit encryption (`true`/`false`) |
+| `CHIT_VAULT_ADDR` | Vault server URL |
+| `CHIT_VAULT_TOKEN` | Vault authentication token |
+| `CHIT_VAULT_TRANSIT_KEY` | Transit engine key name for message encryption |
+
+### ZincSearch
+
+| Variable | Description |
+|---|---|
+| `CHIT_ZINCSEARCH_URL` | ZincSearch server URL |
+| `CHIT_ZINCSEARCH_USER` | ZincSearch username |
+| `CHIT_ZINCSEARCH_PASSWORD` | ZincSearch password |
+
+### WebSocket
+
+| Variable | Description |
+|---|---|
+| `CHIT_WS_PING_INTERVAL` | Interval between WebSocket ping frames |
+| `CHIT_WS_WRITE_TIMEOUT` | Write deadline for WebSocket messages |
+
+### Cache
+
+| Variable | Description |
+|---|---|
+| `CHIT_CACHE_SIZE` | Maximum number of entries in the LRU cache |
+| `CHIT_CACHE_TTL` | Cache entry time-to-live |
+
+See the [Configuration Reference](/chit/reference/configuration/) for the
+complete table with types and defaults.

@@ -56,6 +56,7 @@ type ChannelStore interface {
 	GetByName(teamID, name string) (*model.Channel, error)
 	SaveDirectChannel(channel *model.Channel, userIDs []string) (*model.Channel, error)
 	IncrementMsgCount(channelID string, timestamp int64) error
+	IncrementMentionCount(channelID, userID string) error
 }
 
 // PostStore handles persistence for posts (messages).
@@ -80,6 +81,7 @@ type ThreadStore interface {
 	GetThreadsForUser(userID, teamID string, page, perPage int) (*model.UserThreadList, error)
 	IncrementReplyCount(postID string, timestamp int64, userID string) error
 	MarkAsRead(postID, userID string, timestamp int64) error
+	IncrementMentionCount(postID, userID string) error
 }
 
 // TagStore handles persistence for tags and message-tag associations.

@@ -1,0 +1,121 @@
+---
+title: WebSocket Protocol
+description: Wire format, event types, client actions, and connection lifecycle.
+---
+
+Chit provides real-time event delivery over WebSocket connections.
+
+## Connection Endpoint
+
+```
+GET /api/v1/websocket
+```
+
+Upgrade a standard HTTP connection to WebSocket. Authentication is required —
+the request must pass through Oathkeeper with a valid session.
+
+## Wire Format
+
+### Server → Client Events
+
+```json
+{
+  "event": "posted",
+  "data": {
+    "post": {
+      "id": "01912345-...",
+      "channel_id": "01912345-...",
+      "user_id": "01912345-...",
+      "content": "Hello, world!",
+      "create_at": 1700000000000
+    }
+  },
+  "broadcast": {
+    "channel_id": "01912345-...",
+    "team_id": "",
+    "user_id": ""
+  },
+  "seq": 42
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `event` | string | Event type identifier |
+| `data` | object | Event payload (varies by event type) |
+| `broadcast` | object | Delivery targeting scope |
+| `seq` | int64 | Monotonically increasing sequence number |
+
+### Client → Server Messages
+
+```json
+{
+  "action": "typing",
+  "seq": 1,
+  "data": {
+    "channel_id": "01912345-..."
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `action` | string | Action identifier |
+| `seq` | int64 | Client-assigned sequence number |
+| `data` | object | Action payload |
+
+## Server → Client Event Types
+
+| Event | Data Fields | Description |
+|---|---|---|
+| `posted` | `post` | A new post was created |
+| `post_edited` | `post` | A post's content was updated |
+| `post_deleted` | `post.id`, `channel_id` | A post was deleted |
+| `post_pinned` | `post` | A post was pinned |
+| `post_unpinned` | `post` | A post was unpinned |
+| `typing` | `user_id`, `channel_id` | A user is typing |
+| `channel_created` | `channel` | A new channel was created |
+| `channel_updated` | `channel` | Channel metadata was updated |
+| `channel_deleted` | `channel.id`, `team_id` | A channel was deleted |
+| `user_added` | `user_id`, `channel_id` | A user joined a channel |
+| `user_removed` | `user_id`, `channel_id` | A user left a channel |
+| `thread_updated` | `thread`, `post` | A thread received a new reply |
+| `status_change` | `user_id`, `status` | A user's status changed |
+| `mentioned` | `post`, `channel_id` | The connected user was @mentioned |
+
+## Client → Server Actions
+
+| Action | Data Fields | Description |
+|---|---|---|
+| `typing` | `channel_id` | Notify that the user is typing in a channel |
+
+## Broadcast Targeting
+
+The `broadcast` object controls which connected clients receive an event:
+
+| Field | Behavior |
+|---|---|
+| `channel_id` | Deliver to all members of the channel |
+| `team_id` | Deliver to all members of the team |
+| `user_id` | Deliver only to the specific user |
+
+Multiple fields can be set. If all fields are empty, the event is broadcast to
+every connected client.
+
+## Connection Lifecycle
+
+1. **Connect** — client upgrades to WebSocket at `/api/v1/websocket`
+2. **Register** — hub registers the client and starts read/write pumps
+3. **Receive events** — server pushes events matching the client's
+   subscriptions
+4. **Send actions** — client sends actions (e.g., typing indicators)
+5. **Ping/Pong** — server sends periodic ping frames to detect stale
+   connections (configurable via `CHIT_WS_PING_INTERVAL`)
+6. **Disconnect** — client closes the connection or ping times out; hub
+   unregisters the client
+
+## Reconnection
+
+Clients should implement automatic reconnection with exponential backoff. The
+`seq` field on events can be used to detect gaps and request missed events
+(when supported by the server).

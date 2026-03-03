@@ -1,0 +1,210 @@
+---
+title: Database Schema
+description: PostgreSQL schema design, tables, indexes, and conventions.
+---
+
+Chit uses PostgreSQL 17 as its primary data store. The schema is managed with
+[golang-migrate](https://github.com/golang-migrate/migrate) and lives in the
+`migrations/` directory.
+
+## Design Decisions
+
+### UUIDv7 Primary Keys
+
+All tables use **UUIDv7** primary keys. UUIDv7 embeds a Unix millisecond
+timestamp in the first 48 bits, providing:
+
+- Natural chronological ordering without an additional `created_at` index
+- Global uniqueness without coordination
+- Compatibility with standard UUID columns and tooling
+
+### Bigint Millisecond Timestamps
+
+All `*_at` columns use `BIGINT` storing Unix milliseconds. This avoids
+timezone issues, simplifies cross-language serialization, and provides
+millisecond precision.
+
+### Soft Deletes
+
+Tables with a `delete_at` column use soft deletes. A value of `0` means the
+row is active; a non-zero value is the deletion timestamp. Indexes filter on
+`WHERE delete_at = 0` for efficient queries on active rows.
+
+## Tables
+
+### users
+
+Local profile cache linked to an Ory Kratos identity.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | UUID | PK | UUIDv7 primary key |
+| `kratos_id` | UUID | UNIQUE, NOT NULL | Ory Kratos identity ID |
+| `username` | VARCHAR(64) | UNIQUE, NOT NULL | Login username |
+| `display_name` | VARCHAR(100) | NOT NULL | Display name |
+| `email` | VARCHAR(128) | UNIQUE, NOT NULL | Email address |
+| `roles` | VARCHAR(256) | DEFAULT `'system_user'` | Comma-separated roles |
+| `create_at` | BIGINT | NOT NULL | Creation timestamp (ms) |
+| `update_at` | BIGINT | NOT NULL | Last update timestamp (ms) |
+| `delete_at` | BIGINT | DEFAULT `0` | Deletion timestamp (0 = active) |
+
+**Indexes:** `kratos_id`, `username`, `email`, `delete_at`
+
+### teams
+
+Top-level organizational unit.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | UUID | PK | UUIDv7 primary key |
+| `name` | VARCHAR(64) | UNIQUE, NOT NULL | URL-safe team slug |
+| `display_name` | VARCHAR(64) | NOT NULL | Human-readable name |
+| `description` | VARCHAR(255) | DEFAULT `''` | Team description |
+| `type` | VARCHAR(1) | DEFAULT `'O'` | Team type (O = open) |
+| `creator_id` | UUID | FK → users | Team creator |
+| `create_at` | BIGINT | NOT NULL | Creation timestamp (ms) |
+| `update_at` | BIGINT | NOT NULL | Last update timestamp (ms) |
+| `delete_at` | BIGINT | DEFAULT `0` | Deletion timestamp (0 = active) |
+
+**Indexes:** `name`, `delete_at`
+
+### team_members
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `team_id` | UUID | PK, FK → teams (CASCADE) | Team reference |
+| `user_id` | UUID | PK, FK → users (CASCADE) | User reference |
+| `roles` | VARCHAR(256) | DEFAULT `'team_user'` | Member roles |
+| `create_at` | BIGINT | NOT NULL | Join timestamp (ms) |
+| `delete_at` | BIGINT | DEFAULT `0` | Removal timestamp (0 = active) |
+
+**Indexes:** `user_id`
+
+### channels
+
+Belong to a team. `team_id` is NULL for direct and group messages.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | UUID | PK | UUIDv7 primary key |
+| `team_id` | UUID | FK → teams | Owning team (NULL for DM/GM) |
+| `creator_id` | UUID | FK → users | Channel creator |
+| `name` | VARCHAR(512) | NOT NULL | URL-safe channel name |
+| `display_name` | VARCHAR(256) | NOT NULL | Human-readable name |
+| `header` | VARCHAR(1024) | DEFAULT `''` | Channel header text |
+| `purpose` | VARCHAR(250) | DEFAULT `''` | Channel purpose |
+| `type` | VARCHAR(1) | NOT NULL | Channel type |
+| `total_msg_count` | BIGINT | DEFAULT `0` | Total message count |
+| `last_post_at` | BIGINT | DEFAULT `0` | Timestamp of last post |
+| `create_at` | BIGINT | NOT NULL | Creation timestamp (ms) |
+| `update_at` | BIGINT | NOT NULL | Last update timestamp (ms) |
+| `delete_at` | BIGINT | DEFAULT `0` | Deletion timestamp (0 = active) |
+
+**Channel types:**
+
+| Code | Type |
+|---|---|
+| `O` | Open (public) |
+| `P` | Private |
+| `D` | Direct message (1:1) |
+| `G` | Group message |
+
+**Indexes:** `(team_id, name) WHERE delete_at = 0` (unique), `team_id`, `delete_at`
+
+### channel_members
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `channel_id` | UUID | PK, FK → channels (CASCADE) | Channel reference |
+| `user_id` | UUID | PK, FK → users (CASCADE) | User reference |
+| `roles` | VARCHAR(256) | DEFAULT `'channel_user'` | Member roles |
+| `last_viewed_at` | BIGINT | DEFAULT `0` | Last read timestamp |
+| `msg_count` | BIGINT | DEFAULT `0` | Messages read by this member |
+| `mention_count` | BIGINT | DEFAULT `0` | Unread @mentions |
+| `notify_props` | JSONB | DEFAULT `'{}'` | Notification preferences |
+| `create_at` | BIGINT | NOT NULL | Join timestamp (ms) |
+
+**Indexes:** `user_id`
+
+### posts
+
+Messages in channels. Replies reference a `root_id`.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | UUID | PK | UUIDv7 primary key |
+| `channel_id` | UUID | FK → channels, NOT NULL | Target channel |
+| `user_id` | UUID | FK → users, NOT NULL | Author |
+| `root_id` | UUID | FK → posts | Thread root (NULL for root posts) |
+| `content` | TEXT | NOT NULL, DEFAULT `''` | Message body (markdown) |
+| `content_encrypted` | BYTEA | — | Vault-encrypted content |
+| `type` | VARCHAR(26) | DEFAULT `''` | Post type marker |
+| `props` | JSONB | DEFAULT `'{}'` | Arbitrary metadata |
+| `hashtags` | VARCHAR(1000) | DEFAULT `''` | Extracted hashtags |
+| `is_pinned` | BOOLEAN | DEFAULT `FALSE` | Whether the post is pinned |
+| `edit_at` | BIGINT | DEFAULT `0` | Last edit timestamp |
+| `create_at` | BIGINT | NOT NULL | Creation timestamp (ms) |
+| `update_at` | BIGINT | NOT NULL | Last update timestamp (ms) |
+| `delete_at` | BIGINT | DEFAULT `0` | Deletion timestamp (0 = active) |
+
+**Indexes:** `(channel_id, create_at)`, `root_id WHERE root_id IS NOT NULL`, `user_id`, `delete_at`
+
+### threads
+
+Denormalized aggregate for root posts with replies.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `post_id` | UUID | PK, FK → posts (CASCADE) | Root post reference |
+| `channel_id` | UUID | FK → channels, NOT NULL | Channel containing the thread |
+| `reply_count` | INT | DEFAULT `0` | Number of replies |
+| `last_reply_at` | BIGINT | DEFAULT `0` | Timestamp of latest reply |
+| `participants` | JSONB | DEFAULT `'[]'` | Array of participant user IDs |
+
+**Indexes:** `channel_id`
+
+### thread_memberships
+
+Per-user thread follow and read state.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `post_id` | UUID | PK, FK → posts (CASCADE) | Thread root post |
+| `user_id` | UUID | PK, FK → users (CASCADE) | User reference |
+| `following` | BOOLEAN | DEFAULT `TRUE` | Whether the user follows the thread |
+| `last_viewed_at` | BIGINT | DEFAULT `0` | Last read timestamp |
+| `unread_mention_count` | INT | DEFAULT `0` | Unread @mentions in thread |
+
+**Indexes:** `user_id`
+
+### tags
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | UUID | PK | UUIDv7 primary key |
+| `name` | VARCHAR(50) | UNIQUE, NOT NULL | Tag name |
+
+### message_tags
+
+Junction table linking posts to tags.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `message_id` | UUID | PK, FK → posts (CASCADE) | Post reference |
+| `tag_id` | UUID | PK, FK → tags (CASCADE) | Tag reference |
+
+**Indexes:** `tag_id`
+
+## Migrations
+
+Migrations are stored in `migrations/` and applied with golang-migrate:
+
+```bash
+make migrate-up    # Apply all pending migrations
+make migrate-down  # Roll back all migrations
+```
+
+| Migration | Description |
+|---|---|
+| `000001_initial_schema` | Creates all 10 tables and indexes |
+| `000002_widen_channel_name` | Widens `channels.name` to VARCHAR(512) and `display_name` to VARCHAR(256) for DM/GM names |

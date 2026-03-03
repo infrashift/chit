@@ -1,0 +1,70 @@
+---
+title: Roadmap
+description: Development phases and progress for the Chit project.
+---
+
+This page mirrors the project [ROADMAP.md](https://github.com/infrashift/chit/blob/main/ROADMAP.md).
+Check GitHub for the latest status.
+
+## Phase 1 — MVP Foundation
+
+- [x] Layered architecture scaffold (API → App → Store)
+- [x] PostgreSQL schema with UUIDv7 PKs and bigint timestamps
+- [x] OpenAPI 3.1 specification (40+ endpoints)
+- [x] Podman Kube deployment manifest
+- [x] Ory stack configuration (Kratos, Oathkeeper, Keto)
+- [x] WebSocket hub skeleton
+- [x] Pub/sub abstraction (PG LISTEN/NOTIFY + NATS)
+- [x] LRU cache layer
+- [x] Search indexer skeleton
+- [x] MCP server
+- [x] Containerfile and Makefile
+- [x] Environment-based configuration (koanf)
+- [x] Documentation site (Astro + Starlight)
+- [ ] Unit tests
+- [ ] Integration tests
+- [ ] System tests
+- [ ] Search indexer worker (poll for new posts)
+- [ ] Hub channel filtering (broadcast scoping)
+
+## Phase 2 — Core Messaging
+
+- [ ] End-to-end message flow (create → store → broadcast → deliver)
+- [ ] Thread reply tracking and participant updates
+- [ ] Unread counts and channel view tracking
+- [ ] @mention detection and notification events
+- [ ] Message pinning flow
+- [ ] Tag CRUD and post-tag association flow
+
+## Phase 3 — Auth & Security
+
+- [ ] Oathkeeper JWT/session validation in middleware
+- [ ] Keto permission checks for channel access (ReBAC)
+- [ ] Vault Transit encryption for message content
+- [ ] User auto-provisioning from Kratos identity on first request
+
+## Phase 4 — Search & Performance
+
+- [ ] ZincSearch indexer worker (async from PG)
+- [ ] Filtered search (per-team, per-channel, date ranges)
+- [ ] Store decorator chain (Timer → Retry → Cache → SqlStore)
+- [ ] Connection pool tuning and query optimization
+
+## Phase 5 — Testing & Benchmarks
+
+- [ ] Complete test dataset with seed data
+- [ ] Load tests with k6 or vegeta
+- [ ] Published benchmark results
+
+## Phase 6 — Operations
+
+- [ ] Automated provisioning via Ansible and Podman
+- [ ] Operations runbooks
+- [ ] Monitoring and alerting guidance
+- [ ] Horizontal scaling documentation
+
+## Phase 7 — TUI Client
+
+- [ ] Separate repository for terminal UI client
+- [ ] Real-time channel view with WebSocket integration
+- [ ] Thread navigation and reply composition

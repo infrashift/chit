@@ -1,0 +1,148 @@
+---
+title: REST API
+description: Endpoint overview, authentication, pagination, and error format.
+---
+
+The Chit REST API is defined in [`api/openapi.yaml`](https://github.com/infrashift/chit/blob/main/api/openapi.yaml)
+as an OpenAPI 3.1 specification.
+
+## Base URL
+
+```
+/api/v1
+```
+
+## Authentication
+
+All endpoints except `/system/ping` and `/system/config/client` require
+authentication via Ory Oathkeeper. The authenticated user's Kratos identity ID
+is forwarded in the `X-User-Id` header.
+
+See [Ory Stack](/chit/deployment/ory-stack/) for the full authentication flow.
+
+## Pagination
+
+List endpoints accept query parameters:
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `page` | int | `0` | Page number (0-indexed) |
+| `per_page` | int | `60` | Results per page |
+
+## ID Format
+
+All resource IDs are **UUIDv7** strings (e.g., `01912345-6789-7abc-8def-0123456789ab`).
+UUIDv7 encodes creation time, enabling natural chronological ordering.
+
+## Timestamps
+
+All `*_at` fields are **Unix millisecond timestamps** (int64).
+
+## Endpoints
+
+### System
+
+| Method | Path | Summary |
+|---|---|---|
+| GET | `/system/ping` | Health check |
+| GET | `/system/config/client` | Client configuration |
+
+### Users
+
+| Method | Path | Summary |
+|---|---|---|
+| POST | `/users` | Create a user |
+| GET | `/users` | Search users |
+| GET | `/users/me` | Get current user |
+| PUT | `/users/me` | Update current user |
+| GET | `/users/{id}` | Get user by ID |
+| GET | `/users/username/{username}` | Get user by username |
+| POST | `/users/ids` | Get users by IDs |
+
+### Teams
+
+| Method | Path | Summary |
+|---|---|---|
+| POST | `/teams` | Create a team |
+| GET | `/teams` | List all teams |
+| GET | `/teams/{id}` | Get team by ID |
+| PUT | `/teams/{id}` | Update a team |
+| DELETE | `/teams/{id}` | Delete a team |
+| GET | `/users/me/teams` | Get current user's teams |
+| POST | `/teams/{id}/members` | Add a team member |
+| GET | `/teams/{id}/members` | Get team members |
+| DELETE | `/teams/{id}/members/{user_id}` | Remove a team member |
+
+### Channels
+
+| Method | Path | Summary |
+|---|---|---|
+| POST | `/channels` | Create a channel |
+| GET | `/channels/{id}` | Get channel by ID |
+| PUT | `/channels/{id}` | Update a channel |
+| DELETE | `/channels/{id}` | Delete a channel |
+| GET | `/teams/{id}/channels` | Get channels for a team |
+| GET | `/users/me/teams/{id}/channels` | Get my channels in a team |
+| POST | `/channels/direct` | Create a direct message channel |
+| POST | `/channels/group` | Create a group message channel |
+| POST | `/channels/{id}/members` | Add a channel member |
+| GET | `/channels/{id}/members` | Get channel members |
+| DELETE | `/channels/{id}/members/{user_id}` | Remove a channel member |
+| POST | `/channels/{id}/members/me/view` | Mark channel as viewed |
+
+### Posts
+
+| Method | Path | Summary |
+|---|---|---|
+| POST | `/posts` | Create a post |
+| GET | `/posts/{id}` | Get post by ID |
+| PUT | `/posts/{id}` | Update a post |
+| DELETE | `/posts/{id}` | Delete a post |
+| PUT | `/posts/{id}/pin` | Pin a post |
+| DELETE | `/posts/{id}/unpin` | Unpin a post |
+| GET | `/channels/{id}/posts` | Get posts in a channel |
+| GET | `/channels/{id}/pinned` | Get pinned posts in a channel |
+
+### Threads
+
+| Method | Path | Summary |
+|---|---|---|
+| GET | `/posts/{id}/thread` | Get a thread |
+| GET | `/users/me/teams/{id}/threads` | Get my threads in a team |
+| PUT | `/users/me/teams/{team_id}/threads/{id}/read` | Mark thread as read |
+| PUT | `/users/me/teams/{team_id}/threads/{id}/following` | Follow or unfollow a thread |
+
+### Tags
+
+| Method | Path | Summary |
+|---|---|---|
+| POST | `/tags` | Create a tag |
+| GET | `/tags` | List all tags |
+| POST | `/posts/{id}/tags` | Add a tag to a post |
+| GET | `/posts/{id}/tags` | Get tags for a post |
+| DELETE | `/posts/{id}/tags/{tag_id}` | Remove a tag from a post |
+
+### Search
+
+| Method | Path | Summary |
+|---|---|---|
+| POST | `/teams/{id}/posts/search` | Search posts in a team |
+| POST | `/channels/{id}/posts/search` | Search posts in a channel |
+
+### WebSocket
+
+| Method | Path | Summary |
+|---|---|---|
+| GET | `/websocket` | WebSocket connection |
+
+## Error Format
+
+All error responses use a consistent JSON format:
+
+```json
+{
+  "id": "error.id",
+  "message": "Human-readable error description",
+  "status_code": 400
+}
+```

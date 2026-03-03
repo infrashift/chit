@@ -1,0 +1,95 @@
+---
+title: Ory Stack
+description: Authentication and authorization with Kratos, Oathkeeper, and Keto.
+---
+
+Chit delegates identity, authentication, and authorization to the
+[Ory](https://www.ory.sh/) open-source stack. This provides zero-trust
+security without embedding auth logic in the application.
+
+## Components
+
+| Component | Version | Role | Port(s) |
+|---|---|---|---|
+| **Kratos** | v1.3 | Identity management (registration, login, sessions) | 4433 (public), 4434 (admin) |
+| **Oathkeeper** | v0.40 | Authentication proxy (validates sessions, forwards identity) | 4455 (proxy), 4456 (API) |
+| **Keto** | v0.12 | Authorization engine (ReBAC permission checks) | 4466 (read), 4467 (write) |
+| **Hydra** | — | OAuth2/OIDC provider (planned for future) | — |
+
+## Authentication Flow
+
+```
+Client ──► Oathkeeper ──► Chit API
+               │
+               ▼
+            Kratos
+         (validate session)
+               │
+               ▼
+         X-User-Id header
+         forwarded to Chit
+```
+
+1. Client sends a request with a Kratos session cookie or token
+2. Oathkeeper intercepts the request and validates the session with Kratos
+3. On success, Oathkeeper forwards the request to Chit with the authenticated
+   user's Kratos identity ID in the `X-User-Id` header
+4. Chit reads `X-User-Id` from the trusted proxy header
+   (`CHIT_TRUSTED_PROXY_HEADER`)
+
+## User Auto-Provisioning
+
+Chit does **not** use Kratos webhooks to create local user records. Instead,
+on the first authenticated request from a new identity:
+
+1. Chit receives the `X-User-Id` header from Oathkeeper
+2. The App layer checks if a local user exists for this Kratos ID
+3. If not found, it fetches the identity from the Kratos Admin API
+   (`CHIT_KRATOS_ADMIN_URL`)
+4. A local `users` record is created with the identity's traits (username,
+   display name, email)
+
+This approach avoids webhook configuration complexity and ensures the local
+user record is always created in the context of a valid request.
+
+## Keto Authorization (ReBAC)
+
+Channel access is controlled by Ory Keto using Relationship-Based Access
+Control. The Keto namespace is `chit/channel` with the following relations:
+
+| Relation | Meaning |
+|---|---|
+| `member` | User is a member of the channel |
+| `admin` | User is an admin of the channel |
+| `creator` | User created the channel |
+
+### Permission Checks
+
+Before allowing access to a channel, the App layer queries Keto:
+
+```
+Is user {user_id} a "member" of channel {channel_id}?
+```
+
+Keto evaluates the relationship tuple and returns allow/deny.
+
+### Relationship Management
+
+When users join or leave channels, Chit writes relationship tuples to Keto:
+
+- **Join channel:** Create `chit/channel:{channel_id}#member@{user_id}`
+- **Leave channel:** Delete `chit/channel:{channel_id}#member@{user_id}`
+
+## Config File References
+
+Ory configuration files are embedded in the Podman Kube manifest as
+ConfigMaps:
+
+| File | ConfigMap | Description |
+|---|---|---|
+| Kratos config | `chit-kratos-config` | Server settings, self-service flows, identity schema |
+| Oathkeeper config | `chit-oathkeeper-config` | Access rules, authenticators, authorizers, mutators |
+| Keto config | `chit-keto-config` | Namespace definitions, DSN, server settings |
+
+See `deploy/chit.kube.yml` for the full configuration, and the `deploy/`
+directory for standalone reference copies.

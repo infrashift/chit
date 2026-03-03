@@ -1,0 +1,67 @@
+---
+title: Pub/Sub
+description: Cross-node event coordination with PG LISTEN/NOTIFY and NATS.
+---
+
+Chit uses a pub/sub abstraction to coordinate events across server nodes. This
+enables horizontal scaling — when a post is created on node A, all connected
+clients on nodes B and C receive the event in real time.
+
+## Interface
+
+The pub/sub system is defined as a Go interface, allowing backend
+implementations to be swapped without changing application code:
+
+```go
+type PubSub interface {
+    Publish(channel string, msg []byte) error
+    Subscribe(channel string) (<-chan []byte, error)
+    Unsubscribe(channel string) error
+    Close() error
+}
+```
+
+## Backends
+
+### PG LISTEN/NOTIFY (Default)
+
+The default backend uses PostgreSQL's built-in `LISTEN/NOTIFY` mechanism.
+No additional infrastructure is required — the existing database connection
+handles event delivery.
+
+- **Pros:** Zero additional dependencies, transactional consistency
+- **Cons:** Limited to ~8KB payload per notification, single PostgreSQL
+  instance is the bottleneck
+
+### NATS (Optional)
+
+For higher throughput or larger payloads, Chit supports NATS as an alternative
+backend.
+
+- **Pros:** Higher throughput, larger message sizes, clustering support
+- **Cons:** Additional infrastructure to deploy and manage
+
+## Backend Selection
+
+Set the `CHIT_PUBSUB_BACKEND` environment variable:
+
+| Value | Backend |
+|---|---|
+| `pgnotify` | PG LISTEN/NOTIFY (default) |
+| `nats` | NATS |
+
+When using NATS, also set `CHIT_NATS_URL`:
+
+```bash
+CHIT_PUBSUB_BACKEND=nats
+CHIT_NATS_URL=nats://localhost:4222
+```
+
+## Use Cases
+
+| Event | Channel Pattern | Description |
+|---|---|---|
+| New post | `channel:{id}` | Notify members of a channel about a new message |
+| Typing indicator | `channel:{id}` | Broadcast typing status to channel members |
+| User status | `status:{user_id}` | Propagate online/offline status changes |
+| Channel update | `team:{id}` | Notify team members of channel metadata changes |

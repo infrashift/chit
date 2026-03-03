@@ -72,6 +72,15 @@ func (s *SqlThreadStore) IncrementReplyCount(postID string, timestamp int64, use
 	return nil
 }
 
+func (s *SqlThreadStore) IncrementMentionCount(postID, userID string) error {
+	query := `UPDATE thread_memberships SET unread_mention_count = unread_mention_count + 1 WHERE post_id = $1 AND user_id = $2`
+	_, err := s.sqlStore.pool.Exec(context.Background(), query, postID, userID)
+	if err != nil {
+		return fmt.Errorf("increment thread mention count: %w", err)
+	}
+	return nil
+}
+
 func (s *SqlThreadStore) SaveMembership(membership *model.ThreadMembership) error {
 	if err := membership.IsValid(); err != nil {
 		return err

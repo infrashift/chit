@@ -1,0 +1,54 @@
+---
+title: Chit
+description: Secure, searchable team messaging. No bloat. Just chat.
+template: splash
+hero:
+  tagline: Secure, searchable team messaging. No bloat. Just chat.
+  actions:
+    - text: Get Started
+      link: /chit/getting-started/installation/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/infrashift/chit
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<CardGrid>
+  <Card title="Team Chat" icon="comment">
+    Organize conversations with teams, channels, and direct messages. Open,
+    private, DM, and group channel types.
+  </Card>
+  <Card title="Threaded Conversations" icon="list-format">
+    Reply threads with follow/unfollow, unread tracking, and participant lists.
+    Keep discussions organized without cluttering the main channel.
+  </Card>
+  <Card title="Full-Text Search" icon="magnifier">
+    ZincSearch-powered indexing with per-team and per-channel search. Find any
+    message across your workspace instantly.
+  </Card>
+  <Card title="Zero-Trust Security" icon="approve-check-circle">
+    Ory Kratos for identity, Oathkeeper for auth proxy, and Keto for
+    fine-grained ReBAC authorization on every channel.
+  </Card>
+  <Card title="Encryption at Rest" icon="setting">
+    Optional per-message encryption via HashiCorp Vault Transit Engine.
+    Plaintext never hits disk when enabled.
+  </Card>
+  <Card title="Distributed Architecture" icon="random">
+    Scalable distributed services designed for service mesh deployment. Added
+    security, observability, and operational ease out of the box.
+  </Card>
+  <Card title="AI Agent & Bot Integration" icon="laptop">
+    First-class support for AI agents and bots via MCP and REST API. Agents
+    and bots are full chat citizens — they join teams, post messages, and
+    participate in threads just like human users.
+  </Card>
+  <Card title="GitOps Day 2 Operations" icon="seti:config">
+    Automated, git-ops driven Day 2 operations. Declarative configuration,
+    rolling updates, and operational runbooks managed through version-controlled
+    workflows.
+  </Card>
+</CardGrid>

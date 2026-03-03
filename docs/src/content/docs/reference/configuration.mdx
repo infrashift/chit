@@ -1,0 +1,37 @@
+---
+title: Configuration Reference
+description: Complete list of all environment variables with types and defaults.
+---
+
+All configuration is loaded from environment variables using
+[koanf](https://github.com/knadh/koanf) with the `CHIT_` prefix.
+
+## Environment Variables
+
+| Variable | Type | Default | Description |
+|---|---|---|---|
+| `CHIT_LISTEN_ADDRESS` | string | `:8065` | Address and port for the HTTP server |
+| `CHIT_LOG_LEVEL` | string | `info` | Log level: `debug`, `info`, `warn`, `error` |
+| `CHIT_LOG_FORMAT` | string | `json` | Log output format: `json` or `text` |
+| `CHIT_DATABASE_URL` | string | `postgres://chit:chit@localhost:5432/chit?sslmode=disable` | PostgreSQL connection string |
+| `CHIT_DB_MAX_OPEN_CONN` | int | `25` | Maximum number of open database connections |
+| `CHIT_DB_MAX_IDLE_CONN` | int | `10` | Maximum number of idle database connections |
+| `CHIT_PUBSUB_BACKEND` | string | `pgnotify` | Pub/sub backend: `pgnotify` or `nats` |
+| `CHIT_NATS_URL` | string | `nats://localhost:4222` | NATS server URL (when using NATS backend) |
+| `CHIT_TRUSTED_PROXY_HEADER` | string | `X-User-Id` | HTTP header containing the authenticated user's Kratos identity ID |
+| `CHIT_KRATOS_ADMIN_URL` | string | `http://localhost:4434` | Ory Kratos admin API base URL |
+| `CHIT_KETO_READ_URL` | string | `http://localhost:4466` | Ory Keto read API base URL |
+| `CHIT_KETO_WRITE_URL` | string | `http://localhost:4467` | Ory Keto write API base URL |
+| `CHIT_VAULT_ENABLED` | bool | `false` | Enable per-message encryption via Vault Transit Engine |
+| `CHIT_VAULT_ADDR` | string | `http://localhost:8200` | HashiCorp Vault server URL |
+| `CHIT_VAULT_TOKEN` | string | `dev-only-token` | Vault authentication token |
+| `CHIT_VAULT_TRANSIT_KEY` | string | `chit-messages` | Vault Transit Engine key name for message encryption |
+| `CHIT_ZINCSEARCH_URL` | string | `http://localhost:4080` | ZincSearch server URL |
+| `CHIT_ZINCSEARCH_USER` | string | `admin` | ZincSearch authentication username |
+| `CHIT_ZINCSEARCH_PASSWORD` | string | `admin` | ZincSearch authentication password |
+| `CHIT_WS_PING_INTERVAL` | duration | `30s` | Interval between WebSocket ping frames |
+| `CHIT_WS_WRITE_TIMEOUT` | duration | `10s` | Write deadline for WebSocket messages |
+| `CHIT_CACHE_SIZE` | int | `20000` | Maximum number of entries in the LRU cache |
+| `CHIT_CACHE_TTL` | duration | `5m` | Time-to-live for cache entries |
+| `CHIT_ENABLE_OPENAPI_VALIDATION` | bool | `true` | Enable request validation against the OpenAPI spec |
+| `CHIT_MCP_AGENT_USER_ID` | string | _(empty)_ | User ID for the MCP agent to impersonate |

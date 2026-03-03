@@ -1,0 +1,103 @@
+---
+title: WebSocket Architecture
+description: Per-user hub design, client lifecycle, and event types.
+---
+
+Chit uses WebSocket connections for real-time event delivery. The design
+centers on a per-user hub with a single event loop goroutine for thread-safe
+broadcast.
+
+## Hub Design
+
+The WebSocket hub maintains a map of connected users to their client
+connections. A single goroutine processes all hub operations (register,
+unregister, broadcast) to avoid lock contention.
+
+```
+                    ┌──────────────────────────┐
+                    │          Hub             │
+                    │                          │
+  register ──────►  │  map[userID]*Client      │
+  unregister ────►  │                          │
+  broadcast ─────►  │  Single event loop       │
+                    │  goroutine               │
+                    └──────────────────────────┘
+                              │
+              ┌───────────────┼───────────────┐
+              ▼               ▼               ▼
+         ┌─────────┐    ┌─────────┐    ┌─────────┐
+         │ Client  │    │ Client  │    │ Client  │
+         │ User A  │    │ User B  │    │ User C  │
+         └─────────┘    └─────────┘    └─────────┘
+```
+
+## Client Lifecycle
+
+Each WebSocket connection spawns two goroutines:
+
+| Goroutine | Responsibility |
+|---|---|
+| **Read pump** | Reads incoming messages from the client, dispatches actions |
+| **Write pump** | Writes outgoing events to the client, sends ping frames |
+
+Connection lifecycle:
+
+1. Client connects to `/api/v1/websocket`
+2. Hub registers the client
+3. Read and write pump goroutines start
+4. Client receives events matching their subscriptions
+5. On disconnect, hub unregisters the client and goroutines exit
+
+## Event Types
+
+The server emits 14 event types to connected clients:
+
+| Event | Description |
+|---|---|
+| `posted` | A new post was created in a channel |
+| `post_edited` | A post's content was updated |
+| `post_deleted` | A post was deleted |
+| `post_pinned` | A post was pinned to a channel |
+| `post_unpinned` | A post was unpinned from a channel |
+| `typing` | A user is typing in a channel |
+| `channel_created` | A new channel was created |
+| `channel_updated` | A channel's metadata was updated |
+| `channel_deleted` | A channel was deleted |
+| `user_added` | A user was added to a channel |
+| `user_removed` | A user was removed from a channel |
+| `thread_updated` | A thread received a new reply |
+| `status_change` | A user's online status changed |
+| `mentioned` | The connected user was @mentioned |
+
+## Broadcast Targeting
+
+Each event includes a `broadcast` object that controls delivery scope:
+
+```json
+{
+  "event": "posted",
+  "data": { "post": { ... } },
+  "broadcast": {
+    "channel_id": "01912345-...",
+    "team_id": "",
+    "user_id": ""
+  },
+  "seq": 42
+}
+```
+
+| Field | Behavior |
+|---|---|
+| `channel_id` | Deliver to all members of the specified channel |
+| `team_id` | Deliver to all members of the specified team |
+| `user_id` | Deliver only to the specified user |
+
+Fields can be combined. If all fields are empty, the event is broadcast to all
+connected clients.
+
+## Configuration
+
+| Variable | Default | Description |
+|---|---|---|
+| `CHIT_WS_PING_INTERVAL` | `30s` | Interval between ping frames |
+| `CHIT_WS_WRITE_TIMEOUT` | `10s` | Write deadline for outgoing messages |

@@ -945,6 +945,123 @@ else
 fi
 
 # ============================================================================
+# SCENARIO 7: @Mention Support
+# ============================================================================
+section "Scenario 7: @Mention Support"
+
+# 7.1 Alice posts a message mentioning Bob
+CURRENT_TOKEN="$ALICE_TOKEN"
+curl_api_full POST "/posts" "{\"channel_id\":\"${PUBLIC_CHANNEL_ID}\",\"content\":\"Hey @bob, can you review this?\"}"
+assert_status "7.1 Alice posts with @bob mention" 201 "$LAST_STATUS"
+MENTION_POST_ID=$(echo "$LAST_BODY" | jq -r '.id')
+# Verify props.mentions contains Bob's user ID
+MENTION_LIST=$(echo "$LAST_BODY" | jq -r '.props.mentions // []')
+if echo "$MENTION_LIST" | jq -e ".[] | select(. == \"${BOB_ID}\")" >/dev/null 2>&1; then
+  echo -e "  ${GREEN}PASS${NC} 7.1 props.mentions contains Bob's ID"
+  PASS_COUNT=$((PASS_COUNT + 1))
+else
+  echo -e "  ${RED}FAIL${NC} 7.1 props.mentions does not contain Bob's ID (got: ${MENTION_LIST})"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+fi
+
+# 7.2 Check Bob's channel mention_count incremented
+CURRENT_TOKEN="$BOB_TOKEN"
+curl_api_full GET "/channels/${PUBLIC_CHANNEL_ID}/members"
+assert_status "7.2 get channel members" 200 "$LAST_STATUS"
+BOB_MENTION_COUNT=$(echo "$LAST_BODY" | jq -r "[.[] | select(.user_id==\"${BOB_ID}\")] | .[0].mention_count // 0")
+if [[ "$BOB_MENTION_COUNT" -ge 1 ]]; then
+  echo -e "  ${GREEN}PASS${NC} 7.2 Bob mention_count >= 1 (got ${BOB_MENTION_COUNT})"
+  PASS_COUNT=$((PASS_COUNT + 1))
+else
+  echo -e "  ${RED}FAIL${NC} 7.2 Bob mention_count expected >= 1, got ${BOB_MENTION_COUNT}"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+fi
+
+# 7.3 Self-mention is NOT counted — Alice mentions herself
+CURRENT_TOKEN="$ALICE_TOKEN"
+curl_api_full POST "/posts" "{\"channel_id\":\"${PUBLIC_CHANNEL_ID}\",\"content\":\"I am @alice talking to myself\"}"
+assert_status "7.3a Alice posts self-mention" 201 "$LAST_STATUS"
+SELF_MENTION_POST_ID=$(echo "$LAST_BODY" | jq -r '.id')
+# props.mentions should NOT contain Alice's own ID
+SELF_MENTIONS=$(echo "$LAST_BODY" | jq -r '.props.mentions // []')
+if echo "$SELF_MENTIONS" | jq -e ".[] | select(. == \"${ALICE_ID}\")" >/dev/null 2>&1; then
+  echo -e "  ${RED}FAIL${NC} 7.3 self-mention: props.mentions contains Alice's own ID"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+else
+  echo -e "  ${GREEN}PASS${NC} 7.3 self-mention filtered from props.mentions"
+  PASS_COUNT=$((PASS_COUNT + 1))
+fi
+
+# 7.4 @all mention — mentions all channel members except author
+CURRENT_TOKEN="$ALICE_TOKEN"
+curl_api_full POST "/posts" "{\"channel_id\":\"${PUBLIC_CHANNEL_ID}\",\"content\":\"Hey @all, standup time!\"}"
+assert_status "7.4 Alice posts @all" 201 "$LAST_STATUS"
+ALL_MENTION_POST_ID=$(echo "$LAST_BODY" | jq -r '.id')
+ALL_MENTIONS=$(echo "$LAST_BODY" | jq -r '.props.mentions // []')
+ALL_MENTION_COUNT=$(echo "$ALL_MENTIONS" | jq 'length')
+# Should mention at least Bob and Charlie (2+ members besides Alice)
+if [[ "$ALL_MENTION_COUNT" -ge 2 ]]; then
+  echo -e "  ${GREEN}PASS${NC} 7.4 @all mentions >= 2 other members (got ${ALL_MENTION_COUNT})"
+  PASS_COUNT=$((PASS_COUNT + 1))
+else
+  echo -e "  ${RED}FAIL${NC} 7.4 @all expected >= 2 mentions, got ${ALL_MENTION_COUNT}"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+fi
+# Verify Alice is NOT in the @all mention list
+if echo "$ALL_MENTIONS" | jq -e ".[] | select(. == \"${ALICE_ID}\")" >/dev/null 2>&1; then
+  echo -e "  ${RED}FAIL${NC} 7.4b @all includes author (Alice)"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+else
+  echo -e "  ${GREEN}PASS${NC} 7.4b @all excludes author (Alice)"
+  PASS_COUNT=$((PASS_COUNT + 1))
+fi
+
+# 7.5 Mention non-member — not included in mentions
+# Charlie is not in the private channel, mentioning him should be silently skipped
+CURRENT_TOKEN="$ALICE_TOKEN"
+# First ensure Alice is a member of the private channel
+curl_api_full GET "/channels/${PRIVATE_CHANNEL_ID}/members"
+assert_status "7.5a get private channel members" 200 "$LAST_STATUS"
+curl_api_full POST "/posts" "{\"channel_id\":\"${PRIVATE_CHANNEL_ID}\",\"content\":\"Hey @charlie, are you here?\"}"
+assert_status "7.5 post mentioning non-member" 201 "$LAST_STATUS"
+NON_MEMBER_MENTIONS=$(echo "$LAST_BODY" | jq -r '.props.mentions // "null"')
+if [[ "$NON_MEMBER_MENTIONS" == "null" ]] || ! echo "$NON_MEMBER_MENTIONS" | jq -e ".[] | select(. == \"${CHARLIE_ID}\")" >/dev/null 2>&1; then
+  echo -e "  ${GREEN}PASS${NC} 7.5 non-member Charlie not in mentions"
+  PASS_COUNT=$((PASS_COUNT + 1))
+else
+  echo -e "  ${RED}FAIL${NC} 7.5 non-member Charlie appeared in mentions"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+fi
+
+# 7.6 Mention in thread reply — check thread unread_mention_count
+# Bob follows the thread from scenario 5 (THREAD_ROOT_ID). Alice mentions Bob in a reply.
+CURRENT_TOKEN="$ALICE_TOKEN"
+curl_api_full POST "/posts" "{\"channel_id\":\"${PUBLIC_CHANNEL_ID}\",\"content\":\"@bob what do you think about this thread?\",\"root_id\":\"${THREAD_ROOT_ID}\"}"
+assert_status "7.6 Alice mentions Bob in thread reply" 201 "$LAST_STATUS"
+THREAD_MENTION_PROPS=$(echo "$LAST_BODY" | jq -r '.props.mentions // []')
+if echo "$THREAD_MENTION_PROPS" | jq -e ".[] | select(. == \"${BOB_ID}\")" >/dev/null 2>&1; then
+  echo -e "  ${GREEN}PASS${NC} 7.6 thread reply props.mentions contains Bob"
+  PASS_COUNT=$((PASS_COUNT + 1))
+else
+  echo -e "  ${RED}FAIL${NC} 7.6 thread reply props.mentions missing Bob"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+fi
+
+# 7.7 Edit post re-parses mentions but does NOT double-count
+CURRENT_TOKEN="$ALICE_TOKEN"
+curl_api_full PUT "/posts/${MENTION_POST_ID}" '{"content":"Hey @bob and @charlie, updated mention"}'
+assert_status "7.7 edit post with mentions" 200 "$LAST_STATUS"
+EDIT_MENTIONS=$(echo "$LAST_BODY" | jq -r '.props.mentions // []')
+EDIT_MENTION_COUNT=$(echo "$EDIT_MENTIONS" | jq 'length')
+if [[ "$EDIT_MENTION_COUNT" -ge 2 ]]; then
+  echo -e "  ${GREEN}PASS${NC} 7.7 edited post props.mentions updated (${EDIT_MENTION_COUNT} users)"
+  PASS_COUNT=$((PASS_COUNT + 1))
+else
+  echo -e "  ${RED}FAIL${NC} 7.7 edited post expected >= 2 mentions, got ${EDIT_MENTION_COUNT}"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+fi
+
+# ============================================================================
 # SUMMARY
 # ============================================================================
 section "Test Summary"

@@ -7,8 +7,17 @@ import (
 	"github.com/infrashift/chit/internal/model"
 )
 
-// CreatePost creates a new post and handles threading, channel stats, and WebSocket broadcast.
+// CreatePost creates a new post and handles threading, channel stats, mentions, and WebSocket broadcast.
 func (a *App) CreatePost(ctx context.Context, post *model.Post) (*model.Post, error) {
+	// Process mentions on plaintext content before encryption
+	mentionedUserIDs, _ := a.processMentions(post)
+	if len(mentionedUserIDs) > 0 {
+		if post.Props == nil {
+			post.Props = make(map[string]any)
+		}
+		post.Props["mentions"] = mentionedUserIDs
+	}
+
 	// Optionally encrypt content
 	if a.Config.VaultEnabled {
 		ciphertext, err := a.EncryptContent(ctx, post.Content)
@@ -35,6 +44,12 @@ func (a *App) CreatePost(ctx context.Context, post *model.Post) (*model.Post, er
 	}
 
 	a.broadcastPostEvent(model.WebSocketEventPosted, saved)
+
+	// Notify mentioned users after post is saved and broadcast
+	if len(mentionedUserIDs) > 0 {
+		a.notifyMentionedUsers(saved, mentionedUserIDs)
+	}
+
 	return saved, nil
 }
 
@@ -52,8 +67,19 @@ func (a *App) GetPost(ctx context.Context, id string) (*model.Post, error) {
 	return post, nil
 }
 
-// UpdatePost updates a post's content.
+// UpdatePost updates a post's content. Re-parses mentions for Props but does not re-increment counters.
 func (a *App) UpdatePost(ctx context.Context, post *model.Post) (*model.Post, error) {
+	// Re-parse mentions on plaintext for correct client rendering
+	mentionedUserIDs, _ := a.processMentions(post)
+	if post.Props == nil {
+		post.Props = make(map[string]any)
+	}
+	if len(mentionedUserIDs) > 0 {
+		post.Props["mentions"] = mentionedUserIDs
+	} else {
+		delete(post.Props, "mentions")
+	}
+
 	if a.Config.VaultEnabled {
 		ciphertext, err := a.EncryptContent(ctx, post.Content)
 		if err != nil {

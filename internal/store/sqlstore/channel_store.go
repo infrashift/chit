@@ -264,6 +264,15 @@ func (s *SqlChannelStore) IncrementMsgCount(channelID string, timestamp int64) e
 	return nil
 }
 
+func (s *SqlChannelStore) IncrementMentionCount(channelID, userID string) error {
+	query := `UPDATE channel_members SET mention_count = mention_count + 1 WHERE channel_id = $1 AND user_id = $2`
+	_, err := s.sqlStore.pool.Exec(context.Background(), query, channelID, userID)
+	if err != nil {
+		return fmt.Errorf("increment mention count: %w", err)
+	}
+	return nil
+}
+
 func scanChannels(rows pgx.Rows) ([]*model.Channel, error) {
 	var channels []*model.Channel
 	for rows.Next() {

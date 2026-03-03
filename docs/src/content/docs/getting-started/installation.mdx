@@ -1,0 +1,48 @@
+---
+title: Installation
+description: Prerequisites and build instructions for the Chit server.
+---
+
+## Prerequisites
+
+| Dependency | Version | Purpose |
+|---|---|---|
+| Go | 1.22+ | Build the server binary |
+| Podman | 4.0+ | Run infrastructure containers |
+| PostgreSQL | 17 | Primary data store (runs in the pod) |
+| golang-migrate | latest | Apply database migrations |
+
+## Build from source
+
+```bash
+git clone https://github.com/infrashift/chit.git
+cd chit
+make build
+```
+
+This produces `bin/chitd` — the main server binary.
+
+## Build the MCP server
+
+```bash
+make build-mcp
+```
+
+This produces `bin/chit-mcp` — an MCP server for AI agent integration.
+
+## Build the container image
+
+```bash
+podman build -t chit:latest -f deploy/Containerfile .
+```
+
+## Verify the build
+
+```bash
+./bin/chitd --help
+```
+
+## Next steps
+
+- [Configure environment variables](/chit/getting-started/configuration/)
+- [Run the full stack with Quick Start](/chit/getting-started/quick-start/)

@@ -1,0 +1,107 @@
+---
+title: Architecture Overview
+description: Layered architecture, store decorators, and project structure.
+---
+
+Chit follows a layered architecture inspired by Mattermost, with clear
+separation between HTTP handling, business logic, and data access.
+
+## Layers
+
+```
+HTTP Request
+    │
+    ▼
+┌─────────┐
+│   API   │  chi router, JSON encoding, request validation
+└────┬────┘
+     │
+     ▼
+┌─────────┐
+│   App   │  Business logic, authorization checks, event publishing
+└────┬────┘
+     │
+     ▼
+┌─────────┐
+│  Store  │  Data access layer with decorator chain
+└────┬────┘
+     │
+     ▼
+┌─────────┐
+│   PG    │  PostgreSQL via pgx/v5
+└─────────┘
+```
+
+### API Layer
+
+The API layer uses the [chi](https://github.com/go-chi/chi) router to handle
+HTTP requests. Each handler parses the request, calls the App layer, and
+serializes the response. OpenAPI validation middleware checks requests against
+the spec at `api/openapi.yaml`.
+
+### App Layer
+
+The App layer contains all business logic. It is **request-scoped** and
+**stateless** — no mutable state is held between requests. The App layer
+coordinates between the Store, WebSocket hub, and pub/sub system.
+
+### Store Layer
+
+The Store layer provides data access through a Go interface. The concrete
+implementation uses pgx/v5 for PostgreSQL queries.
+
+## Store Decorator Chain
+
+Store operations pass through a chain of decorators:
+
+```
+Timer → Retry → Cache → SqlStore
+```
+
+| Decorator | Purpose |
+|---|---|
+| **Timer** | Records query latency metrics |
+| **Retry** | Retries transient failures with backoff |
+| **Cache** | LRU cache using hashicorp/golang-lru/v2 |
+| **SqlStore** | Executes SQL against PostgreSQL |
+
+Each decorator implements the same Store interface, enabling transparent
+composition.
+
+## Server Lifecycle
+
+1. Load configuration from environment (koanf with `CHIT_` prefix)
+2. Connect to PostgreSQL and initialize the store decorator chain
+3. Initialize the pub/sub backend (PG LISTEN/NOTIFY or NATS)
+4. Start the WebSocket hub event loop
+5. Start background workers (search indexer)
+6. Register API routes and start the HTTP server
+7. Wait for shutdown signal (SIGINT/SIGTERM)
+8. Graceful shutdown: drain connections, stop workers, close database
+
+## Project Structure
+
+```
+chit/
+├── cmd/
+│   ├── chitd/              Main server binary
+│   └── chit-mcp/           MCP agent binary
+├── internal/
+│   ├── api/                HTTP handlers and middleware
+│   ├── app/                Business logic
+│   ├── cache/              LRU cache implementation
+│   ├── config/             Configuration loading
+│   ├── jobs/               Background workers (search indexer)
+│   ├── mcp/                MCP server implementation
+│   ├── model/              Data models and constants
+│   ├── pubsub/             Pub/sub interface and backends
+│   ├── server/             Server setup and lifecycle
+│   ├── store/              Data access layer and decorators
+│   └── websocket/          WebSocket hub and client management
+├── api/                    OpenAPI specification
+├── deploy/                 Podman Kube manifest and Ory configs
+├── migrations/             SQL migration files (golang-migrate)
+├── tests/                  System test scaffolding
+├── docs/                   Documentation site (Astro + Starlight)
+└── Makefile                Build, test, deploy targets
+```

@@ -1,4 +1,4 @@
-.PHONY: build build-mcp build-all run test lint validate-spec migrate-up migrate-down kube-up kube-down kube-migrate clean
+.PHONY: build build-mcp build-all run test lint validate-spec migrate-up migrate-down kube-up kube-down kube-migrate docs-dev clean
 
 BINARY=bin/chitd
 MCP_BINARY=bin/chit-mcp
@@ -52,6 +52,11 @@ kube-migrate:
 		docker.io/oryd/keto:v0.12 \
 		migrate up --yes
 	@echo "Run 'make migrate-up' to apply chit schema migrations."
+
+## --- Docs ---
+
+docs-dev:
+	cd docs && bun --bun run dev
 
 clean:
 	rm -rf bin/
