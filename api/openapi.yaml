@@ -42,6 +42,8 @@ tags:
     description: Tag CRUD and post-tag associations
   - name: Search
     description: Full-text search across posts via ZincSearch
+  - name: Commands
+    description: Slash command registry and discovery
   - name: WebSocket
     description: Real-time event streaming
 
@@ -1300,6 +1302,28 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  # ──────────────────────────── Commands ──────────────────────────
+  /commands:
+    get:
+      operationId: list_commands
+      summary: List available slash commands
+      description: |
+        Returns the list of registered slash commands. Commands are loaded
+        from the CUE definitions in the auth/ directory at server start.
+        If no commands are loaded, an empty array is returned.
+      tags: [Commands]
+      responses:
+        "200":
+          description: Command list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Command"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   # ──────────────────────────── WebSocket ─────────────────────────
   /websocket:
     get:
@@ -1898,6 +1922,27 @@ components:
         tag_id:
           type: string
           format: uuid
+
+    Command:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique command identifier
+        slug:
+          type: string
+          description: The slash command trigger (e.g. "help" for /help)
+        description:
+          type: string
+          description: Human-readable description of the command
+        category:
+          type: string
+          description: Command category (e.g. "chat", "admin", "agent")
+      example:
+        id: "help"
+        slug: "help"
+        description: "List available commands"
+        category: "chat"
 
     SearchRequest:
       type: object

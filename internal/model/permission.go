@@ -14,7 +14,9 @@ const (
 
 	// Keto namespace and relations
 	KetoNamespaceChannel = "chit/channel"
+	KetoNamespaceCommand = "chit/command"
 	KetoRelationMember   = "member"
 	KetoRelationWriter   = "writer"
 	KetoRelationReader   = "reader"
+	KetoRelationExecute  = "execute"
 )

@@ -44,6 +44,16 @@ type Config struct {
 
 	EnableOpenAPIValidation bool   `koanf:"enable_openapi_validation"`
 	MCPAgentUserID          string `koanf:"mcp_agent_user_id"`
+
+	// Slash Commands
+	CommandsCUEDir     string `koanf:"commands_cue_dir"`
+	AuditLogPath       string `koanf:"audit_log_path"`
+	WebhookEnabled     bool   `koanf:"webhook_enabled"`
+	WebhookURL         string `koanf:"webhook_url"`
+	WebhookSecret      string `koanf:"webhook_secret"`
+	WebhookWorkerCount int    `koanf:"webhook_worker_count"`
+	WebhookQueueSize   int    `koanf:"webhook_queue_size"`
+	WebhookTimeoutSec  int    `koanf:"webhook_timeout_sec"`
 }
 
 // Defaults returns a Config populated with default values.
@@ -70,6 +80,11 @@ func Defaults() *Config {
 		LogLevel:                "info",
 		LogFormat:               "json",
 		EnableOpenAPIValidation: true,
+		CommandsCUEDir:         "auth",
+		AuditLogPath:           "/var/log/chit/audit.log",
+		WebhookWorkerCount:     4,
+		WebhookQueueSize:       1024,
+		WebhookTimeoutSec:      10,
 	}
 }
 

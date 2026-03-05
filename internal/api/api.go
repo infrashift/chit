@@ -112,6 +112,9 @@ func New(a *app.App) http.Handler {
 			r.Delete("/posts/{id}/tags/{tag_id}", removeTagFromPost(a))
 			r.Get("/posts/{id}/tags", getTagsForPost(a))
 
+			// Commands
+			r.Get("/commands", listCommands(a))
+
 			// Search
 			r.Post("/teams/{id}/posts/search", searchPostsInTeam(a))
 			r.Post("/channels/{id}/posts/search", searchPostsInChannel(a))

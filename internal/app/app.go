@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/infrashift/chit/internal/command"
 	"github.com/infrashift/chit/internal/config"
 	"github.com/infrashift/chit/internal/pubsub"
 	"github.com/infrashift/chit/internal/store"
@@ -22,6 +23,12 @@ type App struct {
 	Hub    *websocket.Hub
 	PubSub pubsub.PubSub
 	Config *config.Config
+
+	// Slash commands (nil when commands are disabled).
+	CommandRegistry *command.Registry
+	CommandHandlers map[string]command.Handler
+	AuditLogger     *command.AuditLogger
+	WebhookCh       chan *command.WebhookEvent
 
 	ketoReadURL  string
 	ketoWriteURL string
