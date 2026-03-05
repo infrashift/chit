@@ -11,6 +11,8 @@ serve:
 namespaces:
   - id: 0
     name: chit/channel
+  - id: 1
+    name: chit/command
 
 log:
   level: info

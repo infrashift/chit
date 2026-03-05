@@ -1,7 +1,8 @@
-.PHONY: build build-mcp build-all run test lint validate-spec migrate-up migrate-down kube-up kube-down kube-migrate docs-dev clean
+.PHONY: build build-mcp build-reconcile build-all run test lint validate-spec cue-validate reconcile migrate-up migrate-down kube-up kube-down kube-migrate docs-dev clean
 
 BINARY=bin/chitd
 MCP_BINARY=bin/chit-mcp
+RECONCILE_BINARY=bin/chit-reconcile
 KUBE_FILE=deploy/chit.kube.yml
 MIGRATE_URL?=postgres://chit:chit@localhost:5432/chit?sslmode=disable
 
@@ -11,7 +12,10 @@ build:
 build-mcp:
 	go build -o $(MCP_BINARY) ./cmd/chit-mcp
 
-build-all: build build-mcp
+build-reconcile:
+	go build -o $(RECONCILE_BINARY) ./cmd/chit-reconcile
+
+build-all: build build-mcp build-reconcile
 
 validate-spec:
 	go run github.com/getkin/kin-openapi/cmd/validate@latest api/openapi.yaml
@@ -24,6 +28,14 @@ test:
 
 lint:
 	golangci-lint run
+
+## --- CUE / Reconciler ---
+
+cue-validate:
+	go run cuelang.org/go/cmd/cue@latest eval ./auth/...
+
+reconcile: build-reconcile
+	./$(RECONCILE_BINARY)
 
 ## --- Database Migrations ---
 

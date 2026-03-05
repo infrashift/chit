@@ -39,8 +39,12 @@ func parseMentions(content string) []string {
 func (a *App) processMentions(post *model.Post) ([]string, error) {
 	usernames := parseMentions(post.Content)
 	if len(usernames) == 0 {
+		slog.Debug("processMentions: no usernames parsed from content",
+			"channel_id", post.ChannelID, "content_len", len(post.Content))
 		return nil, nil
 	}
+	slog.Info("processMentions: parsed usernames",
+		"usernames", usernames, "channel_id", post.ChannelID, "user_id", post.UserID)
 
 	// Check for @all or @channel — collect all channel members
 	broadcastAll := false
@@ -79,14 +83,16 @@ func (a *App) processMentions(post *model.Post) ([]string, error) {
 	for _, username := range individualUsernames {
 		user, err := a.Store.User().GetByUsername(username)
 		if err != nil {
-			// Unknown user — skip silently
+			slog.Debug("processMentions: user not found", "username", username, "error", err)
 			continue
 		}
 
 		// Verify channel membership
 		_, err = a.Store.Channel().GetMember(post.ChannelID, user.ID)
 		if err != nil {
-			// Not a channel member — skip
+			slog.Debug("processMentions: user not a channel member",
+				"username", username, "user_id", user.ID,
+				"channel_id", post.ChannelID, "error", err)
 			continue
 		}
 
@@ -97,6 +103,8 @@ func (a *App) processMentions(post *model.Post) ([]string, error) {
 	delete(mentionedIDs, post.UserID)
 
 	if len(mentionedIDs) == 0 {
+		slog.Info("processMentions: no mentions after filtering",
+			"channel_id", post.ChannelID, "user_id", post.UserID)
 		return nil, nil
 	}
 
@@ -104,6 +112,8 @@ func (a *App) processMentions(post *model.Post) ([]string, error) {
 	for id := range mentionedIDs {
 		result = append(result, id)
 	}
+	slog.Info("processMentions: resolved mentions",
+		"mentioned_ids", result, "channel_id", post.ChannelID)
 	return result, nil
 }
 

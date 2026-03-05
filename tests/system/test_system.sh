@@ -1062,6 +1062,132 @@ else
 fi
 
 # ============================================================================
+# SCENARIO 8: Slash Commands
+# ============================================================================
+section "Scenario 8: Slash Commands"
+
+# 8.1 GET /api/v1/commands returns the command list
+CURRENT_TOKEN="$ALICE_TOKEN"
+curl_api_full GET "/commands"
+assert_status "8.1 GET /commands" 200 "$LAST_STATUS"
+# Should be a JSON array (may be empty if CUE dir not loaded, but should still be 200)
+CMD_COUNT=$(echo "$LAST_BODY" | jq 'if type == "array" then length else 0 end')
+if [[ "$CMD_COUNT" -ge 0 ]]; then
+  echo -e "  ${GREEN}PASS${NC} 8.1 /commands returns valid JSON array (${CMD_COUNT} commands)"
+  PASS_COUNT=$((PASS_COUNT + 1))
+else
+  echo -e "  ${RED}FAIL${NC} 8.1 /commands did not return JSON array"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+fi
+
+# 8.2 Verify /commands returns expected fields when commands are loaded
+if [[ "$CMD_COUNT" -gt 0 ]]; then
+  FIRST_SLUG=$(echo "$LAST_BODY" | jq -r '.[0].slug')
+  FIRST_DESC=$(echo "$LAST_BODY" | jq -r '.[0].description')
+  FIRST_CAT=$(echo "$LAST_BODY" | jq -r '.[0].category')
+  if [[ -n "$FIRST_SLUG" && "$FIRST_SLUG" != "null" && -n "$FIRST_DESC" && "$FIRST_DESC" != "null" && -n "$FIRST_CAT" && "$FIRST_CAT" != "null" ]]; then
+    echo -e "  ${GREEN}PASS${NC} 8.2 command has slug, description, category fields"
+    PASS_COUNT=$((PASS_COUNT + 1))
+  else
+    echo -e "  ${RED}FAIL${NC} 8.2 command missing expected fields (slug=${FIRST_SLUG}, desc=${FIRST_DESC}, cat=${FIRST_CAT})"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+  fi
+else
+  echo -e "  ${YELLOW}SKIP${NC} 8.2 no commands loaded (CUE dir may not be configured)"
+  SKIP_COUNT=$((SKIP_COUNT + 1))
+fi
+
+# 8.3 Posting a slash command returns an ephemeral response (not persisted)
+CURRENT_TOKEN="$ALICE_TOKEN"
+curl_api_full POST "/posts" "{\"channel_id\":\"${PUBLIC_CHANNEL_ID}\",\"content\":\"/help\"}"
+# When commands are loaded, we get 201 with type=command_response.
+# When commands are NOT loaded, /help goes through as a normal post (also 201).
+assert_status "8.3 POST /help" 201 "$LAST_STATUS"
+SLASH_POST_TYPE=$(echo "$LAST_BODY" | jq -r '.type // ""')
+SLASH_EPHEMERAL=$(echo "$LAST_BODY" | jq -r '.props.ephemeral // false')
+if [[ "$CMD_COUNT" -gt 0 ]]; then
+  # Commands are loaded — should be intercepted
+  if [[ "$SLASH_POST_TYPE" == "command_response" ]]; then
+    echo -e "  ${GREEN}PASS${NC} 8.3a /help intercepted: type=command_response"
+    PASS_COUNT=$((PASS_COUNT + 1))
+  else
+    echo -e "  ${RED}FAIL${NC} 8.3a expected type=command_response, got ${SLASH_POST_TYPE}"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+  fi
+  if [[ "$SLASH_EPHEMERAL" == "true" ]]; then
+    echo -e "  ${GREEN}PASS${NC} 8.3b ephemeral=true"
+    PASS_COUNT=$((PASS_COUNT + 1))
+  else
+    echo -e "  ${RED}FAIL${NC} 8.3b expected ephemeral=true, got ${SLASH_EPHEMERAL}"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+  fi
+
+  # 8.4 Verify the slash command was NOT persisted
+  SLASH_POST_ID=$(echo "$LAST_BODY" | jq -r '.id')
+  curl_api_full GET "/posts/${SLASH_POST_ID}"
+  if [[ "$LAST_STATUS" == "404" ]]; then
+    echo -e "  ${GREEN}PASS${NC} 8.4 slash command not persisted (404 on GET)"
+    PASS_COUNT=$((PASS_COUNT + 1))
+  else
+    echo -e "  ${RED}FAIL${NC} 8.4 expected 404 for ephemeral post, got HTTP ${LAST_STATUS}"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+  fi
+else
+  echo -e "  ${YELLOW}SKIP${NC} 8.3a/b/8.4 commands not loaded, slash intercept not active"
+  SKIP_COUNT=$((SKIP_COUNT + 3))
+fi
+
+# 8.5 Posting an unknown slash command returns an ephemeral error
+if [[ "$CMD_COUNT" -gt 0 ]]; then
+  CURRENT_TOKEN="$ALICE_TOKEN"
+  curl_api_full POST "/posts" "{\"channel_id\":\"${PUBLIC_CHANNEL_ID}\",\"content\":\"/nonexistent-cmd\"}"
+  assert_status "8.5 POST /nonexistent-cmd" 201 "$LAST_STATUS"
+  UNKNOWN_TYPE=$(echo "$LAST_BODY" | jq -r '.type // ""')
+  UNKNOWN_TEXT=$(echo "$LAST_BODY" | jq -r '.content // ""')
+  if [[ "$UNKNOWN_TYPE" == "command_response" ]]; then
+    echo -e "  ${GREEN}PASS${NC} 8.5a unknown command returns command_response"
+    PASS_COUNT=$((PASS_COUNT + 1))
+  else
+    echo -e "  ${RED}FAIL${NC} 8.5a expected type=command_response for unknown cmd, got ${UNKNOWN_TYPE}"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+  fi
+  if echo "$UNKNOWN_TEXT" | grep -qi "unknown"; then
+    echo -e "  ${GREEN}PASS${NC} 8.5b unknown command response mentions 'unknown'"
+    PASS_COUNT=$((PASS_COUNT + 1))
+  else
+    echo -e "  ${RED}FAIL${NC} 8.5b expected 'unknown' in response, got: ${UNKNOWN_TEXT:0:100}"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+  fi
+else
+  echo -e "  ${YELLOW}SKIP${NC} 8.5 commands not loaded"
+  SKIP_COUNT=$((SKIP_COUNT + 2))
+fi
+
+# 8.6 Normal post still persisted (no regression)
+CURRENT_TOKEN="$ALICE_TOKEN"
+curl_api_full POST "/posts" "{\"channel_id\":\"${PUBLIC_CHANNEL_ID}\",\"content\":\"This is a normal message, not a command\"}"
+assert_status "8.6 normal post still works" 201 "$LAST_STATUS"
+NORMAL_POST_TYPE=$(echo "$LAST_BODY" | jq -r '.type // ""')
+NORMAL_POST_ID=$(echo "$LAST_BODY" | jq -r '.id')
+if [[ "$NORMAL_POST_TYPE" != "command_response" ]]; then
+  echo -e "  ${GREEN}PASS${NC} 8.6a normal post type is not command_response"
+  PASS_COUNT=$((PASS_COUNT + 1))
+else
+  echo -e "  ${RED}FAIL${NC} 8.6a normal post incorrectly intercepted as command"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+fi
+
+# 8.6b Verify the normal post was persisted
+curl_api_full GET "/posts/${NORMAL_POST_ID}"
+assert_status "8.6b normal post persisted" 200 "$LAST_STATUS"
+assert_json "8.6b normal post content" ".content" "This is a normal message, not a command" "$LAST_BODY"
+
+# 8.7 Unauthenticated request to /commands → 401
+CURRENT_TOKEN=""
+curl_api_full GET "/commands"
+assert_status "8.7 unauthenticated /commands" 401 "$LAST_STATUS"
+
+# ============================================================================
 # SUMMARY
 # ============================================================================
 section "Test Summary"

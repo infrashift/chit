@@ -3,26 +3,25 @@
 ## How to run
 
 ```bash
- # Stop chitd if running
-  kill %1 2>/dev/null
+  # 1. Kill the stale chitd process (kill ALL chitd, not just shell job %1)                                                                                                 
+  pkill -f chitd 2>/dev/null                                                                                                                                                
+  sleep 1                                                                                                                                                                                                                                                                                                           
+  # 2. Rebuild the binary with the latest code
+  make build
 
-  # Restart the pod with updated config
+  # 3. Restart services
   make kube-down && make kube-up
-
-  # Wait for services to start
   sleep 10
 
-  # Run Keto migration
+  # 4. Run migrations
   make kube-migrate
-
-  # Run app migrations
   ~/go/bin/migrate -path migrations -database "postgres://chit:chit@localhost:5432/chit?sslmode=disable" up
 
-  # Start chitd
+  # 5. Start the NEW binary
   CHIT_DATABASE_URL="postgres://chit:chit@localhost:5432/chit?sslmode=disable" ./bin/chitd &
   sleep 2
 
-  # Run tests
+  # 6. Run tests
   bash tests/system/test_system.sh
 ```
 

@@ -9,6 +9,25 @@ import (
 
 // CreatePost creates a new post and handles threading, channel stats, mentions, and WebSocket broadcast.
 func (a *App) CreatePost(ctx context.Context, post *model.Post) (*model.Post, error) {
+	// Intercept slash commands — they are NOT persisted.
+	if a.CommandRegistry != nil {
+		resp, handled, err := a.InterceptSlashCommand(ctx, post.UserID, post.ChannelID, post.Content)
+		if err != nil {
+			return nil, err
+		}
+		if handled {
+			return &model.Post{
+				ID:        model.NewID(),
+				ChannelID: post.ChannelID,
+				UserID:    post.UserID,
+				Content:   resp.Text,
+				Type:      "command_response",
+				CreateAt:  model.GetMillis(),
+				Props:     map[string]any{"ephemeral": true},
+			}, nil
+		}
+	}
+
 	// Process mentions on plaintext content before encryption
 	mentionedUserIDs, _ := a.processMentions(post)
 	if len(mentionedUserIDs) > 0 {
@@ -69,6 +88,19 @@ func (a *App) GetPost(ctx context.Context, id string) (*model.Post, error) {
 
 // UpdatePost updates a post's content. Re-parses mentions for Props but does not re-increment counters.
 func (a *App) UpdatePost(ctx context.Context, post *model.Post) (*model.Post, error) {
+	// Fetch original post to carry forward immutable fields (ChannelID, UserID)
+	// needed for mention resolution when the update payload omits them.
+	existing, err := a.Store.Post().Get(post.ID)
+	if err != nil {
+		return nil, err
+	}
+	if post.ChannelID == "" {
+		post.ChannelID = existing.ChannelID
+	}
+	if post.UserID == "" {
+		post.UserID = existing.UserID
+	}
+
 	// Re-parse mentions on plaintext for correct client rendering
 	mentionedUserIDs, _ := a.processMentions(post)
 	if post.Props == nil {

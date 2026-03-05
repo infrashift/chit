@@ -12,6 +12,7 @@ import (
 
 	"github.com/infrashift/chit/internal/api"
 	"github.com/infrashift/chit/internal/app"
+	"github.com/infrashift/chit/internal/command"
 	"github.com/infrashift/chit/internal/config"
 	"github.com/infrashift/chit/internal/jobs"
 	"github.com/infrashift/chit/internal/jobs/workers"
@@ -29,6 +30,7 @@ type Server struct {
 	app       *app.App
 	scheduler *jobs.Scheduler
 	httpSrv   *http.Server
+	webhookCh chan *command.WebhookEvent
 }
 
 // New creates a Server from configuration.
@@ -50,6 +52,7 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 
 	s.initApp()
+	s.initCommands()
 	s.initJobs()
 	s.initHTTP()
 
@@ -116,6 +119,52 @@ func (s *Server) initApp() {
 	s.app = app.New(s.store, s.hub, s.pubsub, s.config)
 }
 
+func (s *Server) initCommands() {
+	cueCfg, err := command.LoadCUE(s.config.CommandsCUEDir)
+	if err != nil {
+		slog.Warn("slash commands disabled: failed to load CUE definitions",
+			"dir", s.config.CommandsCUEDir, "error", err)
+		return
+	}
+
+	reg := command.NewRegistry(cueCfg.Commands)
+	s.app.CommandRegistry = reg
+
+	// Register built-in handlers.
+	handlers := make(map[string]command.Handler)
+	handlers["help"] = command.HandlerFunc(func(ctx context.Context, actorID, channelID, args string) (*command.CommandResult, error) {
+		var text string
+		for _, c := range reg.All() {
+			text += fmt.Sprintf("- `/%s` — %s\n", c.Slug, c.Description)
+		}
+		if text == "" {
+			text = "No commands available."
+		}
+		return &command.CommandResult{ResponseText: text}, nil
+	})
+	s.app.CommandHandlers = handlers
+
+	// Audit logger.
+	al, err := command.NewAuditLogger(s.config.AuditLogPath)
+	if err != nil {
+		slog.Warn("failed to create audit logger, using stderr", "error", err)
+		al, _ = command.NewAuditLogger("-")
+	}
+	s.app.AuditLogger = al
+
+	// Webhook channel.
+	if s.config.WebhookEnabled && s.config.WebhookURL != "" {
+		ch := make(chan *command.WebhookEvent, s.config.WebhookQueueSize)
+		s.webhookCh = ch
+		s.app.WebhookCh = ch
+	}
+
+	slog.Info("slash commands initialized",
+		"commands", len(cueCfg.Commands),
+		"roles", len(cueCfg.Roles),
+		"webhook_enabled", s.config.WebhookEnabled)
+}
+
 func (s *Server) initJobs() {
 	s.scheduler = jobs.NewScheduler()
 	indexer := workers.NewSearchIndexer(
@@ -124,6 +173,17 @@ func (s *Server) initJobs() {
 		s.config.ZincSearchPassword,
 	)
 	s.scheduler.AddWorker(indexer)
+
+	if s.webhookCh != nil {
+		dispatcher := workers.NewWebhookDispatcher(
+			s.webhookCh,
+			s.config.WebhookURL,
+			s.config.WebhookSecret,
+			s.config.WebhookWorkerCount,
+			time.Duration(s.config.WebhookTimeoutSec)*time.Second,
+		)
+		s.scheduler.AddWorker(dispatcher)
+	}
 }
 
 func (s *Server) initHTTP() {
@@ -180,6 +240,12 @@ func (s *Server) Shutdown() error {
 	if s.pubsub != nil {
 		if err := s.pubsub.Close(); err != nil {
 			slog.Error("pubsub close error", "error", err)
+		}
+	}
+
+	if s.app.AuditLogger != nil {
+		if err := s.app.AuditLogger.Close(); err != nil {
+			slog.Error("audit logger close error", "error", err)
 		}
 	}
 
