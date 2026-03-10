@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Chit System Tests
+# Chit E2E Tests
 #
 # Exercises the full stack: Kratos → Oathkeeper → chitd → PostgreSQL → Keto
 # using curl + jq. Requires all services up (make kube-up && make kube-migrate
 # && make migrate-up && make run &).
 #
-# Usage: bash tests/system/test_system.sh
+# Usage: bash tests/e2e/test_e2e.sh
 # ============================================================================
 set -euo pipefail
 

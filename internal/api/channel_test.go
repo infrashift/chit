@@ -165,6 +165,42 @@ func TestCreateDirectChannel(t *testing.T) {
 	}
 }
 
+func TestCreateDirectChannel_Idempotent(t *testing.T) {
+	a, _, cleanup := setupTestApp(t)
+	defer cleanup()
+
+	handler := createDirectChannel(a)
+	body := `["` + testUserID + `","` + extraUserID + `"]`
+
+	// First call — creates the DM
+	r1 := httptest.NewRequest(http.MethodPost, "/api/v1/channels/direct", strings.NewReader(body))
+	r1.Header.Set("Content-Type", "application/json")
+	w1 := httptest.NewRecorder()
+	handler.ServeHTTP(w1, r1)
+
+	if w1.Code != http.StatusCreated {
+		t.Fatalf("first call: expected 201, got %d; body: %s", w1.Code, w1.Body.String())
+	}
+	var ch1 model.Channel
+	decodeJSON(t, w1.Body, &ch1)
+
+	// Second call — should return same channel, no 500
+	r2 := httptest.NewRequest(http.MethodPost, "/api/v1/channels/direct", strings.NewReader(body))
+	r2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	handler.ServeHTTP(w2, r2)
+
+	if w2.Code != http.StatusCreated {
+		t.Fatalf("second call: expected 201, got %d; body: %s", w2.Code, w2.Body.String())
+	}
+	var ch2 model.Channel
+	decodeJSON(t, w2.Body, &ch2)
+
+	if ch1.ID != ch2.ID {
+		t.Fatalf("expected same channel ID, got %q and %q", ch1.ID, ch2.ID)
+	}
+}
+
 func TestCreateDirectChannel_WrongCount(t *testing.T) {
 	a, _, cleanup := setupTestApp(t)
 	defer cleanup()
@@ -229,6 +265,112 @@ func TestGetChannelMembers(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestGetMyDirectChannels(t *testing.T) {
+	a, ms, cleanup := setupTestApp(t)
+	defer cleanup()
+
+	// Seed a direct channel with membership for the test user
+	dmChannel := &model.Channel{
+		ID:          "019421a0-0000-7000-8000-000000000099",
+		Type:        "D",
+		Name:        testUserID + "__" + extraUserID,
+		DisplayName: testUserID + ", " + extraUserID,
+		CreateAt:    1000,
+		UpdateAt:    1000,
+	}
+	ms.channel.seed(dmChannel)
+	ms.channel.seedMember(&model.ChannelMember{
+		ChannelID: dmChannel.ID,
+		UserID:    testUserID,
+		CreateAt:  1000,
+	})
+	ms.channel.seedMember(&model.ChannelMember{
+		ChannelID: dmChannel.ID,
+		UserID:    extraUserID,
+		CreateAt:  1000,
+	})
+
+	handler := getMyDirectChannels(a)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/users/me/channels/direct", nil)
+	r = authedRequest(r, testUser())
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+
+	var channels []*model.Channel
+	decodeJSON(t, w.Body, &channels)
+
+	if len(channels) != 1 {
+		t.Fatalf("expected 1 direct channel, got %d", len(channels))
+	}
+	if channels[0].ID != dmChannel.ID {
+		t.Fatalf("expected channel ID %q, got %q", dmChannel.ID, channels[0].ID)
+	}
+}
+
+func TestGetMyDirectChannels_Empty(t *testing.T) {
+	a, _, cleanup := setupTestApp(t)
+	defer cleanup()
+
+	handler := getMyDirectChannels(a)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/users/me/channels/direct", nil)
+	r = authedRequest(r, testUser())
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+
+	var channels []*model.Channel
+	decodeJSON(t, w.Body, &channels)
+
+	if len(channels) != 0 {
+		t.Fatalf("expected 0 channels, got %d", len(channels))
+	}
+}
+
+func TestCreateGroupChannel_Idempotent(t *testing.T) {
+	a, _, cleanup := setupTestApp(t)
+	defer cleanup()
+
+	handler := createGroupChannel(a)
+	body := `["` + testUserID + `","` + extraUserID + `","` + thirdUserID + `"]`
+
+	// First call — creates the GM
+	r1 := httptest.NewRequest(http.MethodPost, "/api/v1/channels/group", strings.NewReader(body))
+	r1.Header.Set("Content-Type", "application/json")
+	w1 := httptest.NewRecorder()
+	handler.ServeHTTP(w1, r1)
+
+	if w1.Code != http.StatusCreated {
+		t.Fatalf("first call: expected 201, got %d; body: %s", w1.Code, w1.Body.String())
+	}
+	var ch1 model.Channel
+	decodeJSON(t, w1.Body, &ch1)
+
+	// Second call — should return same channel, no 500
+	r2 := httptest.NewRequest(http.MethodPost, "/api/v1/channels/group", strings.NewReader(body))
+	r2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	handler.ServeHTTP(w2, r2)
+
+	if w2.Code != http.StatusCreated {
+		t.Fatalf("second call: expected 201, got %d; body: %s", w2.Code, w2.Body.String())
+	}
+	var ch2 model.Channel
+	decodeJSON(t, w2.Body, &ch2)
+
+	if ch1.ID != ch2.ID {
+		t.Fatalf("expected same channel ID, got %q and %q", ch1.ID, ch2.ID)
 	}
 }
 

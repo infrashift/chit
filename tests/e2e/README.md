@@ -1,4 +1,4 @@
-# Test System
+# E2E Tests
 
 ## How to run
 
@@ -22,14 +22,14 @@
   sleep 2
 
   # 6. Run tests
-  bash tests/system/test_system.sh
+  bash tests/e2e/test_e2e.sh
 ```
 
 ## Details
 
 Created/Modified Files                                                                                                                                                                  
                                                                                                                     
-  1. tests/system/test_system.sh (new, 898 lines)                                                                                                                                         
+  1. tests/e2e/test_e2e.sh (new, 898 lines)                                                                                                                                         
                                                                                                                                                                                         
   Executable bash script with:                                                                                                                                                            
   - Setup: Health checks for all 7 services (PG, Kratos, Oathkeeper, Keto, Vault, ZincSearch, chitd), creates 3 test users via Kratos Admin API, logs in each via API flow to get session 

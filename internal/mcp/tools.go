@@ -89,7 +89,7 @@ func (s *ChitMCPServer) registerTools() {
 	// Search
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "search_posts",
-		Description: "Full-text search across posts. Uses ZincSearch backend.",
+		Description: "Search posts by text query and/or tag IDs. Provide terms, tag_ids, or both.",
 	}, s.handleSearchPosts)
 
 	// Tags
@@ -210,9 +210,10 @@ type followThreadArgs struct {
 }
 
 type searchPostsArgs struct {
-	Terms   string `json:"terms" jsonschema:"Search query"`
-	Page    int    `json:"page,omitempty"`
-	PerPage int    `json:"per_page,omitempty"`
+	Terms   string   `json:"terms,omitempty" jsonschema:"Search query"`
+	TagIDs  []string `json:"tag_ids,omitempty" jsonschema:"Tag IDs to filter by"`
+	Page    int      `json:"page,omitempty"`
+	PerPage int      `json:"per_page,omitempty"`
 }
 
 type addTagToPostArgs struct {
@@ -397,7 +398,7 @@ func (s *ChitMCPServer) handleSearchPosts(ctx context.Context, _ *mcp.CallToolRe
 	if perPage == 0 {
 		perPage = 60
 	}
-	results, err := s.app.SearchPosts(ctx, args.Terms, args.Page, perPage)
+	results, err := s.app.SearchPosts(ctx, "", args.Terms, args.TagIDs, args.Page, perPage)
 	if err != nil {
 		return toolError(err)
 	}

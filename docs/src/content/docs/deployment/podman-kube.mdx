@@ -53,6 +53,7 @@ is reachable at `localhost` on its configured port.
 | `make kube-migrate` | Runs Kratos and Keto migration containers | Apply Ory schema migrations |
 | `make migrate-up` | `migrate -database ... -path migrations up` | Apply Chit schema migrations |
 | `make migrate-down` | `migrate -database ... -path migrations down` | Roll back Chit migrations |
+| `make test-container` | Build `chit-test:latest` and run all unit tests | Run tests in a UBI9 container |
 
 ## Containerfile
 
@@ -64,6 +65,23 @@ podman build -t chit:latest -f deploy/Containerfile .
 
 The Containerfile uses a multi-stage build: Go compilation in a builder stage,
 then copies the binary into a minimal UBI-based runtime image.
+
+## Test Containerfile
+
+A separate Containerfile at `Containerfiles/Containerfile.test` builds a UBI9
+image with the full Go toolchain for running unit tests. All tests use in-memory
+mocks — no PostgreSQL or Ory services are needed.
+
+```bash
+make test-container
+```
+
+The image compile-gates at build time (`go build ./...`), then streams test
+output at run time. You can override the default `CMD` to run specific tests:
+
+```bash
+podman run --rm chit-test:latest go test -run TestSpecific ./internal/model/...
+```
 
 ## Startup Order
 

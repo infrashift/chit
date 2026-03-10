@@ -127,6 +127,24 @@ func getMyChannels(a *app.App) http.HandlerFunc {
 	}
 }
 
+func getMyDirectChannels(a *app.App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := ContextGetUser(r)
+
+		channels, err := a.GetDirectChannelsForUser(user.ID)
+		if err != nil {
+			WriteError(w, model.NewInternalError("getMyDirectChannels", err))
+			return
+		}
+
+		if channels == nil {
+			channels = []*model.Channel{}
+		}
+
+		WriteJSON(w, http.StatusOK, channels)
+	}
+}
+
 func createDirectChannel(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var userIDs []string

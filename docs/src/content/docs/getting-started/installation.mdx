@@ -36,6 +36,32 @@ This produces `bin/chit-mcp` — an MCP server for AI agent integration.
 podman build -t chit:latest -f deploy/Containerfile .
 ```
 
+## Run tests in a container
+
+The test Containerfile builds a UBI9-based image with the Go toolchain and runs
+all unit tests inside it. No PostgreSQL or external services are required — every
+test uses in-memory mocks.
+
+```bash
+make test-container
+```
+
+This builds the `chit-test:latest` image (compile-gating at build time) and then
+runs `go test -race -count=1 -v ./...` inside it.
+
+To run a specific test or package, override the default `CMD`:
+
+```bash
+podman run --rm chit-test:latest go test -run TestSpecific ./internal/model/...
+```
+
+To build with a different Go version:
+
+```bash
+podman build --build-arg GO_VERSION=1.25.4 \
+  -t chit-test:latest -f Containerfiles/Containerfile.test .
+```
+
 ## Verify the build
 
 ```bash

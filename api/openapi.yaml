@@ -612,6 +612,24 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /users/me/channels/direct:
+    get:
+      operationId: get_my_direct_channels
+      summary: Get my direct message channels
+      description: Returns all direct-message and group-message channels the authenticated user is a member of.
+      tags: [Channels]
+      responses:
+        "200":
+          description: List of DM/GM channels
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Channel"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /channels/direct:
     post:
       operationId: create_direct_channel

@@ -82,6 +82,7 @@ func New(a *app.App) http.Handler {
 			r.Delete("/channels/{id}", deleteChannel(a))
 			r.Get("/teams/{id}/channels", getChannelsForTeam(a))
 			r.Get("/users/me/teams/{id}/channels", getMyChannels(a))
+			r.Get("/users/me/channels/direct", getMyDirectChannels(a))
 			r.Post("/channels/direct", createDirectChannel(a))
 			r.Post("/channels/group", createGroupChannel(a))
 			r.Post("/channels/{id}/members", addChannelMember(a))

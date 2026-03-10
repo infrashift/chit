@@ -179,6 +179,34 @@ func (s *SqlPostStore) SetPinned(id string, pinned bool) error {
 	return nil
 }
 
+func (s *SqlPostStore) SearchByContent(channelID, query string, page, perPage int) ([]*model.Post, error) {
+	if channelID != "" {
+		q := `SELECT id, channel_id, user_id, COALESCE(root_id::text, ''), content, content_encrypted, type, props, hashtags, is_pinned, edit_at, create_at, update_at, delete_at
+			FROM posts
+			WHERE content ILIKE '%' || $1 || '%' AND channel_id = $2 AND delete_at = 0
+			ORDER BY create_at DESC
+			LIMIT $3 OFFSET $4`
+		rows, err := s.sqlStore.pool.Query(context.Background(), q, query, channelID, perPage, page*perPage)
+		if err != nil {
+			return nil, fmt.Errorf("search posts by content: %w", err)
+		}
+		defer rows.Close()
+		return scanPosts(rows)
+	}
+
+	q := `SELECT id, channel_id, user_id, COALESCE(root_id::text, ''), content, content_encrypted, type, props, hashtags, is_pinned, edit_at, create_at, update_at, delete_at
+		FROM posts
+		WHERE content ILIKE '%' || $1 || '%' AND delete_at = 0
+		ORDER BY create_at DESC
+		LIMIT $2 OFFSET $3`
+	rows, err := s.sqlStore.pool.Query(context.Background(), q, query, perPage, page*perPage)
+	if err != nil {
+		return nil, fmt.Errorf("search posts by content: %w", err)
+	}
+	defer rows.Close()
+	return scanPosts(rows)
+}
+
 func scanPosts(rows pgx.Rows) ([]*model.Post, error) {
 	var posts []*model.Post
 	for rows.Next() {

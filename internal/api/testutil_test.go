@@ -27,6 +27,7 @@ const (
 	testReplyPost = "019421a0-0000-7000-8000-000000000031"
 	testTagID     = "019421a0-0000-7000-8000-000000000040"
 	extraUserID   = "019421a0-0000-7000-8000-000000000002"
+	thirdUserID   = "019421a0-0000-7000-8000-000000000003"
 )
 
 // ─── noopPubSub ──────────────────────────────────────────────────
@@ -374,6 +375,17 @@ func (s *mockChannelStore) GetByName(_, _ string) (*model.Channel, error) {
 	return nil, fmt.Errorf("not found")
 }
 
+func (s *mockChannelStore) GetDirectChannelByName(name string) (*model.Channel, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, c := range s.byID {
+		if c.TeamID == "" && c.Name == name && c.DeleteAt == 0 {
+			return c, nil
+		}
+	}
+	return nil, fmt.Errorf("direct channel %s not found", name)
+}
+
 func (s *mockChannelStore) SaveDirectChannel(c *model.Channel, userIDs []string) (*model.Channel, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -388,6 +400,24 @@ func (s *mockChannelStore) SaveDirectChannel(c *model.Channel, userIDs []string)
 		})
 	}
 	return c, nil
+}
+
+func (s *mockChannelStore) GetDirectChannelsForUser(userID string) ([]*model.Channel, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var channels []*model.Channel
+	for _, c := range s.byID {
+		if c.TeamID == "" && (c.Type == "D" || c.Type == "G") && c.DeleteAt == 0 {
+			// Check if user is a member
+			for _, m := range s.members[c.ID] {
+				if m.UserID == userID {
+					channels = append(channels, c)
+					break
+				}
+			}
+		}
+	}
+	return channels, nil
 }
 
 func (s *mockChannelStore) IncrementMsgCount(_ string, _ int64) error {
@@ -499,6 +529,10 @@ func (s *mockPostStore) SetPinned(id string, pinned bool) error {
 		return nil
 	}
 	return fmt.Errorf("post %s not found", id)
+}
+
+func (s *mockPostStore) SearchByContent(_, _ string, _, _ int) ([]*model.Post, error) {
+	return nil, nil
 }
 
 // ─── Mock ThreadStore ────────────────────────────────────────────
@@ -673,6 +707,57 @@ func (s *mockTagStore) GetTagsForPost(messageID string) ([]*model.Tag, error) {
 	return tags, nil
 }
 
+func (s *mockTagStore) GetPostIDsByTags(tagIDs []string, page, perPage int) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var result []string
+	for msgID, tags := range s.postTags {
+		matchCount := 0
+		for _, tid := range tagIDs {
+			if tags[tid] {
+				matchCount++
+			}
+		}
+		if matchCount == len(tagIDs) {
+			result = append(result, msgID)
+		}
+	}
+	start := page * perPage
+	if start >= len(result) {
+		return nil, nil
+	}
+	end := start + perPage
+	if end > len(result) {
+		end = len(result)
+	}
+	return result[start:end], nil
+}
+
+func (s *mockTagStore) FilterPostIDsByTags(postIDs []string, tagIDs []string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	postSet := make(map[string]bool, len(postIDs))
+	for _, id := range postIDs {
+		postSet[id] = true
+	}
+	var result []string
+	for msgID, tags := range s.postTags {
+		if !postSet[msgID] {
+			continue
+		}
+		matchCount := 0
+		for _, tid := range tagIDs {
+			if tags[tid] {
+				matchCount++
+			}
+		}
+		if matchCount == len(tagIDs) {
+			result = append(result, msgID)
+		}
+	}
+	return result, nil
+}
+
 // ─── Setup helper ────────────────────────────────────────────────
 
 func setupTestApp(t *testing.T) (*app.App, *mockStore, func()) {
@@ -703,6 +788,16 @@ func setupTestApp(t *testing.T) (*app.App, *mockStore, func()) {
 		Username:    "alice",
 		DisplayName: "Alice",
 		Email:       "alice@example.com",
+		Roles:       "system_user",
+		CreateAt:    1000,
+		UpdateAt:    1000,
+	})
+	ms.user.seed(&model.User{
+		ID:          thirdUserID,
+		KratosID:    "kratos-003",
+		Username:    "charlie",
+		DisplayName: "Charlie",
+		Email:       "charlie@example.com",
 		Roles:       "system_user",
 		CreateAt:    1000,
 		UpdateAt:    1000,

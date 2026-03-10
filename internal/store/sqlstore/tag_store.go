@@ -90,3 +90,52 @@ func (s *SqlTagStore) GetTagsForPost(messageID string) ([]*model.Tag, error) {
 
 	return tags, rows.Err()
 }
+
+func (s *SqlTagStore) GetPostIDsByTags(tagIDs []string, page, perPage int) ([]string, error) {
+	query := `SELECT mt.message_id FROM message_tags mt
+		INNER JOIN posts p ON p.id = mt.message_id AND p.delete_at = 0
+		WHERE mt.tag_id = ANY($1)
+		GROUP BY mt.message_id
+		HAVING COUNT(DISTINCT mt.tag_id) = $2
+		ORDER BY MAX(p.create_at) DESC
+		LIMIT $3 OFFSET $4`
+
+	rows, err := s.sqlStore.pool.Query(context.Background(), query, tagIDs, len(tagIDs), perPage, page*perPage)
+	if err != nil {
+		return nil, fmt.Errorf("get post ids by tags: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan post id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func (s *SqlTagStore) FilterPostIDsByTags(postIDs []string, tagIDs []string) ([]string, error) {
+	query := `SELECT mt.message_id FROM message_tags mt
+		WHERE mt.message_id = ANY($1) AND mt.tag_id = ANY($2)
+		GROUP BY mt.message_id
+		HAVING COUNT(DISTINCT mt.tag_id) = $3`
+
+	rows, err := s.sqlStore.pool.Query(context.Background(), query, postIDs, tagIDs, len(tagIDs))
+	if err != nil {
+		return nil, fmt.Errorf("filter post ids by tags: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan post id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}

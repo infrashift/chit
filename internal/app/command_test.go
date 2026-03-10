@@ -58,6 +58,9 @@ func (s *cmdMockPostStore) GetPinnedPosts(_ string) (*model.PostList, error) {
 	return &model.PostList{}, nil
 }
 func (s *cmdMockPostStore) SetPinned(_ string, _ bool) error { return nil }
+func (s *cmdMockPostStore) SearchByContent(_, _ string, _, _ int) ([]*model.Post, error) {
+	return nil, nil
+}
 
 // ─── Test helpers ────────────────────────────────────────────────
 

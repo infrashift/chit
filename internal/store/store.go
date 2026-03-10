@@ -55,6 +55,8 @@ type ChannelStore interface {
 	UpdateLastViewedAt(channelID, userID string, lastViewedAt int64) error
 	GetByName(teamID, name string) (*model.Channel, error)
 	SaveDirectChannel(channel *model.Channel, userIDs []string) (*model.Channel, error)
+	GetDirectChannelByName(name string) (*model.Channel, error)
+	GetDirectChannelsForUser(userID string) ([]*model.Channel, error)
 	IncrementMsgCount(channelID string, timestamp int64) error
 	IncrementMentionCount(channelID, userID string) error
 }
@@ -69,6 +71,7 @@ type PostStore interface {
 	GetPostsForThread(rootID string) (*model.PostList, error)
 	GetPinnedPosts(channelID string) (*model.PostList, error)
 	SetPinned(id string, pinned bool) error
+	SearchByContent(channelID, query string, page, perPage int) ([]*model.Post, error)
 }
 
 // ThreadStore handles persistence for threads and thread memberships.
@@ -91,4 +94,6 @@ type TagStore interface {
 	AddTagToPost(messageID, tagID string) error
 	RemoveTagFromPost(messageID, tagID string) error
 	GetTagsForPost(messageID string) ([]*model.Tag, error)
+	GetPostIDsByTags(tagIDs []string, page, perPage int) ([]string, error)
+	FilterPostIDsByTags(postIDs []string, tagIDs []string) ([]string, error)
 }

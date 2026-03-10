@@ -127,8 +127,14 @@ func (s *mentionMockChannelStore) SaveMember(_ *model.ChannelMember) (*model.Cha
 func (s *mentionMockChannelStore) RemoveMember(_, _ string) error          { return nil }
 func (s *mentionMockChannelStore) UpdateLastViewedAt(_, _ string, _ int64) error { return nil }
 func (s *mentionMockChannelStore) GetByName(_, _ string) (*model.Channel, error) { return nil, errNotFound }
+func (s *mentionMockChannelStore) GetDirectChannelByName(_ string) (*model.Channel, error) {
+	return nil, errNotFound
+}
 func (s *mentionMockChannelStore) SaveDirectChannel(c *model.Channel, _ []string) (*model.Channel, error) {
 	return c, nil
+}
+func (s *mentionMockChannelStore) GetDirectChannelsForUser(_ string) ([]*model.Channel, error) {
+	return nil, nil
 }
 func (s *mentionMockChannelStore) IncrementMsgCount(_ string, _ int64) error { return nil }
 func (s *mentionMockChannelStore) GetMembers(channelID string, page, perPage int) ([]*model.ChannelMember, error) {
@@ -222,6 +228,9 @@ func (mentionMockPostStore) GetPinnedPosts(_ string) (*model.PostList, error) {
 	return &model.PostList{}, nil
 }
 func (mentionMockPostStore) SetPinned(_ string, _ bool) error { return nil }
+func (mentionMockPostStore) SearchByContent(_, _ string, _, _ int) ([]*model.Post, error) {
+	return nil, nil
+}
 
 type mentionMockTagStore struct{}
 
@@ -230,6 +239,8 @@ func (mentionMockTagStore) GetAll() ([]*model.Tag, error)                { retur
 func (mentionMockTagStore) AddTagToPost(_, _ string) error               { return nil }
 func (mentionMockTagStore) RemoveTagFromPost(_, _ string) error          { return nil }
 func (mentionMockTagStore) GetTagsForPost(_ string) ([]*model.Tag, error) { return nil, nil }
+func (mentionMockTagStore) GetPostIDsByTags(_ []string, _, _ int) ([]string, error) { return nil, nil }
+func (mentionMockTagStore) FilterPostIDsByTags(_ []string, _ []string) ([]string, error) { return nil, nil }
 
 type mentionMockStore struct {
 	user    *mentionMockUserStore

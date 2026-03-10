@@ -309,10 +309,22 @@ func TestMCP_SearchPosts(t *testing.T) {
 	ctx, cs, _, cleanup := setupTestMCP(t)
 	defer cleanup()
 
-	// SearchPosts tries to reach ZincSearch which isn't running — should error
-	res := callTool(t, ctx, cs, "search_posts", map[string]any{"terms": "hello"})
-	if !res.IsError {
-		t.Fatal("expected error from search_posts (ZincSearch unavailable)")
+	// SQL fallback: ZincSearchURL is empty in test config, so SearchByContent is used
+	res := callTool(t, ctx, cs, "search_posts", map[string]any{"terms": "Hello"})
+	if res.IsError {
+		t.Fatalf("expected success from search_posts, got error: %s", extractText(t, res))
+	}
+	text := extractText(t, res)
+
+	var postList model.PostList
+	if err := json.Unmarshal([]byte(text), &postList); err != nil {
+		t.Fatalf("unmarshal post list: %v", err)
+	}
+	if len(postList.Order) != 1 {
+		t.Fatalf("expected 1 post matching 'Hello', got %d", len(postList.Order))
+	}
+	if postList.Order[0].ID != rootPostID {
+		t.Fatalf("expected post %s, got %s", rootPostID, postList.Order[0].ID)
 	}
 }
 

@@ -81,6 +81,18 @@ func TestStructuredLogger(t *testing.T) {
 	}
 }
 
+func TestResponseWriter_HijackDelegatesToUnderlying(t *testing.T) {
+	// httptest.NewRecorder does NOT implement http.Hijacker, so wrapping
+	// it should surface that error.
+	rec := httptest.NewRecorder()
+	rw := &responseWriter{ResponseWriter: rec, statusCode: http.StatusOK}
+
+	_, _, err := rw.Hijack()
+	if err == nil {
+		t.Fatal("expected error when underlying writer is not a Hijacker")
+	}
+}
+
 func TestRateLimit_Allows(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

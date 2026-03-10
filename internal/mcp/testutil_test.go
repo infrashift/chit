@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -295,8 +296,16 @@ func (s *mockChannelStore) GetByName(_, _ string) (*model.Channel, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
+func (s *mockChannelStore) GetDirectChannelByName(_ string) (*model.Channel, error) {
+	return nil, fmt.Errorf("not found")
+}
+
 func (s *mockChannelStore) SaveDirectChannel(_ *model.Channel, _ []string) (*model.Channel, error) {
 	return nil, fmt.Errorf("not implemented")
+}
+
+func (s *mockChannelStore) GetDirectChannelsForUser(_ string) ([]*model.Channel, error) {
+	return nil, nil
 }
 
 func (s *mockChannelStore) IncrementMsgCount(_ string, _ int64) error {
@@ -398,6 +407,29 @@ func (s *mockPostStore) GetPinnedPosts(channelID string) (*model.PostList, error
 
 func (s *mockPostStore) SetPinned(_ string, _ bool) error {
 	return fmt.Errorf("not implemented")
+}
+
+func (s *mockPostStore) SearchByContent(channelID, query string, page, perPage int) ([]*model.Post, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var posts []*model.Post
+	for _, p := range s.byID {
+		if channelID != "" && p.ChannelID != channelID {
+			continue
+		}
+		if strings.Contains(strings.ToLower(p.Content), strings.ToLower(query)) {
+			posts = append(posts, p)
+		}
+	}
+	start := page * perPage
+	if start >= len(posts) {
+		return nil, nil
+	}
+	end := start + perPage
+	if end > len(posts) {
+		end = len(posts)
+	}
+	return posts[start:end], nil
 }
 
 // ─── Mock ThreadStore ────────────────────────────────────────────
@@ -574,6 +606,57 @@ func (s *mockTagStore) GetTagsForPost(messageID string) ([]*model.Tag, error) {
 	return tags, nil
 }
 
+func (s *mockTagStore) GetPostIDsByTags(tagIDs []string, page, perPage int) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var result []string
+	for msgID, tags := range s.postTags {
+		matchCount := 0
+		for _, tid := range tagIDs {
+			if tags[tid] {
+				matchCount++
+			}
+		}
+		if matchCount == len(tagIDs) {
+			result = append(result, msgID)
+		}
+	}
+	start := page * perPage
+	if start >= len(result) {
+		return nil, nil
+	}
+	end := start + perPage
+	if end > len(result) {
+		end = len(result)
+	}
+	return result[start:end], nil
+}
+
+func (s *mockTagStore) FilterPostIDsByTags(postIDs []string, tagIDs []string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	postSet := make(map[string]bool, len(postIDs))
+	for _, id := range postIDs {
+		postSet[id] = true
+	}
+	var result []string
+	for msgID, tags := range s.postTags {
+		if !postSet[msgID] {
+			continue
+		}
+		matchCount := 0
+		for _, tid := range tagIDs {
+			if tags[tid] {
+				matchCount++
+			}
+		}
+		if matchCount == len(tagIDs) {
+			result = append(result, msgID)
+		}
+	}
+	return result, nil
+}
+
 // ─── Setup helper ────────────────────────────────────────────────
 
 // setupTestMCP creates a ChitMCPServer backed by mock stores and connects
@@ -675,6 +758,7 @@ func setupTestMCP(t *testing.T) (context.Context, *mcpsdk.ClientSession, *ChitMC
 	// Build App with real Hub (in-memory, no external deps) and noop pubsub
 	cfg := config.Defaults()
 	cfg.VaultEnabled = false
+	cfg.ZincSearchURL = "" // Use SQL fallback instead of ZincSearch
 	hub := websocket.NewHub()
 	a := app.New(ms, hub, noopPubSub{}, cfg)
 

@@ -208,12 +208,36 @@ func (s *SqlChannelStore) GetMember(channelID, userID string) (*model.ChannelMem
 }
 
 func (s *SqlChannelStore) UpdateLastViewedAt(channelID, userID string, lastViewedAt int64) error {
-	query := `UPDATE channel_members SET last_viewed_at = $1 WHERE channel_id = $2 AND user_id = $3`
+	query := `UPDATE channel_members
+		SET last_viewed_at = $1,
+		    msg_count = (SELECT total_msg_count FROM channels WHERE id = $2),
+		    mention_count = 0
+		WHERE channel_id = $2 AND user_id = $3`
 	_, err := s.sqlStore.pool.Exec(context.Background(), query, lastViewedAt, channelID, userID)
 	if err != nil {
 		return fmt.Errorf("update last viewed at: %w", err)
 	}
 	return nil
+}
+
+func (s *SqlChannelStore) GetDirectChannelByName(name string) (*model.Channel, error) {
+	query := `SELECT id, COALESCE(team_id::text, ''), creator_id, name, display_name, header, purpose, type, total_msg_count, last_post_at, create_at, update_at, delete_at
+		FROM channels WHERE team_id IS NULL AND name = $1 AND delete_at = 0`
+
+	ch := &model.Channel{}
+	err := s.sqlStore.pool.QueryRow(context.Background(), query, name).Scan(
+		&ch.ID, &ch.TeamID, &ch.CreatorID, &ch.Name, &ch.DisplayName,
+		&ch.Header, &ch.Purpose, &ch.Type, &ch.TotalMsgCount,
+		&ch.LastPostAt, &ch.CreateAt, &ch.UpdateAt, &ch.DeleteAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, model.NewNotFoundError("SqlChannelStore.GetDirectChannelByName", name)
+		}
+		return nil, fmt.Errorf("get direct channel by name: %w", err)
+	}
+
+	return ch, nil
 }
 
 func (s *SqlChannelStore) SaveDirectChannel(channel *model.Channel, userIDs []string) (*model.Channel, error) {
@@ -253,6 +277,23 @@ func (s *SqlChannelStore) SaveDirectChannel(channel *model.Channel, userIDs []st
 	}
 
 	return channel, nil
+}
+
+func (s *SqlChannelStore) GetDirectChannelsForUser(userID string) ([]*model.Channel, error) {
+	query := `SELECT c.id, COALESCE(c.team_id::text, ''), c.creator_id, c.name, c.display_name, c.header, c.purpose, c.type, c.total_msg_count, c.last_post_at, c.create_at, c.update_at, c.delete_at
+		FROM channels c
+		INNER JOIN channel_members cm ON c.id = cm.channel_id
+		WHERE cm.user_id = $1 AND c.team_id IS NULL
+		  AND c.type IN ('D','G') AND c.delete_at = 0
+		ORDER BY c.last_post_at DESC`
+
+	rows, err := s.sqlStore.pool.Query(context.Background(), query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get direct channels for user: %w", err)
+	}
+	defer rows.Close()
+
+	return scanChannels(rows)
 }
 
 func (s *SqlChannelStore) IncrementMsgCount(channelID string, timestamp int64) error {

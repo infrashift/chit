@@ -1,0 +1,56 @@
+# E2E Containerfile — runs integration tests against a real PostgreSQL.
+# Requires a Podman pod with a Postgres container sharing the network.
+#
+# Build:  podman build -t chit-e2e:latest -f Containerfiles/Containerfile.e2e .
+# Run:    see `make test-e2e`
+
+FROM ghcr.io/infrashift/trusted-base-images/trusted/ubi9-standard
+
+ARG GO_VERSION=1.25.4
+ARG MIGRATE_VERSION=4.18.3
+
+ENV GOPATH=/go \
+    GOCACHE=/go/cache \
+    PATH="/usr/local/go/bin:/go/bin:${PATH}" \
+    GOFLAGS="-buildvcs=false" \
+    HOME=/home/local
+
+# Switch to root for toolchain installation
+USER root
+
+# Install Go toolchain
+RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" \
+    | tar -C /usr/local -xz \
+    && go version
+
+# Install gcc for -race support
+RUN dnf install -y gcc && dnf clean all
+
+# Install golang-migrate CLI
+RUN curl -fsSL "https://github.com/golang-migrate/migrate/releases/download/v${MIGRATE_VERSION}/migrate.linux-amd64.tar.gz" \
+    | tar -C /usr/local/bin -xz migrate \
+    && chmod +x /usr/local/bin/migrate \
+    && migrate -version
+
+WORKDIR /src
+
+# Ensure the non-root user can write to GOPATH, GOCACHE, HOME, and WORKDIR
+RUN mkdir -p /go/cache /home/local && chown -R 1001:0 /go /src /home/local
+
+# Drop back to non-root user
+USER 1001
+
+# Cache dependency layer
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source (includes migrations/)
+COPY . .
+
+# Compile-gate: ensure everything builds with integration tag
+RUN go build -tags integration ./...
+
+# Copy entrypoint
+COPY --chmod=0755 scripts/e2e-entrypoint.sh /usr/local/bin/e2e-entrypoint.sh
+
+CMD ["/usr/local/bin/e2e-entrypoint.sh"]

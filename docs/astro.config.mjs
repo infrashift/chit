@@ -25,6 +25,7 @@ export default defineConfig({
             { label: 'Installation', slug: 'getting-started/installation' },
             { label: 'Configuration', slug: 'getting-started/configuration' },
             { label: 'Quick Start', slug: 'getting-started/quick-start' },
+            { label: 'Manual Acceptance Testing', slug: 'getting-started/manual-acceptance-testing' },
           ],
         },
         {
