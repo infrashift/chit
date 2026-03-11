@@ -1,19 +1,18 @@
 ---
 title: Manual Acceptance Testing
-description: Spin up a self-contained UAT environment with pre-seeded users for manual API testing.
+description: Spin up a self-contained UAT environment with pre-seeded users for manual testing.
 ---
 
-The UAT environment runs chitd and PostgreSQL in a Podman pod with five
-pre-seeded users. No Ory stack is needed — requests authenticate via the
-`X-User-Id` header with fixed Kratos IDs.
+The UAT environment runs the full Ory stack (Kratos, Oathkeeper, Keto) with
+chitd and PostgreSQL in a Podman pod. Five test users are pre-seeded with
+Kratos identities so you can test both API access and chit-tui login.
 
 ## Prerequisites
 
 | Dependency | Version | Purpose |
 |---|---|---|
 | Podman | 4.0+ | Run the UAT pod |
-
-No Go toolchain needed on the host — everything runs inside the container.
+| Go | 1.24+ | Run the Kratos seed script |
 
 ## Start the environment
 
@@ -21,25 +20,36 @@ No Go toolchain needed on the host — everything runs inside the container.
 make uat-up
 ```
 
-This builds the E2E container image, creates a Podman pod, starts PostgreSQL,
-runs migrations, seeds test data, and starts the chitd server on port 8065.
+This builds the container images, creates a Podman pod, starts PostgreSQL,
+runs migrations, seeds chit test data, and starts all services (Kratos,
+Oathkeeper, Keto, chitd, Zincsearch, Vault).
 
-To use a different host port:
-
-```bash
-UAT_PORT=9065 make uat-up
-```
-
-Watch the server logs to confirm startup:
+Watch the server logs to confirm all services are ready:
 
 ```bash
-podman logs -f chit-uat-chitd
+podman logs -f chit-uat-app-chitd
 ```
+
+### Seed Kratos identities
+
+After the pod is fully running, create Kratos identities so users can log in:
+
+```bash
+make uat-seed-kratos
+```
+
+This creates password-based identities in Kratos for all 5 test users.
+The script waits for Kratos to be ready before proceeding. It is idempotent
+and safe to run multiple times.
 
 ## Verify
 
 ```bash
+# Direct server access
 curl http://localhost:8065/api/v1/system/ping
+
+# Through Oathkeeper proxy
+curl http://localhost:4455/api/v1/system/ping
 ```
 
 Expected response:
@@ -50,20 +60,42 @@ Expected response:
 
 ## Users
 
-All requests require the `X-User-Id` header set to the user's Kratos ID.
-Alice has the `system_admin` role; all others are `system_user`.
+All test users share the password `Password1!`. Alice has the `system_admin`
+role; all others are `system_user`.
 
-| Username | Display Name   | X-User-Id header                           |
-|----------|----------------|---------------------------------------------|
-| alice    | Alice Anderson | `a11ce000-0000-4000-a000-000000000001`      |
-| bob      | Bob Baker      | `b0b00000-0000-4000-a000-000000000002`      |
-| chad     | Chad Cooper    | `c4ad0000-0000-4000-a000-000000000003`      |
-| diana    | Diana Drake    | `d1a4a000-0000-4000-a000-000000000004`      |
-| eve      | Eve Ellis      | `e0e00000-0000-4000-a000-000000000005`      |
+| Username | Email                | Display Name   | Password      |
+|----------|----------------------|----------------|---------------|
+| alice    | alice@example.com    | Alice Anderson | `Password1!`  |
+| bob      | bob@example.com      | Bob Baker      | `Password1!`  |
+| chad     | chad@example.com     | Chad Cooper    | `Password1!`  |
+| diana    | diana@example.com    | Diana Drake    | `Password1!`  |
+| eve      | eve@example.com      | Eve Ellis      | `Password1!`  |
 
-## Curl examples
+## Testing with chit-tui
 
-For convenience, set a shell variable for Alice's header:
+Point chit-tui at the Oathkeeper proxy (port 4455) and log in interactively:
+
+```bash
+export CHIT_SERVER_URL=http://localhost:4455
+./bin/chit-tui
+```
+
+The login screen will appear. Enter any user's email and password from the
+table above. After successful login, the session token is stored at
+`~/.config/chit-tui/session.json` and reused on subsequent launches.
+
+To force a fresh login, clear the stored session:
+
+```bash
+rm ~/.config/chit-tui/session.json
+```
+
+Or use the `/logout` slash command in chit-tui.
+
+## Testing with curl
+
+For direct API testing, you can still bypass auth by hitting the chitd server
+directly (port 8065) with the `X-User-Id` header:
 
 ```bash
 ALICE="X-User-Id: a11ce000-0000-4000-a000-000000000001"
@@ -130,18 +162,43 @@ curl -H "$ALICE" http://localhost:8065/api/v1/teams
 curl -H "$ALICE" http://localhost:8065/api/v1/teams/TEAM_ID/channels
 ```
 
-## How auth bypass works
+### Authenticated curl via Oathkeeper
 
-In production, Ory Oathkeeper authenticates requests and sets the
-`X-User-Id` header before forwarding to chitd. The `AuthExtract` middleware
-reads this header and calls `ProvisionUser`, which looks up the user by
-Kratos ID in the database.
+To test the full auth flow with curl, first obtain a session token from Kratos:
 
-In the UAT environment, there is no Oathkeeper proxy. Requests go directly to
-chitd. Since the seed program pre-creates users with known Kratos IDs in the
-database, `ProvisionUser` finds them on the first lookup — Kratos is never
-called. This means you can authenticate as any seeded user by setting the
-`X-User-Id` header directly.
+```bash
+# 1. Init a login flow
+FLOW=$(curl -s http://localhost:4455/kratos/self-service/login/api | jq -r .id)
+
+# 2. Submit credentials
+TOKEN=$(curl -s -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{"method":"password","identifier":"alice@example.com","password":"Password1!"}' \
+  "http://localhost:4455/kratos/self-service/login?flow=$FLOW" \
+  | jq -r .session_token)
+
+# 3. Make authenticated requests through Oathkeeper
+curl -H "X-Session-Token: $TOKEN" http://localhost:4455/api/v1/users/me
+```
+
+## How auth works
+
+In the UAT environment, the full Ory stack is running:
+
+1. **Oathkeeper** (port 4455) — auth proxy for all requests
+2. **Kratos** (ports 4433/4434) — manages user identities and sessions
+3. **Keto** (ports 4466/4467) — relationship-based authorization
+
+The request flow is:
+1. Client sends `X-Session-Token` header to Oathkeeper
+2. Oathkeeper validates the session with Kratos (`/sessions/whoami`)
+3. On success, Oathkeeper extracts `identity.id` and sets `X-User-Id` header
+4. Oathkeeper forwards the request to chitd
+5. chitd's `AuthExtract` middleware reads `X-User-Id` and calls `ProvisionUser`
+
+Direct access to chitd on port 8065 bypasses Oathkeeper entirely. Since the
+seed program pre-creates users with known Kratos IDs, `ProvisionUser` finds
+them without calling Kratos.
 
 ## Tear down
 
@@ -151,8 +208,16 @@ make uat-down
 
 This removes the Podman pod and all its containers.
 
+To also remove persistent volumes (database data):
+
+```bash
+make uat-clean
+```
+
 ## Next steps
 
+- [User Management](/chit/deployment/user-management/) — creating and managing
+  user identities
 - [REST API Reference](/chit/api-reference/rest-api/) — full endpoint
   documentation
 - [WebSocket Protocol](/chit/api-reference/websocket-protocol/) — connect for

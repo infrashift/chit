@@ -230,10 +230,11 @@ data:
 apiVersion: v1
 kind: Pod
 metadata:
-  name: chit-db
+  name: chit-uat-db
   labels:
     app: chit
     component: db
+    env: uat
 spec:
   restartPolicy: Always
   containers:
@@ -255,19 +256,20 @@ spec:
   volumes:
     - name: pgdata
       persistentVolumeClaim:
-        claimName: chit-pgdata
+        claimName: chit-uat-pgdata
     - name: pg-init
       configMap:
         name: chit-postgres-init
 ---
-# Pod 2: App — init containers wait for postgres, run migrations, then start services
+# Pod 2: App — init containers wait for postgres, run migrations, seed UAT data, then start services
 apiVersion: v1
 kind: Pod
 metadata:
-  name: chit-app
+  name: chit-uat-app
   labels:
     app: chit
     component: app
+    env: uat
 spec:
   restartPolicy: Always
 
@@ -320,6 +322,13 @@ spec:
         - name: chit-migrations
           mountPath: /migrations
           readOnly: true
+
+    - name: seed-uat
+      image: chit-e2e:latest
+      command: ["go", "run", "/src/scripts/seed-uat/main.go"]
+      env:
+        - name: CHIT_DATABASE_URL
+          value: postgres://chit:chit@localhost:5432/chit?sslmode=disable
 
   containers:
     - name: kratos
@@ -419,7 +428,7 @@ spec:
         name: chit-keto-config
     - name: zincdata
       persistentVolumeClaim:
-        claimName: chit-zincdata
+        claimName: chit-uat-zincdata
     - name: chit-migrations
       hostPath:
         path: __PROJECT_ROOT__/migrations

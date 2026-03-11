@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -26,6 +27,11 @@ var users = []seedUser{
 	{"eve", "Eve Ellis", "eve@example.com", "e0e00000-0000-4000-a000-000000000005", "system_user"},
 }
 
+func isNotFound(err error) bool {
+	var appErr *model.AppError
+	return errors.As(err, &appErr) && appErr.StatusCode == 404
+}
+
 func main() {
 	dbURL := os.Getenv("CHIT_DATABASE_URL")
 	if dbURL == "" {
@@ -39,9 +45,19 @@ func main() {
 	}
 	defer store.Close()
 
-	// Create users.
+	// Create users (idempotent — skip if already exists).
 	userIDs := make([]string, len(users))
 	for i, u := range users {
+		existing, err := store.User().GetByKratosID(u.KratosID)
+		if err == nil {
+			userIDs[i] = existing.ID
+			fmt.Printf("  User %-8s already exists  id=%s\n", u.Username, existing.ID)
+			continue
+		}
+		if !isNotFound(err) {
+			log.Fatalf("Failed to check user %s: %v", u.Username, err)
+		}
+
 		saved, err := store.User().Save(&model.User{
 			KratosID:    u.KratosID,
 			Username:    u.Username,
@@ -56,19 +72,28 @@ func main() {
 		fmt.Printf("  Created user %-8s  id=%s\n", u.Username, saved.ID)
 	}
 
-	// Create team.
-	team, err := store.Team().Save(&model.Team{
-		Name:        "uat-team",
-		DisplayName: "UAT Team",
-		Type:        model.TeamOpen,
-		CreatorID:   userIDs[0],
-	})
-	if err != nil {
-		log.Fatalf("Failed to create team: %v", err)
+	// Create team (idempotent).
+	var team *model.Team
+	team, err = store.Team().GetByName("uat-team")
+	if err != nil && !isNotFound(err) {
+		log.Fatalf("Failed to check team: %v", err)
 	}
-	fmt.Printf("  Created team %-8s  id=%s\n", team.Name, team.ID)
+	if team == nil {
+		team, err = store.Team().Save(&model.Team{
+			Name:        "uat-team",
+			DisplayName: "UAT Team",
+			Type:        model.TeamOpen,
+			CreatorID:   userIDs[0],
+		})
+		if err != nil {
+			log.Fatalf("Failed to create team: %v", err)
+		}
+		fmt.Printf("  Created team %-8s  id=%s\n", team.Name, team.ID)
+	} else {
+		fmt.Printf("  Team %-8s already exists  id=%s\n", team.Name, team.ID)
+	}
 
-	// Add all users to team.
+	// Add all users to team (SaveMember is already idempotent via ON CONFLICT).
 	for i, uid := range userIDs {
 		_, err := store.Team().SaveMember(&model.TeamMember{
 			TeamID: team.ID,
@@ -78,22 +103,31 @@ func main() {
 			log.Fatalf("Failed to add user %s to team: %v", users[i].Username, err)
 		}
 	}
-	fmt.Printf("  Added %d members to team\n", len(userIDs))
+	fmt.Printf("  Ensured %d members in team\n", len(userIDs))
 
-	// Create channel.
-	channel, err := store.Channel().Save(&model.Channel{
-		TeamID:      team.ID,
-		CreatorID:   userIDs[0],
-		Name:        "town-square",
-		DisplayName: "Town Square",
-		Type:        model.ChannelOpen,
-	})
-	if err != nil {
-		log.Fatalf("Failed to create channel: %v", err)
+	// Create channel (idempotent).
+	var channel *model.Channel
+	channel, err = store.Channel().GetByName(team.ID, "town-square")
+	if err != nil && !isNotFound(err) {
+		log.Fatalf("Failed to check channel: %v", err)
 	}
-	fmt.Printf("  Created channel %-14s  id=%s\n", channel.Name, channel.ID)
+	if channel == nil {
+		channel, err = store.Channel().Save(&model.Channel{
+			TeamID:      team.ID,
+			CreatorID:   userIDs[0],
+			Name:        "town-square",
+			DisplayName: "Town Square",
+			Type:        model.ChannelOpen,
+		})
+		if err != nil {
+			log.Fatalf("Failed to create channel: %v", err)
+		}
+		fmt.Printf("  Created channel %-14s  id=%s\n", channel.Name, channel.ID)
+	} else {
+		fmt.Printf("  Channel %-14s already exists  id=%s\n", channel.Name, channel.ID)
+	}
 
-	// Add all users to channel.
+	// Add all users to channel (SaveMember is already idempotent via ON CONFLICT).
 	for i, uid := range userIDs {
 		_, err := store.Channel().SaveMember(&model.ChannelMember{
 			ChannelID: channel.ID,
@@ -103,7 +137,7 @@ func main() {
 			log.Fatalf("Failed to add user %s to channel: %v", users[i].Username, err)
 		}
 	}
-	fmt.Printf("  Added %d members to channel\n", len(userIDs))
+	fmt.Printf("  Ensured %d members in channel\n", len(userIDs))
 
 	// Print cheat sheet.
 	fmt.Println()

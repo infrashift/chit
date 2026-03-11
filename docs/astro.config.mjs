@@ -41,6 +41,7 @@ export default defineConfig({
           items: [
             { label: 'Podman Kube', slug: 'deployment/podman-kube' },
             { label: 'Ory Stack', slug: 'deployment/ory-stack' },
+            { label: 'User Management', slug: 'deployment/user-management' },
           ],
         },
         {
