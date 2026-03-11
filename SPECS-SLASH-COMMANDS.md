@@ -124,7 +124,7 @@ A dedicated security log located at `/var/log/chit/audit.log`.
 Successful executions emit a **CloudEvents v1.0** payload.
 
 * **Standard Headers:** `ce-specversion`, `ce-type`, `ce-source`, `ce-id`.
-* **Security:** HMAC-SHA256 signature in `X-Chit-Signature` header using a shared secret from Vault.
+* **Security:** HMAC-SHA256 signature in `X-Chit-Signature` header using a shared secret.
 * **Payload Example:**
 
 ```json

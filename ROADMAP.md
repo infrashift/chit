@@ -34,7 +34,6 @@
 
 - [ ] Oathkeeper JWT/session validation in middleware
 - [ ] Keto permission checks for channel access (ReBAC)
-- [ ] Vault Transit encryption for message content
 - [ ] User auto-provisioning from Kratos identity on first request
 
 ## Phase 4 — Search & Performance

@@ -19,8 +19,6 @@ KRATOS_PUBLIC="http://localhost:4433"   # Kratos public API (direct)
 KRATOS_ADMIN="http://localhost:4434"    # Kratos admin API (direct)
 KETO_READ="http://localhost:4466"       # Keto read API
 KETO_WRITE="http://localhost:4467"      # Keto write API
-VAULT_ADDR="http://localhost:8200"      # Vault (dev mode)
-VAULT_TOKEN="dev-only-token"
 ZINC_URL="http://localhost:4080"        # ZincSearch
 ZINC_USER="admin"
 ZINC_PASS="admin"
@@ -261,8 +259,6 @@ check_service "Kratos Admin"          "${KRATOS_ADMIN}/admin/identities" "200"
 check_service "Oathkeeper Proxy"      "${PROXY}/api/v1/system/ping"
 check_service "Keto Read"             "${KETO_READ}/health/alive"
 check_service "Keto Write"            "${KETO_WRITE}/health/alive"
-check_service "Vault"                 "${VAULT_ADDR}/v1/sys/health"
-
 # ZincSearch may return 200 or other codes on root
 ZINC_STATUS=$(curl -s -o /dev/null -w '%{http_code}' "${ZINC_URL}/version" 2>/dev/null || echo "000")
 if [[ "$ZINC_STATUS" == "200" ]]; then
@@ -306,18 +302,6 @@ CHARLIE_TOKEN="$SESSION_TOKEN"
 echo "  Charlie token: ${CHARLIE_TOKEN:0:20}..."
 
 # ---------------------------------------------------------------------------
-# Enable Vault transit key (best-effort)
-# ---------------------------------------------------------------------------
-curl -s -X POST "${VAULT_ADDR}/v1/sys/mounts/transit" \
-  -H "X-Vault-Token: ${VAULT_TOKEN}" \
-  -H "Content-Type: application/json" \
-  -d '{"type":"transit"}' >/dev/null 2>&1 || true
-
-curl -s -X POST "${VAULT_ADDR}/v1/transit/keys/chit-messages" \
-  -H "X-Vault-Token: ${VAULT_TOKEN}" \
-  -H "Content-Type: application/json" \
-  -d '{"type":"aes256-gcm96"}' >/dev/null 2>&1 || true
-
 echo ""
 echo -e "${BOLD}Setup complete. Running test scenarios...${NC}"
 

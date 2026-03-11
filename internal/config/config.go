@@ -24,11 +24,6 @@ type Config struct {
 	KetoReadURL        string `koanf:"keto_read_url"`
 	KetoWriteURL       string `koanf:"keto_write_url"`
 
-	VaultEnabled    bool   `koanf:"vault_enabled"`
-	VaultAddr       string `koanf:"vault_addr"`
-	VaultToken      string `koanf:"vault_token"`
-	VaultTransitKey string `koanf:"vault_transit_key"`
-
 	ZincSearchURL      string `koanf:"zincsearch_url"`
 	ZincSearchUser     string `koanf:"zincsearch_user"`
 	ZincSearchPassword string `koanf:"zincsearch_password"`
@@ -68,9 +63,6 @@ func Defaults() *Config {
 		KratosAdminURL:     "http://localhost:4434",
 		KetoReadURL:        "http://localhost:4466",
 		KetoWriteURL:       "http://localhost:4467",
-		VaultEnabled:       false,
-		VaultAddr:          "http://localhost:8200",
-		VaultTransitKey:    "chit-messages",
 		ZincSearchURL:      "http://localhost:4080",
 		ZincSearchUser:     "admin",
 		WSPingInterval:     30 * time.Second,

@@ -9,7 +9,7 @@ command — no Docker Compose required.
 
 ## Pod Contents
 
-The pod runs 6 containers alongside the Chit server:
+The pod runs 5 containers alongside the Chit server:
 
 | Container | Image | Port(s) | Purpose |
 |---|---|---|---|
@@ -17,7 +17,6 @@ The pod runs 6 containers alongside the Chit server:
 | **kratos** | `oryd/kratos:v1.3` | 4433, 4434 | Identity management |
 | **oathkeeper** | `oryd/oathkeeper:v0.40` | 4455, 4456 | Authentication proxy |
 | **keto** | `oryd/keto:v0.12` | 4466, 4467 | Authorization (ReBAC) |
-| **vault** | `vault:1.17` | 8200 | Encryption (Transit Engine) |
 | **zincsearch** | `zincsearch:latest` | 4080 | Full-text search indexing |
 
 ## ConfigMaps

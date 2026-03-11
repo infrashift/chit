@@ -6,7 +6,7 @@
 
 **Project Owner:** Ryan Craig
 
-**Core Stack:** Go, PostgreSQL, ZincSearch, Ory Stack, Vault
+**Core Stack:** Go, PostgreSQL, ZincSearch, Ory Stack
 
 ---
 
@@ -21,7 +21,7 @@
 * **Zero-Trust Identity:** Offload all authentication and authorization to the Ory ecosystem.
 * **Searchability:** Provide sub-second full-text search across all historical conversations.
 * **Simplicity:** Utilize PostgreSQL as the sole backend and coordination engine to reduce operational overhead.
-* **Security:** Ensure message content is optionally encrypted at rest using Vault before hitting the database.
+* **Security:** Enforce access control via Ory Keto for channel-level authorization.
 
 ---
 
@@ -108,7 +108,7 @@ On the first authenticated request through Oathkeeper, the Chit backend auto-pro
 The codebase follows a layered pattern: **API → App → Store → PostgreSQL**
 
 * **API Layer:** HTTP handlers using chi router. Extracts auth context, validates input, delegates to App layer.
-* **App Layer:** Business logic. Coordinates between Store, Keto, Vault, WebSocket hub, and pub/sub.
+* **App Layer:** Business logic. Coordinates between Store, Keto, WebSocket hub, and pub/sub.
 * **Store Layer:** Data access. Interface-based with PostgreSQL (pgx/v5) implementation. Decorator pattern: Timer → Retry → Cache → SqlStore.
 
 ### 5.2 Real-time Coordination
@@ -140,7 +140,7 @@ The schema uses UUIDv7 primary keys (time-sortable, B-tree friendly) and `BIGINT
 * **team_members** — Composite PK (team_id, user_id). Tracks roles and membership.
 * **channels** — Belongs to a team (or NULL for DMs/GMs). Types: O, P, D, G.
 * **channel_members** — Tracks per-user read state, mention counts, notification preferences.
-* **posts** — Messages. Supports threading via `root_id`. Content stored as TEXT (plaintext) or BYTEA (Vault-encrypted).
+* **posts** — Messages. Supports threading via `root_id`. Content stored as TEXT (plaintext).
 * **threads** — Denormalized aggregate for root posts with replies.
 * **thread_memberships** — Per-user thread follow/read state.
 * **tags** — Named tags for message categorization.
@@ -148,10 +148,9 @@ The schema uses UUIDv7 primary keys (time-sortable, B-tree friendly) and `BIGINT
 
 ---
 
-## 7. Security & Encryption
+## 7. Security
 
 * **In-Transit:** All client-to-server communication is strictly over TLS/WSS.
-* **At-Rest:** Message payloads are optionally encrypted using **HashiCorp Vault's Transit Secret Engine** before being stored. When enabled, the `content_encrypted` BYTEA column holds ciphertext and `content` holds an empty string. This feature is opt-in per deployment.
 * **Access Control:** Oathkeeper enforces that no request reaches the Go backend without a valid session from Kratos. Channel-level access is enforced via Keto.
 
 ---

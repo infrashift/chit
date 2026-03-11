@@ -14,9 +14,6 @@ func (a *App) searchByContent(ctx context.Context, channelID, query string, page
 	if err != nil {
 		return nil, err
 	}
-	for _, p := range posts {
-		_ = a.decryptPost(ctx, p)
-	}
 	return &model.PostList{Order: posts}, nil
 }
 
@@ -60,7 +57,7 @@ func (a *App) SearchPosts(ctx context.Context, channelID, query string, tagIDs [
 		if err != nil {
 			return nil, err
 		}
-		if !ok {
+		if !ok || len(zincIDs) == 0 {
 			return a.searchByContent(ctx, channelID, query, page, perPage)
 		}
 		ids = zincIDs
@@ -70,7 +67,7 @@ func (a *App) SearchPosts(ctx context.Context, channelID, query string, tagIDs [
 		if err != nil {
 			return nil, err
 		}
-		if !ok {
+		if !ok || len(zincIDs) == 0 {
 			// SQL fallback: search by content, then filter by tags
 			posts, err := a.Store.Post().SearchByContent(channelID, query, page, perPage*3)
 			if err != nil {
@@ -86,7 +83,7 @@ func (a *App) SearchPosts(ctx context.Context, channelID, query string, tagIDs [
 					return nil, err
 				}
 			}
-		} else if len(zincIDs) > 0 {
+		} else {
 			ids, err = a.Store.Tag().FilterPostIDsByTags(zincIDs, tagIDs)
 			if err != nil {
 				return nil, err
@@ -107,7 +104,6 @@ func (a *App) SearchPosts(ctx context.Context, channelID, query string, tagIDs [
 		if err != nil {
 			continue
 		}
-		_ = a.decryptPost(ctx, post)
 		posts = append(posts, post)
 	}
 

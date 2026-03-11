@@ -71,8 +71,7 @@ paths:
       summary: Client configuration
       description: |
         Returns public configuration values that clients need at startup,
-        such as the server version and whether Vault encryption is enabled.
-        No authentication required.
+        such as the server version. No authentication required.
       tags: [System]
       responses:
         "200":
@@ -85,9 +84,6 @@ paths:
                   version:
                     type: string
                     example: "0.1.0"
-                  vault_enabled:
-                    type: boolean
-                    example: false
 
   # ──────────────────────────── Users ─────────────────────────────
   /users:
@@ -811,7 +807,6 @@ paths:
         automatically (reply count, participants, last reply time). The
         replying user is auto-followed on the thread.
 
-        If Vault encryption is enabled, the content is encrypted at rest.
         A `posted` WebSocket event is broadcast to the channel.
       tags: [Posts]
       requestBody:
@@ -836,7 +831,7 @@ paths:
     get:
       operationId: get_post
       summary: Get post by ID
-      description: Returns a single post. Encrypted content is decrypted transparently.
+      description: Returns a single post by ID.
       tags: [Posts]
       parameters:
         - $ref: "#/components/parameters/PostIdParam"
@@ -855,9 +850,8 @@ paths:
       operationId: update_post
       summary: Update a post
       description: |
-        Updates a post's content. Sets edit_at timestamp. If Vault encryption
-        is enabled, the new content is re-encrypted. Broadcasts a `post_edited`
-        WebSocket event.
+        Updates a post's content. Sets edit_at timestamp. Broadcasts a
+        `post_edited` WebSocket event.
       tags: [Posts]
       parameters:
         - $ref: "#/components/parameters/PostIdParam"
@@ -951,8 +945,7 @@ paths:
       summary: Get posts in a channel
       description: |
         Returns a paginated list of posts in a channel, ordered by creation
-        time (newest first). Encrypted content is decrypted transparently.
-        Supports cursor-based pagination via `before`, `after`, and `since`
+        time (newest first). Supports cursor-based pagination via `before`, `after`, and `since`
         query parameters in addition to page/per_page.
       tags: [Posts]
       parameters:
@@ -1787,7 +1780,7 @@ components:
         content:
           type: string
           maxLength: 65535
-          description: Message content (markdown). Decrypted transparently if Vault is enabled.
+          description: Message content (markdown).
         type:
           type: string
           description: Post type (empty for normal messages)

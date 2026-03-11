@@ -10,7 +10,6 @@ type Post struct {
 	UserID           string         `json:"user_id"`
 	RootID           string         `json:"root_id,omitempty"`
 	Content          string         `json:"content"`
-	ContentEncrypted []byte         `json:"-"`
 	Type             string         `json:"type,omitempty"`
 	Props            map[string]any `json:"props,omitempty"`
 	Hashtags         string         `json:"hashtags,omitempty"`

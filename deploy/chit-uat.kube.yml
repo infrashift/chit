@@ -369,18 +369,6 @@ spec:
         - name: oathkeeper-config
           mountPath: /etc/oathkeeper
 
-    - name: vault
-      image: docker.io/hashicorp/vault:1.17
-      env:
-        - name: VAULT_DEV_ROOT_TOKEN_ID
-          value: dev-only-token
-        - name: VAULT_DEV_LISTEN_ADDRESS
-          value: "0.0.0.0:8200"
-      securityContext:
-        capabilities:
-          add:
-            - IPC_LOCK
-
     - name: zincsearch
       image: public.ecr.aws/zinclabs/zincsearch:latest
       env:
@@ -405,10 +393,6 @@ spec:
           value: http://localhost:4466
         - name: CHIT_KETO_WRITE_URL
           value: http://localhost:4467
-        - name: CHIT_VAULT_ADDR
-          value: http://localhost:8200
-        - name: CHIT_VAULT_TOKEN
-          value: dev-only-token
         - name: CHIT_ZINCSEARCH_URL
           value: http://localhost:4080
         - name: CHIT_ZINCSEARCH_USER

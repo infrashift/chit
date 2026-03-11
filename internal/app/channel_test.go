@@ -112,7 +112,6 @@ func TestCreateChannel_OpenAutoAddsTeamMembers(t *testing.T) {
 	t.Cleanup(hub.Stop)
 
 	cfg := config.Defaults()
-	cfg.VaultEnabled = false
 	a := New(ms, hub, nil, cfg)
 
 	ch := &model.Channel{
@@ -161,7 +160,6 @@ func TestCreateChannel_PrivateOnlyAddsCreator(t *testing.T) {
 	t.Cleanup(hub.Stop)
 
 	cfg := config.Defaults()
-	cfg.VaultEnabled = false
 	a := New(ms, hub, nil, cfg)
 
 	ch := &model.Channel{
