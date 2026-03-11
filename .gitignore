@@ -1,5 +1,6 @@
 # Binaries
 bin/
+/seed-uat
 *.exe
 *.exe~
 *.dll

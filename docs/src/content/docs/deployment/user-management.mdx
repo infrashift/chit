@@ -1,0 +1,352 @@
+---
+title: User Management
+description: Creating and managing user identities and authorization for Chit.
+---
+
+Chit uses Ory Kratos for identity management and Ory Keto for authorization.
+Users authenticate through Kratos, and channel access is controlled by Keto
+relationship tuples. This guide covers how to create users, manage sessions,
+and configure authorization.
+
+## How user provisioning works
+
+Chit does not require you to create users in two places. The flow is:
+
+1. **Create a Kratos identity** — this is the source of truth for authentication
+2. **User logs in** — Oathkeeper validates the session and forwards `X-User-Id`
+3. **Chit auto-provisions** — on first authenticated request, Chit fetches the
+   identity from the Kratos Admin API and creates a local user record with the
+   identity's traits (username, email, display name)
+
+You only need to create the Kratos identity. Chit handles the rest.
+
+## Prerequisites
+
+| Dependency | Purpose |
+|---|---|
+| Kratos Admin API access (port 4434) | Create and manage identities |
+| Keto Write API access (port 4467) | Manage channel authorization |
+| `curl` and `jq` | Command-line examples below |
+
+## Creating users
+
+### Via the Kratos Admin API
+
+Create an identity with a password credential:
+
+```bash
+curl -s -X POST http://localhost:4434/admin/identities \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "schema_id": "default",
+    "traits": {
+      "email": "newuser@example.com",
+      "username": "newuser",
+      "display_name": "New User"
+    },
+    "credentials": {
+      "password": {
+        "config": {
+          "password": "SecurePassword123!"
+        }
+      }
+    },
+    "state": "active"
+  }' | jq .
+```
+
+The response includes the generated identity ID:
+
+```json
+{
+  "id": "generated-uuid-here",
+  "traits": {
+    "email": "newuser@example.com",
+    "username": "newuser",
+    "display_name": "New User"
+  },
+  "state": "active"
+}
+```
+
+Save the `id` value — this is the Kratos identity ID that Chit uses as the
+user's `X-User-Id`.
+
+### With a specific identity ID
+
+To assign a known UUID (useful for scripting and test environments):
+
+```bash
+curl -s -X POST http://localhost:4434/admin/identities \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "id": "aaaaaaaa-bbbb-4ccc-dddd-eeeeeeeeeeee",
+    "schema_id": "default",
+    "traits": {
+      "email": "scripted@example.com",
+      "username": "scripted",
+      "display_name": "Scripted User"
+    },
+    "credentials": {
+      "password": {
+        "config": {
+          "password": "SecurePassword123!"
+        }
+      }
+    },
+    "state": "active"
+  }' | jq .
+```
+
+### Using the seed script (UAT only)
+
+For the UAT environment, a seed script creates all 5 test users at once:
+
+```bash
+make uat-seed-kratos
+```
+
+This creates Kratos identities with known UUIDs matching the pre-seeded Chit
+database users. See [Manual Acceptance Testing](/chit/getting-started/manual-acceptance-testing/)
+for details.
+
+## Identity schema
+
+Chit's Kratos identity schema requires three traits:
+
+| Trait | Type | Constraints | Purpose |
+|---|---|---|---|
+| `email` | string (email) | Required, used as login identifier | Authentication credential |
+| `username` | string | 2–64 chars, `^[a-z0-9][a-z0-9._-]{0,62}[a-z0-9]$` | Display in UI, @mentions |
+| `display_name` | string | 1–100 chars | Shown in message headers |
+
+The schema is defined in the `chit-kratos-config` ConfigMap in
+`deploy/chit.kube.yml`.
+
+## Managing users
+
+### List all identities
+
+```bash
+curl -s http://localhost:4434/admin/identities | jq '.[].traits'
+```
+
+### Get a specific identity
+
+```bash
+curl -s http://localhost:4434/admin/identities/IDENTITY_ID | jq .
+```
+
+### Update identity traits
+
+```bash
+curl -s -X PUT http://localhost:4434/admin/identities/IDENTITY_ID \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "schema_id": "default",
+    "traits": {
+      "email": "updated@example.com",
+      "username": "updateduser",
+      "display_name": "Updated Name"
+    },
+    "state": "active"
+  }' | jq .
+```
+
+:::caution
+Updating traits in Kratos does **not** automatically update the Chit local user
+record. The local record is only populated during auto-provisioning (first
+login). To update a user's display name or username in Chit after provisioning,
+update the Chit database directly.
+:::
+
+### Delete an identity
+
+```bash
+curl -s -X DELETE http://localhost:4434/admin/identities/IDENTITY_ID
+```
+
+### Reset a user's password
+
+```bash
+curl -s -X PUT http://localhost:4434/admin/identities/IDENTITY_ID \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "schema_id": "default",
+    "traits": {
+      "email": "user@example.com",
+      "username": "username",
+      "display_name": "Display Name"
+    },
+    "credentials": {
+      "password": {
+        "config": {
+          "password": "NewPassword123!"
+        }
+      }
+    },
+    "state": "active"
+  }' | jq .
+```
+
+## Sessions
+
+### How sessions work
+
+1. User submits credentials to Kratos login flow
+2. Kratos returns a **session token**
+3. Client sends `X-Session-Token` header on every request to Oathkeeper
+4. Oathkeeper validates the session with Kratos (`/sessions/whoami`)
+5. On success, Oathkeeper sets `X-User-Id` header and forwards to Chit
+
+chit-tui stores the session token at `~/.config/chit-tui/session.json` and
+reuses it on subsequent launches.
+
+### Invalidate a user's sessions
+
+To force a user to re-authenticate, delete their active sessions:
+
+```bash
+curl -s -X DELETE \
+  http://localhost:4434/admin/identities/IDENTITY_ID/sessions
+```
+
+### Check an active session
+
+```bash
+curl -s -H "X-Session-Token: SESSION_TOKEN" \
+  http://localhost:4433/sessions/whoami | jq .
+```
+
+## Authorization with Keto
+
+Chit uses Ory Keto for channel-level access control. Authorization is managed
+automatically — when users join or leave channels, Chit writes the appropriate
+Keto relationship tuples.
+
+### Namespaces and relations
+
+| Namespace | Object | Relation | Subject | Meaning |
+|---|---|---|---|---|
+| `chit/channel` | Channel ID | `member` | User ID | User can access the channel |
+| `chit/command` | `Command:{id}` | `execute` | `Actor:{id}` | User can execute the command |
+
+### Automatic authorization
+
+You do **not** need to manually create Keto tuples for normal operations:
+
+- **Channel creation** — creator is added as `member`; for open channels, all
+  team members are auto-added
+- **Join channel** — `member` relation is written
+- **Leave channel** — `member` relation is deleted
+- **Direct messages** — both users are added as `member`
+- **Group channels** — all participants are added as `member`
+
+### Manual Keto management
+
+For advanced scenarios, you can interact with Keto directly.
+
+**Check if a user has channel access:**
+
+```bash
+curl -s -X POST http://localhost:4466/relation-tuples/check \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "namespace": "chit/channel",
+    "object": "CHANNEL_ID",
+    "relation": "member",
+    "subject_id": "USER_ID"
+  }' | jq .
+```
+
+Response: `{"allowed": true}` or `{"allowed": false}`
+
+**Grant channel access:**
+
+```bash
+curl -s -X PUT http://localhost:4467/admin/relation-tuples \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "namespace": "chit/channel",
+    "object": "CHANNEL_ID",
+    "relation": "member",
+    "subject_id": "USER_ID"
+  }'
+```
+
+**Revoke channel access:**
+
+```bash
+curl -s -X DELETE \
+  "http://localhost:4467/admin/relation-tuples?namespace=chit/channel&object=CHANNEL_ID&relation=member&subject_id=USER_ID"
+```
+
+**List all members of a channel:**
+
+```bash
+curl -s "http://localhost:4466/relation-tuples?namespace=chit/channel&object=CHANNEL_ID" \
+  | jq '.relation_tuples[].subject_id'
+```
+
+## System admin role
+
+Alice (`alice@example.com`) is assigned the `system_admin` role in the Chit
+database during UAT seeding. System admins can manage teams, channels, and
+users through the Chit API. Other users are assigned `system_user`.
+
+Admin role assignment is stored in the Chit database (`users.roles` column),
+not in Kratos or Keto.
+
+## End-to-end example
+
+Create a new user and verify they can log in and access channels:
+
+```bash
+# 1. Create the Kratos identity
+IDENTITY=$(curl -s -X POST http://localhost:4434/admin/identities \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "schema_id": "default",
+    "traits": {
+      "email": "frank@example.com",
+      "username": "frank",
+      "display_name": "Frank Foster"
+    },
+    "credentials": {
+      "password": {
+        "config": {
+          "password": "Password1!"
+        }
+      }
+    },
+    "state": "active"
+  }')
+echo "$IDENTITY" | jq .id
+
+# 2. Log in through Oathkeeper to get a session token
+FLOW=$(curl -s http://localhost:4455/kratos/self-service/login/api | jq -r .id)
+TOKEN=$(curl -s -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{"method":"password","identifier":"frank@example.com","password":"Password1!"}' \
+  "http://localhost:4455/kratos/self-service/login?flow=$FLOW" \
+  | jq -r .session_token)
+echo "Session token: $TOKEN"
+
+# 3. Make an authenticated request — Chit auto-provisions the user
+curl -s -H "X-Session-Token: $TOKEN" \
+  http://localhost:4455/api/v1/users/me | jq .
+
+# 4. List available teams and channels
+curl -s -H "X-Session-Token: $TOKEN" \
+  http://localhost:4455/api/v1/teams | jq .
+```
+
+After step 3, the user exists in Chit's database and can be added to channels,
+send messages, and use all features.
+
+## See also
+
+- [Ory Stack](/chit/deployment/ory-stack/) — architecture and configuration details
+- [Manual Acceptance Testing](/chit/getting-started/manual-acceptance-testing/) —
+  UAT environment with pre-seeded users
+- [REST API Reference](/chit/api-reference/rest-api/) — full endpoint documentation

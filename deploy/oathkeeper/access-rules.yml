@@ -19,6 +19,7 @@
 - id: "kratos-public"
   upstream:
     url: "http://localhost:4433"
+    strip_path: /kratos
   match:
     url: "http://localhost:4455/kratos/<**>"
     methods:

@@ -1,17 +1,17 @@
-.PHONY: build build-mcp build-reconcile build-all run test test-container test-e2e test-e2e-clean lint validate-spec cue-validate reconcile migrate-up migrate-down kube-up kube-down kube-migrate uat-up uat-down docs-dev clean
+.PHONY: build build-mcp build-reconcile build-all run test test-container test-e2e test-e2e-clean lint validate-spec cue-validate reconcile migrate-up migrate-down kube-build kube-up kube-down kube-restart kube-logs kube-clean uat-up uat-seed-kratos uat-down uat-clean docs-dev clean
 
 BINARY=bin/chitd
 MCP_BINARY=bin/chit-mcp
 RECONCILE_BINARY=bin/chit-reconcile
 KUBE_FILE=deploy/chit.kube.yml
+UAT_KUBE_FILE=deploy/chit-uat.kube.yml
 MIGRATE_URL?=postgres://chit:chit@localhost:5432/chit?sslmode=disable
+CHIT_IMAGE?=localhost/chit:latest
 
 E2E_POD=chit-e2e
 E2E_IMAGE=chit-e2e:latest
 PG_IMAGE=docker.io/library/postgres:17-alpine
 
-UAT_POD=chit-uat
-UAT_PORT?=8065
 
 build:
 	go build -o $(BINARY) ./cmd/chitd
@@ -75,44 +75,50 @@ migrate-down:
 
 ## --- Podman Kube ---
 
-kube-up:
-	podman kube play --network host $(KUBE_FILE)
+kube-build:
+	podman build -t $(CHIT_IMAGE) -f deploy/Containerfile .
+
+kube-up: kube-build
+	sed "s|__PROJECT_ROOT__|$(CURDIR)|g" $(KUBE_FILE) | podman kube play --network host -
 
 kube-down:
-	podman kube down $(KUBE_FILE)
+	sed "s|__PROJECT_ROOT__|$(CURDIR)|g" $(KUBE_FILE) | podman kube down -
 
-# Run Kratos and Keto schema migrations against the running pod.
-# Postgres init script creates the kratos/keto databases on first start.
-kube-migrate:
-	podman run --rm --network host docker.io/oryd/kratos:v1.3 \
-		migrate sql "postgres://chit:chit@localhost:5432/kratos?sslmode=disable" --yes
-	podman run --rm --network host \
-		-v $(CURDIR)/deploy/keto/keto.yml:/home/ory/keto.yml:ro,Z \
-		-e DSN=postgres://chit:chit@localhost:5432/keto?sslmode=disable \
-		docker.io/oryd/keto:v0.12 \
-		migrate up --yes
-	@echo "Run 'make migrate-up' to apply chit schema migrations."
+kube-restart: kube-down kube-up
+
+kube-logs:
+	podman pod logs -f chit-app
+
+kube-log-%:
+	podman logs -f chit-app-$*
+
+kube-clean: kube-down
+	-podman volume rm chit-pgdata chit-zincdata 2>/dev/null
 
 ## --- UAT (Manual Acceptance Testing) ---
 
-uat-up:
+uat-up: kube-build
 	podman build -t $(E2E_IMAGE) -f Containerfiles/Containerfile.e2e .
-	-podman pod rm -f $(UAT_POD) 2>/dev/null
-	podman pod create --name $(UAT_POD) --share net -p $(UAT_PORT):8065
-	podman run -d --pod $(UAT_POD) --name $(UAT_POD)-pg \
-		-e POSTGRES_USER=chit -e POSTGRES_PASSWORD=chit -e POSTGRES_DB=chit \
-		$(PG_IMAGE)
-	podman run -d --pod $(UAT_POD) --name $(UAT_POD)-chitd \
-		-e CHIT_DATABASE_URL=postgres://chit:chit@localhost:5432/chit?sslmode=disable \
-		$(E2E_IMAGE) bash /src/scripts/uat-entrypoint.sh
+	sed "s|__PROJECT_ROOT__|$(CURDIR)|g" $(UAT_KUBE_FILE) | podman kube play --network host -
 	@echo ""
 	@echo "UAT environment starting..."
-	@echo "  Server: http://localhost:$(UAT_PORT)/api/v1/system/ping"
-	@echo "  Logs:   podman logs -f $(UAT_POD)-chitd"
+	@echo "  Server: http://localhost:8065/api/v1/system/ping"
+	@echo "  Proxy:  http://localhost:4455/api/v1/system/ping"
+	@echo "  Logs:   podman logs -f chit-uat-app-chitd"
+	@echo ""
+	@echo "Once services are ready, seed Kratos identities for TUI login:"
+	@echo "  make uat-seed-kratos"
 	@echo ""
 
+uat-seed-kratos:
+	@echo "Seeding Kratos identities (requires UAT pod running)..."
+	KRATOS_ADMIN_URL=http://localhost:4434 CHIT_DATABASE_URL=postgres://chit:chit@localhost:5432/chit?sslmode=disable go run scripts/seed-kratos/main.go
+
 uat-down:
-	-podman pod rm -f $(UAT_POD) 2>/dev/null
+	sed "s|__PROJECT_ROOT__|$(CURDIR)|g" $(UAT_KUBE_FILE) | podman kube down -
+
+uat-clean: uat-down
+	-podman volume rm chit-uat-pgdata chit-uat-zincdata 2>/dev/null
 
 ## --- Docs ---
 
