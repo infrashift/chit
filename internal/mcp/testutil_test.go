@@ -757,7 +757,6 @@ func setupTestMCP(t *testing.T) (context.Context, *mcpsdk.ClientSession, *ChitMC
 
 	// Build App with real Hub (in-memory, no external deps) and noop pubsub
 	cfg := config.Defaults()
-	cfg.VaultEnabled = false
 	cfg.ZincSearchURL = "" // Use SQL fallback instead of ZincSearch
 	hub := websocket.NewHub()
 	a := app.New(ms, hub, noopPubSub{}, cfg)

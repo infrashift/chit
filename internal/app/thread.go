@@ -13,10 +13,6 @@ func (a *App) GetThread(ctx context.Context, rootID string) (*model.PostList, er
 		return nil, err
 	}
 
-	for _, p := range list.Order {
-		_ = a.decryptPost(ctx, p)
-	}
-
 	return list, nil
 }
 

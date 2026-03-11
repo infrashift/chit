@@ -32,9 +32,6 @@ type App struct {
 
 	ketoReadURL  string
 	ketoWriteURL string
-	vaultAddr    string
-	vaultToken   string
-	vaultKey     string
 	httpClient   *http.Client
 }
 
@@ -47,9 +44,6 @@ func New(s store.Store, hub *websocket.Hub, ps pubsub.PubSub, cfg *config.Config
 		Config:       cfg,
 		ketoReadURL:  cfg.KetoReadURL,
 		ketoWriteURL: cfg.KetoWriteURL,
-		vaultAddr:    cfg.VaultAddr,
-		vaultToken:   cfg.VaultToken,
-		vaultKey:     cfg.VaultTransitKey,
 		httpClient:   &http.Client{Timeout: 5 * time.Second},
 	}
 }
@@ -146,86 +140,6 @@ func (a *App) DeleteKetoRelation(ctx context.Context, namespace, object, relatio
 	}
 
 	return nil
-}
-
-// EncryptContent encrypts content via Vault Transit if enabled.
-func (a *App) EncryptContent(ctx context.Context, plaintext string) ([]byte, error) {
-	if !a.Config.VaultEnabled {
-		return nil, nil
-	}
-
-	url := fmt.Sprintf("%s/v1/transit/encrypt/%s", a.vaultAddr, a.vaultKey)
-	body := map[string]string{
-		"plaintext": plaintext,
-	}
-	jsonBody, err := json.Marshal(body)
-	if err != nil {
-		return nil, fmt.Errorf("marshal vault encrypt: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBody))
-	if err != nil {
-		return nil, fmt.Errorf("create vault request: %w", err)
-	}
-	req.Header.Set("X-Vault-Token", a.vaultToken)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := a.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("vault encrypt: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Data struct {
-			Ciphertext string `json:"ciphertext"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode vault response: %w", err)
-	}
-
-	return []byte(result.Data.Ciphertext), nil
-}
-
-// DecryptContent decrypts content via Vault Transit.
-func (a *App) DecryptContent(ctx context.Context, ciphertext []byte) (string, error) {
-	if !a.Config.VaultEnabled || len(ciphertext) == 0 {
-		return "", nil
-	}
-
-	url := fmt.Sprintf("%s/v1/transit/decrypt/%s", a.vaultAddr, a.vaultKey)
-	body := map[string]string{
-		"ciphertext": string(ciphertext),
-	}
-	jsonBody, err := json.Marshal(body)
-	if err != nil {
-		return "", fmt.Errorf("marshal vault decrypt: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBody))
-	if err != nil {
-		return "", fmt.Errorf("create vault request: %w", err)
-	}
-	req.Header.Set("X-Vault-Token", a.vaultToken)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := a.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("vault decrypt: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Data struct {
-			Plaintext string `json:"plaintext"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("decode vault response: %w", err)
-	}
-
-	return result.Data.Plaintext, nil
 }
 
 // FetchKratosIdentity retrieves identity traits from Kratos Admin API.

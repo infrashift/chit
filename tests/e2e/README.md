@@ -32,8 +32,7 @@ Created/Modified Files
   1. tests/e2e/test_e2e.sh (new, 898 lines)                                                                                                                                         
                                                                                                                                                                                         
   Executable bash script with:                                                                                                                                                            
-  - Setup: Health checks for all 7 services (PG, Kratos, Oathkeeper, Keto, Vault, ZincSearch, chitd), creates 3 test users via Kratos Admin API, logs in each via API flow to get session 
-  tokens, enables Vault transit key                                                                                                                                                       
+  - Setup: Health checks for all 6 services (PG, Kratos, Oathkeeper, Keto, ZincSearch, chitd), creates 3 test users via Kratos Admin API, logs in each via API flow to get session tokens                                                                                                                                                       
   - Scenario 1 (11 assertions): User provisioning — system ping/config, auto-provision on first /users/me, user lookup by ID/username, user search, unauthenticated 401, idempotent       
   provisioning                                                                                                                                                                            
   - Scenario 2 (19 assertions): Team & channel lifecycle — team creation with auto team_admin role, adding members, public/private channels, Keto relation tuple verification (write &    

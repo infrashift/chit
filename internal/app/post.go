@@ -28,23 +28,13 @@ func (a *App) CreatePost(ctx context.Context, post *model.Post) (*model.Post, er
 		}
 	}
 
-	// Process mentions on plaintext content before encryption
+	// Process mentions
 	mentionedUserIDs, _ := a.processMentions(post)
 	if len(mentionedUserIDs) > 0 {
 		if post.Props == nil {
 			post.Props = make(map[string]any)
 		}
 		post.Props["mentions"] = mentionedUserIDs
-	}
-
-	// Optionally encrypt content
-	if a.Config.VaultEnabled {
-		ciphertext, err := a.EncryptContent(ctx, post.Content)
-		if err != nil {
-			return nil, err
-		}
-		post.ContentEncrypted = ciphertext
-		post.Content = ""
 	}
 
 	saved, err := a.Store.Post().Save(post)
@@ -72,14 +62,10 @@ func (a *App) CreatePost(ctx context.Context, post *model.Post) (*model.Post, er
 	return saved, nil
 }
 
-// GetPost retrieves a post by ID, decrypting content if needed.
+// GetPost retrieves a post by ID.
 func (a *App) GetPost(ctx context.Context, id string) (*model.Post, error) {
 	post, err := a.Store.Post().Get(id)
 	if err != nil {
-		return nil, err
-	}
-
-	if err := a.decryptPost(ctx, post); err != nil {
 		return nil, err
 	}
 
@@ -110,15 +96,6 @@ func (a *App) UpdatePost(ctx context.Context, post *model.Post) (*model.Post, er
 		post.Props["mentions"] = mentionedUserIDs
 	} else {
 		delete(post.Props, "mentions")
-	}
-
-	if a.Config.VaultEnabled {
-		ciphertext, err := a.EncryptContent(ctx, post.Content)
-		if err != nil {
-			return nil, err
-		}
-		post.ContentEncrypted = ciphertext
-		post.Content = ""
 	}
 
 	updated, err := a.Store.Post().Update(post)
@@ -158,10 +135,6 @@ func (a *App) GetPostsForChannel(ctx context.Context, channelID string, opts mod
 	list, err := a.Store.Post().GetPostsForChannel(channelID, opts)
 	if err != nil {
 		return nil, err
-	}
-
-	for _, p := range list.Order {
-		_ = a.decryptPost(ctx, p)
 	}
 
 	return list, nil
@@ -213,9 +186,6 @@ func (a *App) GetPinnedPosts(ctx context.Context, channelID string) (*model.Post
 	if err != nil {
 		return nil, err
 	}
-	for _, p := range list.Order {
-		_ = a.decryptPost(ctx, p)
-	}
 	return list, nil
 }
 
@@ -241,17 +211,6 @@ func (a *App) handleThreadReply(post *model.Post) error {
 		Following: true,
 	}
 	return a.Store.Thread().SaveMembership(membership)
-}
-
-func (a *App) decryptPost(ctx context.Context, post *model.Post) error {
-	if a.Config.VaultEnabled && len(post.ContentEncrypted) > 0 {
-		plaintext, err := a.DecryptContent(ctx, post.ContentEncrypted)
-		if err != nil {
-			return err
-		}
-		post.Content = plaintext
-	}
-	return nil
 }
 
 func (a *App) broadcastPostEvent(event string, post *model.Post) {

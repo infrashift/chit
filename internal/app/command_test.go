@@ -93,7 +93,6 @@ func newCommandTestApp(t *testing.T, ketoAllowed bool) *App {
 	}
 
 	cfg := config.Defaults()
-	cfg.VaultEnabled = false
 	cfg.KetoReadURL = ketoSrv.URL
 
 	a := New(ms, hub, nil, cfg)

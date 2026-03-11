@@ -17,8 +17,6 @@ security via the Ory stack.
   per-team queries
 - **Zero-trust auth** — Ory Kratos (identity), Oathkeeper (auth proxy), and
   Keto (ReBAC authorization)
-- **Encryption at rest** — optional per-message encryption via Vault Transit
-  Engine
 - **Real-time WebSocket** — 14 event types with per-user hub and broadcast
   filtering
 - **Conversation tags** — label and filter posts with user-defined tags
@@ -49,7 +47,7 @@ transparently.
 git clone https://github.com/infrashift/chit.git
 cd chit
 
-# Start infrastructure (PostgreSQL, Ory stack, Vault, ZincSearch)
+# Start infrastructure (PostgreSQL, Ory stack, ZincSearch)
 make kube-up
 
 # Run Ory schema migrations

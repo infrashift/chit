@@ -863,7 +863,6 @@ func setupTestApp(t *testing.T) (*app.App, *mockStore, func()) {
 	ms.tag.seedPostTag(testRootPost, testTagID)
 
 	cfg := config.Defaults()
-	cfg.VaultEnabled = false
 	cfg.TrustedProxyHeader = "X-User-Id"
 	hub := websocket.NewHub()
 	a := app.New(ms, hub, noopPubSub{}, cfg)

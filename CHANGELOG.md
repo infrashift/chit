@@ -13,8 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (10 tables: users, teams, team_members, channels, channel_members, posts,
   threads, thread_memberships, tags, message_tags)
 - OpenAPI 3.1 specification with 40+ endpoints across 9 resource tags
-- Podman Kube deployment manifest with 6 containers (PostgreSQL, Kratos,
-  Oathkeeper, Keto, Vault, ZincSearch)
+- Podman Kube deployment manifest with 5 containers (PostgreSQL, Kratos,
+  Oathkeeper, Keto, ZincSearch)
 - Ory stack configuration files (Kratos identity schemas, Oathkeeper access
   rules, Keto namespace configuration)
 - WebSocket hub with per-user connection map and single event loop goroutine

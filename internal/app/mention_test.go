@@ -286,7 +286,6 @@ func TestProcessMentions(t *testing.T) {
 			},
 		}
 		cfg := config.Defaults()
-		cfg.VaultEnabled = false
 		return New(ms, hub, nil, cfg)
 	}
 

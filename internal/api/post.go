@@ -23,7 +23,11 @@ func createPost(a *app.App) http.HandlerFunc {
 
 		saved, err := a.CreatePost(r.Context(), &post)
 		if err != nil {
-			WriteError(w, model.NewInternalError("createPost", err))
+			if appErr, ok := err.(*model.AppError); ok {
+				WriteError(w, appErr)
+			} else {
+				WriteError(w, model.NewInternalError("createPost", err))
+			}
 			return
 		}
 

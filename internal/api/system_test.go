@@ -47,7 +47,4 @@ func TestSystemClientConfig(t *testing.T) {
 	if _, ok := result["version"]; !ok {
 		t.Fatal("expected 'version' in response")
 	}
-	if _, ok := result["vault_enabled"]; !ok {
-		t.Fatal("expected 'vault_enabled' in response")
-	}
 }

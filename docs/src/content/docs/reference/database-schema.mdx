@@ -137,7 +137,6 @@ Messages in channels. Replies reference a `root_id`.
 | `user_id` | UUID | FK → users, NOT NULL | Author |
 | `root_id` | UUID | FK → posts | Thread root (NULL for root posts) |
 | `content` | TEXT | NOT NULL, DEFAULT `''` | Message body (markdown) |
-| `content_encrypted` | BYTEA | — | Vault-encrypted content |
 | `type` | VARCHAR(26) | DEFAULT `''` | Post type marker |
 | `props` | JSONB | DEFAULT `'{}'` | Arbitrary metadata |
 | `hashtags` | VARCHAR(1000) | DEFAULT `''` | Extracted hashtags |
