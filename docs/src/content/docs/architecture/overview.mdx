@@ -85,7 +85,8 @@ composition.
 chit/
 ├── cmd/
 │   ├── chitd/              Main server binary
-│   ├── chit-mcp/           MCP agent binary
+│   ├── chit-mcp/           MCP agent binary (HTTP/WS client of chitd,
+│   │                       like chit-claude)
 │   ├── chit-reconcile/     One-shot job pushing CUE-defined roles,
 │   │                       commands, and actors into Keto
 │   └── chit-claude/        Bridge driving headless Claude Code sessions
@@ -94,6 +95,8 @@ chit/
 │   ├── api/                HTTP handlers and middleware
 │   ├── app/                Business logic
 │   ├── cache/              LRU cache implementation
+│   ├── chitclient/         Shared HTTP/WS client of chitd used by the
+│   │                       headless agent binaries (chit-claude, chit-mcp)
 │   ├── config/             Configuration loading
 │   ├── jobs/               Background workers (search indexer)
 │   ├── mcp/                MCP server implementation

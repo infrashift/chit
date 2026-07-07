@@ -4,10 +4,11 @@ description: Cross-node event coordination with PG LISTEN/NOTIFY and NATS.
 ---
 
 Chit uses a pub/sub abstraction to distribute events beyond the chitd
-process. Today it powers the **MCP agent event feed**: chitd publishes a thin
-event envelope on the `chit_events` topic for each broadcast event, and the
-`chit-mcp` process subscribes, buffers the envelopes, and serves them to AI
-agents via the `get_new_events` MCP tool.
+process. chitd publishes a thin event envelope on the `chit_events` topic
+for each broadcast event. Its intended consumer is future multi-node
+WebSocket fan-out; `chit-mcp` consumed it historically but now receives
+events over chitd's public WebSocket instead (richer payloads, server-side
+membership filtering).
 
 :::note[Single-node WebSocket fan-out]
 chitd does **not** yet consume the `chit_events` topic itself, so WebSocket
@@ -76,5 +77,8 @@ through the REST API using those IDs.
 
 | Producer | Consumer | Purpose |
 |---|---|---|
-| chitd | chit-mcp | Agent event feed: chit-mcp buffers envelopes per agent, polled via the `get_new_events` MCP tool |
 | chitd | chitd (planned) | Multi-node WebSocket fan-out — not yet implemented |
+
+The MCP agent event feed formerly consumed this topic; `chit-mcp` now
+listens on chitd's WebSocket (full event payloads, filtered server-side by
+the hub) and buffers events for the `get_new_events` MCP tool.

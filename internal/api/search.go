@@ -17,6 +17,36 @@ type searchPostsBody struct {
 	PerPage int      `json:"per_page"`
 }
 
+// searchPostsGlobal searches across every channel the requesting user is a
+// member of (no team or channel scope).
+func searchPostsGlobal(a *app.App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := ContextGetUser(r)
+
+		var body searchPostsBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			WriteError(w, model.NewBadRequestError("searchPostsGlobal", "invalid request body"))
+			return
+		}
+		if body.Terms == "" && len(body.TagIDs) == 0 {
+			WriteError(w, model.NewBadRequestError("searchPostsGlobal", "terms or tag_ids required"))
+			return
+		}
+		if body.PerPage == 0 {
+			body.PerPage = 60
+		}
+		body.Page, body.PerPage = clampPagination(body.Page, body.PerPage)
+
+		results, err := a.SearchPosts(r.Context(), "", user.ID, body.Terms, body.TagIDs, body.Page, body.PerPage)
+		if err != nil {
+			WriteAppError(w, "searchPostsGlobal", err)
+			return
+		}
+
+		WriteJSON(w, http.StatusOK, results)
+	}
+}
+
 func searchPostsInTeam(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)

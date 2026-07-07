@@ -1259,6 +1259,33 @@ paths:
           $ref: "#/components/responses/NotFound"
 
   # ──────────────────────────── Search ────────────────────────────
+  /posts/search:
+    post:
+      operationId: search_posts
+      summary: Search posts globally
+      description: |
+        Full-text search across posts in every channel the requesting user
+        is a member of (no team or channel scope). Used by headless agents
+        such as chit-mcp.
+      tags: [Search]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchRequest"
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /teams/{id}/posts/search:
     post:
       operationId: search_posts_in_team

@@ -1,0 +1,32 @@
+FROM ghcr.io/infrashift/trusted-base-images/trusted/ubi9-standard
+
+ARG GO_VERSION=1.24.4
+
+ENV GOPATH=/go \
+    GOCACHE=/go/cache \
+    PATH="/usr/local/go/bin:/go/bin:${PATH}" \
+    GOFLAGS="-buildvcs=false" \
+    HOME=/home/local
+
+USER root
+
+RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" \
+    | tar -C /usr/local -xz \
+    && go version
+
+WORKDIR /src
+
+RUN mkdir -p /go/cache /home/local && chown -R 1001:0 /go /src /home/local
+
+USER 1001
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+RUN go build -tags e2e ./...
+
+COPY --chmod=0755 scripts/e2e-entrypoint.sh /usr/local/bin/e2e-entrypoint.sh
+
+CMD ["/usr/local/bin/e2e-entrypoint.sh"]

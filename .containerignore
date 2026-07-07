@@ -35,3 +35,9 @@ Thumbs.db
 
 # Containerfiles (no need to include in build context)
 Containerfiles/
+
+# Nested client modules and Go workspace: server images must build the root
+# module standalone (COPY . . must not pull in TUI code or enable workspace mode)
+clients/
+go.work
+go.work.sum

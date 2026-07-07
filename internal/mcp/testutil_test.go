@@ -2,804 +2,341 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/gorilla/websocket"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/infrashift/chit/internal/app"
-	"github.com/infrashift/chit/internal/config"
+	"github.com/infrashift/chit/internal/chitclient"
 	"github.com/infrashift/chit/internal/model"
-	"github.com/infrashift/chit/internal/store"
-	"github.com/infrashift/chit/internal/websocket"
 )
 
 // ─── Pre-seeded test IDs ─────────────────────────────────────────
 
 const (
-	agentUserID = "agent-user-001"
-	extraUserID = "user-002"
-	teamID      = "team-001"
-	channelID   = "channel-001"
-	rootPostID  = "post-001"
-	replyPostID = "post-002"
-	tagID       = "tag-001"
+	agentKratosID = "kratos-agent"
+	agentUserID   = "agent-user-001"
+	extraUserID   = "user-002"
+	teamID        = "team-001"
+	channelID     = "channel-001"
+	rootPostID    = "post-001"
+	replyPostID   = "post-002"
+	tagID         = "tag-001"
 )
 
-// ─── noopPubSub ──────────────────────────────────────────────────
+// ─── Fake chitd ──────────────────────────────────────────────────
 
-type noopPubSub struct{}
+// fakeChit is an httptest-backed stand-in for chitd's REST API and WebSocket,
+// pre-seeded with the same fixtures the MCP tests have always used.
+type fakeChit struct {
+	server *httptest.Server
+	// wsCh delivers events to any connected WebSocket client.
+	wsCh chan *model.WebSocketEvent
 
-func (noopPubSub) Publish(_ context.Context, _ string, _ []byte) error              { return nil }
-func (noopPubSub) Subscribe(_ context.Context, _ string, _ func(data []byte)) error { return nil }
-func (noopPubSub) Close() error                                                     { return nil }
-
-// ─── Mock Store ──────────────────────────────────────────────────
-
-type mockStore struct {
-	user    *mockUserStore
-	team    *mockTeamStore
-	channel *mockChannelStore
-	post    *mockPostStore
-	thread  *mockThreadStore
-	tag     *mockTagStore
+	mu      sync.Mutex
+	agent   model.User
+	alice   model.User
+	team    model.Team
+	channel model.Channel
+	root    model.Post
+	reply   model.Post
+	tag     model.Tag
+	postSeq int
 }
 
-func (m *mockStore) User() store.UserStore       { return m.user }
-func (m *mockStore) Team() store.TeamStore       { return m.team }
-func (m *mockStore) Channel() store.ChannelStore { return m.channel }
-func (m *mockStore) Post() store.PostStore       { return m.post }
-func (m *mockStore) Thread() store.ThreadStore   { return m.thread }
-func (m *mockStore) Tag() store.TagStore         { return m.tag }
-func (m *mockStore) Close()                      {}
+func newFakeChit(t *testing.T) *fakeChit {
+	t.Helper()
 
-// ─── Mock UserStore ──────────────────────────────────────────────
+	f := &fakeChit{
+		wsCh: make(chan *model.WebSocketEvent, 16),
+		agent: model.User{
+			ID: agentUserID, KratosID: agentKratosID, Username: "agent-bot",
+			DisplayName: "Agent Bot", Email: "agent@chit.local",
+			ActorType: model.ActorTypeAgent, Roles: "system_user",
+			CreateAt: 1000, UpdateAt: 1000,
+		},
+		alice: model.User{
+			ID: extraUserID, KratosID: "kratos-alice", Username: "alice",
+			DisplayName: "Alice", Email: "alice@chit.local",
+			Roles: "system_user", CreateAt: 1000, UpdateAt: 1000,
+		},
+		team: model.Team{
+			ID: teamID, Name: "engineering", DisplayName: "Engineering",
+			Type: "O", CreatorID: extraUserID, CreateAt: 1000, UpdateAt: 1000,
+		},
+		channel: model.Channel{
+			ID: channelID, TeamID: teamID, CreatorID: extraUserID,
+			Name: "general", DisplayName: "General", Type: "O",
+			CreateAt: 1000, UpdateAt: 1000,
+		},
+		root: model.Post{
+			ID: rootPostID, ChannelID: channelID, UserID: extraUserID,
+			Content: "Hello world", CreateAt: 2000, UpdateAt: 2000,
+		},
+		reply: model.Post{
+			ID: replyPostID, ChannelID: channelID, UserID: agentUserID,
+			RootID: rootPostID, Content: "Hi there", CreateAt: 3000, UpdateAt: 3000,
+		},
+		tag: model.Tag{ID: tagID, Name: "important"},
+	}
 
-type mockUserStore struct {
-	mu    sync.RWMutex
-	byID  map[string]*model.User
-	byUN  map[string]*model.User
+	r := chi.NewRouter()
+
+	// Every request must carry the agent's Kratos ID, exactly like chitd's
+	// trusted-proxy-header auth.
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if req.Header.Get("X-User-Id") != agentKratosID {
+				http.Error(w, `{"message":"unauthorized"}`, http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, req)
+		})
+	})
+
+	r.Route("/api/v1", func(r chi.Router) {
+		r.Get("/users/me", func(w http.ResponseWriter, req *http.Request) {
+			writeJSON(w, f.agent) // own profile keeps its email
+		})
+		r.Get("/users/{id}", func(w http.ResponseWriter, req *http.Request) {
+			u, ok := f.userByID(chi.URLParam(req, "id"))
+			if !ok {
+				http.NotFound(w, req)
+				return
+			}
+			writeJSON(w, sanitized(&u))
+		})
+		r.Get("/users/username/{username}", func(w http.ResponseWriter, req *http.Request) {
+			u, ok := f.userByUsername(chi.URLParam(req, "username"))
+			if !ok {
+				http.NotFound(w, req)
+				return
+			}
+			writeJSON(w, sanitized(&u))
+		})
+
+		r.Get("/teams", func(w http.ResponseWriter, req *http.Request) {
+			writeJSON(w, []*model.Team{&f.team})
+		})
+		r.Get("/teams/{id}", func(w http.ResponseWriter, req *http.Request) {
+			if chi.URLParam(req, "id") != teamID {
+				http.NotFound(w, req)
+				return
+			}
+			writeJSON(w, f.team)
+		})
+		r.Get("/teams/{id}/channels", func(w http.ResponseWriter, req *http.Request) {
+			writeJSON(w, []*model.Channel{&f.channel})
+		})
+
+		r.Get("/channels/{id}", func(w http.ResponseWriter, req *http.Request) {
+			if chi.URLParam(req, "id") != channelID {
+				http.NotFound(w, req)
+				return
+			}
+			writeJSON(w, f.channel)
+		})
+		r.Get("/channels/{id}/members", func(w http.ResponseWriter, req *http.Request) {
+			writeJSON(w, []*model.ChannelMember{
+				{ChannelID: channelID, UserID: agentUserID, CreateAt: 1000},
+			})
+		})
+		r.Get("/channels/{id}/posts", func(w http.ResponseWriter, req *http.Request) {
+			writeJSON(w, &model.PostList{Order: []*model.Post{&f.reply, &f.root}})
+		})
+		r.Get("/channels/{id}/pinned", func(w http.ResponseWriter, req *http.Request) {
+			writeJSON(w, &model.PostList{Order: []*model.Post{}})
+		})
+		r.Post("/channels/{id}/members/me/view", func(w http.ResponseWriter, req *http.Request) {
+			writeJSON(w, map[string]string{"status": "OK"})
+		})
+
+		r.Post("/posts", func(w http.ResponseWriter, req *http.Request) {
+			var post model.Post
+			if err := json.NewDecoder(req.Body).Decode(&post); err != nil {
+				http.Error(w, `{"message":"bad request"}`, http.StatusBadRequest)
+				return
+			}
+			f.mu.Lock()
+			f.postSeq++
+			post.ID = fmt.Sprintf("post-new-%03d", f.postSeq)
+			f.mu.Unlock()
+			post.UserID = agentUserID // chitd stamps the authenticated user
+			writeJSON(w, post)
+		})
+		r.Get("/posts/{id}", func(w http.ResponseWriter, req *http.Request) {
+			p, ok := f.postByID(chi.URLParam(req, "id"))
+			if !ok {
+				http.NotFound(w, req)
+				return
+			}
+			writeJSON(w, p)
+		})
+		r.Get("/posts/{id}/thread", func(w http.ResponseWriter, req *http.Request) {
+			writeJSON(w, &model.PostList{Order: []*model.Post{&f.root, &f.reply}})
+		})
+		r.Get("/posts/{id}/tags", func(w http.ResponseWriter, req *http.Request) {
+			if chi.URLParam(req, "id") == rootPostID {
+				writeJSON(w, []*model.Tag{&f.tag})
+				return
+			}
+			writeJSON(w, []*model.Tag{})
+		})
+		r.Post("/posts/{id}/tags", func(w http.ResponseWriter, req *http.Request) {
+			var body struct {
+				TagID string `json:"tag_id"`
+			}
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.TagID == "" {
+				http.Error(w, `{"message":"bad request"}`, http.StatusBadRequest)
+				return
+			}
+			writeJSON(w, map[string]string{"status": "OK"})
+		})
+		r.Post("/posts/search", func(w http.ResponseWriter, req *http.Request) {
+			var body struct {
+				Terms  string   `json:"terms"`
+				TagIDs []string `json:"tag_ids"`
+			}
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				http.Error(w, `{"message":"bad request"}`, http.StatusBadRequest)
+				return
+			}
+			if strings.Contains(f.root.Content, body.Terms) && body.Terms != "" {
+				writeJSON(w, &model.PostList{Order: []*model.Post{&f.root}})
+				return
+			}
+			writeJSON(w, &model.PostList{Order: []*model.Post{}})
+		})
+
+		r.Get("/tags", func(w http.ResponseWriter, req *http.Request) {
+			writeJSON(w, []*model.Tag{&f.tag})
+		})
+
+		r.Get("/users/me/teams/{id}/threads", func(w http.ResponseWriter, req *http.Request) {
+			writeJSON(w, &model.UserThreadList{Threads: []*model.ThreadResponse{}, Total: 0})
+		})
+		r.Put("/users/me/teams/{team_id}/threads/{id}/read", func(w http.ResponseWriter, req *http.Request) {
+			writeJSON(w, map[string]string{"status": "OK"})
+		})
+		r.Put("/users/me/teams/{team_id}/threads/{id}/following", func(w http.ResponseWriter, req *http.Request) {
+			var body struct {
+				Following bool `json:"following"`
+			}
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				http.Error(w, `{"message":"bad request"}`, http.StatusBadRequest)
+				return
+			}
+			writeJSON(w, map[string]string{"status": "OK"})
+		})
+
+		r.Get("/websocket", f.handleWS)
+	})
+
+	f.server = httptest.NewServer(r)
+	t.Cleanup(f.close)
+	return f
 }
 
-func newMockUserStore() *mockUserStore {
-	return &mockUserStore{
-		byID: make(map[string]*model.User),
-		byUN: make(map[string]*model.User),
+func (f *fakeChit) close() {
+	f.mu.Lock()
+	if f.wsCh != nil {
+		close(f.wsCh)
+		f.wsCh = nil
+	}
+	f.mu.Unlock()
+	f.server.Close()
+}
+
+// pushEvent delivers an event to connected WebSocket clients.
+func (f *fakeChit) pushEvent(ev *model.WebSocketEvent) {
+	f.mu.Lock()
+	ch := f.wsCh
+	f.mu.Unlock()
+	if ch != nil {
+		ch <- ev
 	}
 }
 
-func (s *mockUserStore) seed(u *model.User) {
-	s.byID[u.ID] = u
-	s.byUN[u.Username] = u
-}
+var upgrader = websocket.Upgrader{}
 
-func (s *mockUserStore) Save(_ context.Context, u *model.User) (*model.User, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.byID[u.ID] = u
-	s.byUN[u.Username] = u
-	return u, nil
-}
-
-func (s *mockUserStore) Get(_ context.Context, id string) (*model.User, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	u, ok := s.byID[id]
-	if !ok {
-		return nil, fmt.Errorf("user %s not found", id)
+func (f *fakeChit) handleWS(w http.ResponseWriter, req *http.Request) {
+	conn, err := upgrader.Upgrade(w, req, nil)
+	if err != nil {
+		return
 	}
+	defer func() { _ = conn.Close() }()
+	f.mu.Lock()
+	ch := f.wsCh
+	f.mu.Unlock()
+	if ch == nil {
+		return
+	}
+	for ev := range ch {
+		if err := conn.WriteJSON(ev); err != nil {
+			return
+		}
+	}
+}
+
+func (f *fakeChit) userByID(id string) (model.User, bool) {
+	switch id {
+	case agentUserID:
+		return f.agent, true
+	case extraUserID:
+		return f.alice, true
+	}
+	return model.User{}, false
+}
+
+func (f *fakeChit) userByUsername(username string) (model.User, bool) {
+	switch username {
+	case f.agent.Username:
+		return f.agent, true
+	case f.alice.Username:
+		return f.alice, true
+	}
+	return model.User{}, false
+}
+
+func (f *fakeChit) postByID(id string) (model.Post, bool) {
+	switch id {
+	case rootPostID:
+		return f.root, true
+	case replyPostID:
+		return f.reply, true
+	}
+	return model.Post{}, false
+}
+
+func sanitized(u *model.User) *model.User {
 	cp := *u
-	return &cp, nil
+	cp.Sanitize()
+	return &cp
 }
 
-func (s *mockUserStore) GetByKratosID(_ context.Context, _ string) (*model.User, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (s *mockUserStore) GetByUsername(_ context.Context, username string) (*model.User, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	u, ok := s.byUN[username]
-	if !ok {
-		return nil, fmt.Errorf("user %s not found", username)
-	}
-	cp := *u
-	return &cp, nil
-}
-
-func (s *mockUserStore) GetByEmail(_ context.Context, _ string) (*model.User, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (s *mockUserStore) Update(_ context.Context, u *model.User) (*model.User, error) {
-	return s.Save(context.Background(), u)
-}
-
-func (s *mockUserStore) Search(_ context.Context, _ string, _, _ int) ([]*model.User, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (s *mockUserStore) GetByIDs(_ context.Context, _ []string) ([]*model.User, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-// ─── Mock TeamStore ──────────────────────────────────────────────
-
-type mockTeamStore struct {
-	mu      sync.RWMutex
-	byID    map[string]*model.Team
-	members map[string][]*model.TeamMember // teamID -> members
-}
-
-func newMockTeamStore() *mockTeamStore {
-	return &mockTeamStore{
-		byID:    make(map[string]*model.Team),
-		members: make(map[string][]*model.TeamMember),
-	}
-}
-
-func (s *mockTeamStore) seed(t *model.Team) { s.byID[t.ID] = t }
-
-func (s *mockTeamStore) Save(_ context.Context, t *model.Team) (*model.Team, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.byID[t.ID] = t
-	return t, nil
-}
-
-func (s *mockTeamStore) Get(_ context.Context, id string) (*model.Team, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	t, ok := s.byID[id]
-	if !ok {
-		return nil, fmt.Errorf("team %s not found", id)
-	}
-	return t, nil
-}
-
-func (s *mockTeamStore) GetByName(_ context.Context, _ string) (*model.Team, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (s *mockTeamStore) Update(_ context.Context, t *model.Team) (*model.Team, error) {
-	return s.Save(context.Background(), t)
-}
-
-func (s *mockTeamStore) Delete(_ context.Context, _ string, _ int64) error {
-	return fmt.Errorf("not implemented")
-}
-
-func (s *mockTeamStore) GetAll(_ context.Context, _, _ int) ([]*model.Team, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var teams []*model.Team
-	for _, t := range s.byID {
-		teams = append(teams, t)
-	}
-	return teams, nil
-}
-
-func (s *mockTeamStore) GetTeamsForUser(_ context.Context, _ string) ([]*model.Team, error) {
-	return s.GetAll(context.Background(), 0, 100)
-}
-
-func (s *mockTeamStore) SaveMember(_ context.Context, m *model.TeamMember) (*model.TeamMember, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.members[m.TeamID] = append(s.members[m.TeamID], m)
-	return m, nil
-}
-
-func (s *mockTeamStore) RemoveMember(_ context.Context, _, _ string) error {
-	return fmt.Errorf("not implemented")
-}
-
-func (s *mockTeamStore) GetMembers(_ context.Context, teamID string, _, _ int) ([]*model.TeamMember, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.members[teamID], nil
-}
-
-func (s *mockTeamStore) GetMember(_ context.Context, teamID, userID string) (*model.TeamMember, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, m := range s.members[teamID] {
-		if m.UserID == userID {
-			return m, nil
-		}
-	}
-	return nil, model.NewNotFoundError("mockTeamStore.GetMember", teamID+"/"+userID)
-}
-
-// ─── Mock ChannelStore ───────────────────────────────────────────
-
-type mockChannelStore struct {
-	mu      sync.RWMutex
-	byID    map[string]*model.Channel
-	members map[string][]*model.ChannelMember // channelID -> members
-}
-
-func newMockChannelStore() *mockChannelStore {
-	return &mockChannelStore{
-		byID:    make(map[string]*model.Channel),
-		members: make(map[string][]*model.ChannelMember),
-	}
-}
-
-func (s *mockChannelStore) seed(c *model.Channel)                    { s.byID[c.ID] = c }
-func (s *mockChannelStore) seedMember(m *model.ChannelMember) {
-	s.members[m.ChannelID] = append(s.members[m.ChannelID], m)
-}
-
-func (s *mockChannelStore) Save(_ context.Context, c *model.Channel) (*model.Channel, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.byID[c.ID] = c
-	return c, nil
-}
-
-func (s *mockChannelStore) Get(_ context.Context, id string) (*model.Channel, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	c, ok := s.byID[id]
-	if !ok {
-		return nil, fmt.Errorf("channel %s not found", id)
-	}
-	return c, nil
-}
-
-func (s *mockChannelStore) Update(_ context.Context, c *model.Channel) (*model.Channel, error) {
-	return s.Save(context.Background(), c)
-}
-
-func (s *mockChannelStore) Delete(_ context.Context, _ string, _ int64) error {
-	return fmt.Errorf("not implemented")
-}
-
-func (s *mockChannelStore) GetChannelsForTeam(_ context.Context, teamID string, _, _ int) ([]*model.Channel, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var channels []*model.Channel
-	for _, c := range s.byID {
-		if c.TeamID == teamID {
-			channels = append(channels, c)
-		}
-	}
-	return channels, nil
-}
-
-func (s *mockChannelStore) GetChannelsForUser(_ context.Context, _, _ string) ([]*model.Channel, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (s *mockChannelStore) SaveMember(_ context.Context, m *model.ChannelMember) (*model.ChannelMember, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.members[m.ChannelID] = append(s.members[m.ChannelID], m)
-	return m, nil
-}
-
-func (s *mockChannelStore) RemoveMember(_ context.Context, _, _ string) error {
-	return fmt.Errorf("not implemented")
-}
-
-func (s *mockChannelStore) GetMembers(_ context.Context, channelID string, _, _ int) ([]*model.ChannelMember, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.members[channelID], nil
-}
-
-func (s *mockChannelStore) GetMember(_ context.Context, channelID, userID string) (*model.ChannelMember, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, m := range s.members[channelID] {
-		if m.UserID == userID {
-			return m, nil
-		}
-	}
-	return nil, model.NewNotFoundError("mockChannelStore.GetMember", channelID+"/"+userID)
-}
-
-func (s *mockChannelStore) GetChannelIDsForUser(_ context.Context, userID string) ([]string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var ids []string
-	for channelID, members := range s.members {
-		for _, m := range members {
-			if m.UserID == userID {
-				ids = append(ids, channelID)
-				break
-			}
-		}
-	}
-	return ids, nil
-}
-
-func (s *mockChannelStore) UpdateLastViewedAt(_ context.Context, _, _ string, _ int64) error {
-	return nil
-}
-
-func (s *mockChannelStore) GetByName(_ context.Context, _, _ string) (*model.Channel, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (s *mockChannelStore) GetDirectChannelByName(_ context.Context, _ string) (*model.Channel, error) {
-	return nil, fmt.Errorf("not found")
-}
-
-func (s *mockChannelStore) SaveDirectChannel(_ context.Context, _ *model.Channel, _ []string) (*model.Channel, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (s *mockChannelStore) GetDirectChannelsForUser(_ context.Context, _ string) ([]*model.Channel, error) {
-	return nil, nil
-}
-
-func (s *mockChannelStore) IncrementMsgCount(_ context.Context, _ string, _ int64) error {
-	return nil
-}
-
-func (s *mockChannelStore) IncrementMentionCount(_ context.Context, channelID, userID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, m := range s.members[channelID] {
-		if m.UserID == userID {
-			m.MentionCount++
-			return nil
-		}
-	}
-	return nil
-}
-
-// ─── Mock PostStore ──────────────────────────────────────────────
-
-type mockPostStore struct {
-	mu   sync.RWMutex
-	byID map[string]*model.Post
-}
-
-func newMockPostStore() *mockPostStore {
-	return &mockPostStore{
-		byID: make(map[string]*model.Post),
-	}
-}
-
-func (s *mockPostStore) seed(p *model.Post) { s.byID[p.ID] = p }
-
-func (s *mockPostStore) Save(_ context.Context, p *model.Post) (*model.Post, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	p.PreSave()
-	s.byID[p.ID] = p
-	return p, nil
-}
-
-func (s *mockPostStore) Get(_ context.Context, id string) (*model.Post, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	p, ok := s.byID[id]
-	if !ok {
-		return nil, fmt.Errorf("post %s not found", id)
-	}
-	return p, nil
-}
-
-func (s *mockPostStore) Update(_ context.Context, p *model.Post) (*model.Post, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.byID[p.ID] = p
-	return p, nil
-}
-
-func (s *mockPostStore) Delete(_ context.Context, _ string, _ int64) error {
-	return fmt.Errorf("not implemented")
-}
-
-func (s *mockPostStore) GetPostsForChannel(_ context.Context, channelID string, _ model.GetPostsOptions) (*model.PostList, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var posts []*model.Post
-	for _, p := range s.byID {
-		if p.ChannelID == channelID {
-			posts = append(posts, p)
-		}
-	}
-	return &model.PostList{Order: posts}, nil
-}
-
-func (s *mockPostStore) GetPostsForThread(_ context.Context, rootID string) (*model.PostList, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var posts []*model.Post
-	// Include root post and replies
-	for _, p := range s.byID {
-		if p.ID == rootID || p.RootID == rootID {
-			posts = append(posts, p)
-		}
-	}
-	return &model.PostList{Order: posts}, nil
-}
-
-func (s *mockPostStore) GetPinnedPosts(_ context.Context, channelID string) (*model.PostList, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var posts []*model.Post
-	for _, p := range s.byID {
-		if p.ChannelID == channelID && p.IsPinned {
-			posts = append(posts, p)
-		}
-	}
-	return &model.PostList{Order: posts}, nil
-}
-
-func (s *mockPostStore) SetPinned(_ context.Context, _ string, _ bool) error {
-	return fmt.Errorf("not implemented")
-}
-func (s *mockPostStore) GetPostsSince(_ context.Context, _ int64, _ int) ([]*model.Post, error) {
-	return nil, nil
-}
-
-func (s *mockPostStore) SearchByContent(_ context.Context, channelID, query string, page, perPage int) ([]*model.Post, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var posts []*model.Post
-	for _, p := range s.byID {
-		if channelID != "" && p.ChannelID != channelID {
-			continue
-		}
-		if strings.Contains(strings.ToLower(p.Content), strings.ToLower(query)) {
-			posts = append(posts, p)
-		}
-	}
-	start := page * perPage
-	if start >= len(posts) {
-		return nil, nil
-	}
-	end := start + perPage
-	if end > len(posts) {
-		end = len(posts)
-	}
-	return posts[start:end], nil
-}
-
-// ─── Mock ThreadStore ────────────────────────────────────────────
-
-type mockThreadStore struct {
-	mu          sync.RWMutex
-	threads     map[string]*model.Thread            // postID -> thread
-	memberships map[string]*model.ThreadMembership   // postID:userID -> membership
-}
-
-func newMockThreadStore() *mockThreadStore {
-	return &mockThreadStore{
-		threads:     make(map[string]*model.Thread),
-		memberships: make(map[string]*model.ThreadMembership),
-	}
-}
-
-func (s *mockThreadStore) seed(t *model.Thread) { s.threads[t.PostID] = t }
-func (s *mockThreadStore) seedMembership(m *model.ThreadMembership) {
-	s.memberships[m.PostID+":"+m.UserID] = m
-}
-
-func (s *mockThreadStore) SaveOrUpdate(_ context.Context, t *model.Thread) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if existing, ok := s.threads[t.PostID]; ok {
-		existing.ReplyCount = t.ReplyCount
-		existing.LastReplyAt = t.LastReplyAt
-	} else {
-		s.threads[t.PostID] = t
-	}
-	return nil
-}
-
-func (s *mockThreadStore) Get(_ context.Context, postID string) (*model.Thread, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	t, ok := s.threads[postID]
-	if !ok {
-		return nil, fmt.Errorf("thread %s not found", postID)
-	}
-	return t, nil
-}
-
-func (s *mockThreadStore) SaveMembership(_ context.Context, m *model.ThreadMembership) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.memberships[m.PostID+":"+m.UserID] = m
-	return nil
-}
-
-func (s *mockThreadStore) GetMembership(_ context.Context, postID, userID string) (*model.ThreadMembership, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	m, ok := s.memberships[postID+":"+userID]
-	if !ok {
-		return nil, fmt.Errorf("membership %s:%s not found", postID, userID)
-	}
-	return m, nil
-}
-
-func (s *mockThreadStore) UpdateMembership(_ context.Context, m *model.ThreadMembership) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.memberships[m.PostID+":"+m.UserID] = m
-	return nil
-}
-
-func (s *mockThreadStore) GetThreadsForUser(_ context.Context, _, _ string, _, _ int) (*model.UserThreadList, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return &model.UserThreadList{
-		Threads: []*model.ThreadResponse{},
-		Total:   0,
-	}, nil
-}
-
-func (s *mockThreadStore) IncrementReplyCount(_ context.Context, postID string, timestamp int64, userID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	t, ok := s.threads[postID]
-	if !ok {
-		return fmt.Errorf("thread %s not found", postID)
-	}
-	t.ReplyCount++
-	t.LastReplyAt = timestamp
-	return nil
-}
-
-func (s *mockThreadStore) MarkAsRead(_ context.Context, _, _ string, _ int64) error {
-	return nil
-}
-
-func (s *mockThreadStore) IncrementMentionCount(_ context.Context, postID, userID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	key := postID + ":" + userID
-	if m, ok := s.memberships[key]; ok {
-		m.UnreadMentionCount++
-	}
-	return nil
-}
-
-// ─── Mock TagStore ───────────────────────────────────────────────
-
-type mockTagStore struct {
-	mu         sync.RWMutex
-	tags       map[string]*model.Tag
-	postTags   map[string]map[string]bool // messageID -> set of tagIDs
-}
-
-func newMockTagStore() *mockTagStore {
-	return &mockTagStore{
-		tags:     make(map[string]*model.Tag),
-		postTags: make(map[string]map[string]bool),
-	}
-}
-
-func (s *mockTagStore) seed(t *model.Tag) { s.tags[t.ID] = t }
-func (s *mockTagStore) seedPostTag(messageID, tagID string) {
-	if s.postTags[messageID] == nil {
-		s.postTags[messageID] = make(map[string]bool)
-	}
-	s.postTags[messageID][tagID] = true
-}
-
-func (s *mockTagStore) Save(_ context.Context, t *model.Tag) (*model.Tag, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.tags[t.ID] = t
-	return t, nil
-}
-
-func (s *mockTagStore) GetAll(_ context.Context) ([]*model.Tag, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var tags []*model.Tag
-	for _, t := range s.tags {
-		tags = append(tags, t)
-	}
-	return tags, nil
-}
-
-func (s *mockTagStore) AddTagToPost(_ context.Context, messageID, tagID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.postTags[messageID] == nil {
-		s.postTags[messageID] = make(map[string]bool)
-	}
-	s.postTags[messageID][tagID] = true
-	return nil
-}
-
-func (s *mockTagStore) RemoveTagFromPost(_ context.Context, messageID, tagID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if m, ok := s.postTags[messageID]; ok {
-		delete(m, tagID)
-	}
-	return nil
-}
-
-func (s *mockTagStore) GetTagsForPost(_ context.Context, messageID string) ([]*model.Tag, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var tags []*model.Tag
-	if tagIDs, ok := s.postTags[messageID]; ok {
-		for tid := range tagIDs {
-			if t, exists := s.tags[tid]; exists {
-				tags = append(tags, t)
-			}
-		}
-	}
-	return tags, nil
-}
-
-func (s *mockTagStore) GetPostIDsByTags(_ context.Context, tagIDs []string, page, perPage int) ([]string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var result []string
-	for msgID, tags := range s.postTags {
-		matchCount := 0
-		for _, tid := range tagIDs {
-			if tags[tid] {
-				matchCount++
-			}
-		}
-		if matchCount == len(tagIDs) {
-			result = append(result, msgID)
-		}
-	}
-	start := page * perPage
-	if start >= len(result) {
-		return nil, nil
-	}
-	end := start + perPage
-	if end > len(result) {
-		end = len(result)
-	}
-	return result[start:end], nil
-}
-
-func (s *mockTagStore) FilterPostIDsByTags(_ context.Context, postIDs []string, tagIDs []string) ([]string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	postSet := make(map[string]bool, len(postIDs))
-	for _, id := range postIDs {
-		postSet[id] = true
-	}
-	var result []string
-	for msgID, tags := range s.postTags {
-		if !postSet[msgID] {
-			continue
-		}
-		matchCount := 0
-		for _, tid := range tagIDs {
-			if tags[tid] {
-				matchCount++
-			}
-		}
-		if matchCount == len(tagIDs) {
-			result = append(result, msgID)
-		}
-	}
-	return result, nil
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 // ─── Setup helper ────────────────────────────────────────────────
 
-// setupTestMCP creates a ChitMCPServer backed by mock stores and connects
-// an MCP client to it via in-memory transport.
+// setupTestMCP creates a ChitMCPServer backed by a fake chitd HTTP server and
+// connects an MCP client to it via in-memory transport.
 // Returns (ctx, clientSession, mcpServer, cleanup).
 func setupTestMCP(t *testing.T) (context.Context, *mcpsdk.ClientSession, *ChitMCPServer, func()) {
 	t.Helper()
 
-	// Build mock store with pre-seeded data
-	ms := &mockStore{
-		user:    newMockUserStore(),
-		team:    newMockTeamStore(),
-		channel: newMockChannelStore(),
-		post:    newMockPostStore(),
-		thread:  newMockThreadStore(),
-		tag:     newMockTagStore(),
-	}
-
-	ms.user.seed(&model.User{
-		ID:          agentUserID,
-		KratosID:    "kratos-agent",
-		Username:    "agent-bot",
-		DisplayName: "Agent Bot",
-		Email:       "agent@chit.local",
-		Roles:       "system_user",
-		CreateAt:    1000,
-		UpdateAt:    1000,
-	})
-	ms.user.seed(&model.User{
-		ID:          extraUserID,
-		KratosID:    "kratos-alice",
-		Username:    "alice",
-		DisplayName: "Alice",
-		Email:       "alice@chit.local",
-		Roles:       "system_user",
-		CreateAt:    1000,
-		UpdateAt:    1000,
-	})
-
-	ms.team.seed(&model.Team{
-		ID:          teamID,
-		Name:        "engineering",
-		DisplayName: "Engineering",
-		Type:        "O",
-		CreatorID:   extraUserID,
-		CreateAt:    1000,
-		UpdateAt:    1000,
-	})
-
-	_, _ = ms.team.SaveMember(context.Background(), &model.TeamMember{
-		TeamID: teamID,
-		UserID: agentUserID,
-	})
-
-	ms.channel.seed(&model.Channel{
-		ID:          channelID,
-		TeamID:      teamID,
-		CreatorID:   extraUserID,
-		Name:        "general",
-		DisplayName: "General",
-		Type:        "O",
-		CreateAt:    1000,
-		UpdateAt:    1000,
-	})
-	ms.channel.seedMember(&model.ChannelMember{
-		ChannelID: channelID,
-		UserID:    agentUserID,
-		CreateAt:  1000,
-	})
-
-	ms.post.seed(&model.Post{
-		ID:        rootPostID,
-		ChannelID: channelID,
-		UserID:    extraUserID,
-		Content:   "Hello world",
-		CreateAt:  2000,
-		UpdateAt:  2000,
-	})
-	ms.post.seed(&model.Post{
-		ID:        replyPostID,
-		ChannelID: channelID,
-		UserID:    agentUserID,
-		RootID:    rootPostID,
-		Content:   "Hi there",
-		CreateAt:  3000,
-		UpdateAt:  3000,
-	})
-
-	ms.thread.seed(&model.Thread{
-		PostID:      rootPostID,
-		ChannelID:   channelID,
-		ReplyCount:  1,
-		LastReplyAt: 3000,
-	})
-	ms.thread.seedMembership(&model.ThreadMembership{
-		PostID:    rootPostID,
-		UserID:    agentUserID,
-		Following: true,
-	})
-
-	ms.tag.seed(&model.Tag{ID: tagID, Name: "important"})
-	ms.tag.seedPostTag(rootPostID, tagID)
-
-	// Build App with real Hub (in-memory, no external deps) and noop pubsub
-	cfg := config.Defaults()
-	cfg.ZincSearchURL = "" // Use SQL fallback instead of ZincSearch
-	hub := websocket.NewHub(nil)
-	a := app.New(ms, hub, noopPubSub{}, cfg)
-
-	// Create MCP server
-	mcpSrv := New(a, agentUserID)
+	fake := newFakeChit(t)
+	client := chitclient.New(fake.server.URL, agentKratosID, "")
+	mcpSrv := New(client)
 
 	// Connect via in-memory transport
 	ctx := context.Background()
@@ -812,18 +349,17 @@ func setupTestMCP(t *testing.T) (context.Context, *mcpsdk.ClientSession, *ChitMC
 	}
 
 	// Client connects
-	client := mcpsdk.NewClient(&mcpsdk.Implementation{
+	mcpClient := mcpsdk.NewClient(&mcpsdk.Implementation{
 		Name:    "test-client",
 		Version: "0.0.1",
 	}, nil)
-	cs, err := client.Connect(ctx, clientTransport, nil)
+	cs, err := mcpClient.Connect(ctx, clientTransport, nil)
 	if err != nil {
 		t.Fatalf("client connect: %v", err)
 	}
 
 	cleanup := func() {
-		cs.Close()
-		hub.Stop()
+		_ = cs.Close()
 	}
 
 	return ctx, cs, mcpSrv, cleanup

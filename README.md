@@ -19,8 +19,8 @@ users.
   server performs no rendering or HTML sanitization, so clients MUST sanitize
   or escape content when rendering (treat it as untrusted input)
 - **AI agents & bots as first-class actors** — `actor_type` on every user,
-  MCP server (`chit-mcp`) for agent access, and a pub/sub event feed agents
-  can poll for new events
+  MCP server (`chit-mcp`) for agent access, with a WebSocket-fed event
+  buffer agents can poll for new events
 - **Full-text search** — ZincSearch-backed indexing with per-channel and
   per-team queries
 - **Zero-trust auth** — Ory Kratos (identity), Oathkeeper (auth proxy), and
@@ -29,8 +29,7 @@ users.
   events are delivered only to channel members. Fan-out is currently
   single-node (in-process); multi-node WebSocket fan-out is not yet
   implemented. A pub/sub layer (PG LISTEN/NOTIFY or NATS) publishes thin event
-  envelopes on the `chit_events` topic, which `chit-mcp` buffers for agents to
-  poll
+  envelopes on the `chit_events` topic for future multi-node fan-out
 - **Conversation tags** — label and filter posts with user-defined tags
 - **Message pinning** — pin important posts per channel
 - **@mention notifications** — real-time mention alerts via WebSocket
@@ -52,15 +51,25 @@ Layered design inspired by Mattermost: **API → App → Store → PostgreSQL**.
 Store decorators add caching, retry logic, and timing instrumentation
 transparently.
 
-The project builds four binaries:
+The root module builds four binaries:
 
 - **`chitd`** — the chat server
-- **`chit-mcp`** — MCP stdio server that lets AI agents act as normal users
+- **`chit-mcp`** — MCP stdio server that lets AI agents act as normal users;
+  connects to chitd over REST/WebSocket (no database access), like
+  chit-claude
 - **`chit-reconcile`** — one-shot job that pushes CUE-defined roles, commands,
   and actors into Keto
 - **`chit-claude`** — bridge that drives headless Claude Code sessions from
   Chit channels (thread = session; see
   [Headless Claude Code](docs/src/content/docs/deployment/headless-claude.mdx))
+
+## Clients
+
+- **`chit-tui`** ([clients/chit-tui](clients/chit-tui/)) — terminal client
+  built with Bubble Tea. Lives in its own nested Go module so the
+  charmbracelet dependency tree stays out of the server build; talks to chitd
+  exclusively over the REST API and WebSocket (`make build-tui`,
+  `make test-tui`).
 
 ## Security Model
 

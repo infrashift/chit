@@ -105,9 +105,10 @@ event.
 WebSocket broadcast is currently **in-process only**: events reach clients
 connected to the same chitd instance. Multi-node WebSocket fan-out (chitd
 consuming the pub/sub event topic to relay events across nodes) is not yet
-implemented. The pub/sub layer currently carries event envelopes to the
-`chit-mcp` process for the agent event feed — see
-[Pub/Sub](/chit/architecture/pubsub/).
+implemented. The pub/sub layer publishes thin event envelopes intended for
+that future fan-out — see [Pub/Sub](/chit/architecture/pubsub/). Headless
+agent processes (`chit-mcp`, `chit-claude`) consume events as ordinary
+WebSocket clients of this endpoint.
 
 ## Configuration
 

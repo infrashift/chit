@@ -8,6 +8,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `chit-tui` terminal client imported into the monorepo at `clients/chit-tui`
+  as a nested Go module (own `go.mod`, own dependency tree) with a committed
+  root `go.work` workspace. Server builds and images exclude it. New Makefile
+  targets: `build-tui`, `test-tui`, `lint-tui`, `test-e2e-tui`, `test-all`.
+  TUI docs merged into the main docs site under a "TUI Client" section.
+- Global post search endpoint `POST /api/v1/posts/search` — searches across
+  every channel the caller is a member of (no team/channel scope)
+- `internal/chitclient`: shared HTTP/WebSocket client of chitd used by the
+  headless agent binaries (extracted from `internal/bridge` and extended
+  with the full REST surface the MCP server needs)
+- `make check-deps` dependency-boundary guards (run in CI): client binaries
+  must never link server-side deps, chitd must not link the MCP SDK, and
+  TUI/charmbracelet deps must stay out of the server module
+
 - `chit-claude` bridge (`cmd/chit-claude`, `internal/bridge`): drives headless
   Claude Code sessions from Chit channels. Thread = session (resumed via
   `claude -p --resume`, session ID stored in reply post props), per-thread run
@@ -24,9 +38,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `actor_type` column on users (`user` | `agent` | `bot`) — migration
   `000004_actor_type`; humans, AI agents, and bots are equal first-class
   actors
-- MCP agent event feed: chitd publishes thin event envelopes on the
-  `chit_events` pub/sub topic; chit-mcp buffers them for agents to poll via
-  the `get_new_events` tool
+- MCP agent event feed: chit-mcp buffers real-time events for agents to
+  poll via the `get_new_events` tool
 - Background search indexer: polls posts by `update_at` watermark every 5
   seconds and upserts documents into ZincSearch (keyed by post ID);
   soft-deleted posts are removed from the index; SQL ILIKE fallback when
@@ -55,6 +68,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `.env.example` for the full list)
 - Documentation site built with Astro + Starlight
 - README, ROADMAP, and CHANGELOG
+
+### Changed
+
+- `chit-mcp` is now an HTTP/WebSocket client of chitd (like `chit-claude`)
+  instead of embedding the app/store/PostgreSQL stack in-process. Configure
+  with `CHIT_MCP_SERVER_URL`, `CHIT_MCP_AGENT_KRATOS_ID`, and optional
+  `CHIT_MCP_PROXY_SECRET`; `CHIT_MCP_AGENT_USER_ID` and database access are
+  gone. The agent event feed now consumes chitd's WebSocket: events carry
+  full payloads (`posted` events include the entire post) and membership
+  filtering happens server-side in the hub. The `mark_thread_read` and
+  `follow_thread` MCP tools now take a `team_id` argument.
 
 ### Security
 

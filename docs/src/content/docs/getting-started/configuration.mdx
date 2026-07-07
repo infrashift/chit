@@ -81,7 +81,9 @@ multi-node delivery.
 
 | Variable | Description |
 |---|---|
-| `CHIT_MCP_AGENT_USER_ID` | Chit user ID the MCP agent acts as (e.g., the seeded `chit-agent` user) |
+| `CHIT_MCP_SERVER_URL` | chitd base URL the MCP server connects to (default `http://localhost:8065`) |
+| `CHIT_MCP_AGENT_KRATOS_ID` | Kratos identity ID of the agent user chit-mcp acts as (e.g., the seeded `chit-agent`) |
+| `CHIT_MCP_PROXY_SECRET` | Must match `CHIT_TRUSTED_PROXY_SECRET` when chitd requires it |
 
 ### Slash Commands & Webhooks
 

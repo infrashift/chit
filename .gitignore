@@ -40,3 +40,10 @@ docs/node_modules/
 docs/dist/
 docs/.astro/
 docs/.bun/
+
+# Stray root-level binaries from `go build ./cmd/...`
+/chitd
+/chit-mcp
+/chit-reconcile
+/chit-claude
+/chit-tui

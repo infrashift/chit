@@ -129,6 +129,7 @@ func New(a *app.App) http.Handler {
 			r.Get("/commands", listCommands(a))
 
 			// Search
+			r.Post("/posts/search", searchPostsGlobal(a))
 			r.Post("/teams/{id}/posts/search", searchPostsInTeam(a))
 			r.Post("/channels/{id}/posts/search", searchPostsInChannel(a))
 
