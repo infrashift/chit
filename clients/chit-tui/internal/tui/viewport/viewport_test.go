@@ -47,6 +47,38 @@ func TestViewport_AppendPost(t *testing.T) {
 	}
 }
 
+func TestViewport_AppendPostKeepsExistingSelection(t *testing.T) {
+	m := viewport.New(testStyles())
+	m.SetSize(80, 24)
+	m.Focus()
+	// SetPosts takes server order (newest first) and reverses for display.
+	m.SetPosts([]*model.Post{
+		{ID: "p2", UserID: "u2", Content: "Second", CreateAt: 1700000001000},
+		{ID: "p1", UserID: "u1", Content: "First", CreateAt: 1700000000000},
+	})
+	// Move the selection off the last post (p2 at the bottom) up to p1.
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+
+	m.AppendPost(&model.Post{ID: "p3", UserID: "u1", Content: "Third", CreateAt: 1700000002000})
+
+	if p := m.SelectedPost(); p == nil || p.ID != "p1" {
+		t.Errorf("expected selection to stay on p1, got %v", p)
+	}
+}
+
+func TestViewport_AppendPostIntoEmptyChannelSelectsIt(t *testing.T) {
+	m := viewport.New(testStyles())
+	m.SetSize(80, 24)
+	// A channel that starts empty leaves the cursor unset (-1).
+	m.SetPosts(nil)
+
+	m.AppendPost(&model.Post{ID: "p1", UserID: "u1", Content: "First", CreateAt: 1700000000000})
+
+	if p := m.SelectedPost(); p == nil || p.ID != "p1" {
+		t.Errorf("expected the first appended post to be selected, got %v", p)
+	}
+}
+
 func TestViewport_SetUsernames(t *testing.T) {
 	m := viewport.New(testStyles())
 	m.SetSize(80, 24)

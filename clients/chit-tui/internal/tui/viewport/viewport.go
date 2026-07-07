@@ -63,9 +63,14 @@ func (m *Model) SetPosts(posts []*model.Post) {
 	m.viewport.GotoBottom()
 }
 
-// AppendPost adds a post at the end.
+// AppendPost adds a post at the end. A channel that started empty has no
+// selection yet (cursor -1); select the first post that arrives so
+// Enter/`t` work without reloading the channel.
 func (m *Model) AppendPost(p *model.Post) {
 	m.posts = append(m.posts, p)
+	if m.cursor < 0 {
+		m.cursor = len(m.posts) - 1
+	}
 	m.updateContent()
 	m.viewport.GotoBottom()
 }
