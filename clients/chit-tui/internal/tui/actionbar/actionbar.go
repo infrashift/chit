@@ -85,6 +85,7 @@ func (m Model) buttons() []button {
 		button{label: "^S Search", action: ActionSearch},
 		button{label: "^D DM", action: ActionPeople},
 		button{label: "^N New", action: ActionNewChannel},
+		button{label: "? Help", action: ActionHelp},
 	)
 	return btns
 }

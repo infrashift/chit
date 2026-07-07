@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Unified palette** — One overlay (`Ctrl+K`) for all navigation: channels/DMs sorted by mentions → unread → recency with fuzzy filtering, `@` people search (opens a DM), `/` slash commands, and `?` message search scoped to the active channel; `Ctrl+S`/`Ctrl+D` open it pre-filled
+- **Action bar** — Bottom bar with clickable buttons (`^K Jump`, `^S Search`, `^D DM`, `^N New`, `? Help`, `esc Back` in threads), active team/channel context, transient errors, and a WebSocket connection indicator
+- **Mouse support** — Wheel scrolls the history/thread pane and moves the palette cursor; clicks trigger bar buttons and select palette rows; clicking outside the palette closes it
+- **Help overlay** — `?` (from the history pane) or the bar button shows keybindings and mouse actions
+- **All-team channels** — Channels are fetched for every team at startup; palette rows show a `· team` suffix when more than one team is loaded
+
+### Changed
+
+- **Two-pane layout** — The persistent sidebar is gone; chat history and input span the full width, and the palette is the only channel navigation
+- **Threads fill the main pane** — Enter on a post swaps the history pane for the thread; replies are composed in the regular input box and `Esc` returns to the channel (`Ctrl+T` and the side panel are removed)
+- **Focus cycle** — `Tab` toggles between the main pane and the input; `Esc` in the input refocuses the history pane
+- **DM picker reduced to member selection** — Starting DMs moved to the palette's `@` mode; the picker overlay now only selects members for new private channels (group-DM creation via multi-select was dropped)
+- Unread/mention counts, DM display names, and per-team channel lists are owned by the root model (previously sidebar state)
+
+### Removed
+
+- Sidebar, command palette (`cmdpalette`), and search (`search`) components — superseded by the unified palette and action bar
+
+### Added (initial development)
+
 - **Core TUI** — Full terminal client with Elm Architecture (Model-Update-View) using Bubble Tea
 - **Sidebar** — Team and channel navigation with cursor-based selection
 - **Viewport** — Scrollable post list with Glamour markdown rendering
@@ -46,7 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Keybindings reference** — Documented `Ctrl+N` (channel creator), `Ctrl+D` (DM picker), `t` (tag picker), channel creator fields, DM picker multi-select, and tag picker controls
 - **UAT tutorial scenarios** — Scenarios for creating team channels, direct messages, and group channels (Scenarios 11-13)
 
-### Changed
+### Changed (initial development)
 
 - Viewport and thread renderers use theme-derived Glamour style configs instead of the built-in `"dark"` style
 - UAT tutorial Scenario 2 rewritten to reflect auto-selection behavior (sidebar starts in channels view, not teams view)

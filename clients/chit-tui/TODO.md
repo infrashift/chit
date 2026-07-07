@@ -640,3 +640,42 @@
 - [x] separator_test.go: TestSameDay_True, TestSameDay_False, TestFormatDaySeparator, TestFormatDaySeparator_NarrowWidth
 - [x] viewport_test.go: TestViewport_DaySeparator_MultiDay, TestViewport_DaySeparator_SameDay, TestViewport_DaySeparator_SinglePost
 - [x] Coverage: 92% overall viewport, 100% on new helpers
+
+# UI-Flow Redesign: Two-Pane Layout + Unified Palette
+
+## Step 1: Action bar + mouse plumbing
+- [x] internal/tui/actionbar: clickable button spans (cell-width hit-testing), context, error, connection dot
+- [x] styles.BarButton; statusBar() removed
+- [x] tea.WithMouseCellMotion(); mouse.go with wheel scroll + bar HitTest dispatch
+- [x] viewport.ScrollBy / thread.ScrollBy (focus-independent wheel scrolling)
+- [x] Tests: actionbar spans/indicators, app-level wheel + bar-click tests
+
+## Step 2: All-team channels + root-owned badge state
+- [x] TeamsLoadedMsg fans out FetchChannels per team → channelsByTeam + flattened channels
+- [x] unread/mentions/dmDisplayNames moved from sidebar to root Model (UnreadCount/MentionCount accessors)
+- [x] selectChannel helper shared by all channel-activation flows
+- [x] Tests: all-team fetch, cross-team selection, DM keeps active team, WS unread on root
+
+## Step 3: Unified palette
+- [x] internal/tui/palette: ModeChannels (default), ModeUsers (@, debounced), ModeCommands (/), ModeSearch (?)
+- [x] Fuzzy subsequence matcher (fuzzy.go) — no new dependency
+- [x] Default sort: mentions → unread → LastPostAt; unread/mention badges; · team suffix (multi-team)
+- [x] Ctrl+K / Ctrl+S(?) / Ctrl+D(@) / slash-trigger open the palette; RowAt/ChooseRow mouse hooks
+- [x] Tests: fuzzy, mode detection, sorting, filtering, debounce, search submit/select, RowAt
+
+## Step 4: Remove sidebar + layout rework
+- [x] Sidebar package deleted; full-width two-pane layout; Tab cycles viewport ↔ input
+- [x] Centered overlays composited via a single overlay table; mention popup anchored to full-width input
+- [x] channelAutoSelected one-shot flag preserves no-reselect-on-reload behavior
+
+## Step 5: Thread as main pane
+- [x] mainPane enum; Enter on a post swaps the history pane for the thread
+- [x] thread.Model: textarea/Toggle/Visible removed; read-only full-pane viewport; Clear()
+- [x] input.SendMsg routes replies (RootID) while in the thread pane; Esc returns to channel
+- [x] Ctrl+T removed; action bar shows [esc Back] in thread pane
+
+## Step 6: Cleanup + help + docs
+- [x] cmdpalette and search packages deleted; dmpicker reduced to member-picker mode
+- [x] internal/tui/help overlay (? key + bar button; any key/click closes)
+- [x] Docs: tui/index.mdx, architecture.md, keybindings.md, project-structure.md
+- [x] CHANGELOG.md updated

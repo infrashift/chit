@@ -103,6 +103,7 @@ func TestHitTest_AllButtonsReachable(t *testing.T) {
 	for _, want := range []actionbar.Action{
 		actionbar.ActionPalette, actionbar.ActionSearch,
 		actionbar.ActionPeople, actionbar.ActionNewChannel,
+		actionbar.ActionHelp,
 	} {
 		if !found[want] {
 			t.Errorf("action %v not reachable via HitTest", want)

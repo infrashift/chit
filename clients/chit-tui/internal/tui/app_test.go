@@ -969,14 +969,14 @@ func TestModel_UserSearchResultsMsg_Error(t *testing.T) {
 	}
 }
 
-func TestModel_DMPickerUserPicked(t *testing.T) {
+func TestModel_PaletteUserChosenCreatesDM(t *testing.T) {
 	m := setupModel(t)
 
-	_, cmd := m.Update(dmpicker.UserPickedMsg{
+	_, cmd := m.Update(palette.UserChosenMsg{
 		User: &model.User{ID: "u2", Username: "bob"},
 	})
 	if cmd == nil {
-		t.Error("expected command from UserPickedMsg")
+		t.Error("expected command from UserChosenMsg")
 	}
 }
 
@@ -1271,20 +1271,6 @@ func TestModel_SkinPickerKeyInterception(t *testing.T) {
 }
 
 // --- Group Channel Tests ---
-
-func TestModel_GroupPickedMsg(t *testing.T) {
-	m := setupModel(t)
-
-	_, cmd := m.Update(dmpicker.GroupPickedMsg{
-		Users: []*model.User{
-			{ID: "u2", Username: "bob"},
-			{ID: "u3", Username: "charlie"},
-		},
-	})
-	if cmd == nil {
-		t.Error("expected command from GroupPickedMsg")
-	}
-}
 
 func TestModel_GroupCreatedMsg(t *testing.T) {
 	m := setupModel(t)

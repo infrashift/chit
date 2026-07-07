@@ -1,6 +1,7 @@
 package palette_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -413,5 +414,135 @@ func TestPalette_MoveCursorClamped(t *testing.T) {
 	// No panic and still selectable.
 	if cmd := m.ChooseRow(1); cmd == nil {
 		t.Error("expected ChooseRow to work after cursor movement")
+	}
+}
+
+func TestPalette_FocusBlurAndStyles(t *testing.T) {
+	m := newPalette()
+	m.Open("")
+	if !m.Focused() {
+		t.Error("expected focused after Open")
+	}
+	m.Blur()
+	if m.Focused() {
+		t.Error("expected blurred after Blur")
+	}
+	m.Focus()
+	if !m.Focused() {
+		t.Error("expected focused after Focus")
+	}
+	m.SetStyles(styles.New(theme.TokyoNight()))
+	if m.View() == "" {
+		t.Error("expected non-empty view after SetStyles")
+	}
+}
+
+func TestPalette_TeamNameFallsBackToSlug(t *testing.T) {
+	m := newPalette()
+	m.SetTeams([]*model.Team{
+		{ID: "t1", Name: "eng"},
+		{ID: "t2", DisplayName: "Design"},
+	})
+	m.SetChannels([]*model.Channel{{ID: "c1", DisplayName: "General", TeamID: "t1"}})
+	m.Open("")
+
+	view := testutil.StripANSI(m.View())
+	if !strings.Contains(view, "General · eng") {
+		t.Errorf("expected team slug fallback in suffix:\n%s", view)
+	}
+}
+
+func TestPalette_ChannelNameFallsBackToSlug(t *testing.T) {
+	m := newPalette()
+	m.SetChannels([]*model.Channel{{ID: "c1", Name: "town-square"}})
+	m.Open("")
+
+	view := testutil.StripANSI(m.View())
+	if !strings.Contains(view, "town-square") {
+		t.Errorf("expected channel Name fallback:\n%s", view)
+	}
+}
+
+func TestPalette_SearchResultUnknownAuthorAndLongContent(t *testing.T) {
+	m := newPalette()
+	m.SetActiveChannel("General")
+	m.Open("?")
+	m, _ = typeRunes(m, "x")
+	m.SetSearchResults([]*model.Post{{
+		ID:      "p1",
+		UserID:  "user-abcdef123456",
+		Content: strings.Repeat("long content ", 20),
+	}})
+
+	view := testutil.StripANSI(m.View())
+	if !strings.Contains(view, "user-abc") {
+		t.Errorf("expected truncated user ID as author:\n%s", view)
+	}
+	if !strings.Contains(view, "…") {
+		t.Errorf("expected truncated excerpt:\n%s", view)
+	}
+}
+
+func TestPalette_CursorScrollsWindow(t *testing.T) {
+	m := palette.New(styles.New(theme.TokyoNight()))
+	m.SetSize(120, 16) // maxVisibleRows = max(16/2-6, 5) = 5
+	channels := make([]*model.Channel, 10)
+	for i := range channels {
+		channels[i] = &model.Channel{
+			ID:          fmt.Sprintf("c%d", i),
+			DisplayName: fmt.Sprintf("chan-%02d", i),
+			LastPostAt:  int64(100 - i),
+		}
+	}
+	m.SetChannels(channels)
+	m.Open("")
+
+	// Move the cursor past the visible window; the window follows.
+	for range 8 {
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	}
+	view := testutil.StripANSI(m.View())
+	if !strings.Contains(view, "chan-08") {
+		t.Errorf("expected window to scroll to cursor:\n%s", view)
+	}
+	if strings.Contains(view, "chan-00") {
+		t.Errorf("expected first row scrolled out of window:\n%s", view)
+	}
+
+	// RowAt maps the first visible line to the window start, not row 0.
+	idx, ok := m.RowAt(4)
+	if !ok || idx != 4 {
+		t.Errorf("expected RowAt(4) = window start 4, got idx=%d ok=%v", idx, ok)
+	}
+}
+
+func TestPalette_EnterOnEmptySearchIsNoOp(t *testing.T) {
+	m := newPalette()
+	m.SetActiveChannel("General")
+	m.Open("?")
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("expected no command for empty search submit")
+	}
+}
+
+func TestPalette_EnterOnEmptyUserQueryIsNoOp(t *testing.T) {
+	m := newPalette()
+	m.Open("@")
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("expected no command for empty people query")
+	}
+}
+
+func TestPalette_UpdateIgnoredWhenHidden(t *testing.T) {
+	m := newPalette()
+	m.SetChannels(testChannels())
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("expected no command while hidden")
 	}
 }

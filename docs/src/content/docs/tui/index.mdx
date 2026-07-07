@@ -10,6 +10,11 @@ markdown rendering, and customizable themes, all from your terminal. Built
 with Go and the Charmbracelet Bubble Tea ecosystem, living in the Chit
 monorepo under `clients/chit-tui`.
 
+The interface is a clean two-pane layout: chat history on top, message input
+below, and a clickable action bar along the bottom. All navigation flows
+through the unified palette — press `Ctrl+K` to jump between channels, find
+people, run slash commands, or search messages.
+
 Start with [Installation](/chit/tui/getting-started/installation/), or jump
 to the [Keybindings reference](/chit/tui/reference/keybindings/).
 
@@ -17,28 +22,28 @@ to the [Keybindings reference](/chit/tui/reference/keybindings/).
   <Card title="Real-Time Messaging" icon="rocket">
     WebSocket connectivity with automatic reconnection and exponential backoff. Messages appear instantly as they're posted.
   </Card>
+  <Card title="Unified Palette" icon="magnifier">
+    One overlay for everything (Ctrl+K): jump to channels sorted by unread activity, find people with `@`, run slash commands with `/`, and search messages with `?`.
+  </Card>
   <Card title="Threaded Conversations" icon="comment">
-    Open a side panel to view and reply to threaded discussions without leaving the main channel view.
+    Press Enter on a post to open its thread full-screen. Reply from the regular input box; Esc returns to the channel.
+  </Card>
+  <Card title="Mouse Support" icon="setting">
+    Click action-bar buttons, select palette rows, and wheel-scroll history — while everything stays fully keyboard-drivable.
   </Card>
   <Card title="Markdown Rendering" icon="document">
     Posts rendered with Glamour for rich terminal output — code blocks, links, emphasis, and more.
-  </Card>
-  <Card title="Command Palette" icon="magnifier">
-    Fuzzy-filter overlay for slash commands. Open with Ctrl+K and start typing to find commands instantly.
-  </Card>
-  <Card title="Post Search" icon="magnifier">
-    Search posts in the current channel with Ctrl+S. Navigate results and jump to matching messages.
   </Card>
   <Card title="Customizable Themes" icon="sun">
     Four built-in themes — Tokyo Night, Catppuccin, Kanagawa, and Nightfox — plus JSON-based custom theme support.
   </Card>
   <Card title="Unread Badges" icon="information">
-    Per-channel unread message counts displayed in the sidebar so you always know where new messages are.
+    Per-channel unread and mention counts surface in the palette, which sorts the most active channels to the top.
   </Card>
   <Card title="Post Tagging" icon="list-format">
     Tag posts with `#tag` syntax or the tag picker overlay. Search by tags to find relevant conversations quickly.
   </Card>
-  <Card title="Keyboard Driven" icon="laptop">
-    Navigate entirely by keyboard. Tab between panes, toggle panels, open overlays — no mouse required.
+  <Card title="Keyboard First" icon="laptop">
+    Every mouse action has a keybinding. Press `?` for the built-in help overlay.
   </Card>
 </CardGrid>

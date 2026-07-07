@@ -78,14 +78,27 @@ The Bubble Tea TUI layer.
 
 | File | Purpose |
 |------|---------|
-| `app.go` | Root `Model` — composes all sub-components, message routing, focus management |
+| `app.go` | Root `Model` — composes all sub-components, message routing, focus and main-pane management, overlay compositing |
+| `mouse.go` | Mouse routing — wheel scroll, action-bar hit-testing, palette clicks |
 | `messages.go` | All `tea.Msg` types (`UserLoadedMsg`, `PostsLoadedMsg`, etc.) |
 | `commands.go` | `tea.Cmd` wrappers (`FetchMe`, `FetchPosts`, `ListenWebSocket`, etc.) |
 | `keymap.go` | `KeyMap` struct with global keybindings |
 
-### `tui/sidebar/`
+### `tui/palette/`
 
-Team and channel navigation. Cursor-based list with unread badges.
+The unified palette overlay (Ctrl+K): jump to channels/DMs sorted by unread
+activity, `@` people search, `/` slash commands, `?` message search. Includes
+a hand-rolled fuzzy subsequence matcher (`fuzzy.go`).
+
+### `tui/actionbar/`
+
+Bottom action/status bar: clickable buttons (hit-tested by cell span),
+active team/channel context, transient errors, and the WebSocket connection
+indicator.
+
+### `tui/help/`
+
+Static help overlay listing keybindings and mouse actions.
 
 ### `tui/viewport/`
 
@@ -97,19 +110,12 @@ Message input wrapping `bubbles/textarea`. Detects `/` prefix for slash command 
 
 ### `tui/thread/`
 
-Thread side panel with its own viewport and reply input.
+Read-only thread view that swaps into the main pane; replies are composed in
+the regular input box.
 
 ### `tui/post/`
 
 Single post renderer using Glamour markdown. Shows username, timestamp, pinned badge, encrypted badge, reply count badge, and tag badges.
-
-### `tui/cmdpalette/`
-
-Command palette overlay with fuzzy filtering.
-
-### `tui/search/`
-
-Post search overlay with query input and result navigation. Supports `#tag` syntax to filter by tags.
 
 ### `tui/mention/`
 
@@ -117,7 +123,8 @@ Post search overlay with query input and result navigation. Supports `#tag` synt
 
 ### `tui/dmpicker/`
 
-DM picker overlay for user search. Supports single-select (1:1 DM) and multi-select (group channel) modes.
+Member-selection overlay used when creating private channels (multi-select
+with Tab). Starting DMs is handled by the palette's `@` mode.
 
 ### `tui/skinpicker/`
 

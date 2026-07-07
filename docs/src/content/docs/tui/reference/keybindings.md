@@ -1,9 +1,11 @@
 ---
 title: Keybindings
-description: Keyboard shortcuts for Chit TUI.
+description: Keyboard shortcuts and mouse actions for Chit TUI.
 ---
 
-Chit TUI is fully keyboard-driven. All navigation and actions are performed through keybindings.
+Chit TUI is keyboard-first: every action has a keybinding, and the most
+common ones are also clickable on the bottom action bar. Press `?` (from the
+history pane) for the built-in help overlay.
 
 ## Global Keybindings
 
@@ -12,47 +14,64 @@ These work regardless of which pane is focused:
 | Key | Action |
 |-----|--------|
 | `Ctrl+C` | Quit |
-| `Tab` | Focus next pane |
-| `Shift+Tab` | Focus previous pane |
-| `Ctrl+T` | Toggle thread panel |
-| `Ctrl+K` | Open command palette |
-| `Ctrl+S` | Open search |
+| `Tab` / `Shift+Tab` | Toggle focus between the main pane and the input |
+| `Ctrl+K` | Open the palette (jump to channels/DMs) |
+| `Ctrl+S` | Open the palette in message-search mode (`?`) |
+| `Ctrl+D` | Open the palette in people mode (`@`) |
 | `Ctrl+N` | Create a new team channel |
-| `Ctrl+D` | Create a new direct message or group channel |
-| `Esc` | Close active overlay or thread |
+| `?` | Help overlay (only when the history/thread pane is focused) |
+| `Esc` | Close overlay → leave thread → move focus from input to history |
 
-## Focus Order
+## The Palette
 
-Pressing `Tab` cycles focus through panes in this order:
+`Ctrl+K` opens the unified palette. With an empty query it lists channels and
+DMs sorted by mentions, then unread count, then most recent post — typing
+fuzzy-filters the list. The first character switches modes:
 
-1. **Sidebar** — Team and channel lists
-2. **Viewport** — Message list
-3. **Input** — Message composition
-4. **Thread** — Thread panel (only when visible)
-
-`Shift+Tab` cycles in reverse. The command palette, search overlay, and thread panel are separate focus targets that don't participate in the Tab cycle.
-
-## Sidebar
-
-When the sidebar is focused:
+| Prefix | Mode |
+|--------|------|
+| *(none)* | Jump to a channel or DM |
+| `@` | Search people; `Enter` opens (or creates) a DM |
+| `/` | Slash commands |
+| `?` | Full-text message search in the **active channel** |
 
 | Key | Action |
 |-----|--------|
-| `j` / `↓` | Move cursor down |
-| `k` / `↑` | Move cursor up |
-| `Enter` | Select team or channel |
-| `Esc` / `Backspace` | Go back to team list |
+| (any text) | Filter / type query |
+| `↑` / `↓` | Move selection |
+| `Enter` | Select row (in `?`/`@` mode with no results: run the search) |
+| `Esc` | Close palette |
 
-## Viewport
+## Mouse Actions
 
-When the viewport is focused:
+| Mouse | Action |
+|-------|--------|
+| Wheel | Scroll the history/thread pane; move the palette cursor |
+| Click a bar button | Trigger that action (same as its keybinding) |
+| Click a palette row | Select it |
+| Click outside the palette | Close it |
+
+## History Pane (Viewport)
+
+When the message history is focused:
 
 | Key | Action |
 |-----|--------|
-| `j` / `↓` | Scroll down |
-| `k` / `↑` | Scroll up |
-| `Enter` | Open thread for selected post |
-| `t` | Open tag picker for selected post |
+| `j` / `↓` | Move post selection down |
+| `k` / `↑` | Move post selection up |
+| `Enter` | Open the thread for the selected post (fills the main pane) |
+| `t` | Open tag picker for the selected post |
+
+## Thread Pane
+
+Opening a thread replaces the history pane; the input box now composes
+replies to the thread root.
+
+| Key | Action |
+|-----|--------|
+| `j`/`k`, `↑`/`↓`, `PgUp`/`PgDn` | Scroll the thread |
+| `Enter` (in input) | Send reply |
+| `Esc` | Return to the channel view |
 
 ## Input
 
@@ -60,31 +79,10 @@ When the input area is focused:
 
 | Key | Action |
 |-----|--------|
-| (any text) | Type message |
-| `Enter` | Send message |
-| `/` | Trigger command palette (when at start of line) |
-
-## Thread Panel
-
-When the thread panel is focused:
-
-| Key | Action |
-|-----|--------|
-| `j` / `↓` | Scroll thread |
-| `k` / `↑` | Scroll thread |
-| `Enter` | Send reply |
-| `Esc` | Close thread |
-
-## Command Palette
-
-When the command palette is open:
-
-| Key | Action |
-|-----|--------|
-| (any text) | Filter commands |
-| `↑` / `↓` | Navigate results |
-| `Enter` | Select command |
-| `Esc` | Close palette |
+| (any text) | Type message (`@` triggers mention autocomplete) |
+| `Enter` | Send message (or thread reply) |
+| `Alt+Enter` | Insert newline |
+| `/` | At the start of a message, `Enter` opens the palette in command mode |
 
 ## Channel Creator
 
@@ -99,22 +97,23 @@ When the channel creator overlay is open (`Ctrl+N`):
 | `Enter` | Submit the new channel |
 | `Esc` | Cancel and close |
 
-## DM Picker
+## Member Picker
 
-When the DM picker overlay is open (`Ctrl+D`):
+When creating a **private** channel, the member picker opens to select its
+members:
 
 | Key | Action |
 |-----|--------|
 | (any text) | Search for users by name |
 | `↑` / `↓` | Navigate search results |
-| `Enter` | Select user (1:1 DM) or create group (if 2+ selected) |
-| `Tab` | Toggle multi-select on highlighted user (for group channels) |
+| `Tab` | Toggle multi-select on the highlighted user |
+| `Enter` | Add the selected member(s) |
 | `Backspace` | Remove last selected user (when search input is empty) |
-| `Esc` | Close picker |
+| `Esc` | Skip adding members |
 
 ## Tag Picker
 
-When the tag picker overlay is open (`t` from the viewport):
+When the tag picker overlay is open (`t` from the history pane):
 
 | Key | Action |
 |-----|--------|
@@ -124,13 +123,7 @@ When the tag picker overlay is open (`t` from the viewport):
 | `Ctrl+N` | Create a new tag from the filter text |
 | `Esc` | Close tag picker |
 
-## Search Overlay
+## Help Overlay
 
-When the search overlay is open:
-
-| Key | Action |
-|-----|--------|
-| (any text) | Type search query (use `#tag` to filter by tags) |
-| `Enter` | Submit search (or select result) |
-| `↑` / `↓` | Navigate results |
-| `Esc` | Close search |
+`?` (from the history or thread pane) or the `[? Help]` bar button opens the
+help overlay. Any key or click closes it.

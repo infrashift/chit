@@ -22,7 +22,7 @@ func TestDMPicker_OpenClose(t *testing.T) {
 		t.Error("should not be visible initially")
 	}
 
-	m.Open()
+	m.OpenForMembers()
 	if !m.Visible() {
 		t.Error("should be visible after Open()")
 	}
@@ -36,7 +36,7 @@ func TestDMPicker_OpenClose(t *testing.T) {
 func TestDMPicker_EscapeCloses(t *testing.T) {
 	m := dmpicker.New(testStyles())
 	m.SetSize(80, 40)
-	m.Open()
+	m.OpenForMembers()
 
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
 	if m.Visible() {
@@ -47,7 +47,7 @@ func TestDMPicker_EscapeCloses(t *testing.T) {
 func TestDMPicker_NavigateResults(t *testing.T) {
 	m := dmpicker.New(testStyles())
 	m.SetSize(80, 40)
-	m.Open()
+	m.OpenForMembers()
 	m.SetResults([]*model.User{
 		{ID: "u1", Username: "alice"},
 		{ID: "u2", Username: "bob"},
@@ -65,19 +65,19 @@ func TestDMPicker_NavigateResults(t *testing.T) {
 		t.Fatal("expected command from enter")
 	}
 	msg := cmd()
-	picked, ok := msg.(dmpicker.UserPickedMsg)
+	picked, ok := msg.(dmpicker.MembersPickedMsg)
 	if !ok {
-		t.Fatalf("expected UserPickedMsg, got %T", msg)
+		t.Fatalf("expected MembersPickedMsg, got %T", msg)
 	}
-	if picked.User.Username != "charlie" {
-		t.Errorf("expected charlie, got %s", picked.User.Username)
+	if picked.Users[0].Username != "charlie" {
+		t.Errorf("expected charlie, got %s", picked.Users[0].Username)
 	}
 }
 
 func TestDMPicker_SelectFirstUser(t *testing.T) {
 	m := dmpicker.New(testStyles())
 	m.SetSize(80, 40)
-	m.Open()
+	m.OpenForMembers()
 	m.SetResults([]*model.User{
 		{ID: "u1", Username: "alice", DisplayName: "Alice"},
 	})
@@ -88,19 +88,19 @@ func TestDMPicker_SelectFirstUser(t *testing.T) {
 		t.Fatal("expected command from enter")
 	}
 	msg := cmd()
-	picked, ok := msg.(dmpicker.UserPickedMsg)
+	picked, ok := msg.(dmpicker.MembersPickedMsg)
 	if !ok {
-		t.Fatalf("expected UserPickedMsg, got %T", msg)
+		t.Fatalf("expected MembersPickedMsg, got %T", msg)
 	}
-	if picked.User.ID != "u1" {
-		t.Errorf("expected u1, got %s", picked.User.ID)
+	if picked.Users[0].ID != "u1" {
+		t.Errorf("expected u1, got %s", picked.Users[0].ID)
 	}
 }
 
 func TestDMPicker_SearchTrigger(t *testing.T) {
 	m := dmpicker.New(testStyles())
 	m.SetSize(80, 40)
-	m.Open()
+	m.OpenForMembers()
 
 	// Type a search term
 	for _, r := range "alice" {
@@ -126,7 +126,7 @@ func TestDMPicker_SearchTrigger(t *testing.T) {
 func TestDMPicker_EnterEmptyNoOp(t *testing.T) {
 	m := dmpicker.New(testStyles())
 	m.SetSize(80, 40)
-	m.Open()
+	m.OpenForMembers()
 
 	// Enter with no text and no results => no-op
 	var cmd tea.Cmd
@@ -139,7 +139,7 @@ func TestDMPicker_EnterEmptyNoOp(t *testing.T) {
 func TestDMPicker_UpBounds(t *testing.T) {
 	m := dmpicker.New(testStyles())
 	m.SetSize(80, 40)
-	m.Open()
+	m.OpenForMembers()
 	m.SetResults([]*model.User{
 		{ID: "u1", Username: "alice"},
 		{ID: "u2", Username: "bob"},
@@ -149,16 +149,16 @@ func TestDMPicker_UpBounds(t *testing.T) {
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
 	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	msg := cmd()
-	picked := msg.(dmpicker.UserPickedMsg)
-	if picked.User.Username != "alice" {
-		t.Errorf("expected alice, got %s", picked.User.Username)
+	picked := msg.(dmpicker.MembersPickedMsg)
+	if picked.Users[0].Username != "alice" {
+		t.Errorf("expected alice, got %s", picked.Users[0].Username)
 	}
 }
 
 func TestDMPicker_DownBounds(t *testing.T) {
 	m := dmpicker.New(testStyles())
 	m.SetSize(80, 40)
-	m.Open()
+	m.OpenForMembers()
 	m.SetResults([]*model.User{
 		{ID: "u1", Username: "alice"},
 	})
@@ -168,16 +168,16 @@ func TestDMPicker_DownBounds(t *testing.T) {
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	msg := cmd()
-	picked := msg.(dmpicker.UserPickedMsg)
-	if picked.User.Username != "alice" {
-		t.Errorf("expected alice, got %s", picked.User.Username)
+	picked := msg.(dmpicker.MembersPickedMsg)
+	if picked.Users[0].Username != "alice" {
+		t.Errorf("expected alice, got %s", picked.Users[0].Username)
 	}
 }
 
 func TestDMPicker_ViewShowsResults(t *testing.T) {
 	m := dmpicker.New(testStyles())
 	m.SetSize(80, 40)
-	m.Open()
+	m.OpenForMembers()
 	m.SetResults([]*model.User{
 		{ID: "u1", Username: "alice", DisplayName: "Alice"},
 	})
@@ -213,7 +213,7 @@ func TestDMPicker_IgnoresInputWhenNotVisible(t *testing.T) {
 
 func TestDMPicker_FocusBlur(t *testing.T) {
 	m := dmpicker.New(testStyles())
-	m.Open()
+	m.OpenForMembers()
 	m.Blur()
 	// When blurred, should not respond to keys
 	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -235,7 +235,7 @@ func TestDMPicker_FocusBlur(t *testing.T) {
 func TestDMPicker_TabTogglesSelection(t *testing.T) {
 	m := dmpicker.New(testStyles())
 	m.SetSize(80, 40)
-	m.Open()
+	m.OpenForMembers()
 	m.SetResults([]*model.User{
 		{ID: "u1", Username: "alice"},
 		{ID: "u2", Username: "bob"},
@@ -255,10 +255,10 @@ func TestDMPicker_TabTogglesSelection(t *testing.T) {
 	_ = view
 }
 
-func TestDMPicker_GroupPickedMsg(t *testing.T) {
+func TestDMPicker_MultiSelectPicksAll(t *testing.T) {
 	m := dmpicker.New(testStyles())
 	m.SetSize(80, 40)
-	m.Open()
+	m.OpenForMembers()
 	m.SetResults([]*model.User{
 		{ID: "u1", Username: "alice"},
 		{ID: "u2", Username: "bob"},
@@ -271,15 +271,15 @@ func TestDMPicker_GroupPickedMsg(t *testing.T) {
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 
-	// Now 2 selected → Enter should emit GroupPickedMsg
+	// Now 2 selected → Enter should emit MembersPickedMsg
 	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("expected command from enter")
 	}
 	msg := cmd()
-	group, ok := msg.(dmpicker.GroupPickedMsg)
+	group, ok := msg.(dmpicker.MembersPickedMsg)
 	if !ok {
-		t.Fatalf("expected GroupPickedMsg, got %T", msg)
+		t.Fatalf("expected MembersPickedMsg, got %T", msg)
 	}
 	if len(group.Users) != 2 {
 		t.Errorf("expected 2 users, got %d", len(group.Users))
@@ -289,7 +289,7 @@ func TestDMPicker_GroupPickedMsg(t *testing.T) {
 func TestDMPicker_MaxSelection(t *testing.T) {
 	m := dmpicker.New(testStyles())
 	m.SetSize(80, 40)
-	m.Open()
+	m.OpenForMembers()
 
 	users := make([]*model.User, 8)
 	for i := range 8 {
@@ -315,9 +315,9 @@ func TestDMPicker_MaxSelection(t *testing.T) {
 		t.Fatal("expected command from enter")
 	}
 	msg := cmd()
-	group, ok := msg.(dmpicker.GroupPickedMsg)
+	group, ok := msg.(dmpicker.MembersPickedMsg)
 	if !ok {
-		t.Fatalf("expected GroupPickedMsg, got %T", msg)
+		t.Fatalf("expected MembersPickedMsg, got %T", msg)
 	}
 	if len(group.Users) != 7 {
 		t.Errorf("expected 7 users (max), got %d", len(group.Users))
@@ -327,7 +327,7 @@ func TestDMPicker_MaxSelection(t *testing.T) {
 func TestDMPicker_BackspaceRemovesLastSelected(t *testing.T) {
 	m := dmpicker.New(testStyles())
 	m.SetSize(80, 40)
-	m.Open()
+	m.OpenForMembers()
 	m.SetResults([]*model.User{
 		{ID: "u1", Username: "alice"},
 		{ID: "u2", Username: "bob"},
@@ -341,22 +341,25 @@ func TestDMPicker_BackspaceRemovesLastSelected(t *testing.T) {
 	// Backspace on empty input removes last selected (bob)
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
 
-	// Now only 1 selected → Enter should emit UserPickedMsg for cursor user (not GroupPickedMsg)
+	// Now only 1 selected → Enter emits MembersPickedMsg with just that user
 	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("expected command from enter")
 	}
 	msg := cmd()
-	_, ok := msg.(dmpicker.UserPickedMsg)
+	picked, ok := msg.(dmpicker.MembersPickedMsg)
 	if !ok {
-		t.Fatalf("expected UserPickedMsg (only 1 selected), got %T", msg)
+		t.Fatalf("expected MembersPickedMsg, got %T", msg)
+	}
+	if len(picked.Users) != 1 {
+		t.Errorf("expected 1 user, got %d", len(picked.Users))
 	}
 }
 
 func TestDMPicker_OpenResetsSelected(t *testing.T) {
 	m := dmpicker.New(testStyles())
 	m.SetSize(80, 40)
-	m.Open()
+	m.OpenForMembers()
 	m.SetResults([]*model.User{
 		{ID: "u1", Username: "alice"},
 		{ID: "u2", Username: "bob"},
@@ -368,7 +371,7 @@ func TestDMPicker_OpenResetsSelected(t *testing.T) {
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 
 	// Re-open should reset
-	m.Open()
+	m.OpenForMembers()
 
 	// Enter should be no-op (no results, no selected, no text)
 	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -380,7 +383,7 @@ func TestDMPicker_OpenResetsSelected(t *testing.T) {
 func TestDMPicker_ViewShowsSelectedChips(t *testing.T) {
 	m := dmpicker.New(testStyles())
 	m.SetSize(80, 40)
-	m.Open()
+	m.OpenForMembers()
 	m.SetResults([]*model.User{
 		{ID: "u1", Username: "alice"},
 		{ID: "u2", Username: "bob"},
@@ -403,7 +406,7 @@ func TestDMPicker_ViewShowsSelectedChips(t *testing.T) {
 func TestDMPicker_ViewShowsGroupHint(t *testing.T) {
 	m := dmpicker.New(testStyles())
 	m.SetSize(80, 40)
-	m.Open()
+	m.OpenForMembers()
 	m.SetResults([]*model.User{
 		{ID: "u1", Username: "alice"},
 		{ID: "u2", Username: "bob"},
@@ -415,8 +418,8 @@ func TestDMPicker_ViewShowsGroupHint(t *testing.T) {
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 
 	view := m.View()
-	if !strings.Contains(view, "create group") {
-		t.Errorf("expected group hint in view:\n%s", view)
+	if !strings.Contains(view, "add members") {
+		t.Errorf("expected add-members hint in view:\n%s", view)
 	}
 }
 
@@ -427,9 +430,6 @@ func TestDMPicker_MemberPickerMode(t *testing.T) {
 
 	if !m.Visible() {
 		t.Error("should be visible after OpenForMembers()")
-	}
-	if m.GetMode() != dmpicker.ModeMemberPicker {
-		t.Errorf("mode = %d, want ModeMemberPicker", m.GetMode())
 	}
 }
 
@@ -500,23 +500,10 @@ func TestDMPicker_MemberPickerHintText(t *testing.T) {
 	}
 }
 
-func TestDMPicker_OpenResetsMode(t *testing.T) {
+func TestDMPicker_SingleSelectedEnterPicksMember(t *testing.T) {
 	m := dmpicker.New(testStyles())
 	m.SetSize(80, 40)
 	m.OpenForMembers()
-	if m.GetMode() != dmpicker.ModeMemberPicker {
-		t.Error("should be in member picker mode")
-	}
-	m.Open()
-	if m.GetMode() != dmpicker.ModeDM {
-		t.Error("Open() should reset to DM mode")
-	}
-}
-
-func TestDMPicker_SingleSelectedEnterPicksUser(t *testing.T) {
-	m := dmpicker.New(testStyles())
-	m.SetSize(80, 40)
-	m.Open()
 	m.SetResults([]*model.User{
 		{ID: "u1", Username: "alice"},
 		{ID: "u2", Username: "bob"},
@@ -525,14 +512,17 @@ func TestDMPicker_SingleSelectedEnterPicksUser(t *testing.T) {
 	// Select only one user
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 
-	// Enter with 1 selected and cursor on result → still emits UserPickedMsg
+	// Enter with 1 selected emits MembersPickedMsg with that user.
 	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("expected command from enter")
 	}
 	msg := cmd()
-	_, ok := msg.(dmpicker.UserPickedMsg)
+	picked, ok := msg.(dmpicker.MembersPickedMsg)
 	if !ok {
-		t.Fatalf("expected UserPickedMsg with 1 selected, got %T", msg)
+		t.Fatalf("expected MembersPickedMsg with 1 selected, got %T", msg)
+	}
+	if len(picked.Users) != 1 || picked.Users[0].ID != "u1" {
+		t.Errorf("unexpected users: %+v", picked.Users)
 	}
 }

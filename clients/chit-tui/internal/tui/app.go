@@ -17,6 +17,7 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/actionbar"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/chcreator"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/dmpicker"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/help"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/input"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/login"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/mention"
@@ -71,6 +72,7 @@ type Model struct {
 	thread                thread.Model
 	actionBar             actionbar.Model
 	palette               palette.Model
+	help                  help.Model
 	mention               mention.Model
 	dmPicker              dmpicker.Model
 	skinPicker            skinpicker.Model
@@ -131,6 +133,7 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 		actionBar:      actionbar.New(s),
 		thread:         thread.New(s),
 		palette:        palette.New(s),
+		help:           help.New(s),
 		mention:        mention.New(s),
 		dmPicker:       dmpicker.New(s),
 		skinPicker:     skinpicker.New(s),
@@ -239,6 +242,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
+		// Any key closes the help overlay.
+		if m.help.Visible() {
+			var cmd tea.Cmd
+			m.help, cmd = m.help.Update(msg)
+			return m, cmd
+		}
+
 		// Intercept keys when the palette is visible; it handles Esc itself,
 		// so refocus the input once it closes.
 		if m.palette.Visible() {
@@ -309,6 +319,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if key.Matches(msg, m.keys.Search) {
 			return m, m.openPalette("?")
+		}
+
+		// "?" is a printable key: only open help when not typing in a text box.
+		if key.Matches(msg, m.keys.Help) && (m.focus == FocusViewport || m.focus == FocusThread) {
+			m.help.Open()
+			return m, nil
 		}
 
 		if key.Matches(msg, m.keys.Escape) {
@@ -683,13 +699,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dmPicker.SetResults(filtered)
 		return m, nil
 
-	case dmpicker.UserPickedMsg:
-		m.dmPicker.Close()
-		if m.me != nil {
-			cmds = append(cmds, CreateDMChannel(m.client, m.me.ID, msg.User.ID))
-		}
-		return m, tea.Batch(cmds...)
-
 	case DMCreatedMsg:
 		if msg.Err != nil {
 			return m, m.setError(msg.Err)
@@ -698,17 +707,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.addDMChannel(msg.Channel)
 			cmds = append(cmds, m.selectChannel(msg.Channel))
 			cmds = append(cmds, FetchDMChannels(m.client))
-		}
-		return m, tea.Batch(cmds...)
-
-	case dmpicker.GroupPickedMsg:
-		m.dmPicker.Close()
-		if m.me != nil {
-			ids := []string{m.me.ID}
-			for _, u := range msg.Users {
-				ids = append(ids, u.ID)
-			}
-			cmds = append(cmds, CreateGroupChannel(m.client, ids))
 		}
 		return m, tea.Batch(cmds...)
 
@@ -839,6 +837,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.input.SetStyles(newStyles)
 		m.thread.SetStyles(newStyles)
 		m.palette.SetStyles(newStyles)
+		m.help.SetStyles(newStyles)
 		m.mention.SetStyles(newStyles)
 		m.dmPicker.SetStyles(newStyles)
 		m.skinPicker.SetStyles(newStyles)
@@ -929,6 +928,7 @@ func (m *Model) centeredOverlays() []overlayRef {
 		{m.chCreator.Visible, m.chCreator.View},
 		{m.tagPicker.Visible, m.tagPicker.View},
 		{m.palette.Visible, m.palette.View},
+		{m.help.Visible, m.help.View},
 	}
 }
 
@@ -1128,6 +1128,7 @@ func (m *Model) resizeComponents() {
 	m.actionBar.SetSize(m.width)
 	m.thread.SetSize(m.width, vpHeight)
 	m.palette.SetSize(m.width, m.height)
+	m.help.SetSize(m.width, m.height)
 	m.dmPicker.SetSize(m.width, m.height)
 	m.skinPicker.SetSize(m.width, m.height)
 	m.chCreator.SetSize(m.width, m.height)

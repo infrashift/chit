@@ -34,6 +34,12 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Any click closes the help overlay.
+	if m.help.Visible() {
+		m.help.Close()
+		return m, nil
+	}
+
 	if m.palette.Visible() {
 		return m.handlePaletteClick(msg)
 	}
@@ -88,6 +94,9 @@ func (m Model) dispatchAction(a actionbar.Action) (tea.Model, tea.Cmd) {
 		return m, m.openPalette("@")
 	case actionbar.ActionNewChannel:
 		return m, m.openChCreator()
+	case actionbar.ActionHelp:
+		m.help.Open()
+		return m, nil
 	case actionbar.ActionCloseThread:
 		if m.mainPane == paneThread {
 			return m, m.closeThread()
@@ -98,6 +107,6 @@ func (m Model) dispatchAction(a actionbar.Action) (tea.Model, tea.Cmd) {
 
 // anyOverlayVisible reports whether any floating overlay is currently open.
 func (m Model) anyOverlayVisible() bool {
-	return m.palette.Visible() || m.dmPicker.Visible() ||
+	return m.palette.Visible() || m.dmPicker.Visible() || m.help.Visible() ||
 		m.skinPicker.Visible() || m.chCreator.Visible() || m.tagPicker.Visible()
 }
