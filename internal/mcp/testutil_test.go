@@ -40,15 +40,15 @@ type fakeChit struct {
 	// wsCh delivers events to any connected WebSocket client.
 	wsCh chan *model.WebSocketEvent
 
-	mu       sync.Mutex
-	agent    model.User
-	alice    model.User
-	team     model.Team
-	channel  model.Channel
-	root     model.Post
-	reply    model.Post
-	tag      model.Tag
-	postSeq  int
+	mu      sync.Mutex
+	agent   model.User
+	alice   model.User
+	team    model.Team
+	channel model.Channel
+	root    model.Post
+	reply   model.Post
+	tag     model.Tag
+	postSeq int
 }
 
 func newFakeChit(t *testing.T) *fakeChit {
@@ -111,7 +111,7 @@ func newFakeChit(t *testing.T) *fakeChit {
 				http.NotFound(w, req)
 				return
 			}
-			writeJSON(w, sanitized(u))
+			writeJSON(w, sanitized(&u))
 		})
 		r.Get("/users/username/{username}", func(w http.ResponseWriter, req *http.Request) {
 			u, ok := f.userByUsername(chi.URLParam(req, "username"))
@@ -119,7 +119,7 @@ func newFakeChit(t *testing.T) *fakeChit {
 				http.NotFound(w, req)
 				return
 			}
-			writeJSON(w, sanitized(u))
+			writeJSON(w, sanitized(&u))
 		})
 
 		r.Get("/teams", func(w http.ResponseWriter, req *http.Request) {
@@ -271,7 +271,7 @@ func (f *fakeChit) handleWS(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	f.mu.Lock()
 	ch := f.wsCh
 	f.mu.Unlock()
@@ -315,9 +315,10 @@ func (f *fakeChit) postByID(id string) (model.Post, bool) {
 	return model.Post{}, false
 }
 
-func sanitized(u model.User) model.User {
-	u.Sanitize()
-	return u
+func sanitized(u *model.User) *model.User {
+	cp := *u
+	cp.Sanitize()
+	return &cp
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -358,7 +359,7 @@ func setupTestMCP(t *testing.T) (context.Context, *mcpsdk.ClientSession, *ChitMC
 	}
 
 	cleanup := func() {
-		cs.Close()
+		_ = cs.Close()
 	}
 
 	return ctx, cs, mcpSrv, cleanup

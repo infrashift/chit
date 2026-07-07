@@ -20,9 +20,15 @@ func main() {
 		Level: slog.LevelInfo,
 	})))
 
+	if err := run(); err != nil {
+		log.Fatalf("chit-mcp: %v", err)
+	}
+}
+
+func run() error {
 	cfg, err := mcp.LoadConfig()
 	if err != nil {
-		log.Fatalf("failed to load config: %v", err)
+		return err
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -58,7 +64,5 @@ func main() {
 	}()
 
 	slog.Info("chit-mcp starting", "server_url", cfg.ServerURL)
-	if err := server.Run(ctx); err != nil {
-		log.Fatalf("mcp server error: %v", err)
-	}
+	return server.Run(ctx)
 }
