@@ -3,8 +3,8 @@ package markdown_test
 import (
 	"testing"
 
-	"github.com/infrashift/chit-tui/internal/tui/ui/markdown"
-	"github.com/infrashift/chit-tui/internal/tui/ui/theme"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/markdown"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
 
 func TestStyleConfig_DocumentMarginZero(t *testing.T) {

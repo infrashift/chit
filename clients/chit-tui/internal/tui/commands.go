@@ -4,9 +4,9 @@ import (
 	"context"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/infrashift/chit-tui/internal/api"
-	"github.com/infrashift/chit-tui/internal/model"
-	"github.com/infrashift/chit-tui/internal/ws"
+	"github.com/infrashift/chit/clients/chit-tui/internal/api"
+	"github.com/infrashift/chit/clients/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/ws"
 )
 
 // FetchMe returns a command that fetches the current user.

@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/infrashift/chit-tui/internal/auth"
+	"github.com/infrashift/chit/clients/chit-tui/internal/auth"
 )
 
 func TestTokenStore_InitialValue(t *testing.T) {

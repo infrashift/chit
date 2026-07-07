@@ -3,7 +3,7 @@ package config_test
 import (
 	"testing"
 
-	"github.com/infrashift/chit-tui/internal/config"
+	"github.com/infrashift/chit/clients/chit-tui/internal/config"
 )
 
 func TestLoad_FromEnv(t *testing.T) {

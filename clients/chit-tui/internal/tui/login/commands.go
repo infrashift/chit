@@ -4,7 +4,7 @@ import (
 	"context"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/infrashift/chit-tui/internal/auth"
+	"github.com/infrashift/chit/clients/chit-tui/internal/auth"
 )
 
 // LoginSuccessMsg is sent when login succeeds.

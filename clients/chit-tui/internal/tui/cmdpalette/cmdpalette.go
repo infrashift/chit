@@ -6,8 +6,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/infrashift/chit-tui/internal/model"
-	"github.com/infrashift/chit-tui/internal/tui/ui/styles"
+	"github.com/infrashift/chit/clients/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 )
 
 // CommandSelectedMsg is sent when a command is selected from the palette.

@@ -1,6 +1,6 @@
 package tui
 
-import "github.com/infrashift/chit-tui/internal/model"
+import "github.com/infrashift/chit/clients/chit-tui/internal/model"
 
 // UserLoadedMsg is sent when the current user is fetched.
 type UserLoadedMsg struct {

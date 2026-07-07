@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/infrashift/chit-tui/internal/auth"
+	"github.com/infrashift/chit/clients/chit-tui/internal/auth"
 )
 
 func TestSaveAndLoadSession(t *testing.T) {

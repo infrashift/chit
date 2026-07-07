@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/infrashift/chit-tui/internal/tui/tagpicker"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/tagpicker"
 )
 
 func TestExtractHashtags_Basic(t *testing.T) {

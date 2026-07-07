@@ -3,8 +3,8 @@ package styles
 import (
 	"github.com/charmbracelet/glamour/ansi"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/infrashift/chit-tui/internal/tui/ui/markdown"
-	"github.com/infrashift/chit-tui/internal/tui/ui/theme"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/markdown"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
 
 // Styles holds all lipgloss styles for the TUI.

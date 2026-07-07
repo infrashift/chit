@@ -7,9 +7,9 @@ import (
 	bvp "github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
-	"github.com/infrashift/chit-tui/internal/model"
-	"github.com/infrashift/chit-tui/internal/tui/post"
-	"github.com/infrashift/chit-tui/internal/tui/ui/styles"
+	"github.com/infrashift/chit/clients/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/post"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 )
 
 // ReplyMsg is sent when a reply is composed.

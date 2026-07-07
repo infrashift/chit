@@ -3,8 +3,8 @@ package styles_test
 import (
 	"testing"
 
-	"github.com/infrashift/chit-tui/internal/tui/ui/styles"
-	"github.com/infrashift/chit-tui/internal/tui/ui/theme"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
 
 func TestNew_ReturnsValidStyles(t *testing.T) {

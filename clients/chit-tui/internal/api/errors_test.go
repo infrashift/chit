@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/infrashift/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 )
 
 func TestAPIError_Error(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/infrashift/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 )
 
 // WSClient defines the WebSocket interface for the TUI.

@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/infrashift/chit-tui/internal/api"
-	"github.com/infrashift/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/api"
+	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 )
 
 func setupTestClient(t *testing.T, mux *http.ServeMux) (api.ChitClient, *httptest.Server) {

@@ -7,7 +7,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/infrashift/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 )
 
 // APIError wraps a server-side AppError with request context.

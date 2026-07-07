@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/infrashift/chit-tui/internal/tui/ui/theme"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
 
 func TestTokyoNight_HasAllColors(t *testing.T) {

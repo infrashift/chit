@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/infrashift/chit-tui/internal/auth"
+	"github.com/infrashift/chit/clients/chit-tui/internal/auth"
 )
 
 func kratosServer(t *testing.T, mux *http.ServeMux) (*auth.KratosClient, *httptest.Server) {

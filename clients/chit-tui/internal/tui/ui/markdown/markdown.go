@@ -3,7 +3,7 @@ package markdown
 import (
 	"github.com/charmbracelet/glamour/ansi"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/infrashift/chit-tui/internal/tui/ui/theme"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
 
 // StyleConfig builds a glamour ansi.StyleConfig derived from the active theme

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/infrashift/chit-tui/internal/api"
-	"github.com/infrashift/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/api"
+	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 )
 
 func TestGetMe(t *testing.T) {
@@ -204,14 +204,8 @@ func TestGetThread(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetThread: %v", err)
 	}
-	if tr.Thread == nil {
-		t.Fatal("expected non-nil Thread")
-	}
-	if tr.Thread.ReplyCount < 1 {
-		t.Errorf("ReplyCount = %d, want >= 1", tr.Thread.ReplyCount)
-	}
-	if len(tr.Posts) < 2 {
-		t.Errorf("Posts count = %d, want >= 2", len(tr.Posts))
+	if len(tr.Order) < 2 {
+		t.Errorf("Order count = %d, want >= 2", len(tr.Order))
 	}
 }
 

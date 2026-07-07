@@ -3,7 +3,7 @@ package testutil_test
 import (
 	"testing"
 
-	"github.com/infrashift/chit-tui/internal/testutil"
+	"github.com/infrashift/chit/clients/chit-tui/internal/testutil"
 )
 
 func TestNewTestUser(t *testing.T) {

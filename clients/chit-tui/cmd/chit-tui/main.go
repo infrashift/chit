@@ -7,13 +7,13 @@ import (
 	"regexp"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/infrashift/chit-tui/internal/api"
-	"github.com/infrashift/chit-tui/internal/auth"
-	"github.com/infrashift/chit-tui/internal/config"
-	"github.com/infrashift/chit-tui/internal/tui"
-	"github.com/infrashift/chit-tui/internal/tui/ui/styles"
-	"github.com/infrashift/chit-tui/internal/tui/ui/theme"
-	"github.com/infrashift/chit-tui/internal/ws"
+	"github.com/infrashift/chit/clients/chit-tui/internal/api"
+	"github.com/infrashift/chit/clients/chit-tui/internal/auth"
+	"github.com/infrashift/chit/clients/chit-tui/internal/config"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
+	"github.com/infrashift/chit/clients/chit-tui/internal/ws"
 )
 
 // termResponseRe matches terminal response sequences that leak into the input

@@ -5,8 +5,8 @@ package e2e_test
 import (
 	"os"
 
-	"github.com/infrashift/chit-tui/internal/api"
-	"github.com/infrashift/chit-tui/internal/ws"
+	"github.com/infrashift/chit/clients/chit-tui/internal/api"
+	"github.com/infrashift/chit/clients/chit-tui/internal/ws"
 )
 
 // Constants matching chit server's seed-uat script.

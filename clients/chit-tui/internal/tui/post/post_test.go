@@ -5,12 +5,12 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/glamour"
-	"github.com/infrashift/chit-tui/internal/model"
-	"github.com/infrashift/chit-tui/internal/testutil"
-	"github.com/infrashift/chit-tui/internal/tui/post"
-	"github.com/infrashift/chit-tui/internal/tui/ui/markdown"
-	"github.com/infrashift/chit-tui/internal/tui/ui/styles"
-	"github.com/infrashift/chit-tui/internal/tui/ui/theme"
+	"github.com/infrashift/chit/clients/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/testutil"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/post"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/markdown"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
 
 func testStyles() styles.Styles {

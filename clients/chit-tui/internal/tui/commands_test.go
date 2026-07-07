@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/infrashift/chit-tui/internal/model"
-	"github.com/infrashift/chit-tui/internal/tui"
+	"github.com/infrashift/chit/clients/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui"
 )
 
 // mockClient implements api.ChitClient for testing.

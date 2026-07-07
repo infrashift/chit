@@ -5,11 +5,11 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/infrashift/chit-tui/internal/model"
-	"github.com/infrashift/chit-tui/internal/testutil"
-	"github.com/infrashift/chit-tui/internal/tui/thread"
-	"github.com/infrashift/chit-tui/internal/tui/ui/styles"
-	"github.com/infrashift/chit-tui/internal/tui/ui/theme"
+	"github.com/infrashift/chit/clients/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/testutil"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/thread"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
 
 func testStyles() styles.Styles {

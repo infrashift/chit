@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/infrashift/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 )
 
 func TestUser_JSONRoundTrip(t *testing.T) {

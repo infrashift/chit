@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"regexp"
 
-	"github.com/infrashift/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 )
 
 var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)

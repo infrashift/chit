@@ -8,7 +8,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/infrashift/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 )
 
 // ChitClient defines the API surface the TUI uses.
