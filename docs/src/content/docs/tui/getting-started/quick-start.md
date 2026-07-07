@@ -25,35 +25,47 @@ subsequent launches.
 
 Once authenticated, you'll see:
 
-- **Left sidebar** — Your teams and channels
-- **Center viewport** — Messages in the active channel
+- **Top pane** — Chat history for the active channel
 - **Bottom input** — Message composition area
+- **Action bar** — A row of clickable buttons, the active team/channel, and
+  the connection indicator along the bottom edge
 
 ## 4. Navigate
 
+All navigation goes through the **palette**:
+
 | Action | Key |
 |--------|-----|
-| Move between panes | `Tab` / `Shift+Tab` |
-| Select team or channel | `Enter` |
-| Go back to teams | `Esc` or `Backspace` |
-| Navigate lists | `j`/`k` or arrow keys |
+| Open the palette (channels/DMs, sorted by unread activity) | `Ctrl+K` |
+| Find a person / start a DM | `Ctrl+D` (or type `@` in the palette) |
+| Run a slash command | type `/` in the palette |
+| Search messages in the active channel | `Ctrl+S` (or type `?`) |
+| Toggle focus between history and input | `Tab` |
+| Show all keybindings | `?` (from the history pane) |
+
+In the palette, type to filter, use `↑`/`↓` to move, and `Enter` to select.
+The mouse works too: click the action-bar buttons or a palette row, and
+wheel-scroll the history.
 
 ## 5. Send a Message
 
-1. Press `Tab` until the input area is focused
-2. Type your message (supports Markdown)
-3. Press `Enter` to send
+1. Type your message in the input (supports Markdown) — the input is focused
+   by default; press `Tab` if the history pane has focus
+2. Press `Enter` to send (`Alt+Enter` inserts a newline)
 
 ## 6. Open a Thread
 
-1. Focus the viewport (`Tab` to it)
-2. Navigate to a post with `j`/`k`
-3. Press `Enter` to open the thread panel
-4. Type a reply and press `Enter`
+1. Focus the history pane (`Tab`)
+2. Move the selection to a post with `j`/`k`
+3. Press `Enter` — the thread fills the main pane
+4. Type a reply in the input and press `Enter`
+5. Press `Esc` to return to the channel
 
 ## 7. Search
 
-Press `Ctrl+S` to open the search overlay. Type a query, press `Enter` to search, then use arrow keys to browse results.
+Press `Ctrl+S` — the palette opens in message-search mode. Type a query,
+press `Enter` to search the active channel, then use arrow keys to browse
+results.
 
 ## 8. Quit
 

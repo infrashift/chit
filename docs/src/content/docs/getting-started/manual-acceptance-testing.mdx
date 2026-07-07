@@ -79,9 +79,9 @@ environment.
 ## Testing with chit-tui
 
 :::note
-chit-tui is an **external companion project** maintained in a separate
-repository — it is not built by this repo. Obtain and build it separately
-before following the steps below.
+chit-tui lives in this monorepo under `clients/chit-tui` (a nested Go
+module). Build it with `make -C clients/chit-tui build` before following
+the steps below.
 :::
 
 Point chit-tui at the Oathkeeper proxy (port 4455) and log in interactively:

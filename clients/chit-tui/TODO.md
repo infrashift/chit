@@ -679,3 +679,23 @@
 - [x] internal/tui/help overlay (? key + bar button; any key/click closes)
 - [x] Docs: tui/index.mdx, architecture.md, keybindings.md, project-structure.md
 - [x] CHANGELOG.md updated
+
+# Post-Redesign Cleanup: Dead Code, Overlay Consolidation, Doc Currency
+
+## Part 1: Overlay table + focus fix
+- [x] overlayRef extended (visible/update/view/blur/setSize/setStyles/closeFocus); single overlays() table drives key intercepts, View compositing, setFocus blur, resize, restyle, and mouse hit-testing
+- [x] Focus restored after Esc-closing every overlay (regression tests in overlay_focus_test.go)
+- [x] dmpicker emits CancelledMsg on Esc; pending private channel is created without members
+- [x] Unreachable Esc-chain branches and delegateKey overlay cases deleted
+
+## Part 2: Dead-code deletions
+- [x] GroupCreatedMsg + CreateGroupChannel cmd, AuthExpiredMsg, LogoutMsg, KeyMap.Enter, CreateTagCmd, AddChannelMemberCmd, viewport.YOffset, Styles.Sidebar/Border, model.TeamMember/ThreadMembership/ThreadResponse, testutil.NewMockServer, main.go fromEnv
+- [x] SidebarItem/SidebarActive → ListItem/ListItemActive; flattenChannels simplified; member-picker cap comment reworded
+- [x] Kept deliberately: api.GetPost/Pin/Unpin, ws.Send, api.CreateGroupChannel (API completeness; e2e uses pins)
+
+## Part 3: Documentation
+- [x] README.md rewritten (features, keybindings, config table, architecture tree)
+- [x] quick-start.md rewritten for palette navigation and two-pane layout
+- [x] UAT tutorial: scenarios 1/2/3/4/6/7/8/9/11/12/14/17/19/20 updated; scenario 13 replaced (private-channel member picker incl. Esc behavior); scenario 22 added (mouse/action bar/help)
+- [x] custom-themes.md badge descriptions; monorepo docs no longer call chit-tui an external project
+- [x] CHANGELOG.md Fixed/Removed entries

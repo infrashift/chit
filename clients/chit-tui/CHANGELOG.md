@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Focus loss after closing overlays** — Esc-closing the tag picker, channel creator, member picker, or skin picker left keyboard focus on the closed overlay (keys went nowhere until `Tab`/`Ctrl+K`); every overlay now restores focus to a live component on close
+- **Member picker Esc abandoned the pending channel** — dismissing the member picker after submitting a private channel silently dropped it; the channel is now created without extra members (Esc only skips member selection)
+
 ### Added
 
 - **Unified palette** — One overlay (`Ctrl+K`) for all navigation: channels/DMs sorted by mentions → unread → recency with fuzzy filtering, `@` people search (opens a DM), `/` slash commands, and `?` message search scoped to the active channel; `Ctrl+S`/`Ctrl+D` open it pre-filled
@@ -26,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - Sidebar, command palette (`cmdpalette`), and search (`search`) components — superseded by the unified palette and action bar
+- Dead code left behind by the redesign: the producer-less group-create TUI chain (`GroupCreatedMsg`, `CreateGroupChannel` command), never-produced `AuthExpiredMsg`/`LogoutMsg`, the unmatched `Enter` keybinding, unused `CreateTagCmd`/`AddChannelMemberCmd`, `Styles.Sidebar`/`Styles.Border`, and unreferenced model DTOs (`TeamMember`, `ThreadMembership`, `ThreadResponse`); `SidebarItem`/`SidebarActive` styles renamed to `ListItem`/`ListItemActive`
 
 ### Added (initial development)
 
@@ -71,7 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Viewport and thread renderers use theme-derived Glamour style configs instead of the built-in `"dark"` style
 - UAT tutorial Scenario 2 rewritten to reflect auto-selection behavior (sidebar starts in channels view, not teams view)
 
-### Fixed
+### Fixed (initial development)
 
 - Sidebar not responding to keys on launch — `NewModel()` now calls `sidebar.Focus()` so the sidebar accepts input immediately without requiring a full Tab cycle
 - Theme switching not updating markdown rendering — `SetStyles()` resets the Glamour renderer so posts re-render with the new theme's colors

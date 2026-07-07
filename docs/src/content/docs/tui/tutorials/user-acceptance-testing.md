@@ -253,36 +253,39 @@ the main TUI screen with Town Square selected.
 | Step | Action | Expected Result |
 |------|--------|-----------------|
 | 1 | Launch with `CHIT_SERVER_URL=http://localhost:4455 ./bin/chit-tui` | Login screen appears with email and password fields |
-| 2 | Enter `alice@example.com` and `Password1!`, press `Enter` | Login succeeds; sidebar shows **UAT Team** with **Town Square** |
-| 3 | Observe the channel header or user context | Display name **Alice Anderson** is shown |
+| 2 | Enter `alice@example.com` and `Password1!`, press `Enter` | Login succeeds; the action bar shows **UAT Team > Town Square** |
+| 3 | Observe the action bar | Your username **alice** is shown next to the connection indicator `●` |
 
 **What this validates:** Kratos login flow (init flow, submit credentials),
 Oathkeeper session validation, user profile retrieval
 (`GET /api/v1/users/me`), team listing (`GET /api/v1/users/me/teams`), channel
 listing (`GET /api/v1/users/me/teams/{teamId}/channels`), session persistence.
 
-#### Scenario 2: Navigate Teams and Channels
+#### Scenario 2: Navigate Channels via the Palette
 
-The sidebar starts in the **channels view** because the TUI auto-selects the
-first team and its first channel on launch. To reach the team list you must
-back-navigate first.
+The TUI auto-selects the first channel on launch. All channel navigation goes
+through the palette (`Ctrl+K`), which lists every channel and DM across all
+your teams, sorted by mentions, then unread count, then recency.
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
-| 1 | Observe the sidebar | **Town Square** is listed under channels (already selected) |
-| 2 | Press `Esc` or `Backspace` | Sidebar switches to the **team list** showing **UAT Team** |
-| 3 | Press `Enter` on **UAT Team** | Channel list reappears showing **Town Square** |
-| 4 | Press `Enter` on **Town Square** | Viewport reloads the channel's posts |
+| 1 | Press `Ctrl+K` | The palette opens listing **Town Square** |
+| 2 | Type `tow` | The list fuzzy-filters to **Town Square** |
+| 3 | Press `Enter` | The palette closes; the history pane loads Town Square's posts; the action bar shows **UAT Team > Town Square** |
+| 4 | Press `Ctrl+K`, then `Esc` | The palette closes without changing channels |
 
-**What this validates:** Sidebar navigation, back-navigation to team list, team
-re-selection, channel selection.
+If the user belongs to more than one team, palette rows show a `· team`
+suffix so channels with the same name are distinguishable.
+
+**What this validates:** Palette navigation, fuzzy filtering, channel
+selection, all-team channel loading.
 
 #### Scenario 3: Send a Message
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
 | 1 | Navigate to **Town Square** | Viewport is showing the channel |
-| 2 | Press `Tab` until the input area is focused | Cursor appears in the input box |
+| 2 | Press `Tab` if the input is not focused | Cursor appears in the input box |
 | 3 | Type `Hello from UAT!` and press `Enter` | Message appears in the viewport |
 | 4 | Scroll the viewport (`k`/`j`) | The new post is visible with your username and timestamp |
 
@@ -293,7 +296,7 @@ viewport scrolling.
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
-| 1 | Focus the input area (`Tab` until cursor appears) | Input box is active |
+| 1 | Focus the input area (`Tab` toggles history ↔ input) | Input box is active |
 | 2 | Type `First line` | Text appears in the input |
 | 3 | Press `Alt+Enter` | Cursor moves to a new line; message is **not** sent |
 | 4 | Type `Second line` | Input now contains two lines |
@@ -334,26 +337,26 @@ the `posted` event type, live viewport updates without manual refresh.
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
-| 1 | Focus the viewport and navigate to a post with `j`/`k` | A post is highlighted |
-| 2 | Press `Enter` | Thread panel opens on the right showing the root post |
-| 3 | Type a reply in the thread input and press `Enter` | Reply appears in the thread panel |
-| 4 | Press `Esc` to close the thread | Thread panel closes; main viewport is restored |
+| 1 | Focus the history pane (`Tab`) and navigate to a post with `j`/`k` | A post is highlighted |
+| 2 | Press `Enter` | The thread fills the main pane; the action bar shows an **[esc Back]** button |
+| 3 | Type a reply in the regular input and press `Enter` | Reply appears in the thread, indented under the root |
+| 4 | Press `Esc` | The channel history returns; the root post shows a `[1 replies]` badge |
 
 **What this validates:** Thread retrieval (`GET /api/v1/posts/{postId}/thread`),
-reply creation (`POST /api/v1/posts` with `root_id`), thread panel UI.
+reply creation (`POST /api/v1/posts` with `root_id`), the thread main-pane view.
 
 #### Scenario 7: Search
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
-| 1 | Press `Ctrl+S` | Search overlay opens |
-| 2 | Type a word from a message you sent earlier | Search input is active |
-| 3 | Press `Enter` | Search results appear listing matching posts |
+| 1 | Press `Ctrl+S` | The palette opens in search mode (`?` prefix) with a "Search in Town Square" hint |
+| 2 | Type a word from a message you sent earlier | Query appears after the `?` |
+| 3 | Press `Enter` | Results appear listing matching posts |
 | 4 | Navigate results with `↑`/`↓` | Results are highlighted |
-| 5 | Press `Esc` | Search overlay closes |
+| 5 | Press `Esc` | The palette closes |
 
 **What this validates:** Search posts
-(`POST /api/v1/channels/{channelId}/posts/search`), search overlay UI.
+(`POST /api/v1/channels/{channelId}/posts/search`), the palette's search mode.
 
 :::tip[Tag Search]
 You can include `#tag` in your search query to filter results by tags. For
@@ -361,16 +364,17 @@ example, `deploy #release` searches for posts containing "deploy" that are also
 tagged with `release`. See Scenario 17 for a full walkthrough.
 :::
 
-#### Scenario 8: Command Palette
+#### Scenario 8: Slash Commands in the Palette
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
-| 1 | Press `Ctrl+K` | Command palette opens |
-| 2 | Type a few characters to filter | List narrows to matching commands |
-| 3 | Press `Esc` | Command palette closes |
+| 1 | Press `Ctrl+K` | The palette opens listing channels |
+| 2 | Type `/` | The palette switches to command mode listing slash commands |
+| 3 | Type a few characters to filter | List narrows to matching commands |
+| 4 | Press `Esc` | The palette closes |
 
 **What this validates:** Command retrieval (`GET /api/v1/commands`), fuzzy
-filtering, command palette overlay UI.
+filtering, the palette's `/` command mode.
 
 #### Scenario 9: Unread Badge
 
@@ -378,10 +382,10 @@ This scenario requires two terminals.
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
-| 1 | In terminal A (Alice), navigate away from Town Square (press `Esc` to team list) | Alice is no longer viewing Town Square |
+| 1 | In terminal A (Alice), switch to another channel or DM via `Ctrl+K` | Alice is no longer viewing Town Square |
 | 2 | In terminal B (Bob), send a message in Town Square | Bob's message is created |
-| 3 | In terminal A (Alice), observe the sidebar | Town Square shows an unread indicator |
-| 4 | In terminal A, select Town Square | Unread indicator clears |
+| 3 | In terminal A (Alice), press `Ctrl+K` | **Town Square** shows an unread badge `(1)` and sorts to the top |
+| 4 | In terminal A, select Town Square | The badge clears on the next palette open |
 
 **What this validates:** Channel member tracking
 (`GET /api/v1/channels/{channelId}/members`), unread count computation,
@@ -411,42 +415,44 @@ CHIT_SERVER_URL=http://localhost:4455 \
 | 2 | Type `Deploy` in the Display Name field | Name field auto-fills with `deploy` |
 | 3 | Press `Tab` to skip to the Purpose field | Cursor moves to the purpose textarea |
 | 4 | Type `Deployment coordination` | Purpose text appears |
-| 5 | Press `Enter` | Channel is created; sidebar now shows **Deploy** |
-| 6 | Observe the viewport | You are now in the new Deploy channel |
+| 5 | Press `Enter` | Channel is created; the action bar shows **UAT Team > Deploy** |
+| 6 | Press `Ctrl+K` | **Deploy** is listed in the palette |
 
 **What this validates:** Channel creation (`POST /api/v1/channels`), auto-slug
-generation, channel creator overlay UI, sidebar refresh.
+generation, channel creator overlay UI, palette refresh.
 
 #### Scenario 12: Create a Direct Message
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
-| 1 | Press `Ctrl+D` | DM picker overlay opens with a search input |
-| 2 | Type `bob` | Search results show **Bob Baker** |
-| 3 | Press `Enter` | DM channel is created; viewport switches to the 1:1 conversation with Bob |
-| 4 | Send a message: `Hey Bob!` | Message appears in the DM viewport |
+| 1 | Press `Ctrl+D` | The palette opens in people mode (`@` prefix) |
+| 2 | Type `bob` and pause briefly | Search results show **@bob (Bob Baker)** |
+| 3 | Press `Enter` | DM channel is created; the history pane switches to the 1:1 conversation and the action bar shows **bob** |
+| 4 | Send a message: `Hey Bob!` | Message appears in the DM history |
 
 **What this validates:** User search (`POST /api/v1/users/search`), DM channel
-creation (`POST /api/v1/channels/direct`), DM picker overlay UI.
+creation (`POST /api/v1/channels/direct`), the palette's `@` people mode.
 
-#### Scenario 13: Create a Group Channel
+#### Scenario 13: Create a Private Channel with Members
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
-| 1 | Press `Ctrl+D` | DM picker overlay opens |
-| 2 | Type `bob`, then press `Tab` on **Bob Baker** | Bob is selected (chip appears); search clears |
-| 3 | Type `chad`, then press `Tab` on **Chad Cooper** | Chad is selected (second chip appears) |
-| 4 | Press `Enter` | Group channel is created; viewport switches to the group conversation |
-| 5 | Observe the sidebar | A new DM entry shows `bob, chad` |
+| 1 | Press `Ctrl+N` | Channel creator overlay opens |
+| 2 | Type `War Room`, then use `←`/`→` on the type row to select **Private** | Type toggle shows `[Private]` |
+| 3 | Press `Enter` | The member picker opens |
+| 4 | Type `bob`, press `Enter` to search, then `Tab` on **Bob Baker** | Bob is selected (chip appears) |
+| 5 | Press `Enter` | The private channel is created with Bob added; the action bar shows **UAT Team > War Room** |
+| 6 | Repeat steps 1–3, then press `Esc` at the member picker | The channel is still created — Esc only skips member selection |
 
-**What this validates:** Multi-select in DM picker, group channel creation
-(`POST /api/v1/channels/group`), group display name resolution.
+**What this validates:** Private channel creation, the member picker overlay
+(multi-select with `Tab`), member addition
+(`POST /api/v1/channels/{channelId}/members`), and Esc-skips-members behavior.
 
 #### Scenario 14: Tag a Post
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
-| 1 | Focus the viewport (`Tab` until posts are highlighted) | A post is highlighted with cursor |
+| 1 | Focus the history pane (`Tab`) | A post is highlighted with cursor |
 | 2 | Press `t` | Tag picker overlay opens with a filter input |
 | 3 | Type `urgent` in the filter | Tag list filters (may be empty if no tags exist yet) |
 | 4 | Press `Ctrl+N` | A new `urgent` tag is created and applied to the post |
@@ -485,12 +491,12 @@ creation and application on post creation, tag badges rendered from post tags.
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
-| 1 | Press `Ctrl+S` | Search overlay opens |
+| 1 | Press `Ctrl+S` | The palette opens in search mode |
 | 2 | Type `#urgent` and press `Enter` | Search results show posts tagged with `urgent` |
 | 3 | Clear and type `build #release` and press `Enter` | Results show posts matching "build" that also have the `release` tag |
-| 4 | Press `Esc` | Search overlay closes |
+| 4 | Press `Esc` | The palette closes |
 
-**What this validates:** Tag-based search via `#tag` syntax in the search overlay,
+**What this validates:** Tag-based search via `#tag` syntax in search mode,
 hybrid text + tag search, tag name to ID resolution.
 
 #### Scenario 18: Runtime Theme Switching with Tags
@@ -511,7 +517,7 @@ the theme is hot-swapped via `/skin`.
 |------|--------|-----------------|
 | 1 | Quit the TUI (`Ctrl+C`) after a successful login | TUI exits |
 | 2 | Relaunch with `CHIT_SERVER_URL=http://localhost:4455 ./bin/chit-tui` | TUI skips login; goes directly to the main view |
-| 3 | Observe the sidebar | Teams and channels load without re-entering credentials |
+| 3 | Press `Ctrl+K` | Channels load without re-entering credentials |
 
 **What this validates:** Session token persistence at
 `~/.config/chit-tui/session.json`, stored token validation via Kratos
@@ -522,7 +528,7 @@ the theme is hot-swapped via `/skin`.
 | Step | Action | Expected Result |
 |------|--------|-----------------|
 | 1 | Focus the input and type `/logout`, press `Enter` | Login screen reappears |
-| 2 | Enter a different user's email and password (e.g., `bob@example.com`) | Login succeeds; sidebar loads Bob's teams and channels |
+| 2 | Enter a different user's email and password (e.g., `bob@example.com`) | Login succeeds; the action bar and palette show Bob's teams and channels |
 | 3 | Quit and relaunch | TUI auto-loads Bob's session (no login screen) |
 
 **What this validates:** `/logout` slash command, session clearing,
@@ -539,6 +545,20 @@ re-authentication to a different account, new session persistence.
 
 **What this validates:** Login error display, recovery from failed login
 attempt, Kratos error handling.
+
+#### Scenario 22: Mouse, Action Bar, and Help
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Click **[^K Jump]** on the action bar | The palette opens |
+| 2 | Click a channel row inside the palette | The palette closes and the channel loads |
+| 3 | Scroll the mouse wheel over the history pane | The history scrolls (when it overflows the pane) |
+| 4 | Click **[? Help]** on the action bar | The help overlay opens listing keybindings and mouse actions |
+| 5 | Press any key (or click anywhere) | The help overlay closes |
+| 6 | Focus the history pane and press `?` | The help overlay opens again |
+
+**What this validates:** Mouse support (action-bar hit-testing, palette row
+clicks, wheel scroll), the help overlay, keyboard/mouse parity.
 
 ### Step 4: Tear Down the UAT Server
 

@@ -4,20 +4,19 @@ A terminal user interface for the [Chit](https://github.com/infrashift/chit) mes
 
 ## Features
 
-- **Dual-pane navigation** — Sidebar with team/channel tree, main viewport for messages
+- **Two-pane layout** — Chat history over the message input, with a clickable action bar along the bottom
+- **Unified palette** — One overlay (`Ctrl+K`) for everything: jump to channels/DMs sorted by unread activity, `@` people search, `/` slash commands, `?` message search
 - **Real-time messaging** — WebSocket connectivity with automatic reconnection and exponential backoff
-- **Threaded conversations** — Side panel for viewing and replying to threads
+- **Threaded conversations** — Enter on a post opens its thread in the main pane; reply from the regular input, `Esc` returns
+- **Mouse support** — Wheel-scroll history, click action-bar buttons and palette rows (everything stays keyboard-drivable)
 - **Markdown rendering** — Posts rendered with [Glamour](https://github.com/charmbracelet/glamour) for rich terminal output
-- **Command palette** — Fuzzy-filter overlay for slash commands (`Ctrl+K`)
-- **Post search** — Search posts in the current channel (`Ctrl+S`)
-- **Unread badges** — Per-channel unread message counts in the sidebar
+- **Unread badges** — Per-channel unread and mention counts surface in the palette, which sorts active channels to the top
 - **Customizable themes** — Built-in themes (Tokyo Night, Catppuccin, Kanagawa, Nightfox) and JSON theme file support
 
 ## Requirements
 
 - Go 1.24+
 - A running [Chit server](https://github.com/infrashift/chit) instance
-- A valid session token
 
 ## Installation
 
@@ -36,33 +35,37 @@ Chit TUI is configured via environment variables:
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `CHIT_SERVER_URL` | Yes | — | Chit server URL (e.g. `http://localhost:8065`) |
-| `CHIT_SESSION_TOKEN` | Yes | — | Session token for authentication |
+| `CHIT_SERVER_URL` | Yes | — | Chit server or Oathkeeper proxy URL (e.g. `http://localhost:4455`) |
+| `CHIT_SESSION_TOKEN` | No | — | Pre-set session token (skips the interactive login screen) |
+| `CHIT_SESSION_FILE` | No | `~/.config/chit-tui/session.json` | Path to the persisted session file |
 | `CHIT_WS_SCHEME` | No | `ws` | WebSocket scheme (`ws` or `wss`) |
+| `CHIT_AUTH_HEADER` | No | `X-Session-Token` | HTTP header name used for authentication |
 | `CHIT_THEME` | No | — | Theme name (`catppuccin`, `kanagawa`, `nightfox`, `tokyo-night`) |
 
 ```bash
-export CHIT_SERVER_URL=http://localhost:8065
-export CHIT_SESSION_TOKEN=your-session-token
+export CHIT_SERVER_URL=http://localhost:4455
 export CHIT_THEME=catppuccin
 
 ./bin/chit-tui
+# Log in on the interactive login screen (or pre-set CHIT_SESSION_TOKEN)
 ```
 
 ## Keybindings
 
 | Key | Action |
 |-----|--------|
-| `Tab` | Next pane |
-| `Shift+Tab` | Previous pane |
-| `Ctrl+T` | Toggle thread panel |
-| `Ctrl+K` | Open command palette |
-| `Ctrl+S` | Open search |
-| `Esc` | Close overlay / thread |
-| `Enter` | Send message / select item |
+| `Ctrl+K` | Open the palette (jump to channels/DMs; `@` people, `/` commands, `?` search) |
+| `Ctrl+S` | Palette in message-search mode (`?`) |
+| `Ctrl+D` | Palette in people mode (`@`) |
+| `Ctrl+N` | Create a channel |
+| `Tab` / `Shift+Tab` | Toggle focus between the main pane and the input |
+| `Enter` | History pane: open thread · Input: send |
+| `t` | Tag the selected post (history pane) |
+| `?` | Help overlay (history pane) |
+| `Esc` | Close overlay / leave thread / focus history pane |
 | `Ctrl+C` | Quit |
 
-Within the sidebar, use `j`/`k` or arrow keys to navigate teams and channels. Press `Enter` to select, `Esc`/`Backspace` to go back to teams.
+In the history pane, `j`/`k` or arrow keys move the post selection. The mouse works too: wheel-scroll the history, click action-bar buttons and palette rows.
 
 ## Themes
 
@@ -118,16 +121,17 @@ internal/
 ├── testutil/                  Test factories and mock server helpers
 └── tui/
     ├── app.go                 Root model — composes all components
+    ├── mouse.go               Mouse routing (wheel, action bar, palette)
     ├── messages.go            All tea.Msg types
     ├── commands.go            tea.Cmd wrappers for API calls
     ├── keymap.go              Global keybindings
-    ├── sidebar/               Team/channel navigation
-    ├── viewport/              Post list viewport
+    ├── viewport/              Post list (main pane, channel view)
+    ├── thread/                Thread view (swaps into the main pane)
     ├── input/                 Message input textarea
-    ├── thread/                Thread side panel
+    ├── palette/               Unified palette overlay (channels/people/commands/search)
+    ├── actionbar/             Bottom action/status bar
+    ├── help/                  Keybinding help overlay
     ├── post/                  Single post renderer (Glamour markdown)
-    ├── cmdpalette/            Command palette overlay
-    ├── search/                Search overlay
     └── ui/
         ├── theme/             Theme definitions and JSON loader
         └── styles/            Lipgloss style constructors

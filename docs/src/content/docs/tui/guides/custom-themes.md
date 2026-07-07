@@ -64,9 +64,9 @@ A theme file is a JSON object with color values as hex strings:
 | `muted` | Low-contrast text |
 | `username` | Username display in posts |
 | `timestamp` | Timestamp display in posts |
-| `unread_badge` | Unread count badge in sidebar |
+| `unread_badge` | Unread count badge on palette rows |
 | `pin_badge` | Pinned post badge |
-| `channel_active` | Active channel name in sidebar |
+| `channel_active` | Active channel highlight in list rows |
 
 ## Partial Themes
 
