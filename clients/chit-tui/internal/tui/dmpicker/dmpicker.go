@@ -21,6 +21,10 @@ type MembersPickedMsg struct {
 	Users []*model.User
 }
 
+// CancelledMsg is sent when the picker is dismissed without selecting
+// members (Esc).
+type CancelledMsg struct{}
+
 // SearchTriggeredMsg is sent when a search should be performed.
 type SearchTriggeredMsg struct {
 	Term string
@@ -135,7 +139,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		switch keyMsg.Type {
 		case tea.KeyEscape:
 			m.Close()
-			return m, nil
+			return m, func() tea.Msg { return CancelledMsg{} }
 		case tea.KeyTab:
 			if len(m.results) > 0 && m.cursor < len(m.results) {
 				m.toggleSelected(m.results[m.cursor])

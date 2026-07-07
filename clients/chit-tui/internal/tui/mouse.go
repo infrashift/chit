@@ -107,6 +107,10 @@ func (m Model) dispatchAction(a actionbar.Action) (tea.Model, tea.Cmd) {
 
 // anyOverlayVisible reports whether any floating overlay is currently open.
 func (m Model) anyOverlayVisible() bool {
-	return m.palette.Visible() || m.dmPicker.Visible() || m.help.Visible() ||
-		m.skinPicker.Visible() || m.chCreator.Visible() || m.tagPicker.Visible()
+	for _, o := range m.overlays() {
+		if o.visible() {
+			return true
+		}
+	}
+	return false
 }

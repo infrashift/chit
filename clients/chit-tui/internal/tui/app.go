@@ -242,57 +242,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
-		// Any key closes the help overlay.
-		if m.help.Visible() {
-			var cmd tea.Cmd
-			m.help, cmd = m.help.Update(msg)
-			return m, cmd
-		}
-
-		// Intercept keys when the palette is visible; it handles Esc itself,
-		// so refocus the input once it closes.
-		if m.palette.Visible() {
-			var cmd tea.Cmd
-			m.palette, cmd = m.palette.Update(msg)
-			if !m.palette.Visible() && m.focus == FocusPalette {
-				return m, tea.Batch(cmd, m.setFocus(FocusInput))
+		// A visible overlay intercepts all keys. If it self-closes (Esc or a
+		// selection), restore focus to a live component and run any
+		// close-time behavior.
+		for _, o := range m.overlays() {
+			if !o.visible() {
+				continue
 			}
-			return m, cmd
-		}
-
-		// Intercept keys when skin picker is visible
-		if m.skinPicker.Visible() {
-			var cmd tea.Cmd
-			m.skinPicker, cmd = m.skinPicker.Update(msg)
-			return m, cmd
-		}
-
-		// Intercept keys when tag picker is visible
-		if m.tagPicker.Visible() {
-			var cmd tea.Cmd
-			m.tagPicker, cmd = m.tagPicker.Update(msg)
-			return m, cmd
-		}
-
-		// Intercept keys when channel creator is visible
-		if m.chCreator.Visible() {
-			var cmd tea.Cmd
-			m.chCreator, cmd = m.chCreator.Update(msg)
-			return m, cmd
-		}
-
-		// Intercept keys when DM picker is visible
-		if m.dmPicker.Visible() {
-			switch msg.Type {
-			case tea.KeyUp, tea.KeyDown, tea.KeyEnter, tea.KeyEscape:
-				var cmd tea.Cmd
-				m.dmPicker, cmd = m.dmPicker.Update(msg)
-				return m, cmd
-			default:
-				var cmd tea.Cmd
-				m.dmPicker, cmd = m.dmPicker.Update(msg)
+			cmd := o.update(msg)
+			if !o.visible() {
+				if o.closeFocus != focusKeep {
+					return m, tea.Batch(cmd, m.setFocus(o.closeFocus))
+				}
 				return m, cmd
 			}
+			return m, cmd
 		}
 
 		// Intercept keys when mention popup is visible
@@ -328,28 +292,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if key.Matches(msg, m.keys.Escape) {
-			if m.tagPicker.Visible() {
-				m.tagPicker.Close()
-				cmd := m.setFocus(FocusViewport)
-				return m, cmd
-			}
-			if m.chCreator.Visible() {
-				m.chCreator.Close()
-				cmd := m.setFocus(FocusInput)
-				return m, cmd
-			}
-			if m.dmPicker.Visible() {
-				m.dmPicker.Close()
-				if m.pendingPrivateChannel != nil {
-					ch := m.pendingPrivateChannel
-					m.pendingPrivateChannel = nil
-					m.pendingMembers = nil
-					cmd := m.setFocus(FocusInput)
-					return m, tea.Batch(cmd, CreateChannel(m.client, ch))
-				}
-				cmd := m.setFocus(FocusInput)
-				return m, cmd
-			}
 			if m.mainPane == paneThread {
 				return m, m.closeThread()
 			}
@@ -732,6 +674,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, CreateChannel(m.client, msg.Channel))
 		return m, tea.Batch(cmds...)
 
+	case dmpicker.CancelledMsg:
+		// Dismissing the member picker skips member selection but still
+		// creates the already-submitted private channel.
+		if m.pendingPrivateChannel != nil {
+			ch := m.pendingPrivateChannel
+			m.pendingPrivateChannel = nil
+			m.pendingMembers = nil
+			cmds = append(cmds, CreateChannel(m.client, ch))
+		}
+		return m, tea.Batch(cmds...)
+
 	case dmpicker.MembersPickedMsg:
 		m.dmPicker.Close()
 		if m.pendingPrivateChannel != nil {
@@ -836,14 +789,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.SetStyles(newStyles)
 		m.input.SetStyles(newStyles)
 		m.thread.SetStyles(newStyles)
-		m.palette.SetStyles(newStyles)
-		m.help.SetStyles(newStyles)
 		m.mention.SetStyles(newStyles)
-		m.dmPicker.SetStyles(newStyles)
-		m.skinPicker.SetStyles(newStyles)
-		m.chCreator.SetStyles(newStyles)
-		m.tagPicker.SetStyles(newStyles)
 		m.actionBar.SetStyles(newStyles)
+		for _, o := range m.overlays() {
+			o.setStyles(newStyles)
+		}
 		cmd := m.setFocus(FocusInput)
 		return m, cmd
 
@@ -883,7 +833,7 @@ func (m Model) View() string {
 	)
 
 	// Composite the centered floating overlays.
-	for _, o := range m.centeredOverlays() {
+	for _, o := range m.overlays() {
 		if !o.visible() {
 			continue
 		}
@@ -913,22 +863,107 @@ func (m Model) View() string {
 // overlayY is the row where centered floating overlays are anchored.
 const overlayY = 2
 
-// overlayRef is one floating overlay's hooks for the View compositor.
+// focusKeep, used as an overlayRef closeFocus, leaves focus untouched when
+// the overlay closes (for overlays that never take focus, like help).
+const focusKeep FocusArea = -1
+
+// overlayRef is one floating overlay's hooks: visibility, key routing,
+// rendering, and lifecycle plumbing. Every overlay consumer (key intercepts,
+// View compositing, blur/resize/restyle, mouse hit-testing) iterates the
+// single overlays() table, so adding an overlay means adding one entry here.
 type overlayRef struct {
-	visible func() bool
-	view    func() string
+	visible    func() bool
+	update     func(tea.KeyMsg) tea.Cmd
+	view       func() string
+	blur       func()
+	setSize    func(w, h int)
+	setStyles  func(styles.Styles)
+	closeFocus FocusArea // focus target after the overlay self-closes
 }
 
-// centeredOverlays lists the centered floating overlays in z-order
-// (later entries render on top).
-func (m *Model) centeredOverlays() []overlayRef {
+// overlays lists the centered floating overlays in z-order (later entries
+// render on top; earlier entries win key interception, though only one
+// overlay is ever open at a time).
+func (m *Model) overlays() []overlayRef {
 	return []overlayRef{
-		{m.dmPicker.Visible, m.dmPicker.View},
-		{m.skinPicker.Visible, m.skinPicker.View},
-		{m.chCreator.Visible, m.chCreator.View},
-		{m.tagPicker.Visible, m.tagPicker.View},
-		{m.palette.Visible, m.palette.View},
-		{m.help.Visible, m.help.View},
+		{
+			visible: func() bool { return m.dmPicker.Visible() },
+			update: func(msg tea.KeyMsg) tea.Cmd {
+				var cmd tea.Cmd
+				m.dmPicker, cmd = m.dmPicker.Update(msg)
+				return cmd
+			},
+			view:       func() string { return m.dmPicker.View() },
+			blur:       m.dmPicker.Blur,
+			setSize:    m.dmPicker.SetSize,
+			setStyles:  m.dmPicker.SetStyles,
+			closeFocus: FocusInput,
+		},
+		{
+			visible: func() bool { return m.skinPicker.Visible() },
+			update: func(msg tea.KeyMsg) tea.Cmd {
+				var cmd tea.Cmd
+				m.skinPicker, cmd = m.skinPicker.Update(msg)
+				return cmd
+			},
+			view:       func() string { return m.skinPicker.View() },
+			blur:       m.skinPicker.Blur,
+			setSize:    m.skinPicker.SetSize,
+			setStyles:  m.skinPicker.SetStyles,
+			closeFocus: FocusInput,
+		},
+		{
+			visible: func() bool { return m.chCreator.Visible() },
+			update: func(msg tea.KeyMsg) tea.Cmd {
+				var cmd tea.Cmd
+				m.chCreator, cmd = m.chCreator.Update(msg)
+				return cmd
+			},
+			view:       func() string { return m.chCreator.View() },
+			blur:       m.chCreator.Blur,
+			setSize:    m.chCreator.SetSize,
+			setStyles:  m.chCreator.SetStyles,
+			closeFocus: FocusInput,
+		},
+		{
+			visible: func() bool { return m.tagPicker.Visible() },
+			update: func(msg tea.KeyMsg) tea.Cmd {
+				var cmd tea.Cmd
+				m.tagPicker, cmd = m.tagPicker.Update(msg)
+				return cmd
+			},
+			view:       func() string { return m.tagPicker.View() },
+			blur:       m.tagPicker.Blur,
+			setSize:    m.tagPicker.SetSize,
+			setStyles:  m.tagPicker.SetStyles,
+			closeFocus: FocusViewport,
+		},
+		{
+			visible: func() bool { return m.palette.Visible() },
+			update: func(msg tea.KeyMsg) tea.Cmd {
+				var cmd tea.Cmd
+				m.palette, cmd = m.palette.Update(msg)
+				return cmd
+			},
+			view:       func() string { return m.palette.View() },
+			blur:       m.palette.Blur,
+			setSize:    m.palette.SetSize,
+			setStyles:  m.palette.SetStyles,
+			closeFocus: FocusInput,
+		},
+		{
+			visible: func() bool { return m.help.Visible() },
+			update: func(msg tea.KeyMsg) tea.Cmd {
+				var cmd tea.Cmd
+				m.help, cmd = m.help.Update(msg)
+				return cmd
+			},
+			view:       func() string { return m.help.View() },
+			blur:       func() {},
+			setSize:    m.help.SetSize,
+			setStyles:  m.help.SetStyles,
+			closeFocus: focusKeep, // help never takes focus
+		},
 	}
 }
 
@@ -957,11 +992,9 @@ func (m *Model) setFocus(area FocusArea) tea.Cmd {
 	m.viewport.Blur()
 	m.input.Blur()
 	m.thread.Blur()
-	m.palette.Blur()
-	m.dmPicker.Blur()
-	m.skinPicker.Blur()
-	m.chCreator.Blur()
-	m.tagPicker.Blur()
+	for _, o := range m.overlays() {
+		o.blur()
+	}
 
 	m.focus = area
 	switch area {
@@ -1127,14 +1160,14 @@ func (m *Model) resizeComponents() {
 	m.input.SetSize(m.width, inputHeight)
 	m.actionBar.SetSize(m.width)
 	m.thread.SetSize(m.width, vpHeight)
-	m.palette.SetSize(m.width, m.height)
-	m.help.SetSize(m.width, m.height)
-	m.dmPicker.SetSize(m.width, m.height)
-	m.skinPicker.SetSize(m.width, m.height)
-	m.chCreator.SetSize(m.width, m.height)
-	m.tagPicker.SetSize(m.width, m.height)
+	for _, o := range m.overlays() {
+		o.setSize(m.width, m.height)
+	}
 }
 
+// delegateKey routes a key to the focused main component. Overlay focus
+// areas never reach here: a visible overlay intercepts keys earlier in
+// Update, and closing one restores focus to a main component.
 func (m Model) delegateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch m.focus {
@@ -1144,16 +1177,6 @@ func (m Model) delegateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.input, cmd = m.input.Update(msg)
 	case FocusThread:
 		m.thread, cmd = m.thread.Update(msg)
-	case FocusPalette:
-		m.palette, cmd = m.palette.Update(msg)
-	case FocusDMPicker:
-		m.dmPicker, cmd = m.dmPicker.Update(msg)
-	case FocusSkinPicker:
-		m.skinPicker, cmd = m.skinPicker.Update(msg)
-	case FocusChCreator:
-		m.chCreator, cmd = m.chCreator.Update(msg)
-	case FocusTagPicker:
-		m.tagPicker, cmd = m.tagPicker.Update(msg)
 	}
 	return m, cmd
 }
