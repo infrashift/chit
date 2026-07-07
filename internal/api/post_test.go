@@ -58,6 +58,7 @@ func TestGetPost(t *testing.T) {
 	r = withChiParam(r, "id", testRootPost)
 	w := httptest.NewRecorder()
 
+	r = authedRequest(r, testUser())
 	handler.ServeHTTP(w, r)
 
 	if w.Code != http.StatusOK {
@@ -80,6 +81,7 @@ func TestGetPost_NotFound(t *testing.T) {
 	r = withChiParam(r, "id", "nonexistent")
 	w := httptest.NewRecorder()
 
+	r = authedRequest(r, testUser())
 	handler.ServeHTTP(w, r)
 
 	if w.Code != http.StatusNotFound {
@@ -98,6 +100,7 @@ func TestUpdatePost(t *testing.T) {
 	r = withChiParam(r, "id", testRootPost)
 	w := httptest.NewRecorder()
 
+	r = authedRequest(r, testUser())
 	handler.ServeHTTP(w, r)
 
 	if w.Code != http.StatusOK {
@@ -114,6 +117,7 @@ func TestDeletePost(t *testing.T) {
 	r = withChiParam(r, "id", testRootPost)
 	w := httptest.NewRecorder()
 
+	r = authedRequest(r, testUser())
 	handler.ServeHTTP(w, r)
 
 	if w.Code != http.StatusOK {
@@ -130,6 +134,7 @@ func TestPinPost(t *testing.T) {
 	r = withChiParam(r, "id", testRootPost)
 	w := httptest.NewRecorder()
 
+	r = authedRequest(r, testUser())
 	handler.ServeHTTP(w, r)
 
 	if w.Code != http.StatusOK {
@@ -146,6 +151,7 @@ func TestUnpinPost(t *testing.T) {
 	r = withChiParam(r, "id", testRootPost)
 	w := httptest.NewRecorder()
 
+	r = authedRequest(r, testUser())
 	handler.ServeHTTP(w, r)
 
 	if w.Code != http.StatusOK {
@@ -162,6 +168,7 @@ func TestGetChannelPosts(t *testing.T) {
 	r = withChiParam(r, "id", testChannelID)
 	w := httptest.NewRecorder()
 
+	r = authedRequest(r, testUser())
 	handler.ServeHTTP(w, r)
 
 	if w.Code != http.StatusOK {
@@ -178,6 +185,7 @@ func TestGetPinnedPosts(t *testing.T) {
 	r = withChiParam(r, "id", testChannelID)
 	w := httptest.NewRecorder()
 
+	r = authedRequest(r, testUser())
 	handler.ServeHTTP(w, r)
 
 	if w.Code != http.StatusOK {

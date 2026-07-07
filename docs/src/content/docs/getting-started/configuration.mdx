@@ -19,6 +19,7 @@ cp .env.example .env
 | Variable | Description |
 |---|---|
 | `CHIT_LISTEN_ADDRESS` | Address and port to bind (e.g., `:8065`) |
+| `CHIT_ALLOWED_ORIGINS` | Comma-separated CORS/WebSocket origin allowlist; default `*` (dev only, logs a warning) |
 | `CHIT_LOG_LEVEL` | Log verbosity: `debug`, `info`, `warn`, `error` |
 | `CHIT_LOG_FORMAT` | Log output format: `json` or `text` |
 
@@ -37,11 +38,19 @@ cp .env.example .env
 | `CHIT_PUBSUB_BACKEND` | Backend: `pgnotify` (default) or `nats` |
 | `CHIT_NATS_URL` | NATS server URL (when using NATS backend) |
 
+:::note
+The pub/sub layer currently serves the MCP agent event feed (thin event
+envelopes on the `chit_events` topic, polled by `chit-mcp`). WebSocket
+fan-out is single-node — chitd does not yet consume the topic for
+multi-node delivery.
+:::
+
 ### Ory Stack
 
 | Variable | Description |
 |---|---|
 | `CHIT_TRUSTED_PROXY_HEADER` | Header containing the authenticated user ID |
+| `CHIT_TRUSTED_PROXY_SECRET` | When set, `X-User-Id` is only trusted if the request carries a matching `X-Proxy-Secret` header (injected by Oathkeeper); recommended in production |
 | `CHIT_KRATOS_ADMIN_URL` | Kratos admin API URL |
 | `CHIT_KETO_READ_URL` | Keto read API URL |
 | `CHIT_KETO_WRITE_URL` | Keto write API URL |
@@ -68,5 +77,25 @@ cp .env.example .env
 | `CHIT_CACHE_SIZE` | Maximum number of entries in the LRU cache |
 | `CHIT_CACHE_TTL` | Cache entry time-to-live |
 
-See the [Configuration Reference](/chit/reference/configuration/) for the
+### MCP Agent
+
+| Variable | Description |
+|---|---|
+| `CHIT_MCP_AGENT_USER_ID` | Chit user ID the MCP agent acts as (e.g., the seeded `chit-agent` user) |
+
+### Slash Commands & Webhooks
+
+| Variable | Description |
+|---|---|
+| `CHIT_COMMANDS_CUE_DIR` | Directory with CUE definitions for commands, roles, and actors (default `auth`) |
+| `CHIT_AUDIT_LOG_PATH` | File path for the slash-command audit log |
+| `CHIT_WEBHOOK_ENABLED` | Enable the CloudEvents webhook dispatcher (default `false`) |
+| `CHIT_WEBHOOK_URL` | Destination URL for webhook deliveries |
+| `CHIT_WEBHOOK_SECRET` | Shared secret used to sign webhook deliveries |
+| `CHIT_WEBHOOK_WORKER_COUNT` | Concurrent webhook delivery workers (default `4`) |
+| `CHIT_WEBHOOK_QUEUE_SIZE` | In-memory webhook queue size (default `1024`) |
+| `CHIT_WEBHOOK_TIMEOUT_SEC` | Per-delivery HTTP timeout in seconds (default `10`) |
+
+`.env.example` is the source of truth for the complete variable list. See the
+[Configuration Reference](/chit/reference/configuration/) for the
 complete table with types and defaults.

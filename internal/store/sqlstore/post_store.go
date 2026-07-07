@@ -13,7 +13,7 @@ type SqlPostStore struct {
 	sqlStore *SqlStore
 }
 
-func (s *SqlPostStore) Save(post *model.Post) (*model.Post, error) {
+func (s *SqlPostStore) Save(ctx context.Context, post *model.Post) (*model.Post, error) {
 	post.PreSave()
 	if err := post.IsValid(); err != nil {
 		return nil, err
@@ -27,7 +27,7 @@ func (s *SqlPostStore) Save(post *model.Post) (*model.Post, error) {
 		rootID = post.RootID
 	}
 
-	_, err := s.sqlStore.pool.Exec(context.Background(), query,
+	_, err := s.sqlStore.pool.Exec(ctx, query,
 		post.ID, post.ChannelID, post.UserID, rootID, post.Content,
 		post.Type, post.Props, post.Hashtags, post.IsPinned, post.EditAt,
 		post.CreateAt, post.UpdateAt, post.DeleteAt,
@@ -39,12 +39,12 @@ func (s *SqlPostStore) Save(post *model.Post) (*model.Post, error) {
 	return post, nil
 }
 
-func (s *SqlPostStore) Get(id string) (*model.Post, error) {
+func (s *SqlPostStore) Get(ctx context.Context, id string) (*model.Post, error) {
 	query := `SELECT id, channel_id, user_id, COALESCE(root_id::text, ''), content, type, props, hashtags, is_pinned, edit_at, create_at, update_at, delete_at
 		FROM posts WHERE id = $1 AND delete_at = 0`
 
 	p := &model.Post{}
-	err := s.sqlStore.pool.QueryRow(context.Background(), query, id).Scan(
+	err := s.sqlStore.pool.QueryRow(ctx, query, id).Scan(
 		&p.ID, &p.ChannelID, &p.UserID, &p.RootID, &p.Content,
 		&p.Type, &p.Props, &p.Hashtags, &p.IsPinned, &p.EditAt,
 		&p.CreateAt, &p.UpdateAt, &p.DeleteAt,
@@ -59,14 +59,14 @@ func (s *SqlPostStore) Get(id string) (*model.Post, error) {
 	return p, nil
 }
 
-func (s *SqlPostStore) Update(post *model.Post) (*model.Post, error) {
+func (s *SqlPostStore) Update(ctx context.Context, post *model.Post) (*model.Post, error) {
 	post.PreUpdate()
 	post.EditAt = post.UpdateAt
 
 	query := `UPDATE posts SET content = $1, props = $2, hashtags = $3, edit_at = $4, update_at = $5
 		WHERE id = $6 AND delete_at = 0`
 
-	tag, err := s.sqlStore.pool.Exec(context.Background(), query,
+	tag, err := s.sqlStore.pool.Exec(ctx, query,
 		post.Content, post.Props, post.Hashtags, post.EditAt, post.UpdateAt, post.ID,
 	)
 	if err != nil {
@@ -79,9 +79,9 @@ func (s *SqlPostStore) Update(post *model.Post) (*model.Post, error) {
 	return post, nil
 }
 
-func (s *SqlPostStore) Delete(id string, deleteAt int64) error {
+func (s *SqlPostStore) Delete(ctx context.Context, id string, deleteAt int64) error {
 	query := `UPDATE posts SET delete_at = $1, update_at = $1 WHERE id = $2 AND delete_at = 0`
-	tag, err := s.sqlStore.pool.Exec(context.Background(), query, deleteAt, id)
+	tag, err := s.sqlStore.pool.Exec(ctx, query, deleteAt, id)
 	if err != nil {
 		return fmt.Errorf("delete post: %w", err)
 	}
@@ -91,19 +91,30 @@ func (s *SqlPostStore) Delete(id string, deleteAt int64) error {
 	return nil
 }
 
-func (s *SqlPostStore) GetPostsForChannel(channelID string, opts model.GetPostsOptions) (*model.PostList, error) {
+func (s *SqlPostStore) GetPostsForChannel(ctx context.Context, channelID string, opts model.GetPostsOptions) (*model.PostList, error) {
 	perPage := opts.PerPage
-	if perPage == 0 {
+	if perPage <= 0 {
 		perPage = 60
+	}
+	page := opts.Page
+	if page < 0 {
+		page = 0
+	}
+
+	// Pollers (Since > 0) get chronological order; history readers get
+	// newest-first.
+	order := "DESC"
+	if opts.Since > 0 {
+		order = "ASC"
 	}
 
 	query := `SELECT id, channel_id, user_id, COALESCE(root_id::text, ''), content, type, props, hashtags, is_pinned, edit_at, create_at, update_at, delete_at
 		FROM posts
-		WHERE channel_id = $1 AND delete_at = 0
-		ORDER BY create_at DESC
-		LIMIT $2 OFFSET $3`
+		WHERE channel_id = $1 AND delete_at = 0 AND ($2::bigint = 0 OR create_at > $2)
+		ORDER BY create_at ` + order + `
+		LIMIT $3 OFFSET $4`
 
-	rows, err := s.sqlStore.pool.Query(context.Background(), query, channelID, perPage, opts.Page*perPage)
+	rows, err := s.sqlStore.pool.Query(ctx, query, channelID, opts.Since, perPage, page*perPage)
 	if err != nil {
 		return nil, fmt.Errorf("get posts for channel: %w", err)
 	}
@@ -117,13 +128,13 @@ func (s *SqlPostStore) GetPostsForChannel(channelID string, opts model.GetPostsO
 	return &model.PostList{Order: posts}, nil
 }
 
-func (s *SqlPostStore) GetPostsForThread(rootID string) (*model.PostList, error) {
+func (s *SqlPostStore) GetPostsForThread(ctx context.Context, rootID string) (*model.PostList, error) {
 	query := `SELECT id, channel_id, user_id, COALESCE(root_id::text, ''), content, type, props, hashtags, is_pinned, edit_at, create_at, update_at, delete_at
 		FROM posts
 		WHERE (id = $1 OR root_id = $1) AND delete_at = 0
 		ORDER BY create_at ASC`
 
-	rows, err := s.sqlStore.pool.Query(context.Background(), query, rootID)
+	rows, err := s.sqlStore.pool.Query(ctx, query, rootID)
 	if err != nil {
 		return nil, fmt.Errorf("get posts for thread: %w", err)
 	}
@@ -137,13 +148,13 @@ func (s *SqlPostStore) GetPostsForThread(rootID string) (*model.PostList, error)
 	return &model.PostList{Order: posts}, nil
 }
 
-func (s *SqlPostStore) GetPinnedPosts(channelID string) (*model.PostList, error) {
+func (s *SqlPostStore) GetPinnedPosts(ctx context.Context, channelID string) (*model.PostList, error) {
 	query := `SELECT id, channel_id, user_id, COALESCE(root_id::text, ''), content, type, props, hashtags, is_pinned, edit_at, create_at, update_at, delete_at
 		FROM posts
 		WHERE channel_id = $1 AND is_pinned = TRUE AND delete_at = 0
 		ORDER BY create_at DESC`
 
-	rows, err := s.sqlStore.pool.Query(context.Background(), query, channelID)
+	rows, err := s.sqlStore.pool.Query(ctx, query, channelID)
 	if err != nil {
 		return nil, fmt.Errorf("get pinned posts: %w", err)
 	}
@@ -157,9 +168,9 @@ func (s *SqlPostStore) GetPinnedPosts(channelID string) (*model.PostList, error)
 	return &model.PostList{Order: posts}, nil
 }
 
-func (s *SqlPostStore) SetPinned(id string, pinned bool) error {
+func (s *SqlPostStore) SetPinned(ctx context.Context, id string, pinned bool) error {
 	query := `UPDATE posts SET is_pinned = $1, update_at = $2 WHERE id = $3 AND delete_at = 0`
-	tag, err := s.sqlStore.pool.Exec(context.Background(), query, pinned, model.GetMillis(), id)
+	tag, err := s.sqlStore.pool.Exec(ctx, query, pinned, model.GetMillis(), id)
 	if err != nil {
 		return fmt.Errorf("set pinned: %w", err)
 	}
@@ -169,14 +180,37 @@ func (s *SqlPostStore) SetPinned(id string, pinned bool) error {
 	return nil
 }
 
-func (s *SqlPostStore) SearchByContent(channelID, query string, page, perPage int) ([]*model.Post, error) {
+// GetPostsSince returns posts (including soft-deleted ones, so callers can
+// remove them from derived indexes) whose update_at is strictly after the
+// given watermark, oldest first.
+func (s *SqlPostStore) GetPostsSince(ctx context.Context, sinceUpdateAt int64, limit int) ([]*model.Post, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+
+	query := `SELECT id, channel_id, user_id, COALESCE(root_id::text, ''), content, type, props, hashtags, is_pinned, edit_at, create_at, update_at, delete_at
+		FROM posts
+		WHERE update_at > $1
+		ORDER BY update_at ASC
+		LIMIT $2`
+
+	rows, err := s.sqlStore.pool.Query(ctx, query, sinceUpdateAt, limit)
+	if err != nil {
+		return nil, fmt.Errorf("get posts since: %w", err)
+	}
+	defer rows.Close()
+
+	return scanPosts(rows)
+}
+
+func (s *SqlPostStore) SearchByContent(ctx context.Context, channelID, query string, page, perPage int) ([]*model.Post, error) {
 	if channelID != "" {
 		q := `SELECT id, channel_id, user_id, COALESCE(root_id::text, ''), content, type, props, hashtags, is_pinned, edit_at, create_at, update_at, delete_at
 			FROM posts
 			WHERE content ILIKE '%' || $1 || '%' AND channel_id = $2 AND delete_at = 0
 			ORDER BY create_at DESC
 			LIMIT $3 OFFSET $4`
-		rows, err := s.sqlStore.pool.Query(context.Background(), q, query, channelID, perPage, page*perPage)
+		rows, err := s.sqlStore.pool.Query(ctx, q, query, channelID, perPage, page*perPage)
 		if err != nil {
 			return nil, fmt.Errorf("search posts by content: %w", err)
 		}
@@ -189,7 +223,7 @@ func (s *SqlPostStore) SearchByContent(channelID, query string, page, perPage in
 		WHERE content ILIKE '%' || $1 || '%' AND delete_at = 0
 		ORDER BY create_at DESC
 		LIMIT $2 OFFSET $3`
-	rows, err := s.sqlStore.pool.Query(context.Background(), q, query, perPage, page*perPage)
+	rows, err := s.sqlStore.pool.Query(ctx, q, query, perPage, page*perPage)
 	if err != nil {
 		return nil, fmt.Errorf("search posts by content: %w", err)
 	}

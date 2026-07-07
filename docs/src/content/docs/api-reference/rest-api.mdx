@@ -29,6 +29,9 @@ List endpoints accept query parameters:
 | `page` | int | `0` | Page number (0-indexed) |
 | `per_page` | int | `60` | Results per page |
 
+Values are clamped server-side: `page` is forced to `>= 0` and `per_page` to
+between 1 and 200.
+
 ## ID Format
 
 All resource IDs are **UUIDv7** strings (e.g., `01912345-6789-7abc-8def-0123456789ab`).
@@ -103,6 +106,10 @@ All `*_at` fields are **Unix millisecond timestamps** (int64).
 | GET | `/channels/{id}/posts` | Get posts in a channel |
 | GET | `/channels/{id}/pinned` | Get pinned posts in a channel |
 
+`GET /channels/{id}/posts` also accepts a `since` query parameter (Unix
+milliseconds). When set, it returns posts created after that timestamp,
+ordered oldest-first — useful for incremental polling.
+
 ### Threads
 
 | Method | Path | Summary |
@@ -128,6 +135,12 @@ All `*_at` fields are **Unix millisecond timestamps** (int64).
 |---|---|---|
 | POST | `/teams/{id}/posts/search` | Search posts in a team |
 | POST | `/channels/{id}/posts/search` | Search posts in a channel |
+
+### Commands
+
+| Method | Path | Summary |
+|---|---|---|
+| GET | `/commands` | List available slash commands |
 
 ### WebSocket
 

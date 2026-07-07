@@ -16,6 +16,7 @@ func TestGetThread(t *testing.T) {
 	r = withChiParam(r, "id", testRootPost)
 	w := httptest.NewRecorder()
 
+	r = authedRequest(r, testUser())
 	handler.ServeHTTP(w, r)
 
 	if w.Code != http.StatusOK {

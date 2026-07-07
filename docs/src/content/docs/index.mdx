@@ -30,8 +30,9 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
     message across your workspace instantly.
   </Card>
   <Card title="Zero-Trust Security" icon="approve-check-circle">
-    Ory Kratos for identity, Oathkeeper for auth proxy, and Keto for
-    fine-grained ReBAC authorization on every channel.
+    Ory Kratos for identity, Oathkeeper for auth proxy, and Keto for ReBAC
+    slash-command authorization. Channel access is enforced server-side on
+    every read, post, and WebSocket event delivery.
   </Card>
   <Card title="Distributed Architecture" icon="random">
     Scalable distributed services designed for service mesh deployment. Added
@@ -40,7 +41,8 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
   <Card title="AI Agent & Bot Integration" icon="laptop">
     First-class support for AI agents and bots via MCP and REST API. Agents
     and bots are full chat citizens — they join teams, post messages, and
-    participate in threads just like human users.
+    participate in threads just like human users, with a real-time event feed
+    agents poll for new activity.
   </Card>
   <Card title="GitOps Day 2 Operations" icon="seti:config">
     Automated, git-ops driven Day 2 operations. Declarative configuration,

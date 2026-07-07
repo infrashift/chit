@@ -3,6 +3,7 @@ package api
 import (
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/gorilla/websocket"
 
@@ -10,15 +11,30 @@ import (
 	ws "github.com/infrashift/chit/internal/websocket"
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins in dev; restrict in production
-	},
+// originAllowed permits requests with no Origin header (non-browser clients)
+// and browser requests whose Origin is on the configured allowlist.
+func originAllowed(r *http.Request, allowed []string) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	for _, o := range allowed {
+		if o == "*" || strings.EqualFold(o, origin) {
+			return true
+		}
+	}
+	return false
 }
 
 func handleWebSocket(a *app.App) http.HandlerFunc {
+	upgrader := websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin: func(r *http.Request) bool {
+			return originAllowed(r, a.Config.AllowedOrigins)
+		},
+	}
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
 		if user == nil {

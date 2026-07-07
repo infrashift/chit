@@ -1172,6 +1172,43 @@ curl_api_full GET "/commands"
 assert_status "8.7 unauthenticated /commands" 401 "$LAST_STATUS"
 
 # ============================================================================
+# SCENARIO 9: Authorization enforcement (cross-user 403s)
+# ============================================================================
+section "Scenario 9: Authorization Enforcement"
+
+# 9.1 Charlie (not a member of the private channel) cannot post to it
+CURRENT_TOKEN="$CHARLIE_TOKEN"
+curl_api_full POST "/posts" "{\"channel_id\":\"${PRIVATE_CHANNEL_ID}\",\"content\":\"intruder message\"}"
+assert_status "9.1 non-member cannot post to private channel" 403 "$LAST_STATUS"
+
+# 9.2 Charlie cannot read the private channel's posts
+curl_api_full GET "/channels/${PRIVATE_CHANNEL_ID}/posts"
+assert_status "9.2 non-member cannot read private channel posts" 403 "$LAST_STATUS"
+
+# 9.3 Charlie cannot list the private channel's members
+curl_api_full GET "/channels/${PRIVATE_CHANNEL_ID}/members"
+assert_status "9.3 non-member cannot list private channel members" 403 "$LAST_STATUS"
+
+# 9.4 Charlie cannot add himself to the private channel
+curl_api_full POST "/channels/${PRIVATE_CHANNEL_ID}/members" "{\"user_id\":\"${CHARLIE_ID}\"}"
+assert_status "9.4 non-member cannot self-invite to private channel" 403 "$LAST_STATUS"
+
+# 9.5 Bob cannot edit Alice's post
+CURRENT_TOKEN="$BOB_TOKEN"
+curl_api_full PUT "/posts/${NORMAL_POST_ID}" "{\"content\":\"defaced by bob\"}"
+assert_status "9.5 non-owner cannot edit another user's post" 403 "$LAST_STATUS"
+
+# 9.6 Bob cannot delete Alice's post
+curl_api_full DELETE "/posts/${NORMAL_POST_ID}"
+assert_status "9.6 non-owner cannot delete another user's post" 403 "$LAST_STATUS"
+
+# 9.7 Alice's post is unchanged after the failed edit/delete
+CURRENT_TOKEN="$ALICE_TOKEN"
+curl_api_full GET "/posts/${NORMAL_POST_ID}"
+assert_status "9.7 post still readable by owner" 200 "$LAST_STATUS"
+assert_json "9.7 post content unchanged" ".content" "This is a normal message, not a command" "$LAST_BODY"
+
+# ============================================================================
 # SUMMARY
 # ============================================================================
 section "Test Summary"

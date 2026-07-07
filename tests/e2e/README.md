@@ -9,13 +9,14 @@
   # 2. Rebuild the binary with the latest code
   make build
 
-  # 3. Restart services
+  # 3. Restart services (Kratos, Keto, and chit migrations run automatically
+  #    via init/migrate containers during kube-up)
   make kube-down && make kube-up
   sleep 10
 
-  # 4. Run migrations
-  make kube-migrate
-  ~/go/bin/migrate -path migrations -database "postgres://chit:chit@localhost:5432/chit?sslmode=disable" up
+  # 4. (Only if new migration files were added since the pod started)
+  #    re-apply chit schema migrations against the running pod
+  # make kube-migrate
 
   # 5. Start the NEW binary
   CHIT_DATABASE_URL="postgres://chit:chit@localhost:5432/chit?sslmode=disable" ./bin/chitd &

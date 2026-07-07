@@ -2,6 +2,7 @@ package api
 
 import (
 	"bufio"
+	"crypto/subtle"
 	"fmt"
 	"log/slog"
 	"net"
@@ -17,9 +18,20 @@ import (
 
 // AuthExtract reads the trusted proxy header (set by Oathkeeper) and provisions
 // or retrieves the local user, storing it in the request context.
+// When CHIT_TRUSTED_PROXY_SECRET is set, the proxy must also present it in
+// X-Proxy-Secret; this prevents header spoofing if the backend is reachable
+// without going through the proxy.
 func AuthExtract(a *app.App) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if secret := a.Config.TrustedProxySecret; secret != "" {
+				presented := r.Header.Get("X-Proxy-Secret")
+				if subtle.ConstantTimeCompare([]byte(presented), []byte(secret)) != 1 {
+					WriteError(w, model.NewUnauthorizedError("AuthExtract", "invalid proxy credentials"))
+					return
+				}
+			}
+
 			kratosID := r.Header.Get(a.Config.TrustedProxyHeader)
 			if kratosID == "" {
 				WriteError(w, model.NewUnauthorizedError("AuthExtract", "missing authentication header"))

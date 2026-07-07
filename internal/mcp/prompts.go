@@ -57,7 +57,7 @@ func (s *ChitMCPServer) handleSummarizeChannel(ctx context.Context, req *mcp.Get
 		fmt.Sscanf(n, "%d", &perPage)
 	}
 
-	channel, err := s.app.GetChannel(channelID)
+	channel, err := s.app.GetChannel(ctx, channelID)
 	if err != nil {
 		return nil, fmt.Errorf("get channel: %w", err)
 	}
@@ -66,7 +66,7 @@ func (s *ChitMCPServer) handleSummarizeChannel(ctx context.Context, req *mcp.Get
 		Page:    0,
 		PerPage: perPage,
 	}
-	posts, err := s.app.GetPostsForChannel(ctx, channelID, opts)
+	posts, err := s.app.GetPostsForChannel(ctx, channelID, s.agentUserID, opts)
 	if err != nil {
 		return nil, fmt.Errorf("get channel posts: %w", err)
 	}
@@ -100,7 +100,7 @@ func (s *ChitMCPServer) handleDraftReply(ctx context.Context, req *mcp.GetPrompt
 
 	instructions := req.Params.Arguments["instructions"]
 
-	thread, err := s.app.GetThread(ctx, postID)
+	thread, err := s.app.GetThread(ctx, postID, s.agentUserID)
 	if err != nil {
 		return nil, fmt.Errorf("get thread: %w", err)
 	}

@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -21,7 +20,7 @@ func createTeam(a *app.App) http.HandlerFunc {
 		}
 		team.CreatorID = user.ID
 
-		saved, err := a.CreateTeam(&team)
+		saved, err := a.CreateTeam(r.Context(), &team)
 		if err != nil {
 			WriteError(w, model.NewInternalError("createTeam", err))
 			return
@@ -34,7 +33,7 @@ func createTeam(a *app.App) http.HandlerFunc {
 func getTeam(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
-		team, err := a.GetTeam(id)
+		team, err := a.GetTeam(r.Context(), id)
 		if err != nil {
 			WriteError(w, model.NewNotFoundError("getTeam", id))
 			return
@@ -47,7 +46,7 @@ func updateTeam(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 
-		existing, err := a.GetTeam(id)
+		existing, err := a.GetTeam(r.Context(), id)
 		if err != nil {
 			WriteError(w, model.NewInternalError("updateTeam", err))
 			return
@@ -72,7 +71,7 @@ func updateTeam(a *app.App) http.HandlerFunc {
 			existing.Type = patch.Type
 		}
 
-		updated, err := a.UpdateTeam(existing)
+		updated, err := a.UpdateTeam(r.Context(), existing)
 		if err != nil {
 			WriteError(w, model.NewInternalError("updateTeam", err))
 			return
@@ -85,7 +84,7 @@ func updateTeam(a *app.App) http.HandlerFunc {
 func deleteTeam(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
-		if err := a.DeleteTeam(id); err != nil {
+		if err := a.DeleteTeam(r.Context(), id); err != nil {
 			WriteError(w, model.NewInternalError("deleteTeam", err))
 			return
 		}
@@ -95,13 +94,9 @@ func deleteTeam(a *app.App) http.HandlerFunc {
 
 func getAllTeams(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-		perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
-		if perPage == 0 {
-			perPage = 60
-		}
+		page, perPage := parsePagination(r, 60)
 
-		teams, err := a.GetAllTeams(page, perPage)
+		teams, err := a.GetAllTeams(r.Context(), page, perPage)
 		if err != nil {
 			WriteError(w, model.NewInternalError("getAllTeams", err))
 			return
@@ -114,7 +109,7 @@ func getAllTeams(a *app.App) http.HandlerFunc {
 func getMyTeams(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
-		teams, err := a.GetTeamsForUser(user.ID)
+		teams, err := a.GetTeamsForUser(r.Context(), user.ID)
 		if err != nil {
 			WriteError(w, model.NewInternalError("getMyTeams", err))
 			return
@@ -134,7 +129,7 @@ func addTeamMember(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		member, err := a.AddTeamMember(teamID, body.UserID)
+		member, err := a.AddTeamMember(r.Context(), teamID, body.UserID)
 		if err != nil {
 			WriteError(w, model.NewInternalError("addTeamMember", err))
 			return
@@ -149,7 +144,7 @@ func removeTeamMember(a *app.App) http.HandlerFunc {
 		teamID := chi.URLParam(r, "id")
 		userID := chi.URLParam(r, "user_id")
 
-		if err := a.RemoveTeamMember(teamID, userID); err != nil {
+		if err := a.RemoveTeamMember(r.Context(), teamID, userID); err != nil {
 			WriteError(w, model.NewInternalError("removeTeamMember", err))
 			return
 		}
@@ -161,13 +156,9 @@ func removeTeamMember(a *app.App) http.HandlerFunc {
 func getTeamMembers(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		teamID := chi.URLParam(r, "id")
-		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-		perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
-		if perPage == 0 {
-			perPage = 60
-		}
+		page, perPage := parsePagination(r, 60)
 
-		members, err := a.GetTeamMembers(teamID, page, perPage)
+		members, err := a.GetTeamMembers(r.Context(), teamID, page, perPage)
 		if err != nil {
 			WriteError(w, model.NewInternalError("getTeamMembers", err))
 			return

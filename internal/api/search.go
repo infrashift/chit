@@ -10,16 +10,19 @@ import (
 	"github.com/infrashift/chit/internal/model"
 )
 
+type searchPostsBody struct {
+	Terms   string   `json:"terms"`
+	TagIDs  []string `json:"tag_ids"`
+	Page    int      `json:"page"`
+	PerPage int      `json:"per_page"`
+}
+
 func searchPostsInTeam(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user := ContextGetUser(r)
 		_ = chi.URLParam(r, "id")
 
-		var body struct {
-			Terms   string   `json:"terms"`
-			TagIDs  []string `json:"tag_ids"`
-			Page    int      `json:"page"`
-			PerPage int      `json:"per_page"`
-		}
+		var body searchPostsBody
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			WriteError(w, model.NewBadRequestError("searchPostsInTeam", "invalid request body"))
 			return
@@ -31,10 +34,11 @@ func searchPostsInTeam(a *app.App) http.HandlerFunc {
 		if body.PerPage == 0 {
 			body.PerPage = 60
 		}
+		body.Page, body.PerPage = clampPagination(body.Page, body.PerPage)
 
-		results, err := a.SearchPosts(r.Context(), "", body.Terms, body.TagIDs, body.Page, body.PerPage)
+		results, err := a.SearchPosts(r.Context(), "", user.ID, body.Terms, body.TagIDs, body.Page, body.PerPage)
 		if err != nil {
-			WriteError(w, model.NewInternalError("searchPostsInTeam", err))
+			WriteAppError(w, "searchPostsInTeam", err)
 			return
 		}
 
@@ -44,14 +48,10 @@ func searchPostsInTeam(a *app.App) http.HandlerFunc {
 
 func searchPostsInChannel(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user := ContextGetUser(r)
 		channelID := chi.URLParam(r, "id")
 
-		var body struct {
-			Terms   string   `json:"terms"`
-			TagIDs  []string `json:"tag_ids"`
-			Page    int      `json:"page"`
-			PerPage int      `json:"per_page"`
-		}
+		var body searchPostsBody
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			WriteError(w, model.NewBadRequestError("searchPostsInChannel", "invalid request body"))
 			return
@@ -63,10 +63,11 @@ func searchPostsInChannel(a *app.App) http.HandlerFunc {
 		if body.PerPage == 0 {
 			body.PerPage = 60
 		}
+		body.Page, body.PerPage = clampPagination(body.Page, body.PerPage)
 
-		results, err := a.SearchPosts(r.Context(), channelID, body.Terms, body.TagIDs, body.Page, body.PerPage)
+		results, err := a.SearchPosts(r.Context(), channelID, user.ID, body.Terms, body.TagIDs, body.Page, body.PerPage)
 		if err != nil {
-			WriteError(w, model.NewInternalError("searchPostsInChannel", err))
+			WriteAppError(w, "searchPostsInChannel", err)
 			return
 		}
 

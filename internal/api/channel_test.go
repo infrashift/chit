@@ -58,6 +58,7 @@ func TestGetChannel(t *testing.T) {
 	r = withChiParam(r, "id", testChannelID)
 	w := httptest.NewRecorder()
 
+	r = authedRequest(r, testUser())
 	handler.ServeHTTP(w, r)
 
 	if w.Code != http.StatusOK {
@@ -74,6 +75,7 @@ func TestGetChannel_NotFound(t *testing.T) {
 	r = withChiParam(r, "id", "nonexistent")
 	w := httptest.NewRecorder()
 
+	r = authedRequest(r, testUser())
 	handler.ServeHTTP(w, r)
 
 	if w.Code != http.StatusNotFound {
@@ -92,6 +94,7 @@ func TestUpdateChannel(t *testing.T) {
 	r = withChiParam(r, "id", testChannelID)
 	w := httptest.NewRecorder()
 
+	r = authedRequest(r, testUser())
 	handler.ServeHTTP(w, r)
 
 	if w.Code != http.StatusOK {
@@ -108,6 +111,7 @@ func TestDeleteChannel(t *testing.T) {
 	r = withChiParam(r, "id", testChannelID)
 	w := httptest.NewRecorder()
 
+	r = authedRequest(r, testUser())
 	handler.ServeHTTP(w, r)
 
 	if w.Code != http.StatusOK {
@@ -124,6 +128,7 @@ func TestGetChannelsForTeam(t *testing.T) {
 	r = withChiParam(r, "id", testTeamID)
 	w := httptest.NewRecorder()
 
+	r = authedRequest(r, testUser())
 	handler.ServeHTTP(w, r)
 
 	if w.Code != http.StatusOK {
@@ -158,6 +163,7 @@ func TestCreateDirectChannel(t *testing.T) {
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
+	r = authedRequest(r, testUser())
 	handler.ServeHTTP(w, r)
 
 	if w.Code != http.StatusCreated {
@@ -176,6 +182,7 @@ func TestCreateDirectChannel_Idempotent(t *testing.T) {
 	r1 := httptest.NewRequest(http.MethodPost, "/api/v1/channels/direct", strings.NewReader(body))
 	r1.Header.Set("Content-Type", "application/json")
 	w1 := httptest.NewRecorder()
+	r1 = authedRequest(r1, testUser())
 	handler.ServeHTTP(w1, r1)
 
 	if w1.Code != http.StatusCreated {
@@ -188,6 +195,7 @@ func TestCreateDirectChannel_Idempotent(t *testing.T) {
 	r2 := httptest.NewRequest(http.MethodPost, "/api/v1/channels/direct", strings.NewReader(body))
 	r2.Header.Set("Content-Type", "application/json")
 	w2 := httptest.NewRecorder()
+	r2 = authedRequest(r2, testUser())
 	handler.ServeHTTP(w2, r2)
 
 	if w2.Code != http.StatusCreated {
@@ -211,6 +219,7 @@ func TestCreateDirectChannel_WrongCount(t *testing.T) {
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
+	r = authedRequest(r, testUser())
 	handler.ServeHTTP(w, r)
 
 	if w.Code != http.StatusBadRequest {
@@ -229,6 +238,7 @@ func TestAddChannelMember(t *testing.T) {
 	r = withChiParam(r, "id", testChannelID)
 	w := httptest.NewRecorder()
 
+	r = authedRequest(r, testUser())
 	handler.ServeHTTP(w, r)
 
 	if w.Code != http.StatusCreated {
@@ -245,6 +255,7 @@ func TestRemoveChannelMember(t *testing.T) {
 	r = withChiParams(r, map[string]string{"id": testChannelID, "user_id": testUserID})
 	w := httptest.NewRecorder()
 
+	r = authedRequest(r, testUser())
 	handler.ServeHTTP(w, r)
 
 	if w.Code != http.StatusOK {
@@ -261,6 +272,7 @@ func TestGetChannelMembers(t *testing.T) {
 	r = withChiParam(r, "id", testChannelID)
 	w := httptest.NewRecorder()
 
+	r = authedRequest(r, testUser())
 	handler.ServeHTTP(w, r)
 
 	if w.Code != http.StatusOK {
@@ -349,6 +361,7 @@ func TestCreateGroupChannel_Idempotent(t *testing.T) {
 	r1 := httptest.NewRequest(http.MethodPost, "/api/v1/channels/group", strings.NewReader(body))
 	r1.Header.Set("Content-Type", "application/json")
 	w1 := httptest.NewRecorder()
+	r1 = authedRequest(r1, testUser())
 	handler.ServeHTTP(w1, r1)
 
 	if w1.Code != http.StatusCreated {
@@ -361,6 +374,7 @@ func TestCreateGroupChannel_Idempotent(t *testing.T) {
 	r2 := httptest.NewRequest(http.MethodPost, "/api/v1/channels/group", strings.NewReader(body))
 	r2.Header.Set("Content-Type", "application/json")
 	w2 := httptest.NewRecorder()
+	r2 = authedRequest(r2, testUser())
 	handler.ServeHTTP(w2, r2)
 
 	if w2.Code != http.StatusCreated {

@@ -40,25 +40,28 @@ type cmdMockPostStore struct {
 	saved []*model.Post
 }
 
-func (s *cmdMockPostStore) Save(p *model.Post) (*model.Post, error) {
+func (s *cmdMockPostStore) Save(_ context.Context, p *model.Post) (*model.Post, error) {
 	p.PreSave()
 	s.saved = append(s.saved, p)
 	return p, nil
 }
-func (s *cmdMockPostStore) Get(_ string) (*model.Post, error)       { return nil, errNotFound }
-func (s *cmdMockPostStore) Update(p *model.Post) (*model.Post, error) { return p, nil }
-func (s *cmdMockPostStore) Delete(_ string, _ int64) error          { return nil }
-func (s *cmdMockPostStore) GetPostsForChannel(_ string, _ model.GetPostsOptions) (*model.PostList, error) {
+func (s *cmdMockPostStore) Get(_ context.Context, _ string) (*model.Post, error)         { return nil, errNotFound }
+func (s *cmdMockPostStore) Update(_ context.Context, p *model.Post) (*model.Post, error) { return p, nil }
+func (s *cmdMockPostStore) Delete(_ context.Context, _ string, _ int64) error            { return nil }
+func (s *cmdMockPostStore) GetPostsForChannel(_ context.Context, _ string, _ model.GetPostsOptions) (*model.PostList, error) {
 	return &model.PostList{}, nil
 }
-func (s *cmdMockPostStore) GetPostsForThread(_ string) (*model.PostList, error) {
+func (s *cmdMockPostStore) GetPostsForThread(_ context.Context, _ string) (*model.PostList, error) {
 	return &model.PostList{}, nil
 }
-func (s *cmdMockPostStore) GetPinnedPosts(_ string) (*model.PostList, error) {
+func (s *cmdMockPostStore) GetPinnedPosts(_ context.Context, _ string) (*model.PostList, error) {
 	return &model.PostList{}, nil
 }
-func (s *cmdMockPostStore) SetPinned(_ string, _ bool) error { return nil }
-func (s *cmdMockPostStore) SearchByContent(_, _ string, _, _ int) ([]*model.Post, error) {
+func (s *cmdMockPostStore) SetPinned(_ context.Context, _ string, _ bool) error { return nil }
+func (s *cmdMockPostStore) SearchByContent(_ context.Context, _, _ string, _, _ int) ([]*model.Post, error) {
+	return nil, nil
+}
+func (s *cmdMockPostStore) GetPostsSince(_ context.Context, _ int64, _ int) ([]*model.Post, error) {
 	return nil, nil
 }
 
@@ -74,7 +77,7 @@ func newCommandTestApp(t *testing.T, ketoAllowed bool) *App {
 	}))
 	t.Cleanup(ketoSrv.Close)
 
-	hub := websocket.NewHub()
+	hub := websocket.NewHub(nil)
 	t.Cleanup(hub.Stop)
 
 	ms := &cmdMockStore{

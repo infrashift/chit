@@ -27,7 +27,7 @@ func recvWithTimeout(ch chan *model.WebSocketEvent, d time.Duration) (*model.Web
 }
 
 func TestHub_RegisterAndBroadcast(t *testing.T) {
-	hub := NewHub()
+	hub := NewHub(nil)
 	defer hub.Stop()
 
 	client := newStubClient(hub, "user-1")
@@ -53,7 +53,7 @@ func TestHub_RegisterAndBroadcast(t *testing.T) {
 }
 
 func TestHub_BroadcastNilBroadcastField(t *testing.T) {
-	hub := NewHub()
+	hub := NewHub(nil)
 	defer hub.Stop()
 
 	client := newStubClient(hub, "user-1")
@@ -74,7 +74,7 @@ func TestHub_BroadcastNilBroadcastField(t *testing.T) {
 }
 
 func TestHub_TargetedBroadcast(t *testing.T) {
-	hub := NewHub()
+	hub := NewHub(nil)
 	defer hub.Stop()
 
 	c1 := newStubClient(hub, "user-1")
@@ -102,7 +102,7 @@ func TestHub_TargetedBroadcast(t *testing.T) {
 }
 
 func TestHub_BroadcastToAll(t *testing.T) {
-	hub := NewHub()
+	hub := NewHub(nil)
 	defer hub.Stop()
 
 	c1 := newStubClient(hub, "user-1")
@@ -126,7 +126,7 @@ func TestHub_BroadcastToAll(t *testing.T) {
 }
 
 func TestHub_Unregister(t *testing.T) {
-	hub := NewHub()
+	hub := NewHub(nil)
 	defer hub.Stop()
 
 	client := newStubClient(hub, "user-1")
@@ -152,7 +152,7 @@ func TestHub_Unregister(t *testing.T) {
 }
 
 func TestHub_MultipleClientsPerUser(t *testing.T) {
-	hub := NewHub()
+	hub := NewHub(nil)
 	defer hub.Stop()
 
 	c1 := newStubClient(hub, "user-1")
@@ -176,7 +176,7 @@ func TestHub_MultipleClientsPerUser(t *testing.T) {
 }
 
 func TestHub_SlowConsumer(t *testing.T) {
-	hub := NewHub()
+	hub := NewHub(nil)
 	defer hub.Stop()
 
 	client := newStubClient(hub, "user-1")
@@ -219,7 +219,7 @@ func TestHub_SlowConsumer(t *testing.T) {
 }
 
 func TestHub_Stop(t *testing.T) {
-	hub := NewHub()
+	hub := NewHub(nil)
 
 	c1 := newStubClient(hub, "user-1")
 	c2 := newStubClient(hub, "user-2")
@@ -246,5 +246,138 @@ func TestHub_Stop(t *testing.T) {
 	_, ok2 := <-c2.send
 	if ok1 || ok2 {
 		t.Fatal("expected all send channels to be closed after Stop")
+	}
+}
+
+// ─── Membership filtering ────────────────────────────────────────
+
+type fakeMembershipChecker struct {
+	channels map[string][]string // userID → channel IDs
+}
+
+func (f *fakeMembershipChecker) GetChannelIDsForUser(userID string) ([]string, error) {
+	return f.channels[userID], nil
+}
+
+func channelEvent(channelID string) *model.WebSocketEvent {
+	return &model.WebSocketEvent{
+		Event:     model.WebSocketEventPosted,
+		Data:      map[string]any{},
+		Broadcast: &model.WebSocketBroadcast{ChannelID: channelID},
+	}
+}
+
+func TestHub_ChannelEventsOnlyReachMembers(t *testing.T) {
+	hub := NewHub(&fakeMembershipChecker{
+		channels: map[string][]string{
+			"member":     {"ch-1"},
+			"non-member": {"ch-other"},
+		},
+	})
+	defer hub.Stop()
+
+	member := newStubClient(hub, "member")
+	nonMember := newStubClient(hub, "non-member")
+	hub.Register(member)
+	hub.Register(nonMember)
+	time.Sleep(50 * time.Millisecond) // allow async membership loads to apply
+
+	hub.Broadcast(channelEvent("ch-1"))
+
+	if _, ok := recvWithTimeout(member.send, 100*time.Millisecond); !ok {
+		t.Fatal("expected channel member to receive event")
+	}
+	if _, ok := recvWithTimeout(nonMember.send, 50*time.Millisecond); ok {
+		t.Fatal("expected non-member NOT to receive channel event")
+	}
+}
+
+func TestHub_MembershipChangeUpdatesFiltering(t *testing.T) {
+	hub := NewHub(&fakeMembershipChecker{
+		channels: map[string][]string{"user-1": {}},
+	})
+	defer hub.Stop()
+
+	client := newStubClient(hub, "user-1")
+	hub.Register(client)
+	time.Sleep(50 * time.Millisecond)
+
+	hub.Broadcast(channelEvent("ch-1"))
+	if _, ok := recvWithTimeout(client.send, 50*time.Millisecond); ok {
+		t.Fatal("expected no delivery before joining the channel")
+	}
+
+	hub.NotifyMembershipChanged("user-1", "ch-1", true)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.Broadcast(channelEvent("ch-1"))
+	if _, ok := recvWithTimeout(client.send, 100*time.Millisecond); !ok {
+		t.Fatal("expected delivery after joining the channel")
+	}
+
+	hub.NotifyMembershipChanged("user-1", "ch-1", false)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.Broadcast(channelEvent("ch-1"))
+	if _, ok := recvWithTimeout(client.send, 50*time.Millisecond); ok {
+		t.Fatal("expected no delivery after leaving the channel")
+	}
+}
+
+// Regression test: unregistering the same client twice (slow-consumer
+// disconnect racing the readPump's deferred Unregister) must not panic with
+// "close of closed channel".
+func TestHub_DoubleUnregisterNoPanic(t *testing.T) {
+	hub := NewHub(nil)
+	defer hub.Stop()
+
+	client := newStubClient(hub, "user-1")
+	hub.Register(client)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.Unregister(client)
+	hub.Unregister(client)
+	time.Sleep(20 * time.Millisecond)
+
+	if _, ok := <-client.send; ok {
+		t.Fatal("expected send channel to be closed")
+	}
+}
+
+// The slow-consumer disconnect is now synchronous inside the event loop, so
+// the send channel MUST be closed once the overflowing broadcast is processed.
+func TestHub_SlowConsumerIsDisconnected(t *testing.T) {
+	hub := NewHub(nil)
+	defer hub.Stop()
+
+	client := newStubClient(hub, "user-1")
+	hub.Register(client)
+	time.Sleep(20 * time.Millisecond)
+
+	for i := 0; i < sendBufferSize+1; i++ {
+		hub.Broadcast(&model.WebSocketEvent{
+			Event:     model.WebSocketEventPosted,
+			Data:      map[string]any{"i": i},
+			Broadcast: &model.WebSocketBroadcast{},
+		})
+	}
+
+	// Wait for the hub to process every broadcast before draining, so the
+	// overflowing event deterministically finds the buffer full.
+	time.Sleep(100 * time.Millisecond)
+
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case _, ok := <-client.send:
+			if !ok {
+				// A deferred readPump-style unregister must also be harmless.
+				hub.Unregister(client)
+				time.Sleep(20 * time.Millisecond)
+				return
+			}
+		case <-timeout:
+			t.Fatal("expected slow consumer to be disconnected (send channel closed)")
+		}
 	}
 }

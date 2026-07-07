@@ -1,11 +1,13 @@
 package app
 
 import (
+	"context"
 	"log/slog"
 	"regexp"
 	"strings"
 
 	"github.com/infrashift/chit/internal/model"
+	"github.com/infrashift/chit/internal/pubsub"
 )
 
 // mentionRe matches @username patterns at word boundaries.
@@ -36,7 +38,7 @@ func parseMentions(content string) []string {
 // processMentions resolves @username mentions in a post to user IDs.
 // It handles @all/@channel by collecting all channel members.
 // Self-mentions and non-channel-members are filtered out.
-func (a *App) processMentions(post *model.Post) ([]string, error) {
+func (a *App) processMentions(ctx context.Context, post *model.Post) ([]string, error) {
 	usernames := parseMentions(post.Content)
 	if len(usernames) == 0 {
 		slog.Debug("processMentions: no usernames parsed from content",
@@ -64,7 +66,7 @@ func (a *App) processMentions(post *model.Post) ([]string, error) {
 		page := 0
 		const perPage = 200
 		for {
-			members, err := a.Store.Channel().GetMembers(post.ChannelID, page, perPage)
+			members, err := a.Store.Channel().GetMembers(ctx, post.ChannelID, page, perPage)
 			if err != nil {
 				slog.Warn("processMentions: failed to get channel members", "error", err)
 				break
@@ -81,14 +83,14 @@ func (a *App) processMentions(post *model.Post) ([]string, error) {
 
 	// Resolve individual @username mentions
 	for _, username := range individualUsernames {
-		user, err := a.Store.User().GetByUsername(username)
+		user, err := a.Store.User().GetByUsername(ctx, username)
 		if err != nil {
 			slog.Debug("processMentions: user not found", "username", username, "error", err)
 			continue
 		}
 
 		// Verify channel membership
-		_, err = a.Store.Channel().GetMember(post.ChannelID, user.ID)
+		_, err = a.Store.Channel().GetMember(ctx, post.ChannelID, user.ID)
 		if err != nil {
 			slog.Debug("processMentions: user not a channel member",
 				"username", username, "user_id", user.ID,
@@ -118,19 +120,19 @@ func (a *App) processMentions(post *model.Post) ([]string, error) {
 }
 
 // notifyMentionedUsers increments mention counters and sends targeted WebSocket events.
-func (a *App) notifyMentionedUsers(post *model.Post, userIDs []string) {
+func (a *App) notifyMentionedUsers(ctx context.Context, post *model.Post, userIDs []string) {
 	for _, userID := range userIDs {
 		// Increment channel mention count
-		if err := a.Store.Channel().IncrementMentionCount(post.ChannelID, userID); err != nil {
+		if err := a.Store.Channel().IncrementMentionCount(ctx, post.ChannelID, userID); err != nil {
 			slog.Warn("notifyMentionedUsers: failed to increment channel mention count",
 				"channel_id", post.ChannelID, "user_id", userID, "error", err)
 		}
 
 		// If this is a thread reply and the user follows the thread, increment thread mention count
 		if post.RootID != "" {
-			membership, err := a.Store.Thread().GetMembership(post.RootID, userID)
+			membership, err := a.Store.Thread().GetMembership(ctx, post.RootID, userID)
 			if err == nil && membership.Following {
-				if err := a.Store.Thread().IncrementMentionCount(post.RootID, userID); err != nil {
+				if err := a.Store.Thread().IncrementMentionCount(ctx, post.RootID, userID); err != nil {
 					slog.Warn("notifyMentionedUsers: failed to increment thread mention count",
 						"root_id", post.RootID, "user_id", userID, "error", err)
 				}
@@ -138,7 +140,7 @@ func (a *App) notifyMentionedUsers(post *model.Post, userIDs []string) {
 		}
 
 		// Send targeted WebSocket event
-		a.Hub.Broadcast(&model.WebSocketEvent{
+		a.publishEvent(ctx, &model.WebSocketEvent{
 			Event: model.WebSocketEventMentioned,
 			Data: map[string]any{
 				"post_id":    post.ID,
@@ -148,6 +150,11 @@ func (a *App) notifyMentionedUsers(post *model.Post, userIDs []string) {
 			Broadcast: &model.WebSocketBroadcast{
 				UserID: userID,
 			},
+		}, pubsub.EventEnvelope{
+			Event:        model.WebSocketEventMentioned,
+			PostID:       post.ID,
+			ChannelID:    post.ChannelID,
+			TargetUserID: userID,
 		})
 	}
 }

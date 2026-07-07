@@ -7,8 +7,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/infrashift/chit/internal/model"
 )
 
 func TestNewSearchIndexer(t *testing.T) {
@@ -75,13 +78,13 @@ func TestSearchIndexer_IndexPost_Success(t *testing.T) {
 		"content": "hello world",
 	}
 
-	err := si.IndexPost(context.Background(), doc)
+	err := si.IndexPost(context.Background(), "post-123", doc)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	if gotURL != "/api/chit-posts/_doc" {
-		t.Fatalf("expected URL=/api/chit-posts/_doc, got %q", gotURL)
+	if gotURL != "/api/chit-posts/_doc/post-123" {
+		t.Fatalf("expected URL=/api/chit-posts/_doc/post-123, got %q", gotURL)
 	}
 	if gotAuth != "admin" {
 		t.Fatalf("expected basic auth user=%q, got %q", "admin", gotAuth)
@@ -101,7 +104,7 @@ func TestSearchIndexer_IndexPost_ServerError(t *testing.T) {
 	defer srv.Close()
 
 	si := NewSearchIndexer(srv.URL, "admin", "secret")
-	err := si.IndexPost(context.Background(), map[string]any{"id": "1"})
+	err := si.IndexPost(context.Background(), "1", map[string]any{"id": "1"})
 	if err == nil {
 		t.Fatal("expected error for 500 response")
 	}
@@ -163,5 +166,143 @@ func TestSearchIndexer_Search_EmptyHits(t *testing.T) {
 	}
 	if len(ids) != 0 {
 		t.Fatalf("expected 0 IDs, got %d", len(ids))
+	}
+}
+
+// fakePostStore implements just enough of store.PostStore for the indexer.
+type fakePostStore struct {
+	posts []*model.Post
+}
+
+func (f *fakePostStore) Save(_ context.Context, p *model.Post) (*model.Post, error)   { return p, nil }
+func (f *fakePostStore) Get(_ context.Context, _ string) (*model.Post, error)         { return nil, nil }
+func (f *fakePostStore) Update(_ context.Context, p *model.Post) (*model.Post, error) { return p, nil }
+func (f *fakePostStore) Delete(_ context.Context, _ string, _ int64) error            { return nil }
+func (f *fakePostStore) GetPostsForChannel(_ context.Context, _ string, _ model.GetPostsOptions) (*model.PostList, error) {
+	return nil, nil
+}
+func (f *fakePostStore) GetPostsForThread(_ context.Context, _ string) (*model.PostList, error) {
+	return nil, nil
+}
+func (f *fakePostStore) GetPinnedPosts(_ context.Context, _ string) (*model.PostList, error) {
+	return nil, nil
+}
+func (f *fakePostStore) SetPinned(_ context.Context, _ string, _ bool) error { return nil }
+func (f *fakePostStore) SearchByContent(_ context.Context, _, _ string, _, _ int) ([]*model.Post, error) {
+	return nil, nil
+}
+func (f *fakePostStore) GetPostsSince(_ context.Context, since int64, limit int) ([]*model.Post, error) {
+	var out []*model.Post
+	for _, p := range f.posts {
+		if p.UpdateAt > since {
+			out = append(out, p)
+		}
+		if len(out) == limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func TestSearchIndexer_RunOnce_IndexesAndDeletes(t *testing.T) {
+	var mu sync.Mutex
+	indexed := map[string]string{} // id -> method
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		parts := strings.Split(r.URL.Path, "/")
+		id := parts[len(parts)-1]
+		indexed[id] = r.Method
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	ps := &fakePostStore{posts: []*model.Post{
+		{ID: "p1", ChannelID: "ch", UserID: "u", Content: "hello", UpdateAt: 100},
+		{ID: "p2", ChannelID: "ch", UserID: "u", Content: "gone", UpdateAt: 200, DeleteAt: 150},
+		{ID: "p3", ChannelID: "ch", UserID: "u", Content: "world", UpdateAt: 300},
+	}}
+
+	si := NewSearchIndexer(srv.URL, "admin", "secret").WithPostStore(ps)
+	si.runOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if indexed["p1"] != http.MethodPut || indexed["p3"] != http.MethodPut {
+		t.Fatalf("expected p1/p3 indexed via PUT, got %v", indexed)
+	}
+	if indexed["p2"] != http.MethodDelete {
+		t.Fatalf("expected soft-deleted p2 removed via DELETE, got %v", indexed)
+	}
+	if si.watermark != 300 {
+		t.Fatalf("expected watermark=300, got %d", si.watermark)
+	}
+}
+
+func TestSearchIndexer_RunOnce_StopsOnErrorAndRetries(t *testing.T) {
+	var mu sync.Mutex
+	fail := true
+	var puts []string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if fail {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		parts := strings.Split(r.URL.Path, "/")
+		puts = append(puts, parts[len(parts)-1])
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	ps := &fakePostStore{posts: []*model.Post{
+		{ID: "p1", ChannelID: "ch", UserID: "u", Content: "hello", UpdateAt: 100},
+	}}
+	si := NewSearchIndexer(srv.URL, "admin", "secret").WithPostStore(ps)
+
+	si.runOnce(context.Background())
+	if si.watermark != 0 {
+		t.Fatalf("watermark must not advance on failure, got %d", si.watermark)
+	}
+
+	mu.Lock()
+	fail = false
+	mu.Unlock()
+
+	si.runOnce(context.Background())
+	if si.watermark != 100 {
+		t.Fatalf("expected watermark=100 after retry, got %d", si.watermark)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(puts) != 1 || puts[0] != "p1" {
+		t.Fatalf("expected p1 indexed on retry, got %v", puts)
+	}
+}
+
+// ZincSearch answers 400 (not 404) when deleting a document that was never
+// indexed; that must not stall the watermark.
+func TestSearchIndexer_DeleteMissingDocIsNotAnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	ps := &fakePostStore{posts: []*model.Post{
+		{ID: "gone", ChannelID: "ch", UserID: "u", Content: "x", UpdateAt: 100, DeleteAt: 50},
+		{ID: "live", ChannelID: "ch", UserID: "u", Content: "y", UpdateAt: 200},
+	}}
+	si := NewSearchIndexer(srv.URL, "admin", "secret").WithPostStore(ps)
+
+	si.runOnce(context.Background())
+	if si.watermark != 200 {
+		t.Fatalf("watermark stalled on missing-doc delete: got %d, want 200", si.watermark)
 	}
 }

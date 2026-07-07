@@ -17,26 +17,29 @@ type searchMockPostStore struct {
 	getResults    map[string]*model.Post
 }
 
-func (s *searchMockPostStore) Save(p *model.Post) (*model.Post, error)   { return p, nil }
-func (s *searchMockPostStore) Get(id string) (*model.Post, error) {
+func (s *searchMockPostStore) Save(_ context.Context, p *model.Post) (*model.Post, error) { return p, nil }
+func (s *searchMockPostStore) Get(_ context.Context, id string) (*model.Post, error) {
 	if p, ok := s.getResults[id]; ok {
 		return p, nil
 	}
 	return nil, errNotFound
 }
-func (s *searchMockPostStore) Update(p *model.Post) (*model.Post, error) { return p, nil }
-func (s *searchMockPostStore) Delete(_ string, _ int64) error            { return nil }
-func (s *searchMockPostStore) GetPostsForChannel(_ string, _ model.GetPostsOptions) (*model.PostList, error) {
+func (s *searchMockPostStore) Update(_ context.Context, p *model.Post) (*model.Post, error) { return p, nil }
+func (s *searchMockPostStore) Delete(_ context.Context, _ string, _ int64) error            { return nil }
+func (s *searchMockPostStore) GetPostsForChannel(_ context.Context, _ string, _ model.GetPostsOptions) (*model.PostList, error) {
 	return &model.PostList{}, nil
 }
-func (s *searchMockPostStore) GetPostsForThread(_ string) (*model.PostList, error) {
+func (s *searchMockPostStore) GetPostsForThread(_ context.Context, _ string) (*model.PostList, error) {
 	return &model.PostList{}, nil
 }
-func (s *searchMockPostStore) GetPinnedPosts(_ string) (*model.PostList, error) {
+func (s *searchMockPostStore) GetPinnedPosts(_ context.Context, _ string) (*model.PostList, error) {
 	return &model.PostList{}, nil
 }
-func (s *searchMockPostStore) SetPinned(_ string, _ bool) error { return nil }
-func (s *searchMockPostStore) SearchByContent(_, _ string, _, _ int) ([]*model.Post, error) {
+func (s *searchMockPostStore) SetPinned(_ context.Context, _ string, _ bool) error { return nil }
+func (s *searchMockPostStore) GetPostsSince(_ context.Context, _ int64, _ int) ([]*model.Post, error) {
+	return nil, nil
+}
+func (s *searchMockPostStore) SearchByContent(_ context.Context, _, _ string, _, _ int) ([]*model.Post, error) {
 	return s.searchResults, nil
 }
 
@@ -45,35 +48,41 @@ type searchMockTagStore struct {
 	filterPostIDsRes []string
 }
 
-func (s searchMockTagStore) Save(_ *model.Tag) (*model.Tag, error)           { return nil, nil }
-func (s searchMockTagStore) GetAll() ([]*model.Tag, error)                   { return nil, nil }
-func (s searchMockTagStore) AddTagToPost(_, _ string) error                  { return nil }
-func (s searchMockTagStore) RemoveTagFromPost(_, _ string) error             { return nil }
-func (s searchMockTagStore) GetTagsForPost(_ string) ([]*model.Tag, error)   { return nil, nil }
-func (s searchMockTagStore) GetPostIDsByTags(_ []string, _, _ int) ([]string, error) {
+func (s searchMockTagStore) Save(_ context.Context, _ *model.Tag) (*model.Tag, error)         { return nil, nil }
+func (s searchMockTagStore) GetAll(_ context.Context) ([]*model.Tag, error)                 { return nil, nil }
+func (s searchMockTagStore) AddTagToPost(_ context.Context, _, _ string) error                { return nil }
+func (s searchMockTagStore) RemoveTagFromPost(_ context.Context, _, _ string) error           { return nil }
+func (s searchMockTagStore) GetTagsForPost(_ context.Context, _ string) ([]*model.Tag, error) { return nil, nil }
+func (s searchMockTagStore) GetPostIDsByTags(_ context.Context, _ []string, _, _ int) ([]string, error) {
 	return s.postIDsByTags, nil
 }
-func (s searchMockTagStore) FilterPostIDsByTags(_ []string, _ []string) ([]string, error) {
+func (s searchMockTagStore) FilterPostIDsByTags(_ context.Context, _ []string, _ []string) ([]string, error) {
 	return s.filterPostIDsRes, nil
 }
 
 type searchMockStore struct {
-	post *searchMockPostStore
-	tag  searchMockTagStore
+	post    *searchMockPostStore
+	tag     searchMockTagStore
+	channel *mentionMockChannelStore
 }
 
-func (m *searchMockStore) User() store.UserStore       { return &mentionMockUserStore{} }
-func (m *searchMockStore) Team() store.TeamStore       { return mentionMockTeamStore{} }
-func (m *searchMockStore) Channel() store.ChannelStore { return &mentionMockChannelStore{} }
-func (m *searchMockStore) Post() store.PostStore       { return m.post }
-func (m *searchMockStore) Thread() store.ThreadStore   { return &mentionMockThreadStore{} }
-func (m *searchMockStore) Tag() store.TagStore         { return m.tag }
-func (m *searchMockStore) Close()                      {}
+func (m *searchMockStore) User() store.UserStore { return &mentionMockUserStore{} }
+func (m *searchMockStore) Team() store.TeamStore { return mentionMockTeamStore{} }
+func (m *searchMockStore) Channel() store.ChannelStore {
+	if m.channel == nil {
+		m.channel = &mentionMockChannelStore{}
+	}
+	return m.channel
+}
+func (m *searchMockStore) Post() store.PostStore     { return m.post }
+func (m *searchMockStore) Thread() store.ThreadStore { return &mentionMockThreadStore{} }
+func (m *searchMockStore) Tag() store.TagStore       { return m.tag }
+func (m *searchMockStore) Close()                    {}
 
 func newSearchTestApp(t *testing.T, posts []*model.Post, zincURL string) *App {
 	t.Helper()
 
-	hub := websocket.NewHub()
+	hub := websocket.NewHub(nil)
 	t.Cleanup(hub.Stop)
 
 	getResults := make(map[string]*model.Post)
@@ -86,6 +95,7 @@ func newSearchTestApp(t *testing.T, posts []*model.Post, zincURL string) *App {
 			searchResults: posts,
 			getResults:    getResults,
 		},
+		channel: newSearchMockChannelStore(),
 	}
 
 	return &App{
@@ -93,6 +103,18 @@ func newSearchTestApp(t *testing.T, posts []*model.Post, zincURL string) *App {
 		Hub:   hub,
 		Config: &config.Config{
 			ZincSearchURL: zincURL,
+		},
+	}
+}
+
+const searcherID = "user-searcher"
+
+// newSearchMockChannelStore seeds ch1 with the searcher as a member so
+// SearchPosts membership checks pass.
+func newSearchMockChannelStore() *mentionMockChannelStore {
+	return &mentionMockChannelStore{
+		members: map[string][]*model.ChannelMember{
+			"ch1": {{ChannelID: "ch1", UserID: searcherID}},
 		},
 	}
 }
@@ -112,7 +134,7 @@ func TestSearchPosts_ZincEmptyFallsBackToSQL(t *testing.T) {
 	// Empty ZincSearchURL means zincSearch returns (nil, false, nil) → SQL fallback
 	a := newSearchTestApp(t, posts, "")
 
-	result, err := a.SearchPosts(context.Background(), "ch1", "hello", nil, 0, 60)
+	result, err := a.SearchPosts(context.Background(), "ch1", searcherID, "hello", nil, 0, 60)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -128,7 +150,7 @@ func TestSearchPosts_TextOnlySQLFallback(t *testing.T) {
 	}
 	a := newSearchTestApp(t, posts, "")
 
-	result, err := a.SearchPosts(context.Background(), "ch1", "test", nil, 0, 60)
+	result, err := a.SearchPosts(context.Background(), "ch1", searcherID, "test", nil, 0, 60)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -143,7 +165,7 @@ func TestSearchPosts_TextOnlySQLFallback(t *testing.T) {
 func TestSearchPosts_NoQueryNoTags_ReturnsEmpty(t *testing.T) {
 	a := newSearchTestApp(t, nil, "")
 
-	result, err := a.SearchPosts(context.Background(), "ch1", "", nil, 0, 60)
+	result, err := a.SearchPosts(context.Background(), "ch1", searcherID, "", nil, 0, 60)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -157,7 +179,7 @@ func TestSearchPosts_TagOnly(t *testing.T) {
 		{ID: "p1", ChannelID: "ch1", Content: "tagged post"},
 	}
 
-	hub := websocket.NewHub()
+	hub := websocket.NewHub(nil)
 	t.Cleanup(hub.Stop)
 
 	ms := &searchMockStore{
@@ -167,6 +189,7 @@ func TestSearchPosts_TagOnly(t *testing.T) {
 		tag: searchMockTagStore{
 			postIDsByTags: []string{"p1"},
 		},
+		channel: newSearchMockChannelStore(),
 	}
 
 	a := &App{
@@ -175,7 +198,7 @@ func TestSearchPosts_TagOnly(t *testing.T) {
 		Config: &config.Config{},
 	}
 
-	result, err := a.SearchPosts(context.Background(), "ch1", "", []string{"tag1"}, 0, 60)
+	result, err := a.SearchPosts(context.Background(), "ch1", searcherID, "", []string{"tag1"}, 0, 60)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -189,7 +212,7 @@ func TestSearchPosts_HybridFallsBackToSQLWhenZincEmpty(t *testing.T) {
 		{ID: "p1", ChannelID: "ch1", Content: "tagged search"},
 	}
 
-	hub := websocket.NewHub()
+	hub := websocket.NewHub(nil)
 	t.Cleanup(hub.Stop)
 
 	ms := &searchMockStore{
@@ -200,6 +223,7 @@ func TestSearchPosts_HybridFallsBackToSQLWhenZincEmpty(t *testing.T) {
 		tag: searchMockTagStore{
 			filterPostIDsRes: []string{"p1"},
 		},
+		channel: newSearchMockChannelStore(),
 	}
 
 	// Empty ZincSearchURL → zincSearch returns (nil, false, nil) → SQL + tag filter
@@ -209,7 +233,7 @@ func TestSearchPosts_HybridFallsBackToSQLWhenZincEmpty(t *testing.T) {
 		Config: &config.Config{},
 	}
 
-	result, err := a.SearchPosts(context.Background(), "ch1", "tagged", []string{"tag1"}, 0, 60)
+	result, err := a.SearchPosts(context.Background(), "ch1", searcherID, "tagged", []string{"tag1"}, 0, 60)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

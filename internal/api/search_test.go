@@ -16,6 +16,7 @@ func TestSearchPostsInTeam_InvalidBody(t *testing.T) {
 	r = withChiParam(r, "id", testTeamID)
 	w := httptest.NewRecorder()
 
+	r = authedRequest(r, testUser())
 	handler.ServeHTTP(w, r)
 
 	if w.Code != http.StatusBadRequest {
@@ -32,6 +33,7 @@ func TestSearchPostsInChannel_InvalidBody(t *testing.T) {
 	r = withChiParam(r, "id", testChannelID)
 	w := httptest.NewRecorder()
 
+	r = authedRequest(r, testUser())
 	handler.ServeHTTP(w, r)
 
 	if w.Code != http.StatusBadRequest {

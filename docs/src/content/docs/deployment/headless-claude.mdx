@@ -1,0 +1,130 @@
+---
+title: Headless Claude Code
+description: Drive headless Claude Code sessions from Chit channels with the chit-claude bridge.
+---
+
+The `chit-claude` bridge turns Chit into an asynchronous, markdown-native
+front-end for [Claude Code](https://code.claude.com/docs). Post a message in a
+configured channel and the bridge runs `claude -p` headlessly in a working
+directory of your choice; Claude's response lands back in the thread as the
+agent user, with a token/cost footer. Replying in the thread resumes the same
+Claude session — full context intact — so a task can span hours or days with
+no terminal open anywhere.
+
+## How it works
+
+```
+you (any Chit client)
+   │  post "plan the migration of service X"
+   ▼
+chitd ──WebSocket (posted event)──▶ chit-claude bridge
+                                        │ claude -p "<message>" --output-format json
+                                        │ (adds --resume <session_id> on thread replies)
+                                        ▼
+                                    claude CLI ──▶ Anthropic (subscription OAuth)
+                                        │ result JSON: text + session_id + usage
+                                        ▼
+chitd ◀──REST POST /posts (threaded reply + footer + session prop)──┘
+```
+
+- **Thread = session.** A root post starts a new Claude session. The bridge
+  stores the returned `session_id` in the agent reply's `props`
+  (`claude_session_id`), so state lives in the conversation itself and
+  survives bridge restarts. Replies in the thread run
+  `claude -p --resume <session_id>`.
+- **One run at a time per thread.** Messages arriving while Claude is working
+  queue up in order (resuming the same session from two processes at once
+  would interleave its transcript).
+- **The runner posts the reply.** Claude runs with no MCP servers attached in
+  this setup; the bridge captures the `--output-format json` result and posts
+  it. Attaching `chit-mcp` via `--mcp-config` so Claude can post mid-run
+  updates itself is possible but optional.
+- **Failures are visible.** A failed or timed-out run posts an error reply
+  (with the stderr tail) to the thread instead of going silent.
+
+:::caution[Session resumption gotcha]
+`claude -p --session-id <id>` does **not** resume a session on later runs —
+that flag assigns an ID to a *new* session. Resumption is
+`claude -p --resume <session_id>`, using the `session_id` captured from the
+previous run's JSON output. The bridge handles this for you; the note is here
+because most hand-rolled scripts get it wrong.
+:::
+
+## Setup
+
+### 1. Create the agent user
+
+The UAT seeder already creates a `chit-agent` user with `actor_type=agent`,
+membership in the UAT team and channel, and Kratos ID
+`a9e47000-0000-4000-a000-000000000006`. For other environments create an
+equivalent user and **add it to every channel the bridge should serve** —
+channel authorization is enforced server-side, and the hub only delivers
+events for channels the agent belongs to.
+
+### 2. Authenticate the claude CLI
+
+On a machine with a browser, generate a long-lived OAuth token and set it in
+the bridge's environment:
+
+```bash
+claude setup-token          # requires a Pro/Max/Team/Enterprise subscription
+export CLAUDE_CODE_OAUTH_TOKEN=<token>
+```
+
+:::caution[Subscription vs. API billing]
+If `ANTHROPIC_API_KEY` is present in the bridge's environment, Claude Code
+bills per-token against the API instead of your subscription. Keep it unset.
+:::
+
+### 3. Configure and run the bridge
+
+```bash
+export CHIT_CLAUDE_AGENT_KRATOS_ID=a9e47000-0000-4000-a000-000000000006
+export CHIT_CLAUDE_CHANNELS=<channel-id>[,<channel-id>...]
+export CHIT_CLAUDE_WORKDIR=/path/to/project    # where claude runs
+# optional hardening / behavior:
+export CHIT_CLAUDE_PERMISSION_MODE=dontAsk     # blocks tools not allowlisted
+export CHIT_CLAUDE_ALLOWED_TOOLS="Read,Grep,Glob,Bash(go test *)"
+export CHIT_CLAUDE_REQUIRE_MENTION=false       # true → only @chit-agent posts trigger runs
+export CHIT_CLAUDE_RUN_TIMEOUT=30m
+export CHIT_CLAUDE_PROXY_SECRET=...            # match chitd's CHIT_TRUSTED_PROXY_SECRET
+
+make build-claude
+./bin/chit-claude
+```
+
+The full variable list is in `.env.example` (`CHIT_CLAUDE_*` block).
+
+The bridge connects **directly to chitd** (default `http://localhost:8065`),
+authenticating with the agent's Kratos ID via the trusted-proxy header — the
+same trust position Oathkeeper holds. Do not expose chitd beyond the hosts
+that need this. Because replies go through chitd's API, they broadcast to
+connected WebSocket clients in real time like any other message.
+
+## Security notes
+
+- **Access control is channel membership.** Anyone who can post in a
+  configured channel can drive Claude in your `WORKDIR`. Use a private
+  channel.
+- **Prompts are argv, never shell.** Message content is passed to the claude
+  binary as a process argument; there is no shell interpolation to inject
+  into.
+- **Constrain the tools.** `PERMISSION_MODE=dontAsk` plus a tight
+  `ALLOWED_TOOLS` list is the safe default for unattended runs; widen it
+  deliberately per project.
+
+## The footer
+
+Each reply ends with a usage line built from the run's JSON result — no
+OpenTelemetry collector required:
+
+```
+⚙ tokens in 4.5k · out 1.2k · cache 38.0k · $0.42 · context ~21%
+```
+
+`context ~N%` estimates window fill as
+`(cache_read_input_tokens + input_tokens) / CHIT_CLAUDE_CONTEXT_WINDOW`
+(default 200000). For subscription (OAuth) runs the `$` figure is what the
+run *would have cost* on the API, not an actual charge. If you later want
+time-series dashboards, Claude Code's OpenTelemetry support
+(`CLAUDE_CODE_ENABLE_TELEMETRY=1`) can run alongside this unchanged.

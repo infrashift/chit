@@ -94,7 +94,18 @@ func (s *Server) initStore() error {
 }
 
 func (s *Server) initHub() {
-	s.hub = websocket.NewHub()
+	s.hub = websocket.NewHub(hubMembershipAdapter{store: s.store})
+}
+
+// hubMembershipAdapter exposes channel memberships to the websocket hub
+// without giving it the whole store.
+type hubMembershipAdapter struct {
+	store *sqlstore.SqlStore
+}
+
+func (a hubMembershipAdapter) GetChannelIDsForUser(userID string) ([]string, error) {
+	// Hub membership loads are server-internal work, not tied to a request.
+	return a.store.Channel().GetChannelIDsForUser(context.Background(), userID)
 }
 
 func (s *Server) initPubSub() error {
@@ -171,7 +182,7 @@ func (s *Server) initJobs() {
 		s.config.ZincSearchURL,
 		s.config.ZincSearchUser,
 		s.config.ZincSearchPassword,
-	)
+	).WithPostStore(s.store.Post())
 	s.scheduler.AddWorker(indexer)
 
 	if s.webhookCh != nil {

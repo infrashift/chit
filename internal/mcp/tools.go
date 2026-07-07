@@ -41,7 +41,7 @@ func (s *ChitMCPServer) registerTools() {
 	// Reading Messages
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "get_channel_posts",
-		Description: "Get posts in a channel. Use 'since' (unix ms timestamp) to poll for new messages since the last check.",
+		Description: "Get posts in a channel, newest first. Use 'since' (unix ms timestamp) to poll for messages created after that time; results are then oldest first.",
 	}, s.handleGetChannelPosts)
 
 	mcp.AddTool(s.server, &mcp.Tool{
@@ -243,52 +243,57 @@ type getNewEventsArgs struct {
 
 // ─── Tool handlers ───────────────────────────────────────────────
 
-func (s *ChitMCPServer) handleListTeams(_ context.Context, _ *mcp.CallToolRequest, args listTeamsArgs) (*mcp.CallToolResult, any, error) {
-	perPage := args.PerPage
-	if perPage == 0 {
-		perPage = 60
+// clampPagination bounds tool-supplied pagination to sane values.
+func clampPagination(page, perPage, defaultPerPage int) (clampedPage, clampedPerPage int) {
+	if page < 0 {
+		page = 0
 	}
-	teams, err := s.app.GetAllTeams(args.Page, perPage)
+	if perPage <= 0 {
+		perPage = defaultPerPage
+	}
+	if perPage > 200 {
+		perPage = 200
+	}
+	return page, perPage
+}
+
+func (s *ChitMCPServer) handleListTeams(ctx context.Context, _ *mcp.CallToolRequest, args listTeamsArgs) (*mcp.CallToolResult, any, error) {
+	page, perPage := clampPagination(args.Page, args.PerPage, 60)
+	teams, err := s.app.GetAllTeams(ctx, page, perPage)
 	if err != nil {
 		return toolError(err)
 	}
 	return toolJSON(teams)
 }
 
-func (s *ChitMCPServer) handleGetTeam(_ context.Context, _ *mcp.CallToolRequest, args getTeamArgs) (*mcp.CallToolResult, any, error) {
-	team, err := s.app.GetTeam(args.TeamID)
+func (s *ChitMCPServer) handleGetTeam(ctx context.Context, _ *mcp.CallToolRequest, args getTeamArgs) (*mcp.CallToolResult, any, error) {
+	team, err := s.app.GetTeam(ctx, args.TeamID)
 	if err != nil {
 		return toolError(err)
 	}
 	return toolJSON(team)
 }
 
-func (s *ChitMCPServer) handleListChannels(_ context.Context, _ *mcp.CallToolRequest, args listChannelsArgs) (*mcp.CallToolResult, any, error) {
-	perPage := args.PerPage
-	if perPage == 0 {
-		perPage = 60
-	}
-	channels, err := s.app.GetChannelsForTeam(args.TeamID, args.Page, perPage)
+func (s *ChitMCPServer) handleListChannels(ctx context.Context, _ *mcp.CallToolRequest, args listChannelsArgs) (*mcp.CallToolResult, any, error) {
+	page, perPage := clampPagination(args.Page, args.PerPage, 60)
+	channels, err := s.app.GetChannelsForTeam(ctx, args.TeamID, s.agentUserID, page, perPage)
 	if err != nil {
 		return toolError(err)
 	}
 	return toolJSON(channels)
 }
 
-func (s *ChitMCPServer) handleGetChannel(_ context.Context, _ *mcp.CallToolRequest, args getChannelArgs) (*mcp.CallToolResult, any, error) {
-	channel, err := s.app.GetChannel(args.ChannelID)
+func (s *ChitMCPServer) handleGetChannel(ctx context.Context, _ *mcp.CallToolRequest, args getChannelArgs) (*mcp.CallToolResult, any, error) {
+	channel, err := s.app.GetChannel(ctx, args.ChannelID)
 	if err != nil {
 		return toolError(err)
 	}
 	return toolJSON(channel)
 }
 
-func (s *ChitMCPServer) handleGetChannelMembers(_ context.Context, _ *mcp.CallToolRequest, args getChannelMembersArgs) (*mcp.CallToolResult, any, error) {
-	perPage := args.PerPage
-	if perPage == 0 {
-		perPage = 60
-	}
-	members, err := s.app.GetChannelMembers(args.ChannelID, args.Page, perPage)
+func (s *ChitMCPServer) handleGetChannelMembers(ctx context.Context, _ *mcp.CallToolRequest, args getChannelMembersArgs) (*mcp.CallToolResult, any, error) {
+	page, perPage := clampPagination(args.Page, args.PerPage, 60)
+	members, err := s.app.GetChannelMembers(ctx, args.ChannelID, s.agentUserID, page, perPage)
 	if err != nil {
 		return toolError(err)
 	}
@@ -296,16 +301,13 @@ func (s *ChitMCPServer) handleGetChannelMembers(_ context.Context, _ *mcp.CallTo
 }
 
 func (s *ChitMCPServer) handleGetChannelPosts(ctx context.Context, _ *mcp.CallToolRequest, args getChannelPostsArgs) (*mcp.CallToolResult, any, error) {
-	perPage := args.PerPage
-	if perPage == 0 {
-		perPage = 60
-	}
+	page, perPage := clampPagination(args.Page, args.PerPage, 60)
 	opts := model.GetPostsOptions{
-		Page:    args.Page,
+		Page:    page,
 		PerPage: perPage,
 		Since:   args.Since,
 	}
-	posts, err := s.app.GetPostsForChannel(ctx, args.ChannelID, opts)
+	posts, err := s.app.GetPostsForChannel(ctx, args.ChannelID, s.agentUserID, opts)
 	if err != nil {
 		return toolError(err)
 	}
@@ -313,7 +315,7 @@ func (s *ChitMCPServer) handleGetChannelPosts(ctx context.Context, _ *mcp.CallTo
 }
 
 func (s *ChitMCPServer) handleGetPost(ctx context.Context, _ *mcp.CallToolRequest, args getPostArgs) (*mcp.CallToolResult, any, error) {
-	post, err := s.app.GetPost(ctx, args.PostID)
+	post, err := s.app.GetPost(ctx, args.PostID, s.agentUserID)
 	if err != nil {
 		return toolError(err)
 	}
@@ -321,7 +323,7 @@ func (s *ChitMCPServer) handleGetPost(ctx context.Context, _ *mcp.CallToolReques
 }
 
 func (s *ChitMCPServer) handleGetPinnedPosts(ctx context.Context, _ *mcp.CallToolRequest, args getPinnedPostsArgs) (*mcp.CallToolResult, any, error) {
-	posts, err := s.app.GetPinnedPosts(ctx, args.ChannelID)
+	posts, err := s.app.GetPinnedPosts(ctx, args.ChannelID, s.agentUserID)
 	if err != nil {
 		return toolError(err)
 	}
@@ -356,34 +358,31 @@ func (s *ChitMCPServer) handleReplyToThread(ctx context.Context, _ *mcp.CallTool
 }
 
 func (s *ChitMCPServer) handleGetThread(ctx context.Context, _ *mcp.CallToolRequest, args getThreadArgs) (*mcp.CallToolResult, any, error) {
-	thread, err := s.app.GetThread(ctx, args.PostID)
+	thread, err := s.app.GetThread(ctx, args.PostID, s.agentUserID)
 	if err != nil {
 		return toolError(err)
 	}
 	return toolJSON(thread)
 }
 
-func (s *ChitMCPServer) handleGetMyThreads(_ context.Context, _ *mcp.CallToolRequest, args getMyThreadsArgs) (*mcp.CallToolResult, any, error) {
-	perPage := args.PerPage
-	if perPage == 0 {
-		perPage = 25
-	}
-	threads, err := s.app.GetThreadsForUser(s.agentUserID, args.TeamID, args.Page, perPage)
+func (s *ChitMCPServer) handleGetMyThreads(ctx context.Context, _ *mcp.CallToolRequest, args getMyThreadsArgs) (*mcp.CallToolResult, any, error) {
+	page, perPage := clampPagination(args.Page, args.PerPage, 25)
+	threads, err := s.app.GetThreadsForUser(ctx, s.agentUserID, args.TeamID, page, perPage)
 	if err != nil {
 		return toolError(err)
 	}
 	return toolJSON(threads)
 }
 
-func (s *ChitMCPServer) handleMarkThreadRead(_ context.Context, _ *mcp.CallToolRequest, args markThreadReadArgs) (*mcp.CallToolResult, any, error) {
-	if err := s.app.MarkThreadAsRead(args.PostID, s.agentUserID); err != nil {
+func (s *ChitMCPServer) handleMarkThreadRead(ctx context.Context, _ *mcp.CallToolRequest, args markThreadReadArgs) (*mcp.CallToolResult, any, error) {
+	if err := s.app.MarkThreadAsRead(ctx, args.PostID, s.agentUserID); err != nil {
 		return toolError(err)
 	}
 	return toolText("Thread marked as read")
 }
 
-func (s *ChitMCPServer) handleFollowThread(_ context.Context, _ *mcp.CallToolRequest, args followThreadArgs) (*mcp.CallToolResult, any, error) {
-	if err := s.app.UpdateThreadFollowing(args.PostID, s.agentUserID, args.Following); err != nil {
+func (s *ChitMCPServer) handleFollowThread(ctx context.Context, _ *mcp.CallToolRequest, args followThreadArgs) (*mcp.CallToolResult, any, error) {
+	if err := s.app.UpdateThreadFollowing(ctx, args.PostID, s.agentUserID, args.Following); err != nil {
 		return toolError(err)
 	}
 	action := "followed"
@@ -394,42 +393,39 @@ func (s *ChitMCPServer) handleFollowThread(_ context.Context, _ *mcp.CallToolReq
 }
 
 func (s *ChitMCPServer) handleSearchPosts(ctx context.Context, _ *mcp.CallToolRequest, args searchPostsArgs) (*mcp.CallToolResult, any, error) {
-	perPage := args.PerPage
-	if perPage == 0 {
-		perPage = 60
-	}
-	results, err := s.app.SearchPosts(ctx, "", args.Terms, args.TagIDs, args.Page, perPage)
+	page, perPage := clampPagination(args.Page, args.PerPage, 60)
+	results, err := s.app.SearchPosts(ctx, "", s.agentUserID, args.Terms, args.TagIDs, page, perPage)
 	if err != nil {
 		return toolError(err)
 	}
 	return toolJSON(results)
 }
 
-func (s *ChitMCPServer) handleListTags(_ context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
-	tags, err := s.app.GetAllTags()
+func (s *ChitMCPServer) handleListTags(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
+	tags, err := s.app.GetAllTags(ctx)
 	if err != nil {
 		return toolError(err)
 	}
 	return toolJSON(tags)
 }
 
-func (s *ChitMCPServer) handleAddTagToPost(_ context.Context, _ *mcp.CallToolRequest, args addTagToPostArgs) (*mcp.CallToolResult, any, error) {
-	if err := s.app.AddTagToPost(args.PostID, args.TagID); err != nil {
+func (s *ChitMCPServer) handleAddTagToPost(ctx context.Context, _ *mcp.CallToolRequest, args addTagToPostArgs) (*mcp.CallToolResult, any, error) {
+	if err := s.app.AddTagToPost(ctx, args.PostID, args.TagID); err != nil {
 		return toolError(err)
 	}
 	return toolText("Tag added to post")
 }
 
-func (s *ChitMCPServer) handleGetTagsForPost(_ context.Context, _ *mcp.CallToolRequest, args getTagsForPostArgs) (*mcp.CallToolResult, any, error) {
-	tags, err := s.app.GetTagsForPost(args.PostID)
+func (s *ChitMCPServer) handleGetTagsForPost(ctx context.Context, _ *mcp.CallToolRequest, args getTagsForPostArgs) (*mcp.CallToolResult, any, error) {
+	tags, err := s.app.GetTagsForPost(ctx, args.PostID)
 	if err != nil {
 		return toolError(err)
 	}
 	return toolJSON(tags)
 }
 
-func (s *ChitMCPServer) handleGetUser(_ context.Context, _ *mcp.CallToolRequest, args getUserArgs) (*mcp.CallToolResult, any, error) {
-	user, err := s.app.GetUser(args.UserID)
+func (s *ChitMCPServer) handleGetUser(ctx context.Context, _ *mcp.CallToolRequest, args getUserArgs) (*mcp.CallToolResult, any, error) {
+	user, err := s.app.GetUser(ctx, args.UserID)
 	if err != nil {
 		return toolError(err)
 	}
@@ -437,8 +433,8 @@ func (s *ChitMCPServer) handleGetUser(_ context.Context, _ *mcp.CallToolRequest,
 	return toolJSON(user)
 }
 
-func (s *ChitMCPServer) handleGetUserByUsername(_ context.Context, _ *mcp.CallToolRequest, args getUserByUsernameArgs) (*mcp.CallToolResult, any, error) {
-	user, err := s.app.GetUserByUsername(args.Username)
+func (s *ChitMCPServer) handleGetUserByUsername(ctx context.Context, _ *mcp.CallToolRequest, args getUserByUsernameArgs) (*mcp.CallToolResult, any, error) {
+	user, err := s.app.GetUserByUsername(ctx, args.Username)
 	if err != nil {
 		return toolError(err)
 	}
@@ -446,22 +442,22 @@ func (s *ChitMCPServer) handleGetUserByUsername(_ context.Context, _ *mcp.CallTo
 	return toolJSON(user)
 }
 
-func (s *ChitMCPServer) handleGetMyInfo(_ context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
-	user, err := s.app.GetUser(s.agentUserID)
+func (s *ChitMCPServer) handleGetMyInfo(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
+	user, err := s.app.GetUser(ctx, s.agentUserID)
 	if err != nil {
 		return toolError(err)
 	}
 	return toolJSON(user)
 }
 
-func (s *ChitMCPServer) handleMarkChannelViewed(_ context.Context, _ *mcp.CallToolRequest, args markChannelViewedArgs) (*mcp.CallToolResult, any, error) {
-	if err := s.app.UpdateChannelLastViewedAt(args.ChannelID, s.agentUserID); err != nil {
+func (s *ChitMCPServer) handleMarkChannelViewed(ctx context.Context, _ *mcp.CallToolRequest, args markChannelViewedArgs) (*mcp.CallToolResult, any, error) {
+	if err := s.app.UpdateChannelLastViewedAt(ctx, args.ChannelID, s.agentUserID); err != nil {
 		return toolError(err)
 	}
 	return toolText("Channel marked as viewed")
 }
 
-func (s *ChitMCPServer) handleGetNewEvents(_ context.Context, _ *mcp.CallToolRequest, args getNewEventsArgs) (*mcp.CallToolResult, any, error) {
+func (s *ChitMCPServer) handleGetNewEvents(ctx context.Context, _ *mcp.CallToolRequest, args getNewEventsArgs) (*mcp.CallToolResult, any, error) {
 	events := s.eventBuffer.Drain(args.SinceSeq)
 	if len(events) == 0 {
 		return toolText("No new events")

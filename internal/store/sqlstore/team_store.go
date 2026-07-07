@@ -13,7 +13,7 @@ type SqlTeamStore struct {
 	sqlStore *SqlStore
 }
 
-func (s *SqlTeamStore) Save(team *model.Team) (*model.Team, error) {
+func (s *SqlTeamStore) Save(ctx context.Context, team *model.Team) (*model.Team, error) {
 	team.PreSave()
 	if err := team.IsValid(); err != nil {
 		return nil, err
@@ -21,7 +21,7 @@ func (s *SqlTeamStore) Save(team *model.Team) (*model.Team, error) {
 
 	query := `INSERT INTO teams (id, name, display_name, description, type, creator_id, create_at, update_at, delete_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
-	_, err := s.sqlStore.pool.Exec(context.Background(), query,
+	_, err := s.sqlStore.pool.Exec(ctx, query,
 		team.ID, team.Name, team.DisplayName, team.Description, team.Type,
 		team.CreatorID, team.CreateAt, team.UpdateAt, team.DeleteAt,
 	)
@@ -32,12 +32,12 @@ func (s *SqlTeamStore) Save(team *model.Team) (*model.Team, error) {
 	return team, nil
 }
 
-func (s *SqlTeamStore) Get(id string) (*model.Team, error) {
+func (s *SqlTeamStore) Get(ctx context.Context, id string) (*model.Team, error) {
 	query := `SELECT id, name, display_name, description, type, creator_id, create_at, update_at, delete_at
 		FROM teams WHERE id = $1 AND delete_at = 0`
 
 	team := &model.Team{}
-	err := s.sqlStore.pool.QueryRow(context.Background(), query, id).Scan(
+	err := s.sqlStore.pool.QueryRow(ctx, query, id).Scan(
 		&team.ID, &team.Name, &team.DisplayName, &team.Description, &team.Type,
 		&team.CreatorID, &team.CreateAt, &team.UpdateAt, &team.DeleteAt,
 	)
@@ -51,12 +51,12 @@ func (s *SqlTeamStore) Get(id string) (*model.Team, error) {
 	return team, nil
 }
 
-func (s *SqlTeamStore) GetByName(name string) (*model.Team, error) {
+func (s *SqlTeamStore) GetByName(ctx context.Context, name string) (*model.Team, error) {
 	query := `SELECT id, name, display_name, description, type, creator_id, create_at, update_at, delete_at
 		FROM teams WHERE name = $1 AND delete_at = 0`
 
 	team := &model.Team{}
-	err := s.sqlStore.pool.QueryRow(context.Background(), query, name).Scan(
+	err := s.sqlStore.pool.QueryRow(ctx, query, name).Scan(
 		&team.ID, &team.Name, &team.DisplayName, &team.Description, &team.Type,
 		&team.CreatorID, &team.CreateAt, &team.UpdateAt, &team.DeleteAt,
 	)
@@ -70,12 +70,12 @@ func (s *SqlTeamStore) GetByName(name string) (*model.Team, error) {
 	return team, nil
 }
 
-func (s *SqlTeamStore) Update(team *model.Team) (*model.Team, error) {
+func (s *SqlTeamStore) Update(ctx context.Context, team *model.Team) (*model.Team, error) {
 	team.PreUpdate()
 
 	query := `UPDATE teams SET name = $1, display_name = $2, description = $3, type = $4, update_at = $5
 		WHERE id = $6 AND delete_at = 0`
-	tag, err := s.sqlStore.pool.Exec(context.Background(), query,
+	tag, err := s.sqlStore.pool.Exec(ctx, query,
 		team.Name, team.DisplayName, team.Description, team.Type, team.UpdateAt, team.ID,
 	)
 	if err != nil {
@@ -88,9 +88,9 @@ func (s *SqlTeamStore) Update(team *model.Team) (*model.Team, error) {
 	return team, nil
 }
 
-func (s *SqlTeamStore) Delete(id string, deleteAt int64) error {
+func (s *SqlTeamStore) Delete(ctx context.Context, id string, deleteAt int64) error {
 	query := `UPDATE teams SET delete_at = $1, update_at = $1 WHERE id = $2 AND delete_at = 0`
-	tag, err := s.sqlStore.pool.Exec(context.Background(), query, deleteAt, id)
+	tag, err := s.sqlStore.pool.Exec(ctx, query, deleteAt, id)
 	if err != nil {
 		return fmt.Errorf("delete team: %w", err)
 	}
@@ -100,11 +100,11 @@ func (s *SqlTeamStore) Delete(id string, deleteAt int64) error {
 	return nil
 }
 
-func (s *SqlTeamStore) GetAll(page, perPage int) ([]*model.Team, error) {
+func (s *SqlTeamStore) GetAll(ctx context.Context, page, perPage int) ([]*model.Team, error) {
 	query := `SELECT id, name, display_name, description, type, creator_id, create_at, update_at, delete_at
 		FROM teams WHERE delete_at = 0 ORDER BY display_name LIMIT $1 OFFSET $2`
 
-	rows, err := s.sqlStore.pool.Query(context.Background(), query, perPage, page*perPage)
+	rows, err := s.sqlStore.pool.Query(ctx, query, perPage, page*perPage)
 	if err != nil {
 		return nil, fmt.Errorf("get all teams: %w", err)
 	}
@@ -113,14 +113,14 @@ func (s *SqlTeamStore) GetAll(page, perPage int) ([]*model.Team, error) {
 	return scanTeams(rows)
 }
 
-func (s *SqlTeamStore) GetTeamsForUser(userID string) ([]*model.Team, error) {
+func (s *SqlTeamStore) GetTeamsForUser(ctx context.Context, userID string) ([]*model.Team, error) {
 	query := `SELECT t.id, t.name, t.display_name, t.description, t.type, t.creator_id, t.create_at, t.update_at, t.delete_at
 		FROM teams t
 		INNER JOIN team_members tm ON t.id = tm.team_id
 		WHERE tm.user_id = $1 AND t.delete_at = 0 AND tm.delete_at = 0
 		ORDER BY t.display_name`
 
-	rows, err := s.sqlStore.pool.Query(context.Background(), query, userID)
+	rows, err := s.sqlStore.pool.Query(ctx, query, userID)
 	if err != nil {
 		return nil, fmt.Errorf("get teams for user: %w", err)
 	}
@@ -129,7 +129,7 @@ func (s *SqlTeamStore) GetTeamsForUser(userID string) ([]*model.Team, error) {
 	return scanTeams(rows)
 }
 
-func (s *SqlTeamStore) SaveMember(member *model.TeamMember) (*model.TeamMember, error) {
+func (s *SqlTeamStore) SaveMember(ctx context.Context, member *model.TeamMember) (*model.TeamMember, error) {
 	member.PreSave()
 	if err := member.IsValid(); err != nil {
 		return nil, err
@@ -139,7 +139,7 @@ func (s *SqlTeamStore) SaveMember(member *model.TeamMember) (*model.TeamMember, 
 		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (team_id, user_id) DO UPDATE SET roles = EXCLUDED.roles
 		RETURNING team_id, user_id, roles, create_at, delete_at`
-	err := s.sqlStore.pool.QueryRow(context.Background(), query,
+	err := s.sqlStore.pool.QueryRow(ctx, query,
 		member.TeamID, member.UserID, member.Roles, member.CreateAt, member.DeleteAt,
 	).Scan(&member.TeamID, &member.UserID, &member.Roles, &member.CreateAt, &member.DeleteAt)
 	if err != nil {
@@ -149,21 +149,21 @@ func (s *SqlTeamStore) SaveMember(member *model.TeamMember) (*model.TeamMember, 
 	return member, nil
 }
 
-func (s *SqlTeamStore) RemoveMember(teamID, userID string) error {
+func (s *SqlTeamStore) RemoveMember(ctx context.Context, teamID, userID string) error {
 	query := `DELETE FROM team_members WHERE team_id = $1 AND user_id = $2`
-	_, err := s.sqlStore.pool.Exec(context.Background(), query, teamID, userID)
+	_, err := s.sqlStore.pool.Exec(ctx, query, teamID, userID)
 	if err != nil {
 		return fmt.Errorf("remove team member: %w", err)
 	}
 	return nil
 }
 
-func (s *SqlTeamStore) GetMembers(teamID string, page, perPage int) ([]*model.TeamMember, error) {
+func (s *SqlTeamStore) GetMembers(ctx context.Context, teamID string, page, perPage int) ([]*model.TeamMember, error) {
 	query := `SELECT team_id, user_id, roles, create_at, delete_at
 		FROM team_members WHERE team_id = $1 AND delete_at = 0
 		ORDER BY create_at LIMIT $2 OFFSET $3`
 
-	rows, err := s.sqlStore.pool.Query(context.Background(), query, teamID, perPage, page*perPage)
+	rows, err := s.sqlStore.pool.Query(ctx, query, teamID, perPage, page*perPage)
 	if err != nil {
 		return nil, fmt.Errorf("get team members: %w", err)
 	}
@@ -180,12 +180,12 @@ func (s *SqlTeamStore) GetMembers(teamID string, page, perPage int) ([]*model.Te
 	return members, rows.Err()
 }
 
-func (s *SqlTeamStore) GetMember(teamID, userID string) (*model.TeamMember, error) {
+func (s *SqlTeamStore) GetMember(ctx context.Context, teamID, userID string) (*model.TeamMember, error) {
 	query := `SELECT team_id, user_id, roles, create_at, delete_at
 		FROM team_members WHERE team_id = $1 AND user_id = $2 AND delete_at = 0`
 
 	m := &model.TeamMember{}
-	err := s.sqlStore.pool.QueryRow(context.Background(), query, teamID, userID).Scan(
+	err := s.sqlStore.pool.QueryRow(ctx, query, teamID, userID).Scan(
 		&m.TeamID, &m.UserID, &m.Roles, &m.CreateAt, &m.DeleteAt,
 	)
 	if err != nil {

@@ -1,6 +1,10 @@
 package store
 
-import "github.com/infrashift/chit/internal/model"
+import (
+	"context"
+
+	"github.com/infrashift/chit/internal/model"
+)
 
 // Store is the top-level interface composed of sub-store interfaces.
 type Store interface {
@@ -15,85 +19,87 @@ type Store interface {
 
 // UserStore handles persistence for user records.
 type UserStore interface {
-	Save(user *model.User) (*model.User, error)
-	Get(id string) (*model.User, error)
-	GetByKratosID(kratosID string) (*model.User, error)
-	GetByUsername(username string) (*model.User, error)
-	GetByEmail(email string) (*model.User, error)
-	Update(user *model.User) (*model.User, error)
-	Search(term string, page, perPage int) ([]*model.User, error)
-	GetByIDs(ids []string) ([]*model.User, error)
+	Save(ctx context.Context, user *model.User) (*model.User, error)
+	Get(ctx context.Context, id string) (*model.User, error)
+	GetByKratosID(ctx context.Context, kratosID string) (*model.User, error)
+	GetByUsername(ctx context.Context, username string) (*model.User, error)
+	GetByEmail(ctx context.Context, email string) (*model.User, error)
+	Update(ctx context.Context, user *model.User) (*model.User, error)
+	Search(ctx context.Context, term string, page, perPage int) ([]*model.User, error)
+	GetByIDs(ctx context.Context, ids []string) ([]*model.User, error)
 }
 
 // TeamStore handles persistence for teams and team membership.
 type TeamStore interface {
-	Save(team *model.Team) (*model.Team, error)
-	Get(id string) (*model.Team, error)
-	GetByName(name string) (*model.Team, error)
-	Update(team *model.Team) (*model.Team, error)
-	Delete(id string, deleteAt int64) error
-	GetAll(page, perPage int) ([]*model.Team, error)
-	GetTeamsForUser(userID string) ([]*model.Team, error)
-	SaveMember(member *model.TeamMember) (*model.TeamMember, error)
-	RemoveMember(teamID, userID string) error
-	GetMembers(teamID string, page, perPage int) ([]*model.TeamMember, error)
-	GetMember(teamID, userID string) (*model.TeamMember, error)
+	Save(ctx context.Context, team *model.Team) (*model.Team, error)
+	Get(ctx context.Context, id string) (*model.Team, error)
+	GetByName(ctx context.Context, name string) (*model.Team, error)
+	Update(ctx context.Context, team *model.Team) (*model.Team, error)
+	Delete(ctx context.Context, id string, deleteAt int64) error
+	GetAll(ctx context.Context, page, perPage int) ([]*model.Team, error)
+	GetTeamsForUser(ctx context.Context, userID string) ([]*model.Team, error)
+	SaveMember(ctx context.Context, member *model.TeamMember) (*model.TeamMember, error)
+	RemoveMember(ctx context.Context, teamID, userID string) error
+	GetMembers(ctx context.Context, teamID string, page, perPage int) ([]*model.TeamMember, error)
+	GetMember(ctx context.Context, teamID, userID string) (*model.TeamMember, error)
 }
 
 // ChannelStore handles persistence for channels and channel membership.
 type ChannelStore interface {
-	Save(channel *model.Channel) (*model.Channel, error)
-	Get(id string) (*model.Channel, error)
-	Update(channel *model.Channel) (*model.Channel, error)
-	Delete(id string, deleteAt int64) error
-	GetChannelsForTeam(teamID string, page, perPage int) ([]*model.Channel, error)
-	GetChannelsForUser(userID, teamID string) ([]*model.Channel, error)
-	SaveMember(member *model.ChannelMember) (*model.ChannelMember, error)
-	RemoveMember(channelID, userID string) error
-	GetMembers(channelID string, page, perPage int) ([]*model.ChannelMember, error)
-	GetMember(channelID, userID string) (*model.ChannelMember, error)
-	UpdateLastViewedAt(channelID, userID string, lastViewedAt int64) error
-	GetByName(teamID, name string) (*model.Channel, error)
-	SaveDirectChannel(channel *model.Channel, userIDs []string) (*model.Channel, error)
-	GetDirectChannelByName(name string) (*model.Channel, error)
-	GetDirectChannelsForUser(userID string) ([]*model.Channel, error)
-	IncrementMsgCount(channelID string, timestamp int64) error
-	IncrementMentionCount(channelID, userID string) error
+	Save(ctx context.Context, channel *model.Channel) (*model.Channel, error)
+	Get(ctx context.Context, id string) (*model.Channel, error)
+	Update(ctx context.Context, channel *model.Channel) (*model.Channel, error)
+	Delete(ctx context.Context, id string, deleteAt int64) error
+	GetChannelsForTeam(ctx context.Context, teamID string, page, perPage int) ([]*model.Channel, error)
+	GetChannelsForUser(ctx context.Context, userID, teamID string) ([]*model.Channel, error)
+	SaveMember(ctx context.Context, member *model.ChannelMember) (*model.ChannelMember, error)
+	RemoveMember(ctx context.Context, channelID, userID string) error
+	GetMembers(ctx context.Context, channelID string, page, perPage int) ([]*model.ChannelMember, error)
+	GetMember(ctx context.Context, channelID, userID string) (*model.ChannelMember, error)
+	GetChannelIDsForUser(ctx context.Context, userID string) ([]string, error)
+	UpdateLastViewedAt(ctx context.Context, channelID, userID string, lastViewedAt int64) error
+	GetByName(ctx context.Context, teamID, name string) (*model.Channel, error)
+	SaveDirectChannel(ctx context.Context, channel *model.Channel, userIDs []string) (*model.Channel, error)
+	GetDirectChannelByName(ctx context.Context, name string) (*model.Channel, error)
+	GetDirectChannelsForUser(ctx context.Context, userID string) ([]*model.Channel, error)
+	IncrementMsgCount(ctx context.Context, channelID string, timestamp int64) error
+	IncrementMentionCount(ctx context.Context, channelID, userID string) error
 }
 
 // PostStore handles persistence for posts (messages).
 type PostStore interface {
-	Save(post *model.Post) (*model.Post, error)
-	Get(id string) (*model.Post, error)
-	Update(post *model.Post) (*model.Post, error)
-	Delete(id string, deleteAt int64) error
-	GetPostsForChannel(channelID string, opts model.GetPostsOptions) (*model.PostList, error)
-	GetPostsForThread(rootID string) (*model.PostList, error)
-	GetPinnedPosts(channelID string) (*model.PostList, error)
-	SetPinned(id string, pinned bool) error
-	SearchByContent(channelID, query string, page, perPage int) ([]*model.Post, error)
+	Save(ctx context.Context, post *model.Post) (*model.Post, error)
+	Get(ctx context.Context, id string) (*model.Post, error)
+	Update(ctx context.Context, post *model.Post) (*model.Post, error)
+	Delete(ctx context.Context, id string, deleteAt int64) error
+	GetPostsForChannel(ctx context.Context, channelID string, opts model.GetPostsOptions) (*model.PostList, error)
+	GetPostsForThread(ctx context.Context, rootID string) (*model.PostList, error)
+	GetPinnedPosts(ctx context.Context, channelID string) (*model.PostList, error)
+	SetPinned(ctx context.Context, id string, pinned bool) error
+	SearchByContent(ctx context.Context, channelID, query string, page, perPage int) ([]*model.Post, error)
+	GetPostsSince(ctx context.Context, sinceUpdateAt int64, limit int) ([]*model.Post, error)
 }
 
 // ThreadStore handles persistence for threads and thread memberships.
 type ThreadStore interface {
-	SaveOrUpdate(thread *model.Thread) error
-	Get(postID string) (*model.Thread, error)
-	SaveMembership(membership *model.ThreadMembership) error
-	GetMembership(postID, userID string) (*model.ThreadMembership, error)
-	UpdateMembership(membership *model.ThreadMembership) error
-	GetThreadsForUser(userID, teamID string, page, perPage int) (*model.UserThreadList, error)
-	IncrementReplyCount(postID string, timestamp int64, userID string) error
-	MarkAsRead(postID, userID string, timestamp int64) error
-	IncrementMentionCount(postID, userID string) error
+	SaveOrUpdate(ctx context.Context, thread *model.Thread) error
+	Get(ctx context.Context, postID string) (*model.Thread, error)
+	SaveMembership(ctx context.Context, membership *model.ThreadMembership) error
+	GetMembership(ctx context.Context, postID, userID string) (*model.ThreadMembership, error)
+	UpdateMembership(ctx context.Context, membership *model.ThreadMembership) error
+	GetThreadsForUser(ctx context.Context, userID, teamID string, page, perPage int) (*model.UserThreadList, error)
+	IncrementReplyCount(ctx context.Context, postID string, timestamp int64, userID string) error
+	MarkAsRead(ctx context.Context, postID, userID string, timestamp int64) error
+	IncrementMentionCount(ctx context.Context, postID, userID string) error
 }
 
 // TagStore handles persistence for tags and message-tag associations.
 type TagStore interface {
-	Save(tag *model.Tag) (*model.Tag, error)
-	GetAll() ([]*model.Tag, error)
-	AddTagToPost(messageID, tagID string) error
-	RemoveTagFromPost(messageID, tagID string) error
-	GetTagsForPost(messageID string) ([]*model.Tag, error)
-	GetPostIDsByTags(tagIDs []string, page, perPage int) ([]string, error)
-	FilterPostIDsByTags(postIDs []string, tagIDs []string) ([]string, error)
+	Save(ctx context.Context, tag *model.Tag) (*model.Tag, error)
+	GetAll(ctx context.Context) ([]*model.Tag, error)
+	AddTagToPost(ctx context.Context, messageID, tagID string) error
+	RemoveTagFromPost(ctx context.Context, messageID, tagID string) error
+	GetTagsForPost(ctx context.Context, messageID string) ([]*model.Tag, error)
+	GetPostIDsByTags(ctx context.Context, tagIDs []string, page, perPage int) ([]string, error)
+	FilterPostIDsByTags(ctx context.Context, postIDs []string, tagIDs []string) ([]string, error)
 }

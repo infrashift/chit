@@ -71,7 +71,17 @@ role; all others are `system_user`.
 | diana    | diana@example.com    | Diana Drake    | `Password1!`  |
 | eve      | eve@example.com      | Eve Ellis      | `Password1!`  |
 
+The seeder also creates a `chit-agent` user with `actor_type=agent`, added to
+the UAT team and channel. Set `CHIT_MCP_AGENT_USER_ID` to its ID (printed in
+the seed output) to run the MCP server against the UAT environment.
+
 ## Testing with chit-tui
+
+:::note
+chit-tui is an **external companion project** maintained in a separate
+repository — it is not built by this repo. Obtain and build it separately
+before following the steps below.
+:::
 
 Point chit-tui at the Oathkeeper proxy (port 4455) and log in interactively:
 

@@ -20,25 +20,16 @@ This runs `podman kube play --network host deploy/chit.kube.yml`, which starts:
 - Ory Keto (authorization)
 - ZincSearch (full-text search)
 
-## 2. Run Ory schema migrations
+Kratos, Keto, and Chit schema migrations run automatically via init/migrate
+containers — no separate migration step is needed on first start.
 
-```bash
-make kube-migrate
-```
+:::tip
+If you later pull new Chit migration files, apply them to the running pod
+with `make kube-migrate` — it runs a one-shot migrate container against the
+pod's PostgreSQL, no restart required.
+:::
 
-This applies Kratos and Keto database migrations against the running PostgreSQL
-instance.
-
-## 3. Run Chit schema migrations
-
-```bash
-make migrate-up
-```
-
-This applies the Chit application schema (users, teams, channels, posts, etc.)
-using golang-migrate.
-
-## 4. Configure the environment
+## 2. Configure the environment
 
 ```bash
 cp .env.example .env
@@ -47,7 +38,7 @@ cp .env.example .env
 The defaults in `.env.example` are configured for the local Podman Kube pod.
 No changes are needed for local development.
 
-## 5. Build and run the server
+## 3. Build and run the server
 
 ```bash
 make run
@@ -55,7 +46,7 @@ make run
 
 The server starts on `:8065` by default.
 
-## 6. Verify
+## 4. Verify
 
 ```bash
 curl http://localhost:8065/api/v1/system/ping
@@ -67,7 +58,7 @@ Expected response:
 {"status": "OK"}
 ```
 
-## 7. Register a user
+## 5. Register a user
 
 Create an identity via Kratos:
 

@@ -3,9 +3,18 @@ title: Pub/Sub
 description: Cross-node event coordination with PG LISTEN/NOTIFY and NATS.
 ---
 
-Chit uses a pub/sub abstraction to coordinate events across server nodes. This
-enables horizontal scaling — when a post is created on node A, all connected
-clients on nodes B and C receive the event in real time.
+Chit uses a pub/sub abstraction to distribute events beyond the chitd
+process. Today it powers the **MCP agent event feed**: chitd publishes a thin
+event envelope on the `chit_events` topic for each broadcast event, and the
+`chit-mcp` process subscribes, buffers the envelopes, and serves them to AI
+agents via the `get_new_events` MCP tool.
+
+:::note[Single-node WebSocket fan-out]
+chitd does **not** yet consume the `chit_events` topic itself, so WebSocket
+delivery is in-process (single-node). Multi-node fan-out — where a post
+created on node A reaches clients connected to nodes B and C — is a planned
+use of this same abstraction but is not yet implemented.
+:::
 
 ## Interface
 
@@ -57,11 +66,15 @@ CHIT_PUBSUB_BACKEND=nats
 CHIT_NATS_URL=nats://localhost:4222
 ```
 
-## Use Cases
+## The `chit_events` Topic
 
-| Event | Channel Pattern | Description |
+All events are published on a single topic, `chit_events`. Because PostgreSQL
+`NOTIFY` payloads are limited to roughly 8KB, the envelopes are deliberately
+**thin** — they carry event type, IDs (post, channel, user, and similar), and
+timestamps rather than full message content. Consumers fetch full objects
+through the REST API using those IDs.
+
+| Producer | Consumer | Purpose |
 |---|---|---|
-| New post | `channel:{id}` | Notify members of a channel about a new message |
-| Typing indicator | `channel:{id}` | Broadcast typing status to channel members |
-| User status | `status:{user_id}` | Propagate online/offline status changes |
-| Channel update | `team:{id}` | Notify team members of channel metadata changes |
+| chitd | chit-mcp | Agent event feed: chit-mcp buffers envelopes per agent, polled via the `get_new_events` MCP tool |
+| chitd | chitd (planned) | Multi-node WebSocket fan-out — not yet implemented |

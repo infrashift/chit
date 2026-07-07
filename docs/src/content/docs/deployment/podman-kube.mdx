@@ -47,10 +47,10 @@ is reachable at `localhost` on its configured port.
 
 | Target | Command | Description |
 |---|---|---|
-| `make kube-up` | `podman kube play --network host deploy/chit.kube.yml` | Start the pod |
+| `make kube-up` | `podman kube play --network host deploy/chit.kube.yml` | Start the pod (Kratos, Keto, and Chit migrations run automatically via init/migrate containers) |
 | `make kube-down` | `podman kube down deploy/chit.kube.yml` | Stop and remove the pod |
-| `make kube-migrate` | Runs Kratos and Keto migration containers | Apply Ory schema migrations |
-| `make migrate-up` | `migrate -database ... -path migrations up` | Apply Chit schema migrations |
+| `make kube-migrate` | Runs a one-shot `migrate/migrate` container against the pod's PostgreSQL | Re-apply Chit schema migrations (only needed to apply new migration files without restarting the pod) |
+| `make migrate-up` | `migrate -database ... -path migrations up` | Apply Chit schema migrations (host-installed `migrate`) |
 | `make migrate-down` | `migrate -database ... -path migrations down` | Roll back Chit migrations |
 | `make test-container` | Build `chit-test:latest` and run all unit tests | Run tests in a UBI9 container |
 
@@ -84,7 +84,9 @@ podman run --rm chit-test:latest go test -run TestSpecific ./internal/model/...
 
 ## Startup Order
 
-1. `make kube-up` — start all infrastructure containers
-2. `make kube-migrate` — run Ory schema migrations (Kratos + Keto)
-3. `make migrate-up` — run Chit application schema migrations
-4. `make run` — build and start the Chit server
+1. `make kube-up` — start all infrastructure containers; Kratos, Keto, and
+   Chit schema migrations run automatically via init/migrate containers
+2. `make run` — build and start the Chit server
+
+If you later add new migration files, apply them to the running pod with
+`make kube-migrate` — no pod restart required.

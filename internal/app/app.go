@@ -8,10 +8,15 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
+	"github.com/infrashift/chit/internal/jobs/workers"
+
+	"github.com/infrashift/chit/internal/cache"
 	"github.com/infrashift/chit/internal/command"
 	"github.com/infrashift/chit/internal/config"
+	"github.com/infrashift/chit/internal/model"
 	"github.com/infrashift/chit/internal/pubsub"
 	"github.com/infrashift/chit/internal/store"
 	"github.com/infrashift/chit/internal/websocket"
@@ -33,10 +38,37 @@ type App struct {
 	ketoReadURL  string
 	ketoWriteURL string
 	httpClient   *http.Client
+
+	zincOnce   sync.Once
+	zincClient *workers.SearchIndexer
+
+	// userCache caches ProvisionUser lookups (kratos ID → user) so every
+	// authenticated request does not hit the database.
+	userCache *cache.LRU[string, *model.User]
+}
+
+// searchClient returns a shared ZincSearch client (the SearchIndexer type
+// doubles as the query client), created on first use.
+func (a *App) searchClient() *workers.SearchIndexer {
+	a.zincOnce.Do(func() {
+		a.zincClient = workers.NewSearchIndexer(
+			a.Config.ZincSearchURL,
+			a.Config.ZincSearchUser,
+			a.Config.ZincSearchPassword,
+		)
+	})
+	return a.zincClient
 }
 
 // New creates a new App instance.
 func New(s store.Store, hub *websocket.Hub, ps pubsub.PubSub, cfg *config.Config) *App {
+	userCache, err := cache.NewLRU[string, *model.User](cfg.CacheSize, cfg.CacheTTL)
+	if err != nil {
+		// Invalid cache config (size <= 0): run uncached rather than fail.
+		slog.Warn("user cache disabled", "error", err)
+		userCache = nil
+	}
+
 	return &App{
 		Store:        s,
 		Hub:          hub,
@@ -45,6 +77,7 @@ func New(s store.Store, hub *websocket.Hub, ps pubsub.PubSub, cfg *config.Config
 		ketoReadURL:  cfg.KetoReadURL,
 		ketoWriteURL: cfg.KetoWriteURL,
 		httpClient:   &http.Client{Timeout: 5 * time.Second},
+		userCache:    userCache,
 	}
 }
 

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"reflect"
 	"sort"
 	"testing"
@@ -91,14 +92,14 @@ type mentionMockUserStore struct {
 	users map[string]*model.User
 }
 
-func (s *mentionMockUserStore) Save(u *model.User) (*model.User, error)           { return u, nil }
-func (s *mentionMockUserStore) Get(id string) (*model.User, error)                { return nil, errNotFound }
-func (s *mentionMockUserStore) GetByKratosID(_ string) (*model.User, error)       { return nil, errNotFound }
-func (s *mentionMockUserStore) GetByEmail(_ string) (*model.User, error)          { return nil, errNotFound }
-func (s *mentionMockUserStore) Update(u *model.User) (*model.User, error)         { return u, nil }
-func (s *mentionMockUserStore) Search(_ string, _, _ int) ([]*model.User, error)  { return nil, nil }
-func (s *mentionMockUserStore) GetByIDs(_ []string) ([]*model.User, error)        { return nil, nil }
-func (s *mentionMockUserStore) GetByUsername(username string) (*model.User, error) {
+func (s *mentionMockUserStore) Save(_ context.Context, u *model.User) (*model.User, error)          { return u, nil }
+func (s *mentionMockUserStore) Get(_ context.Context, id string) (*model.User, error)               { return nil, errNotFound }
+func (s *mentionMockUserStore) GetByKratosID(_ context.Context, _ string) (*model.User, error)      { return nil, errNotFound }
+func (s *mentionMockUserStore) GetByEmail(_ context.Context, _ string) (*model.User, error)         { return nil, errNotFound }
+func (s *mentionMockUserStore) Update(_ context.Context, u *model.User) (*model.User, error)        { return u, nil }
+func (s *mentionMockUserStore) Search(_ context.Context, _ string, _, _ int) ([]*model.User, error) { return nil, nil }
+func (s *mentionMockUserStore) GetByIDs(_ context.Context, _ []string) ([]*model.User, error)       { return nil, nil }
+func (s *mentionMockUserStore) GetByUsername(_ context.Context, username string) (*model.User, error) {
 	u, ok := s.users[username]
 	if !ok {
 		return nil, errNotFound
@@ -107,37 +108,51 @@ func (s *mentionMockUserStore) GetByUsername(username string) (*model.User, erro
 }
 
 type mentionMockChannelStore struct {
-	members map[string][]*model.ChannelMember
+	members       map[string][]*model.ChannelMember
 	mentionCounts map[string]int64 // key: channelID+":"+userID
 }
 
-func (s *mentionMockChannelStore) Save(_ *model.Channel) (*model.Channel, error)    { return nil, nil }
-func (s *mentionMockChannelStore) Get(_ string) (*model.Channel, error)              { return nil, nil }
-func (s *mentionMockChannelStore) Update(_ *model.Channel) (*model.Channel, error)   { return nil, nil }
-func (s *mentionMockChannelStore) Delete(_ string, _ int64) error                    { return nil }
-func (s *mentionMockChannelStore) GetChannelsForTeam(_ string, _, _ int) ([]*model.Channel, error) {
+func (s *mentionMockChannelStore) Save(_ context.Context, _ *model.Channel) (*model.Channel, error)   { return nil, nil }
+func (s *mentionMockChannelStore) Get(_ context.Context, _ string) (*model.Channel, error)            { return nil, nil }
+func (s *mentionMockChannelStore) Update(_ context.Context, _ *model.Channel) (*model.Channel, error) { return nil, nil }
+func (s *mentionMockChannelStore) Delete(_ context.Context, _ string, _ int64) error                  { return nil }
+func (s *mentionMockChannelStore) GetChannelsForTeam(_ context.Context, _ string, _, _ int) ([]*model.Channel, error) {
 	return nil, nil
 }
-func (s *mentionMockChannelStore) GetChannelsForUser(_, _ string) ([]*model.Channel, error) {
+func (s *mentionMockChannelStore) GetChannelsForUser(_ context.Context, _, _ string) ([]*model.Channel, error) {
 	return nil, nil
 }
-func (s *mentionMockChannelStore) SaveMember(_ *model.ChannelMember) (*model.ChannelMember, error) {
+func (s *mentionMockChannelStore) SaveMember(_ context.Context, _ *model.ChannelMember) (*model.ChannelMember, error) {
 	return nil, nil
 }
-func (s *mentionMockChannelStore) RemoveMember(_, _ string) error          { return nil }
-func (s *mentionMockChannelStore) UpdateLastViewedAt(_, _ string, _ int64) error { return nil }
-func (s *mentionMockChannelStore) GetByName(_, _ string) (*model.Channel, error) { return nil, errNotFound }
-func (s *mentionMockChannelStore) GetDirectChannelByName(_ string) (*model.Channel, error) {
+func (s *mentionMockChannelStore) RemoveMember(_ context.Context, _, _ string) error                { return nil }
+func (s *mentionMockChannelStore) UpdateLastViewedAt(_ context.Context, _, _ string, _ int64) error { return nil }
+func (s *mentionMockChannelStore) GetByName(_ context.Context, _, _ string) (*model.Channel, error) {
 	return nil, errNotFound
 }
-func (s *mentionMockChannelStore) SaveDirectChannel(c *model.Channel, _ []string) (*model.Channel, error) {
+func (s *mentionMockChannelStore) GetDirectChannelByName(_ context.Context, _ string) (*model.Channel, error) {
+	return nil, errNotFound
+}
+func (s *mentionMockChannelStore) SaveDirectChannel(_ context.Context, c *model.Channel, _ []string) (*model.Channel, error) {
 	return c, nil
 }
-func (s *mentionMockChannelStore) GetDirectChannelsForUser(_ string) ([]*model.Channel, error) {
+func (s *mentionMockChannelStore) GetDirectChannelsForUser(_ context.Context, _ string) ([]*model.Channel, error) {
 	return nil, nil
 }
-func (s *mentionMockChannelStore) IncrementMsgCount(_ string, _ int64) error { return nil }
-func (s *mentionMockChannelStore) GetMembers(channelID string, page, perPage int) ([]*model.ChannelMember, error) {
+func (s *mentionMockChannelStore) IncrementMsgCount(_ context.Context, _ string, _ int64) error { return nil }
+func (s *mentionMockChannelStore) GetChannelIDsForUser(_ context.Context, userID string) ([]string, error) {
+	var ids []string
+	for channelID, members := range s.members {
+		for _, m := range members {
+			if m.UserID == userID {
+				ids = append(ids, channelID)
+				break
+			}
+		}
+	}
+	return ids, nil
+}
+func (s *mentionMockChannelStore) GetMembers(_ context.Context, channelID string, page, perPage int) ([]*model.ChannelMember, error) {
 	all := s.members[channelID]
 	start := page * perPage
 	if start >= len(all) {
@@ -149,7 +164,7 @@ func (s *mentionMockChannelStore) GetMembers(channelID string, page, perPage int
 	}
 	return all[start:end], nil
 }
-func (s *mentionMockChannelStore) GetMember(channelID, userID string) (*model.ChannelMember, error) {
+func (s *mentionMockChannelStore) GetMember(_ context.Context, channelID, userID string) (*model.ChannelMember, error) {
 	for _, m := range s.members[channelID] {
 		if m.UserID == userID {
 			return m, nil
@@ -157,7 +172,7 @@ func (s *mentionMockChannelStore) GetMember(channelID, userID string) (*model.Ch
 	}
 	return nil, errNotFound
 }
-func (s *mentionMockChannelStore) IncrementMentionCount(channelID, userID string) error {
+func (s *mentionMockChannelStore) IncrementMentionCount(_ context.Context, channelID, userID string) error {
 	if s.mentionCounts == nil {
 		s.mentionCounts = make(map[string]int64)
 	}
@@ -170,23 +185,23 @@ type mentionMockThreadStore struct {
 	mentionCounts map[string]int // key: postID+":"+userID
 }
 
-func (s *mentionMockThreadStore) SaveOrUpdate(_ *model.Thread) error       { return nil }
-func (s *mentionMockThreadStore) Get(_ string) (*model.Thread, error)      { return nil, errNotFound }
-func (s *mentionMockThreadStore) SaveMembership(_ *model.ThreadMembership) error { return nil }
-func (s *mentionMockThreadStore) UpdateMembership(_ *model.ThreadMembership) error { return nil }
-func (s *mentionMockThreadStore) GetThreadsForUser(_, _ string, _, _ int) (*model.UserThreadList, error) {
+func (s *mentionMockThreadStore) SaveOrUpdate(_ context.Context, _ *model.Thread) error               { return nil }
+func (s *mentionMockThreadStore) Get(_ context.Context, _ string) (*model.Thread, error)              { return nil, errNotFound }
+func (s *mentionMockThreadStore) SaveMembership(_ context.Context, _ *model.ThreadMembership) error   { return nil }
+func (s *mentionMockThreadStore) UpdateMembership(_ context.Context, _ *model.ThreadMembership) error { return nil }
+func (s *mentionMockThreadStore) GetThreadsForUser(_ context.Context, _, _ string, _, _ int) (*model.UserThreadList, error) {
 	return &model.UserThreadList{}, nil
 }
-func (s *mentionMockThreadStore) IncrementReplyCount(_ string, _ int64, _ string) error { return nil }
-func (s *mentionMockThreadStore) MarkAsRead(_, _ string, _ int64) error                 { return nil }
-func (s *mentionMockThreadStore) GetMembership(postID, userID string) (*model.ThreadMembership, error) {
+func (s *mentionMockThreadStore) IncrementReplyCount(_ context.Context, _ string, _ int64, _ string) error { return nil }
+func (s *mentionMockThreadStore) MarkAsRead(_ context.Context, _, _ string, _ int64) error                 { return nil }
+func (s *mentionMockThreadStore) GetMembership(_ context.Context, postID, userID string) (*model.ThreadMembership, error) {
 	m, ok := s.memberships[postID+":"+userID]
 	if !ok {
 		return nil, errNotFound
 	}
 	return m, nil
 }
-func (s *mentionMockThreadStore) IncrementMentionCount(postID, userID string) error {
+func (s *mentionMockThreadStore) IncrementMentionCount(_ context.Context, postID, userID string) error {
 	if s.mentionCounts == nil {
 		s.mentionCounts = make(map[string]int)
 	}
@@ -198,49 +213,58 @@ func (s *mentionMockThreadStore) IncrementMentionCount(postID, userID string) er
 
 type mentionMockTeamStore struct{}
 
-func (mentionMockTeamStore) Save(_ *model.Team) (*model.Team, error)    { return nil, nil }
-func (mentionMockTeamStore) Get(_ string) (*model.Team, error)          { return nil, nil }
-func (mentionMockTeamStore) GetByName(_ string) (*model.Team, error)    { return nil, nil }
-func (mentionMockTeamStore) Update(_ *model.Team) (*model.Team, error)  { return nil, nil }
-func (mentionMockTeamStore) Delete(_ string, _ int64) error             { return nil }
-func (mentionMockTeamStore) GetAll(_, _ int) ([]*model.Team, error)     { return nil, nil }
-func (mentionMockTeamStore) GetTeamsForUser(_ string) ([]*model.Team, error) { return nil, nil }
-func (mentionMockTeamStore) SaveMember(_ *model.TeamMember) (*model.TeamMember, error) {
+func (mentionMockTeamStore) Save(_ context.Context, _ *model.Team) (*model.Team, error)         { return nil, nil }
+func (mentionMockTeamStore) Get(_ context.Context, _ string) (*model.Team, error)               { return nil, nil }
+func (mentionMockTeamStore) GetByName(_ context.Context, _ string) (*model.Team, error)         { return nil, nil }
+func (mentionMockTeamStore) Update(_ context.Context, _ *model.Team) (*model.Team, error)       { return nil, nil }
+func (mentionMockTeamStore) Delete(_ context.Context, _ string, _ int64) error                  { return nil }
+func (mentionMockTeamStore) GetAll(_ context.Context, _, _ int) ([]*model.Team, error)          { return nil, nil }
+func (mentionMockTeamStore) GetTeamsForUser(_ context.Context, _ string) ([]*model.Team, error) { return nil, nil }
+func (mentionMockTeamStore) SaveMember(_ context.Context, _ *model.TeamMember) (*model.TeamMember, error) {
 	return nil, nil
 }
-func (mentionMockTeamStore) RemoveMember(_, _ string) error                        { return nil }
-func (mentionMockTeamStore) GetMembers(_ string, _, _ int) ([]*model.TeamMember, error) { return nil, nil }
-func (mentionMockTeamStore) GetMember(_, _ string) (*model.TeamMember, error) { return nil, errNotFound }
+func (mentionMockTeamStore) RemoveMember(_ context.Context, _, _ string) error { return nil }
+func (mentionMockTeamStore) GetMembers(_ context.Context, _ string, _, _ int) ([]*model.TeamMember, error) {
+	return nil, nil
+}
+func (mentionMockTeamStore) GetMember(_ context.Context, _, _ string) (*model.TeamMember, error) {
+	return nil, errNotFound
+}
 
 type mentionMockPostStore struct{}
 
-func (mentionMockPostStore) Save(p *model.Post) (*model.Post, error) { return p, nil }
-func (mentionMockPostStore) Get(_ string) (*model.Post, error)       { return nil, errNotFound }
-func (mentionMockPostStore) Update(p *model.Post) (*model.Post, error) { return p, nil }
-func (mentionMockPostStore) Delete(_ string, _ int64) error          { return nil }
-func (mentionMockPostStore) GetPostsForChannel(_ string, _ model.GetPostsOptions) (*model.PostList, error) {
+func (mentionMockPostStore) Save(_ context.Context, p *model.Post) (*model.Post, error)   { return p, nil }
+func (mentionMockPostStore) Get(_ context.Context, _ string) (*model.Post, error)         { return nil, errNotFound }
+func (mentionMockPostStore) Update(_ context.Context, p *model.Post) (*model.Post, error) { return p, nil }
+func (mentionMockPostStore) Delete(_ context.Context, _ string, _ int64) error            { return nil }
+func (mentionMockPostStore) GetPostsForChannel(_ context.Context, _ string, _ model.GetPostsOptions) (*model.PostList, error) {
 	return &model.PostList{}, nil
 }
-func (mentionMockPostStore) GetPostsForThread(_ string) (*model.PostList, error) {
+func (mentionMockPostStore) GetPostsForThread(_ context.Context, _ string) (*model.PostList, error) {
 	return &model.PostList{}, nil
 }
-func (mentionMockPostStore) GetPinnedPosts(_ string) (*model.PostList, error) {
+func (mentionMockPostStore) GetPinnedPosts(_ context.Context, _ string) (*model.PostList, error) {
 	return &model.PostList{}, nil
 }
-func (mentionMockPostStore) SetPinned(_ string, _ bool) error { return nil }
-func (mentionMockPostStore) SearchByContent(_, _ string, _, _ int) ([]*model.Post, error) {
+func (mentionMockPostStore) SetPinned(_ context.Context, _ string, _ bool) error { return nil }
+func (mentionMockPostStore) GetPostsSince(_ context.Context, _ int64, _ int) ([]*model.Post, error) {
+	return nil, nil
+}
+func (mentionMockPostStore) SearchByContent(_ context.Context, _, _ string, _, _ int) ([]*model.Post, error) {
 	return nil, nil
 }
 
 type mentionMockTagStore struct{}
 
-func (mentionMockTagStore) Save(_ *model.Tag) (*model.Tag, error)        { return nil, nil }
-func (mentionMockTagStore) GetAll() ([]*model.Tag, error)                { return nil, nil }
-func (mentionMockTagStore) AddTagToPost(_, _ string) error               { return nil }
-func (mentionMockTagStore) RemoveTagFromPost(_, _ string) error          { return nil }
-func (mentionMockTagStore) GetTagsForPost(_ string) ([]*model.Tag, error) { return nil, nil }
-func (mentionMockTagStore) GetPostIDsByTags(_ []string, _, _ int) ([]string, error) { return nil, nil }
-func (mentionMockTagStore) FilterPostIDsByTags(_ []string, _ []string) ([]string, error) { return nil, nil }
+func (mentionMockTagStore) Save(_ context.Context, _ *model.Tag) (*model.Tag, error)                   { return nil, nil }
+func (mentionMockTagStore) GetAll(_ context.Context) ([]*model.Tag, error)                           { return nil, nil }
+func (mentionMockTagStore) AddTagToPost(_ context.Context, _, _ string) error                          { return nil }
+func (mentionMockTagStore) RemoveTagFromPost(_ context.Context, _, _ string) error                     { return nil }
+func (mentionMockTagStore) GetTagsForPost(_ context.Context, _ string) ([]*model.Tag, error)           { return nil, nil }
+func (mentionMockTagStore) GetPostIDsByTags(_ context.Context, _ []string, _, _ int) ([]string, error) { return nil, nil }
+func (mentionMockTagStore) FilterPostIDsByTags(_ context.Context, _ []string, _ []string) ([]string, error) {
+	return nil, nil
+}
 
 type mentionMockStore struct {
 	user    *mentionMockUserStore
@@ -259,7 +283,7 @@ func (m *mentionMockStore) Thread() store.ThreadStore   { return m.thread }
 func (m *mentionMockStore) Tag() store.TagStore         { return m.tag }
 func (m *mentionMockStore) Close()                      {}
 
-var errNotFound = &model.AppError{Message: "not found"}
+var errNotFound = model.NewNotFoundError("mock", "not-found")
 
 func TestProcessMentions(t *testing.T) {
 	const (
@@ -271,7 +295,7 @@ func TestProcessMentions(t *testing.T) {
 	)
 
 	newTestApp := func(users map[string]*model.User, members []*model.ChannelMember) *App {
-		hub := websocket.NewHub()
+		hub := websocket.NewHub(nil)
 		t.Cleanup(hub.Stop)
 
 		ms := &mentionMockStore{
@@ -308,7 +332,7 @@ func TestProcessMentions(t *testing.T) {
 			Content:   "hey @alice and @bob",
 		}
 
-		ids, err := a.processMentions(post)
+		ids, err := a.processMentions(context.Background(), post)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -339,7 +363,7 @@ func TestProcessMentions(t *testing.T) {
 			Content:   "I am @author and @alice",
 		}
 
-		ids, err := a.processMentions(post)
+		ids, err := a.processMentions(context.Background(), post)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -368,7 +392,7 @@ func TestProcessMentions(t *testing.T) {
 			Content:   "hey @alice and @charlie",
 		}
 
-		ids, err := a.processMentions(post)
+		ids, err := a.processMentions(context.Background(), post)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -394,7 +418,7 @@ func TestProcessMentions(t *testing.T) {
 			Content:   "hey @all",
 		}
 
-		ids, err := a.processMentions(post)
+		ids, err := a.processMentions(context.Background(), post)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -424,7 +448,7 @@ func TestProcessMentions(t *testing.T) {
 			Content:   "hey @alice and @nonexistent",
 		}
 
-		ids, err := a.processMentions(post)
+		ids, err := a.processMentions(context.Background(), post)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

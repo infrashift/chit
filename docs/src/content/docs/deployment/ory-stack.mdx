@@ -54,24 +54,23 @@ user record is always created in the context of a valid request.
 
 ## Keto Authorization (ReBAC)
 
-Channel access is controlled by Ory Keto using Relationship-Based Access
-Control. The Keto namespace is `chit/channel` with the following relations:
+Chit uses two Keto namespaces:
 
-| Relation | Meaning |
-|---|---|
-| `member` | User is a member of the channel |
-| `admin` | User is an admin of the channel |
-| `creator` | User created the channel |
+| Namespace | Relation | Meaning |
+|---|---|---|
+| `chit/channel` | `member` | User is a member of the channel |
+| `chit/command` | `execute` | Actor may execute a slash command |
 
 ### Permission Checks
 
-Before allowing access to a channel, the App layer queries Keto:
+Slash-command execution is authorized through Keto: the `chit/command`
+namespace uses the `execute` relation, granted via roles defined in CUE under
+`auth/` and pushed into Keto by the `chit-reconcile` binary.
 
-```
-Is user {user_id} a "member" of channel {channel_id}?
-```
-
-Keto evaluates the relationship tuple and returns allow/deny.
+Channel access checks (read, post, pin, invite) use the PostgreSQL
+`channel_members` table as the source of truth; the `member` tuples in
+`chit/channel` are still dual-written so Keto stays consistent with the
+database.
 
 ### Relationship Management
 

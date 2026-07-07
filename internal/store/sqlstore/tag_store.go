@@ -11,7 +11,7 @@ type SqlTagStore struct {
 	sqlStore *SqlStore
 }
 
-func (s *SqlTagStore) Save(tag *model.Tag) (*model.Tag, error) {
+func (s *SqlTagStore) Save(ctx context.Context, tag *model.Tag) (*model.Tag, error) {
 	tag.PreSave()
 	if err := tag.IsValid(); err != nil {
 		return nil, err
@@ -20,7 +20,7 @@ func (s *SqlTagStore) Save(tag *model.Tag) (*model.Tag, error) {
 	query := `INSERT INTO tags (id, name) VALUES ($1, $2)
 		ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
 		RETURNING id, name`
-	err := s.sqlStore.pool.QueryRow(context.Background(), query, tag.ID, tag.Name).Scan(&tag.ID, &tag.Name)
+	err := s.sqlStore.pool.QueryRow(ctx, query, tag.ID, tag.Name).Scan(&tag.ID, &tag.Name)
 	if err != nil {
 		return nil, fmt.Errorf("save tag: %w", err)
 	}
@@ -28,10 +28,10 @@ func (s *SqlTagStore) Save(tag *model.Tag) (*model.Tag, error) {
 	return tag, nil
 }
 
-func (s *SqlTagStore) GetAll() ([]*model.Tag, error) {
+func (s *SqlTagStore) GetAll(ctx context.Context) ([]*model.Tag, error) {
 	query := `SELECT id, name FROM tags ORDER BY name`
 
-	rows, err := s.sqlStore.pool.Query(context.Background(), query)
+	rows, err := s.sqlStore.pool.Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("get all tags: %w", err)
 	}
@@ -48,32 +48,32 @@ func (s *SqlTagStore) GetAll() ([]*model.Tag, error) {
 	return tags, rows.Err()
 }
 
-func (s *SqlTagStore) AddTagToPost(messageID, tagID string) error {
+func (s *SqlTagStore) AddTagToPost(ctx context.Context, messageID, tagID string) error {
 	query := `INSERT INTO message_tags (message_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`
-	_, err := s.sqlStore.pool.Exec(context.Background(), query, messageID, tagID)
+	_, err := s.sqlStore.pool.Exec(ctx, query, messageID, tagID)
 	if err != nil {
 		return fmt.Errorf("add tag to post: %w", err)
 	}
 	return nil
 }
 
-func (s *SqlTagStore) RemoveTagFromPost(messageID, tagID string) error {
+func (s *SqlTagStore) RemoveTagFromPost(ctx context.Context, messageID, tagID string) error {
 	query := `DELETE FROM message_tags WHERE message_id = $1 AND tag_id = $2`
-	_, err := s.sqlStore.pool.Exec(context.Background(), query, messageID, tagID)
+	_, err := s.sqlStore.pool.Exec(ctx, query, messageID, tagID)
 	if err != nil {
 		return fmt.Errorf("remove tag from post: %w", err)
 	}
 	return nil
 }
 
-func (s *SqlTagStore) GetTagsForPost(messageID string) ([]*model.Tag, error) {
+func (s *SqlTagStore) GetTagsForPost(ctx context.Context, messageID string) ([]*model.Tag, error) {
 	query := `SELECT t.id, t.name
 		FROM tags t
 		INNER JOIN message_tags mt ON t.id = mt.tag_id
 		WHERE mt.message_id = $1
 		ORDER BY t.name`
 
-	rows, err := s.sqlStore.pool.Query(context.Background(), query, messageID)
+	rows, err := s.sqlStore.pool.Query(ctx, query, messageID)
 	if err != nil {
 		return nil, fmt.Errorf("get tags for post: %w", err)
 	}
@@ -91,7 +91,7 @@ func (s *SqlTagStore) GetTagsForPost(messageID string) ([]*model.Tag, error) {
 	return tags, rows.Err()
 }
 
-func (s *SqlTagStore) GetPostIDsByTags(tagIDs []string, page, perPage int) ([]string, error) {
+func (s *SqlTagStore) GetPostIDsByTags(ctx context.Context, tagIDs []string, page, perPage int) ([]string, error) {
 	query := `SELECT mt.message_id FROM message_tags mt
 		INNER JOIN posts p ON p.id = mt.message_id AND p.delete_at = 0
 		WHERE mt.tag_id = ANY($1)
@@ -100,7 +100,7 @@ func (s *SqlTagStore) GetPostIDsByTags(tagIDs []string, page, perPage int) ([]st
 		ORDER BY MAX(p.create_at) DESC
 		LIMIT $3 OFFSET $4`
 
-	rows, err := s.sqlStore.pool.Query(context.Background(), query, tagIDs, len(tagIDs), perPage, page*perPage)
+	rows, err := s.sqlStore.pool.Query(ctx, query, tagIDs, len(tagIDs), perPage, page*perPage)
 	if err != nil {
 		return nil, fmt.Errorf("get post ids by tags: %w", err)
 	}
@@ -117,13 +117,13 @@ func (s *SqlTagStore) GetPostIDsByTags(tagIDs []string, page, perPage int) ([]st
 	return ids, rows.Err()
 }
 
-func (s *SqlTagStore) FilterPostIDsByTags(postIDs []string, tagIDs []string) ([]string, error) {
+func (s *SqlTagStore) FilterPostIDsByTags(ctx context.Context, postIDs []string, tagIDs []string) ([]string, error) {
 	query := `SELECT mt.message_id FROM message_tags mt
 		WHERE mt.message_id = ANY($1) AND mt.tag_id = ANY($2)
 		GROUP BY mt.message_id
 		HAVING COUNT(DISTINCT mt.tag_id) = $3`
 
-	rows, err := s.sqlStore.pool.Query(context.Background(), query, postIDs, tagIDs, len(tagIDs))
+	rows, err := s.sqlStore.pool.Query(ctx, query, postIDs, tagIDs, len(tagIDs))
 	if err != nil {
 		return nil, fmt.Errorf("filter post ids by tags: %w", err)
 	}

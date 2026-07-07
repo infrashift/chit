@@ -1,8 +1,9 @@
-.PHONY: build build-mcp build-reconcile build-all run test test-container test-e2e test-e2e-clean lint validate-spec cue-validate reconcile migrate-up migrate-down kube-build kube-up kube-down kube-restart kube-logs kube-clean uat-up uat-seed-kratos uat-down uat-clean docs-dev clean
+.PHONY: build build-mcp build-reconcile build-claude build-all run test test-container test-e2e test-e2e-clean lint validate-spec cue-validate reconcile migrate-up migrate-down kube-migrate kube-build kube-up kube-down kube-restart kube-logs kube-clean uat-up uat-seed-kratos uat-down uat-clean docs-dev clean
 
 BINARY=bin/chitd
 MCP_BINARY=bin/chit-mcp
 RECONCILE_BINARY=bin/chit-reconcile
+CLAUDE_BINARY=bin/chit-claude
 KUBE_FILE=deploy/chit.kube.yml
 UAT_KUBE_FILE=deploy/chit-uat.kube.yml
 MIGRATE_URL?=postgres://chit:chit@localhost:5432/chit?sslmode=disable
@@ -22,7 +23,10 @@ build-mcp:
 build-reconcile:
 	go build -o $(RECONCILE_BINARY) ./cmd/chit-reconcile
 
-build-all: build build-mcp build-reconcile
+build-claude:
+	go build -o $(CLAUDE_BINARY) ./cmd/chit-claude
+
+build-all: build build-mcp build-reconcile build-claude
 
 validate-spec:
 	go run github.com/getkin/kin-openapi/cmd/validate@latest api/openapi.yaml
@@ -72,6 +76,15 @@ migrate-up:
 
 migrate-down:
 	migrate -database "$(MIGRATE_URL)" -path migrations down
+
+# The kube pod runs Kratos/Keto/chit migrations automatically via init and
+# migrate containers on `make kube-up`. This target re-applies the chit schema
+# migrations against the running pod's PostgreSQL — useful after adding new
+# migration files without restarting the pod. Requires no local migrate binary.
+kube-migrate:
+	podman run --rm --network host -v $(CURDIR)/migrations:/migrations:ro,Z \
+		docker.io/migrate/migrate:v4.15.0 \
+		-database "$(MIGRATE_URL)" -path /migrations up
 
 ## --- Podman Kube ---
 

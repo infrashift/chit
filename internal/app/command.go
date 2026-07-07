@@ -72,14 +72,11 @@ func (a *App) InterceptSlashCommand(ctx context.Context, userID, channelID, cont
 
 	eventID := model.NewID()
 
-	// Determine actor type for audit purposes.
-	actorType := "user"
-
-	// Always audit, regardless of outcome.
-	if a.AuditLogger != nil {
-		defer func() {
-			// logged after authz check below via the two return paths
-		}()
+	// Determine actor type for audit purposes: human, agent, and bot actors
+	// all execute commands the same way; only the audit record differs.
+	actorType := model.ActorTypeUser
+	if u, err := a.Store.User().Get(ctx, userID); err == nil && u.ActorType != "" {
+		actorType = u.ActorType
 	}
 
 	// AuthZ check.

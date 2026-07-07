@@ -11,6 +11,7 @@ All configuration is loaded from environment variables using
 | Variable | Type | Default | Description |
 |---|---|---|---|
 | `CHIT_LISTEN_ADDRESS` | string | `:8065` | Address and port for the HTTP server |
+| `CHIT_ALLOWED_ORIGINS` | string | `*` | Comma-separated CORS/WebSocket origin allowlist; `*` allows any origin (dev only, logs a warning) |
 | `CHIT_LOG_LEVEL` | string | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `CHIT_LOG_FORMAT` | string | `json` | Log output format: `json` or `text` |
 | `CHIT_DATABASE_URL` | string | `postgres://chit:chit@localhost:5432/chit?sslmode=disable` | PostgreSQL connection string |
@@ -19,6 +20,7 @@ All configuration is loaded from environment variables using
 | `CHIT_PUBSUB_BACKEND` | string | `pgnotify` | Pub/sub backend: `pgnotify` or `nats` |
 | `CHIT_NATS_URL` | string | `nats://localhost:4222` | NATS server URL (when using NATS backend) |
 | `CHIT_TRUSTED_PROXY_HEADER` | string | `X-User-Id` | HTTP header containing the authenticated user's Kratos identity ID |
+| `CHIT_TRUSTED_PROXY_SECRET` | string | _(empty)_ | When set, requests must carry a matching `X-Proxy-Secret` header (injected by Oathkeeper's header mutator) before `X-User-Id` is trusted; recommended in production |
 | `CHIT_KRATOS_ADMIN_URL` | string | `http://localhost:4434` | Ory Kratos admin API base URL |
 | `CHIT_KETO_READ_URL` | string | `http://localhost:4466` | Ory Keto read API base URL |
 | `CHIT_KETO_WRITE_URL` | string | `http://localhost:4467` | Ory Keto write API base URL |
@@ -31,3 +33,19 @@ All configuration is loaded from environment variables using
 | `CHIT_CACHE_TTL` | duration | `5m` | Time-to-live for cache entries |
 | `CHIT_ENABLE_OPENAPI_VALIDATION` | bool | `true` | Enable request validation against the OpenAPI spec |
 | `CHIT_MCP_AGENT_USER_ID` | string | _(empty)_ | User ID for the MCP agent to impersonate |
+| `CHIT_COMMANDS_CUE_DIR` | string | `auth` | Directory containing the CUE definitions for slash commands, roles, and actors |
+| `CHIT_AUDIT_LOG_PATH` | string | `/var/log/chit/audit.log` | File path for the slash-command audit log |
+| `CHIT_WEBHOOK_ENABLED` | bool | `false` | Enable the CloudEvents webhook dispatcher for slash commands |
+| `CHIT_WEBHOOK_URL` | string | _(empty)_ | Destination URL for webhook deliveries |
+| `CHIT_WEBHOOK_SECRET` | string | _(empty)_ | Shared secret used to sign webhook deliveries |
+| `CHIT_WEBHOOK_WORKER_COUNT` | int | `4` | Number of concurrent webhook delivery workers |
+| `CHIT_WEBHOOK_QUEUE_SIZE` | int | `1024` | Size of the in-memory webhook delivery queue |
+| `CHIT_WEBHOOK_TIMEOUT_SEC` | int | `10` | Per-delivery HTTP timeout in seconds |
+
+## Notes
+
+- The pub/sub backend (`CHIT_PUBSUB_BACKEND`) currently serves the MCP agent
+  event feed: chitd publishes thin event envelopes on the `chit_events` topic,
+  which `chit-mcp` buffers for agents to poll. WebSocket fan-out is
+  single-node (in-process); chitd does not yet consume the topic for
+  multi-node delivery.

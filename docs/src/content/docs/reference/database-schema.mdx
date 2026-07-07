@@ -44,6 +44,7 @@ Local profile cache linked to an Ory Kratos identity.
 | `display_name` | VARCHAR(100) | NOT NULL | Display name |
 | `email` | VARCHAR(128) | UNIQUE, NOT NULL | Email address |
 | `roles` | VARCHAR(256) | DEFAULT `'system_user'` | Comma-separated roles |
+| `actor_type` | TEXT | NOT NULL, DEFAULT `'user'`, CHECK | Actor type: `user`, `agent`, or `bot` — humans, AI agents, and bots are equal first-class actors |
 | `create_at` | BIGINT | NOT NULL | Creation timestamp (ms) |
 | `update_at` | BIGINT | NOT NULL | Last update timestamp (ms) |
 | `delete_at` | BIGINT | DEFAULT `0` | Deletion timestamp (0 = active) |
@@ -136,7 +137,7 @@ Messages in channels. Replies reference a `root_id`.
 | `channel_id` | UUID | FK → channels, NOT NULL | Target channel |
 | `user_id` | UUID | FK → users, NOT NULL | Author |
 | `root_id` | UUID | FK → posts | Thread root (NULL for root posts) |
-| `content` | TEXT | NOT NULL, DEFAULT `''` | Message body (markdown) |
+| `content` | TEXT | NOT NULL, DEFAULT `''` | Message body: raw markdown text; the server performs no rendering or sanitization, so clients must sanitize when rendering |
 | `type` | VARCHAR(26) | DEFAULT `''` | Post type marker |
 | `props` | JSONB | DEFAULT `'{}'` | Arbitrary metadata |
 | `hashtags` | VARCHAR(1000) | DEFAULT `''` | Extracted hashtags |
@@ -207,3 +208,5 @@ make migrate-down  # Roll back all migrations
 |---|---|
 | `000001_initial_schema` | Creates all 10 tables and indexes |
 | `000002_widen_channel_name` | Widens `channels.name` to VARCHAR(512) and `display_name` to VARCHAR(256) for DM/GM names |
+| `000003_drop_content_encrypted` | Drops the abandoned `posts.content_encrypted` encryption-at-rest column |
+| `000004_actor_type` | Adds `users.actor_type` (`user` \| `agent` \| `bot`) so humans, AI agents, and bots are equal actors |

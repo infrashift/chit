@@ -53,8 +53,8 @@ func (s *ChitMCPServer) registerResources() {
 	}, s.handleTeamChannelsResource)
 }
 
-func (s *ChitMCPServer) handleAgentIdentity(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
-	user, err := s.app.GetUser(s.agentUserID)
+func (s *ChitMCPServer) handleAgentIdentity(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	user, err := s.app.GetUser(ctx, s.agentUserID)
 	if err != nil {
 		return nil, fmt.Errorf("get agent user: %w", err)
 	}
@@ -66,12 +66,12 @@ func (s *ChitMCPServer) handleAgentIdentity(_ context.Context, req *mcp.ReadReso
 	}, nil
 }
 
-func (s *ChitMCPServer) handleChannelResource(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+func (s *ChitMCPServer) handleChannelResource(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 	channelID := extractURIParam(req.Params.URI, "chit://channels/", "")
 	if channelID == "" {
 		return nil, fmt.Errorf("invalid channel URI: %s", req.Params.URI)
 	}
-	channel, err := s.app.GetChannel(channelID)
+	channel, err := s.app.GetChannel(ctx, channelID)
 	if err != nil {
 		return nil, fmt.Errorf("get channel: %w", err)
 	}
@@ -93,7 +93,7 @@ func (s *ChitMCPServer) handleChannelRecentResource(ctx context.Context, req *mc
 		Page:    0,
 		PerPage: 20,
 	}
-	posts, err := s.app.GetPostsForChannel(ctx, channelID, opts)
+	posts, err := s.app.GetPostsForChannel(ctx, channelID, s.agentUserID, opts)
 	if err != nil {
 		return nil, fmt.Errorf("get channel posts: %w", err)
 	}
@@ -110,7 +110,7 @@ func (s *ChitMCPServer) handleThreadResource(ctx context.Context, req *mcp.ReadR
 	if postID == "" {
 		return nil, fmt.Errorf("invalid thread URI: %s", req.Params.URI)
 	}
-	thread, err := s.app.GetThread(ctx, postID)
+	thread, err := s.app.GetThread(ctx, postID, s.agentUserID)
 	if err != nil {
 		return nil, fmt.Errorf("get thread: %w", err)
 	}
@@ -122,13 +122,13 @@ func (s *ChitMCPServer) handleThreadResource(ctx context.Context, req *mcp.ReadR
 	}, nil
 }
 
-func (s *ChitMCPServer) handleTeamChannelsResource(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+func (s *ChitMCPServer) handleTeamChannelsResource(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 	// URI: chit://teams/{team_id}/channels
 	teamID := extractURIParam(req.Params.URI, "chit://teams/", "/channels")
 	if teamID == "" {
 		return nil, fmt.Errorf("invalid team channels URI: %s", req.Params.URI)
 	}
-	channels, err := s.app.GetChannelsForTeam(teamID, 0, 200)
+	channels, err := s.app.GetChannelsForTeam(ctx, teamID, s.agentUserID, 0, 200)
 	if err != nil {
 		return nil, fmt.Errorf("get team channels: %w", err)
 	}

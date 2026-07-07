@@ -17,70 +17,76 @@ type chMockChannelStore struct {
 	members []*model.ChannelMember
 }
 
-func (s *chMockChannelStore) Save(c *model.Channel) (*model.Channel, error) {
+func (s *chMockChannelStore) Save(_ context.Context, c *model.Channel) (*model.Channel, error) {
 	c.ID = "ch-new"
 	s.saved = append(s.saved, c)
 	return c, nil
 }
-func (s *chMockChannelStore) Get(_ string) (*model.Channel, error) { return nil, errNotFound }
-func (s *chMockChannelStore) Update(c *model.Channel) (*model.Channel, error) {
+func (s *chMockChannelStore) Get(_ context.Context, _ string) (*model.Channel, error) { return nil, errNotFound }
+func (s *chMockChannelStore) Update(_ context.Context, c *model.Channel) (*model.Channel, error) {
 	return c, nil
 }
-func (s *chMockChannelStore) Delete(_ string, _ int64) error { return nil }
-func (s *chMockChannelStore) GetChannelsForTeam(_ string, _, _ int) ([]*model.Channel, error) {
+func (s *chMockChannelStore) Delete(_ context.Context, _ string, _ int64) error { return nil }
+func (s *chMockChannelStore) GetChannelsForTeam(_ context.Context, _ string, _, _ int) ([]*model.Channel, error) {
 	return nil, nil
 }
-func (s *chMockChannelStore) GetChannelsForUser(_, _ string) ([]*model.Channel, error) {
+func (s *chMockChannelStore) GetChannelsForUser(_ context.Context, _, _ string) ([]*model.Channel, error) {
 	return nil, nil
 }
-func (s *chMockChannelStore) SaveMember(m *model.ChannelMember) (*model.ChannelMember, error) {
+func (s *chMockChannelStore) SaveMember(_ context.Context, m *model.ChannelMember) (*model.ChannelMember, error) {
 	s.members = append(s.members, m)
 	return m, nil
 }
-func (s *chMockChannelStore) RemoveMember(_, _ string) error            { return nil }
-func (s *chMockChannelStore) UpdateLastViewedAt(_, _ string, _ int64) error { return nil }
-func (s *chMockChannelStore) GetByName(_, _ string) (*model.Channel, error) {
+func (s *chMockChannelStore) RemoveMember(_ context.Context, _, _ string) error                { return nil }
+func (s *chMockChannelStore) UpdateLastViewedAt(_ context.Context, _, _ string, _ int64) error { return nil }
+func (s *chMockChannelStore) GetByName(_ context.Context, _, _ string) (*model.Channel, error) {
 	return nil, errNotFound
 }
-func (s *chMockChannelStore) GetDirectChannelByName(_ string) (*model.Channel, error) {
+func (s *chMockChannelStore) GetDirectChannelByName(_ context.Context, _ string) (*model.Channel, error) {
 	return nil, errNotFound
 }
-func (s *chMockChannelStore) SaveDirectChannel(c *model.Channel, _ []string) (*model.Channel, error) {
+func (s *chMockChannelStore) SaveDirectChannel(_ context.Context, c *model.Channel, _ []string) (*model.Channel, error) {
 	return c, nil
 }
-func (s *chMockChannelStore) GetDirectChannelsForUser(_ string) ([]*model.Channel, error) {
+func (s *chMockChannelStore) GetDirectChannelsForUser(_ context.Context, _ string) ([]*model.Channel, error) {
 	return nil, nil
 }
-func (s *chMockChannelStore) IncrementMsgCount(_ string, _ int64) error { return nil }
-func (s *chMockChannelStore) GetMembers(_ string, _, _ int) ([]*model.ChannelMember, error) {
+func (s *chMockChannelStore) IncrementMsgCount(_ context.Context, _ string, _ int64) error { return nil }
+func (s *chMockChannelStore) GetMembers(_ context.Context, _ string, _, _ int) ([]*model.ChannelMember, error) {
 	return nil, nil
 }
-func (s *chMockChannelStore) GetMember(_, _ string) (*model.ChannelMember, error) {
+func (s *chMockChannelStore) GetMember(_ context.Context, _, _ string) (*model.ChannelMember, error) {
 	return nil, errNotFound
 }
-func (s *chMockChannelStore) IncrementMentionCount(_, _ string) error { return nil }
+func (s *chMockChannelStore) IncrementMentionCount(_ context.Context, _, _ string) error         { return nil }
+func (s *chMockChannelStore) GetChannelIDsForUser(_ context.Context, _ string) ([]string, error) { return nil, nil }
 
 type chMockTeamStore struct {
 	members []*model.TeamMember
 }
 
-func (s *chMockTeamStore) Save(_ *model.Team) (*model.Team, error)   { return nil, nil }
-func (s *chMockTeamStore) Get(_ string) (*model.Team, error)         { return nil, nil }
-func (s *chMockTeamStore) GetByName(_ string) (*model.Team, error)   { return nil, nil }
-func (s *chMockTeamStore) Update(_ *model.Team) (*model.Team, error) { return nil, nil }
-func (s *chMockTeamStore) Delete(_ string, _ int64) error            { return nil }
-func (s *chMockTeamStore) GetAll(_, _ int) ([]*model.Team, error)    { return nil, nil }
-func (s *chMockTeamStore) GetTeamsForUser(_ string) ([]*model.Team, error) {
+func (s *chMockTeamStore) Save(_ context.Context, _ *model.Team) (*model.Team, error)   { return nil, nil }
+func (s *chMockTeamStore) Get(_ context.Context, _ string) (*model.Team, error)         { return nil, nil }
+func (s *chMockTeamStore) GetByName(_ context.Context, _ string) (*model.Team, error)   { return nil, nil }
+func (s *chMockTeamStore) Update(_ context.Context, _ *model.Team) (*model.Team, error) { return nil, nil }
+func (s *chMockTeamStore) Delete(_ context.Context, _ string, _ int64) error            { return nil }
+func (s *chMockTeamStore) GetAll(_ context.Context, _, _ int) ([]*model.Team, error)    { return nil, nil }
+func (s *chMockTeamStore) GetTeamsForUser(_ context.Context, _ string) ([]*model.Team, error) {
 	return nil, nil
 }
-func (s *chMockTeamStore) SaveMember(_ *model.TeamMember) (*model.TeamMember, error) {
+func (s *chMockTeamStore) SaveMember(_ context.Context, _ *model.TeamMember) (*model.TeamMember, error) {
 	return nil, nil
 }
-func (s *chMockTeamStore) RemoveMember(_, _ string) error { return nil }
-func (s *chMockTeamStore) GetMembers(_ string, _, _ int) ([]*model.TeamMember, error) {
+func (s *chMockTeamStore) RemoveMember(_ context.Context, _, _ string) error { return nil }
+func (s *chMockTeamStore) GetMembers(_ context.Context, _ string, _, _ int) ([]*model.TeamMember, error) {
 	return s.members, nil
 }
-func (s *chMockTeamStore) GetMember(_, _ string) (*model.TeamMember, error) {
+func (s *chMockTeamStore) GetMember(_ context.Context, teamID, userID string) (*model.TeamMember, error) {
+	for _, m := range s.members {
+		if m.TeamID == teamID && m.UserID == userID {
+			return m, nil
+		}
+	}
 	return nil, errNotFound
 }
 
@@ -90,12 +96,12 @@ type chMockStore struct {
 }
 
 func (s *chMockStore) User() store.UserStore       { return &mentionMockUserStore{} }
-func (s *chMockStore) Team() store.TeamStore        { return s.team }
-func (s *chMockStore) Channel() store.ChannelStore  { return s.channel }
-func (s *chMockStore) Post() store.PostStore        { return mentionMockPostStore{} }
-func (s *chMockStore) Thread() store.ThreadStore    { return &mentionMockThreadStore{} }
-func (s *chMockStore) Tag() store.TagStore          { return mentionMockTagStore{} }
-func (s *chMockStore) Close()                       {}
+func (s *chMockStore) Team() store.TeamStore       { return s.team }
+func (s *chMockStore) Channel() store.ChannelStore { return s.channel }
+func (s *chMockStore) Post() store.PostStore       { return mentionMockPostStore{} }
+func (s *chMockStore) Thread() store.ThreadStore   { return &mentionMockThreadStore{} }
+func (s *chMockStore) Tag() store.TagStore         { return mentionMockTagStore{} }
+func (s *chMockStore) Close()                      {}
 
 func TestCreateChannel_OpenAutoAddsTeamMembers(t *testing.T) {
 	cs := &chMockChannelStore{}
@@ -108,7 +114,7 @@ func TestCreateChannel_OpenAutoAddsTeamMembers(t *testing.T) {
 	}
 	ms := &chMockStore{channel: cs, team: ts}
 
-	hub := websocket.NewHub()
+	hub := websocket.NewHub(nil)
 	t.Cleanup(hub.Stop)
 
 	cfg := config.Defaults()
@@ -156,7 +162,7 @@ func TestCreateChannel_PrivateOnlyAddsCreator(t *testing.T) {
 	}
 	ms := &chMockStore{channel: cs, team: ts}
 
-	hub := websocket.NewHub()
+	hub := websocket.NewHub(nil)
 	t.Cleanup(hub.Stop)
 
 	cfg := config.Defaults()

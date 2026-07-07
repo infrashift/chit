@@ -17,14 +17,18 @@ type seedUser struct {
 	Email       string
 	KratosID    string
 	Roles       string
+	ActorType   string
 }
 
 var users = []seedUser{
-	{"alice", "Alice Anderson", "alice@example.com", "a11ce000-0000-4000-a000-000000000001", "system_admin"},
-	{"bob", "Bob Baker", "bob@example.com", "b0b00000-0000-4000-a000-000000000002", "system_user"},
-	{"chad", "Chad Cooper", "chad@example.com", "c4ad0000-0000-4000-a000-000000000003", "system_user"},
-	{"diana", "Diana Drake", "diana@example.com", "d1a4a000-0000-4000-a000-000000000004", "system_user"},
-	{"eve", "Eve Ellis", "eve@example.com", "e0e00000-0000-4000-a000-000000000005", "system_user"},
+	{"alice", "Alice Anderson", "alice@example.com", "a11ce000-0000-4000-a000-000000000001", "system_admin", model.ActorTypeUser},
+	{"bob", "Bob Baker", "bob@example.com", "b0b00000-0000-4000-a000-000000000002", "system_user", model.ActorTypeUser},
+	{"chad", "Chad Cooper", "chad@example.com", "c4ad0000-0000-4000-a000-000000000003", "system_user", model.ActorTypeUser},
+	{"diana", "Diana Drake", "diana@example.com", "d1a4a000-0000-4000-a000-000000000004", "system_user", model.ActorTypeUser},
+	{"eve", "Eve Ellis", "eve@example.com", "e0e00000-0000-4000-a000-000000000005", "system_user", model.ActorTypeUser},
+	// The MCP agent is an equal actor: a normal user row with actor_type=agent,
+	// added to the same team and channel. Point CHIT_MCP_AGENT_USER_ID at its ID.
+	{"chit-agent", "Chit Agent", "agent@example.com", "a9e47000-0000-4000-a000-000000000006", "system_user", model.ActorTypeAgent},
 }
 
 func isNotFound(err error) bool {
@@ -48,7 +52,7 @@ func main() {
 	// Create users (idempotent — skip if already exists).
 	userIDs := make([]string, len(users))
 	for i, u := range users {
-		existing, err := store.User().GetByKratosID(u.KratosID)
+		existing, err := store.User().GetByKratosID(ctx, u.KratosID)
 		if err == nil {
 			userIDs[i] = existing.ID
 			fmt.Printf("  User %-8s already exists  id=%s\n", u.Username, existing.ID)
@@ -58,12 +62,13 @@ func main() {
 			log.Fatalf("Failed to check user %s: %v", u.Username, err)
 		}
 
-		saved, err := store.User().Save(&model.User{
+		saved, err := store.User().Save(ctx, &model.User{
 			KratosID:    u.KratosID,
 			Username:    u.Username,
 			DisplayName: u.DisplayName,
 			Email:       u.Email,
 			Roles:       u.Roles,
+			ActorType:   u.ActorType,
 		})
 		if err != nil {
 			log.Fatalf("Failed to create user %s: %v", u.Username, err)
@@ -74,12 +79,12 @@ func main() {
 
 	// Create team (idempotent).
 	var team *model.Team
-	team, err = store.Team().GetByName("uat-team")
+	team, err = store.Team().GetByName(ctx, "uat-team")
 	if err != nil && !isNotFound(err) {
 		log.Fatalf("Failed to check team: %v", err)
 	}
 	if team == nil {
-		team, err = store.Team().Save(&model.Team{
+		team, err = store.Team().Save(ctx, &model.Team{
 			Name:        "uat-team",
 			DisplayName: "UAT Team",
 			Type:        model.TeamOpen,
@@ -95,7 +100,7 @@ func main() {
 
 	// Add all users to team (SaveMember is already idempotent via ON CONFLICT).
 	for i, uid := range userIDs {
-		_, err := store.Team().SaveMember(&model.TeamMember{
+		_, err := store.Team().SaveMember(ctx, &model.TeamMember{
 			TeamID: team.ID,
 			UserID: uid,
 		})
@@ -107,12 +112,12 @@ func main() {
 
 	// Create channel (idempotent).
 	var channel *model.Channel
-	channel, err = store.Channel().GetByName(team.ID, "town-square")
+	channel, err = store.Channel().GetByName(ctx, team.ID, "town-square")
 	if err != nil && !isNotFound(err) {
 		log.Fatalf("Failed to check channel: %v", err)
 	}
 	if channel == nil {
-		channel, err = store.Channel().Save(&model.Channel{
+		channel, err = store.Channel().Save(ctx, &model.Channel{
 			TeamID:      team.ID,
 			CreatorID:   userIDs[0],
 			Name:        "town-square",
@@ -129,7 +134,7 @@ func main() {
 
 	// Add all users to channel (SaveMember is already idempotent via ON CONFLICT).
 	for i, uid := range userIDs {
-		_, err := store.Channel().SaveMember(&model.ChannelMember{
+		_, err := store.Channel().SaveMember(ctx, &model.ChannelMember{
 			ChannelID: channel.ID,
 			UserID:    uid,
 		})
@@ -144,10 +149,10 @@ func main() {
 	fmt.Println("=== UAT Cheat Sheet ===")
 	fmt.Println()
 	fmt.Println("Users:")
-	fmt.Printf("  %-10s %-18s %s\n", "Username", "Display Name", "X-User-Id header")
-	fmt.Printf("  %-10s %-18s %s\n", "--------", "------------", "----------------")
+	fmt.Printf("  %-10s %-18s %-7s %s\n", "Username", "Display Name", "Actor", "X-User-Id header")
+	fmt.Printf("  %-10s %-18s %-7s %s\n", "--------", "------------", "-----", "----------------")
 	for _, u := range users {
-		fmt.Printf("  %-10s %-18s %s\n", u.Username, u.DisplayName, u.KratosID)
+		fmt.Printf("  %-10s %-18s %-7s %s\n", u.Username, u.DisplayName, u.ActorType, u.KratosID)
 	}
 	fmt.Println()
 	fmt.Printf("Team:    %s (id=%s)\n", team.Name, team.ID)

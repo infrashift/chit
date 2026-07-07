@@ -2,9 +2,12 @@
 
 A high-performance, text-only team chat server built with Go.
 
-Chit is a stripped-down alternative to Mattermost — no file uploads, no bots,
-no plugins. Just fast, searchable, threaded team messaging with zero-trust
-security via the Ory stack.
+Chit is a stripped-down alternative to Mattermost — no file uploads, no
+plugins. Just fast, searchable, threaded team messaging with zero-trust
+security via the Ory stack. Humans, AI agents, and bots are equal first-class
+actors: every user record carries an `actor_type` (`user`, `agent`, or `bot`),
+and AI agents connect through the bundled `chit-mcp` MCP server as ordinary
+users.
 
 ## Features
 
@@ -12,13 +15,22 @@ security via the Ory stack.
   private, direct, and group channels
 - **Threaded conversations** — reply threads with follow/unfollow and unread
   tracking
-- **Markdown messages** — full CommonMark support in all posts
+- **Markdown messages** — message content is stored as raw markdown text; the
+  server performs no rendering or HTML sanitization, so clients MUST sanitize
+  or escape content when rendering (treat it as untrusted input)
+- **AI agents & bots as first-class actors** — `actor_type` on every user,
+  MCP server (`chit-mcp`) for agent access, and a pub/sub event feed agents
+  can poll for new events
 - **Full-text search** — ZincSearch-backed indexing with per-channel and
   per-team queries
 - **Zero-trust auth** — Ory Kratos (identity), Oathkeeper (auth proxy), and
   Keto (ReBAC authorization)
-- **Real-time WebSocket** — 14 event types with per-user hub and broadcast
-  filtering
+- **Real-time WebSocket** — 14 event types with per-user hub; channel-targeted
+  events are delivered only to channel members. Fan-out is currently
+  single-node (in-process); multi-node WebSocket fan-out is not yet
+  implemented. A pub/sub layer (PG LISTEN/NOTIFY or NATS) publishes thin event
+  envelopes on the `chit_events` topic, which `chit-mcp` buffers for agents to
+  poll
 - **Conversation tags** — label and filter posts with user-defined tags
 - **Message pinning** — pin important posts per channel
 - **@mention notifications** — real-time mention alerts via WebSocket
@@ -40,6 +52,28 @@ Layered design inspired by Mattermost: **API → App → Store → PostgreSQL**.
 Store decorators add caching, retry logic, and timing instrumentation
 transparently.
 
+The project builds four binaries:
+
+- **`chitd`** — the chat server
+- **`chit-mcp`** — MCP stdio server that lets AI agents act as normal users
+- **`chit-reconcile`** — one-shot job that pushes CUE-defined roles, commands,
+  and actors into Keto
+- **`chit-claude`** — bridge that drives headless Claude Code sessions from
+  Chit channels (thread = session; see
+  [Headless Claude Code](docs/src/content/docs/deployment/headless-claude.mdx))
+
+## Security Model
+
+Channel authorization is enforced server-side: reading or posting to a
+channel requires channel membership (checked against the `channel_members`
+table in PostgreSQL), editing or deleting a post requires being the author or
+a `system_admin`, and WebSocket events are delivered only to channel members.
+Ory Keto remains the authorization backend for slash commands (namespace
+`chit/command`). For production deployments, set `CHIT_ALLOWED_ORIGINS` to an
+explicit origin allowlist and `CHIT_TRUSTED_PROXY_SECRET` so the backend only
+trusts the `X-User-Id` header when Oathkeeper injects a matching
+`X-Proxy-Secret` header.
+
 ## Quick Start
 
 ```bash
@@ -48,13 +82,13 @@ git clone https://github.com/infrashift/chit.git
 cd chit
 
 # Start infrastructure (PostgreSQL, Ory stack, ZincSearch)
+# Kratos, Keto, and Chit schema migrations run automatically via
+# init/migrate containers.
 make kube-up
 
-# Run Ory schema migrations
+# (Later, only when new migration files are added) re-apply Chit
+# schema migrations against the running pod without restarting it
 make kube-migrate
-
-# Run Chit schema migrations
-make migrate-up
 
 # Configure environment
 cp .env.example .env
@@ -75,7 +109,7 @@ using [koanf](https://github.com/knadh/koanf). See
 ## API Documentation
 
 The REST API is defined in [`api/openapi.yaml`](api/openapi.yaml) — an
-OpenAPI 3.1 spec covering 9 resource tags and 40+ endpoints.
+OpenAPI 3.1 spec covering 10 resource tags and 40+ endpoints.
 
 ## Documentation
 

@@ -14,6 +14,7 @@ func validUser() *User {
 		DisplayName: "Test User",
 		Email:       "test@example.com",
 		Roles:       "system_user",
+		ActorType:   ActorTypeUser,
 		CreateAt:    GetMillis(),
 		UpdateAt:    GetMillis(),
 	}
@@ -42,6 +43,10 @@ func TestUser_IsValid(t *testing.T) {
 		{"valid email", func(u *User) { u.Email = "a@b.co" }, false},
 		{"create_at 0", func(u *User) { u.CreateAt = 0 }, true},
 		{"update_at 0", func(u *User) { u.UpdateAt = 0 }, true},
+		{"valid agent actor", func(u *User) { u.ActorType = ActorTypeAgent }, false},
+		{"valid bot actor", func(u *User) { u.ActorType = ActorTypeBot }, false},
+		{"invalid actor_type", func(u *User) { u.ActorType = "robot" }, true},
+		{"empty actor_type", func(u *User) { u.ActorType = "" }, true},
 	}
 
 	for _, tc := range tests {

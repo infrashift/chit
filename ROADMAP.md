@@ -15,42 +15,49 @@
 - [x] Containerfile and Makefile
 - [x] Environment-based configuration (koanf)
 - [x] Documentation site (Astro + Starlight)
-- [ ] Unit tests
-- [ ] Integration tests
-- [ ] System tests
-- [ ] Search indexer worker (poll for new posts)
-- [ ] Hub channel filtering (broadcast scoping)
+- [x] Containerized Ory stack + UAT environment (pre-seeded Podman pod)
+- [x] Unit tests
+- [x] Integration tests
+- [x] End-to-end (system) tests
+- [x] Search indexer worker (poll for new posts)
+- [x] Hub channel filtering (broadcast scoping to channel members)
 
 ## Phase 2 — Core Messaging
 
-- [ ] End-to-end message flow (create → store → broadcast → deliver)
-- [ ] Thread reply tracking and participant updates
-- [ ] Unread counts and channel view tracking
-- [ ] @mention detection and notification events
-- [ ] Message pinning flow
-- [ ] Tag CRUD and post-tag association flow
+- [x] End-to-end message flow (create → store → broadcast → deliver)
+- [x] Thread reply tracking and participant updates
+- [x] Unread counts and channel view tracking
+- [x] @mention detection and notification events
+- [x] Message pinning flow
+- [x] Tag CRUD and post-tag association flow
+- [x] Slash commands framework (CUE-defined, Keto-authorized, audited)
+- [x] Webhook dispatcher (CloudEvents)
+- [x] MCP agent event feed (pub/sub envelopes polled via `get_new_events`)
+- [x] Headless Claude Code bridge (`chit-claude`: thread-per-session, subscription OAuth)
 
 ## Phase 3 — Auth & Security
 
-- [ ] Oathkeeper JWT/session validation in middleware
-- [ ] Keto permission checks for channel access (ReBAC)
-- [ ] User auto-provisioning from Kratos identity on first request
+- [x] Oathkeeper JWT/session validation in middleware
+- [x] Channel authorization checks (Postgres membership source of truth, Keto dual-write)
+- [x] User auto-provisioning from Kratos identity on first request
 
 ## Phase 4 — Search & Performance
 
-- [ ] ZincSearch indexer worker (async from PG)
-- [ ] Filtered search (per-team, per-channel, date ranges)
-- [ ] Store decorator chain (Timer → Retry → Cache → SqlStore)
+- [x] ZincSearch indexer worker (async from PG)
+- [x] Filtered search (per-team, per-channel; results scoped to member channels)
+- [x] Store decorator chain (Timer → Retry → Cache → SqlStore)
 - [ ] Connection pool tuning and query optimization
 
 ## Phase 5 — Testing & Benchmarks
 
-- [ ] Complete test dataset with seed data
+- [x] Complete test dataset with seed data
+- [x] CI pipeline (GitHub Actions: build, lint, unit + integration tests)
 - [ ] Load tests with k6 or vegeta
 - [ ] Published benchmark results
 
 ## Phase 6 — Operations
 
+- [ ] Multi-node WebSocket fan-out (chitd consuming the pub/sub event topic)
 - [ ] Automated provisioning via Ansible and Podman
 - [ ] Operations runbooks
 - [ ] Monitoring and alerting guidance

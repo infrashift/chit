@@ -18,7 +18,7 @@ func createTag(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		saved, err := a.CreateTag(&tag)
+		saved, err := a.CreateTag(r.Context(), &tag)
 		if err != nil {
 			WriteError(w, model.NewInternalError("createTag", err))
 			return
@@ -30,7 +30,7 @@ func createTag(a *app.App) http.HandlerFunc {
 
 func getAllTags(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tags, err := a.GetAllTags()
+		tags, err := a.GetAllTags(r.Context())
 		if err != nil {
 			WriteError(w, model.NewInternalError("getAllTags", err))
 			return
@@ -50,7 +50,7 @@ func addTagToPost(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		if err := a.AddTagToPost(postID, body.TagID); err != nil {
+		if err := a.AddTagToPost(r.Context(), postID, body.TagID); err != nil {
 			WriteError(w, model.NewInternalError("addTagToPost", err))
 			return
 		}
@@ -64,7 +64,7 @@ func removeTagFromPost(a *app.App) http.HandlerFunc {
 		postID := chi.URLParam(r, "id")
 		tagID := chi.URLParam(r, "tag_id")
 
-		if err := a.RemoveTagFromPost(postID, tagID); err != nil {
+		if err := a.RemoveTagFromPost(r.Context(), postID, tagID); err != nil {
 			WriteError(w, model.NewInternalError("removeTagFromPost", err))
 			return
 		}
@@ -76,7 +76,7 @@ func removeTagFromPost(a *app.App) http.HandlerFunc {
 func getTagsForPost(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		postID := chi.URLParam(r, "id")
-		tags, err := a.GetTagsForPost(postID)
+		tags, err := a.GetTagsForPost(r.Context(), postID)
 		if err != nil {
 			WriteError(w, model.NewInternalError("getTagsForPost", err))
 			return

@@ -1,6 +1,8 @@
 # Product Requirements Document (PRD): Project Chit
 
-**Version:** 2.0
+**Version:** 2.1
+
+**Last Updated:** 2026-07-07
 
 **Status:** Draft
 
@@ -59,10 +61,15 @@
 * File attachments
 * Giphy / media embeds
 * Audio/video calls
-* Bots and webhooks
 * Plugins
 * Reactions / emoji reactions
 * Web or native clients (TUI client planned separately)
+
+> **Note:** Bots and webhooks are no longer excluded. Chit now treats humans,
+> AI agents, and bots as equal first-class actors (`users.actor_type`), ships
+> a slash-command framework with a CloudEvents webhook dispatcher, and
+> provides MCP-based agent access. See
+> [PRD-SLASH-COMMANDS.md](PRD-SLASH-COMMANDS.md) for details.
 
 ---
 
@@ -74,26 +81,30 @@ Chit utilizes the Ory Stack to decouple identity concerns from the business logi
 | --- | --- |
 | **Ory Kratos** | **Identity Management:** Handles user registration, profile management, and MFA (YubiKey/WebAuthn). Stores the "Source of Truth" for user accounts. |
 | **Ory Oathkeeper** | **Identity & Access Proxy:** Sits in front of the Go API. It validates incoming Kratos sessions and converts them into headers (e.g., `X-User-Id`) for the backend. |
-| **Ory Keto** | **Authorization (ReBAC):** Manages channel memberships and permissions. The Go backend queries Keto to verify if a user has `read` or `write` access to a specific `channel_id`. Keto is the source of truth for membership access checks. |
+| **Ory Keto** | **Authorization (ReBAC):** Authorizes slash-command execution (`chit/command` namespace, `execute` relation). Channel `member` tuples are dual-written to Keto on join/leave, but channel access checks use the PostgreSQL membership tables as the source of truth. |
 | **Ory Hydra** | **OAuth2/OIDC:** Optional for the initial MVP, reserved for future third-party integrations. |
 
 ### 4.1 Keto Authorization Model
 
-Channel permissions are managed as Keto relation tuples:
+Two Keto namespaces are in use:
 
 ```
 namespace: chit/channel
   relation: member
-  relation: writer
-  relation: reader
-  permission: read = reader + member
-  permission: write = writer + member
+
+namespace: chit/command
+  relation: execute
 ```
 
 When a user joins a channel, a Keto relation tuple is written:
-`chit/channel:<channel_id>#member@<user_id>`
+`chit/channel:<channel_id>#member@<user_id>`; the tuple is deleted on leave.
+Channel access checks (read/post/pin/invite) use the PostgreSQL
+`channel_members` table as the source of truth, with Keto tuples still
+dual-written.
 
-Channel permission checks call Keto's check API to verify membership before allowing read/write operations.
+Slash-command execution is authorized via Keto: the `chit/command` namespace
+uses the `execute` relation, granted through roles defined in CUE under
+`auth/` and reconciled into Keto by the `chit-reconcile` binary.
 
 ### 4.2 User Auto-Provisioning
 

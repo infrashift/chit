@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -19,7 +18,7 @@ func createUser(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		saved, err := a.Store.User().Save(&user)
+		saved, err := a.Store.User().Save(r.Context(), &user)
 		if err != nil {
 			WriteError(w, model.NewInternalError("createUser", err))
 			return
@@ -61,7 +60,7 @@ func updateMe(a *app.App) http.HandlerFunc {
 			user.Username = patch.Username
 		}
 
-		updated, err := a.UpdateUser(user)
+		updated, err := a.UpdateUser(r.Context(), user)
 		if err != nil {
 			WriteError(w, model.NewInternalError("updateMe", err))
 			return
@@ -74,7 +73,7 @@ func updateMe(a *app.App) http.HandlerFunc {
 func getUser(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
-		user, err := a.GetUser(id)
+		user, err := a.GetUser(r.Context(), id)
 		if err != nil {
 			WriteError(w, model.NewNotFoundError("getUser", id))
 			return
@@ -87,7 +86,7 @@ func getUser(a *app.App) http.HandlerFunc {
 func getUserByUsername(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		username := chi.URLParam(r, "username")
-		user, err := a.GetUserByUsername(username)
+		user, err := a.GetUserByUsername(r.Context(), username)
 		if err != nil {
 			WriteError(w, model.NewNotFoundError("getUserByUsername", username))
 			return
@@ -100,13 +99,9 @@ func getUserByUsername(a *app.App) http.HandlerFunc {
 func searchUsers(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		term := r.URL.Query().Get("term")
-		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-		perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
-		if perPage == 0 {
-			perPage = 60
-		}
+		page, perPage := parsePagination(r, 60)
 
-		users, err := a.SearchUsers(term, page, perPage)
+		users, err := a.SearchUsers(r.Context(), term, page, perPage)
 		if err != nil {
 			WriteError(w, model.NewInternalError("searchUsers", err))
 			return
@@ -128,7 +123,7 @@ func getUsersByIDs(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		users, err := a.GetUsersByIDs(ids)
+		users, err := a.GetUsersByIDs(r.Context(), ids)
 		if err != nil {
 			WriteError(w, model.NewInternalError("getUsersByIDs", err))
 			return

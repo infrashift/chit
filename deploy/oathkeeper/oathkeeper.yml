@@ -35,6 +35,10 @@ mutators:
     config:
       headers:
         X-User-Id: "{{ print .Subject }}"
+        # In production, set CHIT_TRUSTED_PROXY_SECRET on chitd and inject the
+        # same value here so a directly-reachable backend cannot be
+        # impersonated with a forged X-User-Id header:
+        # X-Proxy-Secret: "<same value as CHIT_TRUSTED_PROXY_SECRET>"
   noop:
     enabled: true
 

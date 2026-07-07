@@ -21,10 +21,22 @@ func New(a *app.App) http.Handler {
 	r.Use(chimiddleware.RequestID)
 	r.Use(StructuredLogger)
 	r.Use(chimiddleware.Recoverer)
+
+	allowedOrigins := a.Config.AllowedOrigins
+	if len(allowedOrigins) == 0 {
+		allowedOrigins = []string{"*"}
+	}
+	for _, origin := range allowedOrigins {
+		if origin == "*" {
+			slog.Warn("CORS is configured to allow all origins; set CHIT_ALLOWED_ORIGINS in production")
+		}
+	}
+	// Note: the trusted proxy header (X-User-Id) is intentionally NOT an
+	// allowed CORS header — only the auth proxy may set it, server-side.
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins:   allowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-User-Id"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		ExposedHeaders:   []string{"Link"},
 		AllowCredentials: false,
 		MaxAge:           300,

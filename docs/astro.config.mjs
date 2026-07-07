@@ -42,6 +42,7 @@ export default defineConfig({
             { label: 'Podman Kube', slug: 'deployment/podman-kube' },
             { label: 'Ory Stack', slug: 'deployment/ory-stack' },
             { label: 'User Management', slug: 'deployment/user-management' },
+            { label: 'Headless Claude Code', slug: 'deployment/headless-claude' },
           ],
         },
         {

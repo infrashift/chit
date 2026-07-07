@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -23,7 +22,7 @@ func createChannel(a *app.App) http.HandlerFunc {
 
 		saved, err := a.CreateChannel(r.Context(), &channel)
 		if err != nil {
-			WriteError(w, model.NewInternalError("createChannel", err))
+			WriteAppError(w, "createChannel", err)
 			return
 		}
 
@@ -34,7 +33,7 @@ func createChannel(a *app.App) http.HandlerFunc {
 func getChannel(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
-		channel, err := a.GetChannel(id)
+		channel, err := a.GetChannel(r.Context(), id)
 		if err != nil {
 			WriteError(w, model.NewNotFoundError("getChannel", id))
 			return
@@ -45,11 +44,12 @@ func getChannel(a *app.App) http.HandlerFunc {
 
 func updateChannel(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user := ContextGetUser(r)
 		id := chi.URLParam(r, "id")
 
-		existing, err := a.GetChannel(id)
+		existing, err := a.GetChannel(r.Context(), id)
 		if err != nil {
-			WriteError(w, model.NewInternalError("updateChannel", err))
+			WriteAppError(w, "updateChannel", err)
 			return
 		}
 
@@ -72,9 +72,9 @@ func updateChannel(a *app.App) http.HandlerFunc {
 			existing.Name = patch.Name
 		}
 
-		updated, err := a.UpdateChannel(r.Context(), existing)
+		updated, err := a.UpdateChannel(r.Context(), existing, user.ID)
 		if err != nil {
-			WriteError(w, model.NewInternalError("updateChannel", err))
+			WriteAppError(w, "updateChannel", err)
 			return
 		}
 
@@ -84,9 +84,10 @@ func updateChannel(a *app.App) http.HandlerFunc {
 
 func deleteChannel(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user := ContextGetUser(r)
 		id := chi.URLParam(r, "id")
-		if err := a.DeleteChannel(id); err != nil {
-			WriteError(w, model.NewInternalError("deleteChannel", err))
+		if err := a.DeleteChannel(r.Context(), id, user.ID); err != nil {
+			WriteAppError(w, "deleteChannel", err)
 			return
 		}
 		WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
@@ -95,16 +96,13 @@ func deleteChannel(a *app.App) http.HandlerFunc {
 
 func getChannelsForTeam(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user := ContextGetUser(r)
 		teamID := chi.URLParam(r, "id")
-		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-		perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
-		if perPage == 0 {
-			perPage = 60
-		}
+		page, perPage := parsePagination(r, 60)
 
-		channels, err := a.GetChannelsForTeam(teamID, page, perPage)
+		channels, err := a.GetChannelsForTeam(r.Context(), teamID, user.ID, page, perPage)
 		if err != nil {
-			WriteError(w, model.NewInternalError("getChannelsForTeam", err))
+			WriteAppError(w, "getChannelsForTeam", err)
 			return
 		}
 
@@ -117,7 +115,7 @@ func getMyChannels(a *app.App) http.HandlerFunc {
 		user := ContextGetUser(r)
 		teamID := chi.URLParam(r, "id")
 
-		channels, err := a.GetChannelsForUser(user.ID, teamID)
+		channels, err := a.GetChannelsForUser(r.Context(), user.ID, teamID)
 		if err != nil {
 			WriteError(w, model.NewInternalError("getMyChannels", err))
 			return
@@ -131,7 +129,7 @@ func getMyDirectChannels(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
 
-		channels, err := a.GetDirectChannelsForUser(user.ID)
+		channels, err := a.GetDirectChannelsForUser(r.Context(), user.ID)
 		if err != nil {
 			WriteError(w, model.NewInternalError("getMyDirectChannels", err))
 			return
@@ -147,6 +145,7 @@ func getMyDirectChannels(a *app.App) http.HandlerFunc {
 
 func createDirectChannel(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user := ContextGetUser(r)
 		var userIDs []string
 		if err := json.NewDecoder(r.Body).Decode(&userIDs); err != nil {
 			WriteError(w, model.NewBadRequestError("createDirectChannel", "invalid request body"))
@@ -157,9 +156,9 @@ func createDirectChannel(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		channel, err := a.CreateDirectChannel(r.Context(), userIDs[0], userIDs[1])
+		channel, err := a.CreateDirectChannel(r.Context(), user.ID, userIDs[0], userIDs[1])
 		if err != nil {
-			WriteError(w, model.NewInternalError("createDirectChannel", err))
+			WriteAppError(w, "createDirectChannel", err)
 			return
 		}
 
@@ -169,15 +168,16 @@ func createDirectChannel(a *app.App) http.HandlerFunc {
 
 func createGroupChannel(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user := ContextGetUser(r)
 		var userIDs []string
 		if err := json.NewDecoder(r.Body).Decode(&userIDs); err != nil {
 			WriteError(w, model.NewBadRequestError("createGroupChannel", "invalid request body"))
 			return
 		}
 
-		channel, err := a.CreateGroupChannel(r.Context(), userIDs)
+		channel, err := a.CreateGroupChannel(r.Context(), user.ID, userIDs)
 		if err != nil {
-			WriteError(w, model.NewInternalError("createGroupChannel", err))
+			WriteAppError(w, "createGroupChannel", err)
 			return
 		}
 
@@ -187,6 +187,7 @@ func createGroupChannel(a *app.App) http.HandlerFunc {
 
 func addChannelMember(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user := ContextGetUser(r)
 		channelID := chi.URLParam(r, "id")
 		var body struct {
 			UserID string `json:"user_id"`
@@ -196,9 +197,9 @@ func addChannelMember(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		member, err := a.AddChannelMember(r.Context(), channelID, body.UserID)
+		member, err := a.AddChannelMember(r.Context(), channelID, body.UserID, user.ID)
 		if err != nil {
-			WriteError(w, model.NewInternalError("addChannelMember", err))
+			WriteAppError(w, "addChannelMember", err)
 			return
 		}
 
@@ -208,11 +209,12 @@ func addChannelMember(a *app.App) http.HandlerFunc {
 
 func removeChannelMember(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user := ContextGetUser(r)
 		channelID := chi.URLParam(r, "id")
 		userID := chi.URLParam(r, "user_id")
 
-		if err := a.RemoveChannelMember(r.Context(), channelID, userID); err != nil {
-			WriteError(w, model.NewInternalError("removeChannelMember", err))
+		if err := a.RemoveChannelMember(r.Context(), channelID, userID, user.ID); err != nil {
+			WriteAppError(w, "removeChannelMember", err)
 			return
 		}
 
@@ -222,16 +224,13 @@ func removeChannelMember(a *app.App) http.HandlerFunc {
 
 func getChannelMembers(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user := ContextGetUser(r)
 		channelID := chi.URLParam(r, "id")
-		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-		perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
-		if perPage == 0 {
-			perPage = 60
-		}
+		page, perPage := parsePagination(r, 60)
 
-		members, err := a.GetChannelMembers(channelID, page, perPage)
+		members, err := a.GetChannelMembers(r.Context(), channelID, user.ID, page, perPage)
 		if err != nil {
-			WriteError(w, model.NewInternalError("getChannelMembers", err))
+			WriteAppError(w, "getChannelMembers", err)
 			return
 		}
 
@@ -244,8 +243,8 @@ func viewChannel(a *app.App) http.HandlerFunc {
 		user := ContextGetUser(r)
 		channelID := chi.URLParam(r, "id")
 
-		if err := a.UpdateChannelLastViewedAt(channelID, user.ID); err != nil {
-			WriteError(w, model.NewInternalError("viewChannel", err))
+		if err := a.UpdateChannelLastViewedAt(r.Context(), channelID, user.ID); err != nil {
+			WriteAppError(w, "viewChannel", err)
 			return
 		}
 

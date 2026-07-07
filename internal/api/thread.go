@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -13,10 +12,11 @@ import (
 
 func getThread(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user := ContextGetUser(r)
 		id := chi.URLParam(r, "id")
-		posts, err := a.GetThread(r.Context(), id)
+		posts, err := a.GetThread(r.Context(), id, user.ID)
 		if err != nil {
-			WriteError(w, model.NewNotFoundError("getThread", id))
+			WriteAppError(w, "getThread", err)
 			return
 		}
 		WriteJSON(w, http.StatusOK, posts)
@@ -27,13 +27,9 @@ func getMyThreads(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
 		teamID := chi.URLParam(r, "id")
-		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-		perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
-		if perPage == 0 {
-			perPage = 25
-		}
+		page, perPage := parsePagination(r, 25)
 
-		threads, err := a.GetThreadsForUser(user.ID, teamID, page, perPage)
+		threads, err := a.GetThreadsForUser(r.Context(), user.ID, teamID, page, perPage)
 		if err != nil {
 			WriteError(w, model.NewInternalError("getMyThreads", err))
 			return
@@ -48,7 +44,7 @@ func markThreadAsRead(a *app.App) http.HandlerFunc {
 		user := ContextGetUser(r)
 		threadID := chi.URLParam(r, "id")
 
-		if err := a.MarkThreadAsRead(threadID, user.ID); err != nil {
+		if err := a.MarkThreadAsRead(r.Context(), threadID, user.ID); err != nil {
 			WriteError(w, model.NewInternalError("markThreadAsRead", err))
 			return
 		}
@@ -70,7 +66,7 @@ func updateThreadFollowing(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		if err := a.UpdateThreadFollowing(threadID, user.ID, body.Following); err != nil {
+		if err := a.UpdateThreadFollowing(r.Context(), threadID, user.ID, body.Following); err != nil {
 			WriteError(w, model.NewInternalError("updateThreadFollowing", err))
 			return
 		}

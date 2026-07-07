@@ -22,4 +22,4 @@ echo "Running migrations..."
 migrate -database "${CHIT_DATABASE_URL}" -path /src/migrations up
 
 echo "Running integration tests..."
-exec go test -race -count=1 -tags integration -v ${TEST_PACKAGES:-./internal/store/sqlstore/...}
+exec go test -race -count=1 -tags integration -v ${TEST_PACKAGES:-./internal/store/sqlstore/... ./internal/pubsub/...}

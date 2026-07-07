@@ -30,6 +30,17 @@ make build-mcp
 
 This produces `bin/chit-mcp` — an MCP server for AI agent integration.
 
+## Build the other binaries
+
+```bash
+make build-reconcile   # bin/chit-reconcile — pushes CUE roles/actors into Keto
+make build-claude      # bin/chit-claude — headless Claude Code bridge
+make build-all         # everything at once
+```
+
+See [Headless Claude Code](/chit/deployment/headless-claude/) for setting up the
+bridge.
+
 ## Build the container image
 
 ```bash

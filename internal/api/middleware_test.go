@@ -137,3 +137,43 @@ func TestRateLimit_Blocks(t *testing.T) {
 		t.Fatalf("second request: expected 429, got %d", w2.Code)
 	}
 }
+
+func TestAuthExtract_ProxySecretRequired(t *testing.T) {
+	a, _, cleanup := setupTestApp(t)
+	defer cleanup()
+	a.Config.TrustedProxySecret = "s3cret"
+
+	mw := AuthExtract(a)
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// Correct user header but missing proxy secret → 401.
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("X-User-Id", testKratosID)
+	w := httptest.NewRecorder()
+	mw(next).ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("missing secret: expected 401, got %d", w.Code)
+	}
+
+	// Wrong secret → 401.
+	r = httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("X-User-Id", testKratosID)
+	r.Header.Set("X-Proxy-Secret", "wrong")
+	w = httptest.NewRecorder()
+	mw(next).ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong secret: expected 401, got %d", w.Code)
+	}
+
+	// Correct secret → passes through.
+	r = httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("X-User-Id", testKratosID)
+	r.Header.Set("X-Proxy-Secret", "s3cret")
+	w = httptest.NewRecorder()
+	mw(next).ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("correct secret: expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+}

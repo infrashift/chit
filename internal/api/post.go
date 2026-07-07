@@ -23,11 +23,7 @@ func createPost(a *app.App) http.HandlerFunc {
 
 		saved, err := a.CreatePost(r.Context(), &post)
 		if err != nil {
-			if appErr, ok := err.(*model.AppError); ok {
-				WriteError(w, appErr)
-			} else {
-				WriteError(w, model.NewInternalError("createPost", err))
-			}
+			WriteAppError(w, "createPost", err)
 			return
 		}
 
@@ -37,10 +33,11 @@ func createPost(a *app.App) http.HandlerFunc {
 
 func getPost(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user := ContextGetUser(r)
 		id := chi.URLParam(r, "id")
-		post, err := a.GetPost(r.Context(), id)
+		post, err := a.GetPost(r.Context(), id, user.ID)
 		if err != nil {
-			WriteError(w, model.NewNotFoundError("getPost", id))
+			WriteAppError(w, "getPost", err)
 			return
 		}
 		WriteJSON(w, http.StatusOK, post)
@@ -49,6 +46,7 @@ func getPost(a *app.App) http.HandlerFunc {
 
 func updatePost(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user := ContextGetUser(r)
 		id := chi.URLParam(r, "id")
 		var post model.Post
 		if err := json.NewDecoder(r.Body).Decode(&post); err != nil {
@@ -57,9 +55,9 @@ func updatePost(a *app.App) http.HandlerFunc {
 		}
 		post.ID = id
 
-		updated, err := a.UpdatePost(r.Context(), &post)
+		updated, err := a.UpdatePost(r.Context(), &post, user.ID)
 		if err != nil {
-			WriteError(w, model.NewInternalError("updatePost", err))
+			WriteAppError(w, "updatePost", err)
 			return
 		}
 
@@ -69,9 +67,10 @@ func updatePost(a *app.App) http.HandlerFunc {
 
 func deletePost(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user := ContextGetUser(r)
 		id := chi.URLParam(r, "id")
-		if err := a.DeletePost(id); err != nil {
-			WriteError(w, model.NewInternalError("deletePost", err))
+		if err := a.DeletePost(r.Context(), id, user.ID); err != nil {
+			WriteAppError(w, "deletePost", err)
 			return
 		}
 		WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
@@ -80,9 +79,10 @@ func deletePost(a *app.App) http.HandlerFunc {
 
 func pinPost(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user := ContextGetUser(r)
 		id := chi.URLParam(r, "id")
-		if err := a.PinPost(id); err != nil {
-			WriteError(w, model.NewInternalError("pinPost", err))
+		if err := a.PinPost(r.Context(), id, user.ID); err != nil {
+			WriteAppError(w, "pinPost", err)
 			return
 		}
 		WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
@@ -91,9 +91,10 @@ func pinPost(a *app.App) http.HandlerFunc {
 
 func unpinPost(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user := ContextGetUser(r)
 		id := chi.URLParam(r, "id")
-		if err := a.UnpinPost(id); err != nil {
-			WriteError(w, model.NewInternalError("unpinPost", err))
+		if err := a.UnpinPost(r.Context(), id, user.ID); err != nil {
+			WriteAppError(w, "unpinPost", err)
 			return
 		}
 		WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
@@ -102,21 +103,20 @@ func unpinPost(a *app.App) http.HandlerFunc {
 
 func getChannelPosts(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user := ContextGetUser(r)
 		channelID := chi.URLParam(r, "id")
-		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-		perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
-		if perPage == 0 {
-			perPage = 60
-		}
+		page, perPage := parsePagination(r, 60)
+		since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
 
 		opts := model.GetPostsOptions{
 			Page:    page,
 			PerPage: perPage,
+			Since:   since,
 		}
 
-		posts, err := a.GetPostsForChannel(r.Context(), channelID, opts)
+		posts, err := a.GetPostsForChannel(r.Context(), channelID, user.ID, opts)
 		if err != nil {
-			WriteError(w, model.NewInternalError("getChannelPosts", err))
+			WriteAppError(w, "getChannelPosts", err)
 			return
 		}
 
@@ -126,10 +126,11 @@ func getChannelPosts(a *app.App) http.HandlerFunc {
 
 func getPinnedPosts(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user := ContextGetUser(r)
 		channelID := chi.URLParam(r, "id")
-		posts, err := a.GetPinnedPosts(r.Context(), channelID)
+		posts, err := a.GetPinnedPosts(r.Context(), channelID, user.ID)
 		if err != nil {
-			WriteError(w, model.NewInternalError("getPinnedPosts", err))
+			WriteAppError(w, "getPinnedPosts", err)
 			return
 		}
 		WriteJSON(w, http.StatusOK, posts)

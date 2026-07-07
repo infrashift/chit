@@ -85,7 +85,11 @@ composition.
 chit/
 ├── cmd/
 │   ├── chitd/              Main server binary
-│   └── chit-mcp/           MCP agent binary
+│   ├── chit-mcp/           MCP agent binary
+│   ├── chit-reconcile/     One-shot job pushing CUE-defined roles,
+│   │                       commands, and actors into Keto
+│   └── chit-claude/        Bridge driving headless Claude Code sessions
+│                           from Chit channels
 ├── internal/
 │   ├── api/                HTTP handlers and middleware
 │   ├── app/                Business logic
