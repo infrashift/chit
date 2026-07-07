@@ -67,7 +67,7 @@ func main() {
 		return msg
 	}
 
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithFilter(termFilter))
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFilter(termFilter))
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

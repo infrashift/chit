@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/auth"
 	"github.com/infrashift/chit/clients/chit-tui/internal/config"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/actionbar"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/chcreator"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/cmdpalette"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/dmpicker"
@@ -66,6 +68,7 @@ type Model struct {
 	viewport              viewport.Model
 	input                 input.Model
 	thread                thread.Model
+	actionBar             actionbar.Model
 	cmdPalette            cmdpalette.Model
 	search                search.Model
 	mention               mention.Model
@@ -92,6 +95,7 @@ type Model struct {
 	kratosClient          *auth.KratosClient
 	sessionStore          *auth.SessionStore
 	focus                 FocusArea
+	wsConnected           bool
 	lastWSSeq             int64
 	keys                  KeyMap
 	styles                styles.Styles
@@ -118,6 +122,7 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 		sidebar:        sidebar.New(s),
 		viewport:       viewport.New(s),
 		input:          input.New(s),
+		actionBar:      actionbar.New(s),
 		thread:         thread.New(s),
 		cmdPalette:     cmdpalette.New(s),
 		search:         search.New(s),
@@ -212,6 +217,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case LogoutMsg:
 		return m.handleLogout()
 
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
+
 	case tea.KeyMsg:
 		// Global keybindings (Ctrl+C always quits)
 		if key.Matches(msg, m.keys.Quit) {
@@ -264,27 +272,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if key.Matches(msg, m.keys.NewDM) && m.focus != FocusDMPicker {
-			cmd := m.setFocus(FocusDMPicker)
-			m.dmPicker.Open()
-			return m, cmd
+			return m, m.openDMPicker()
 		}
 
 		if key.Matches(msg, m.keys.NewChannel) && m.focus != FocusChCreator && m.activeTeam != nil {
-			cmd := m.setFocus(FocusChCreator)
-			m.chCreator.Open(m.activeTeam.ID)
-			return m, cmd
+			return m, m.openChCreator()
 		}
 
 		if key.Matches(msg, m.keys.CmdPalette) && m.focus != FocusCmdPalette {
-			cmd := m.setFocus(FocusCmdPalette)
-			m.cmdPalette.Open()
-			return m, cmd
+			return m, m.openCmdPalette()
 		}
 
 		if key.Matches(msg, m.keys.Search) && m.focus != FocusSearch {
-			cmd := m.setFocus(FocusSearch)
-			m.search.Open()
-			return m, cmd
+			return m, m.openSearch()
 		}
 
 		if key.Matches(msg, m.keys.Escape) {
@@ -508,6 +508,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case WSConnectedMsg:
+		m.wsConnected = true
 		return m, ListenWebSocket(m.wsClient)
 
 	case WebSocketEventMsg:
@@ -868,6 +869,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.skinPicker.SetStyles(newStyles)
 		m.chCreator.SetStyles(newStyles)
 		m.tagPicker.SetStyles(newStyles)
+		m.actionBar.SetStyles(newStyles)
 		cmd := m.setFocus(FocusInput)
 		return m, cmd
 
@@ -878,6 +880,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case ErrMsg:
+		if errors.Is(msg.Err, ws.ErrNotConnected) {
+			m.wsConnected = false
+		}
 		return m, m.setError(msg.Err)
 	}
 
@@ -982,9 +987,31 @@ func (m Model) View() string {
 		layout = placeOverlay(searchX, searchY, searchView, layout)
 	}
 
-	// Status bar
-	status := m.statusBar()
-	return lipgloss.JoinVertical(lipgloss.Left, layout, status)
+	// Action/status bar (m is a value receiver, so these mutations are local
+	// to this render).
+	m.syncActionBar()
+	return lipgloss.JoinVertical(lipgloss.Left, layout, m.actionBar.View())
+}
+
+// syncActionBar pushes the current model state into the action bar before it
+// is rendered or hit-tested.
+func (m *Model) syncActionBar() {
+	team := ""
+	if m.activeTeam != nil {
+		team = m.activeTeam.DisplayName
+	}
+	user := ""
+	if m.me != nil {
+		user = m.me.Username
+	}
+	errStr := ""
+	if m.err != nil {
+		errStr = m.err.Error()
+	}
+	m.actionBar.SetContext(team, m.activeChannelDisplayName(), user)
+	m.actionBar.SetError(errStr)
+	m.actionBar.SetConnected(m.wsConnected)
+	m.actionBar.SetThreadOpen(m.thread.Visible())
 }
 
 func (m *Model) setFocus(area FocusArea) tea.Cmd {
@@ -1025,6 +1052,37 @@ func (m *Model) setFocus(area FocusArea) tea.Cmd {
 	return nil
 }
 
+// openDMPicker opens the DM picker overlay and focuses it.
+func (m *Model) openDMPicker() tea.Cmd {
+	cmd := m.setFocus(FocusDMPicker)
+	m.dmPicker.Open()
+	return cmd
+}
+
+// openChCreator opens the channel creator overlay for the active team.
+func (m *Model) openChCreator() tea.Cmd {
+	if m.activeTeam == nil {
+		return nil
+	}
+	cmd := m.setFocus(FocusChCreator)
+	m.chCreator.Open(m.activeTeam.ID)
+	return cmd
+}
+
+// openCmdPalette opens the command palette overlay and focuses it.
+func (m *Model) openCmdPalette() tea.Cmd {
+	cmd := m.setFocus(FocusCmdPalette)
+	m.cmdPalette.Open()
+	return cmd
+}
+
+// openSearch opens the search overlay and focuses it.
+func (m *Model) openSearch() tea.Cmd {
+	cmd := m.setFocus(FocusSearch)
+	m.search.Open()
+	return cmd
+}
+
 func (m *Model) cycleFocus(dir int) tea.Cmd {
 	areas := []FocusArea{FocusSidebar, FocusViewport, FocusInput}
 	if m.thread.Visible() {
@@ -1056,6 +1114,7 @@ func (m *Model) resizeComponents() {
 	m.sidebar.SetSize(sidebarWidth, m.height-1)
 	m.viewport.SetSize(mainWidth, vpHeight)
 	m.input.SetSize(mainWidth, inputHeight)
+	m.actionBar.SetSize(m.width)
 	m.thread.SetSize(threadWidth, m.height-1)
 	m.cmdPalette.SetSize(m.width, m.height)
 	m.search.SetSize(m.width, m.height)
@@ -1390,6 +1449,7 @@ func (m Model) handleLoginSuccess(msg login.LoginSuccessMsg) (tea.Model, tea.Cmd
 
 func (m Model) handleAuthExpired() (tea.Model, tea.Cmd) {
 	m.appState = AppStateReLogin
+	m.wsConnected = false
 	m.loginModel.Reset()
 	_ = m.sessionStore.Clear()
 
@@ -1408,6 +1468,7 @@ func (m Model) handleLogout() (tea.Model, tea.Cmd) {
 	_ = m.sessionStore.Clear()
 
 	m.appState = AppStateLogin
+	m.wsConnected = false
 	m.loginModel.Reset()
 
 	if m.wsClient != nil {
@@ -1417,63 +1478,36 @@ func (m Model) handleLogout() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) statusBar() string {
-	team := ""
-	if m.activeTeam != nil {
-		team = m.activeTeam.DisplayName
+// activeChannelDisplayName resolves the human-readable name of the active
+// channel: the other participant for DMs, the member list for group channels,
+// and the display name otherwise.
+func (m Model) activeChannelDisplayName() string {
+	if m.activeChan == nil {
+		return ""
 	}
-	ch := ""
-	if m.activeChan != nil {
-		switch m.activeChan.Type {
-		case model.ChannelDirect:
-			if m.me != nil {
-				parts := strings.Split(m.activeChan.Name, "__")
-				if len(parts) == 2 {
-					otherID := parts[0]
-					if otherID == m.me.ID {
-						otherID = parts[1]
-					}
-					if u, ok := m.users[otherID]; ok && u != nil {
-						ch = u.Username
-					} else {
-						ch = m.activeChan.DisplayName
-					}
-				} else {
-					ch = m.activeChan.DisplayName
+	switch m.activeChan.Type {
+	case model.ChannelDirect:
+		if m.me != nil {
+			parts := strings.Split(m.activeChan.Name, "__")
+			if len(parts) == 2 {
+				otherID := parts[0]
+				if otherID == m.me.ID {
+					otherID = parts[1]
 				}
-			} else {
-				ch = m.activeChan.DisplayName
+				if u, ok := m.users[otherID]; ok && u != nil {
+					return u.Username
+				}
 			}
-		case model.ChannelGroup:
-			if name := m.sidebar.GetDMDisplayName(m.activeChan.ID); name != "" {
-				ch = name
-			} else {
-				ch = m.activeChan.DisplayName
-			}
-		default:
-			ch = m.activeChan.DisplayName
 		}
+		return m.activeChan.DisplayName
+	case model.ChannelGroup:
+		if name := m.sidebar.GetDMDisplayName(m.activeChan.ID); name != "" {
+			return name
+		}
+		return m.activeChan.DisplayName
+	default:
+		return m.activeChan.DisplayName
 	}
-	user := ""
-	if m.me != nil {
-		user = m.me.Username
-	}
-
-	errStr := ""
-	if m.err != nil {
-		errStr = m.styles.ErrorText.Render(" " + m.err.Error())
-	}
-
-	left := m.styles.StatusBar.Render(team + " > " + ch)
-	right := m.styles.StatusBar.Render(user)
-
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right) - lipgloss.Width(errStr)
-	if gap < 0 {
-		gap = 0
-	}
-
-	gapStyle := m.styles.StatusBar.Padding(0, 0)
-	return left + errStr + gapStyle.Render(strings.Repeat(" ", gap)) + right
 }
 
 // placeOverlay places a foreground string on top of a background string at x, y.

@@ -140,6 +140,12 @@ func (m *Model) SetSize(w, h int) {
 	m.updateContent()
 }
 
+// ScrollBy scrolls the content by the given number of lines (negative = up).
+// It works regardless of focus so the mouse wheel can scroll an unfocused pane.
+func (m *Model) ScrollBy(lines int) {
+	m.viewport.SetYOffset(m.viewport.YOffset + lines)
+}
+
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	if !m.focused || !m.visible {

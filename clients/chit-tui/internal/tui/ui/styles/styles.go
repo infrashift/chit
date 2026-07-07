@@ -17,6 +17,7 @@ type Styles struct {
 	ThreadPanel          lipgloss.Style
 	CmdPalette           lipgloss.Style
 	StatusBar            lipgloss.Style
+	BarButton            lipgloss.Style
 	Username             lipgloss.Style
 	Timestamp            lipgloss.Style
 	UnreadBadge          lipgloss.Style
@@ -86,6 +87,11 @@ func New(t theme.Theme) Styles {
 			Background(t.Highlight).
 			Foreground(t.Subtle).
 			Padding(0, 1),
+
+		BarButton: lipgloss.NewStyle().
+			Background(t.Highlight).
+			Foreground(t.Accent).
+			Bold(true),
 
 		Username: lipgloss.NewStyle().
 			Foreground(t.Username).
