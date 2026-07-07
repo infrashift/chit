@@ -52,7 +52,7 @@ Layered design inspired by Mattermost: **API → App → Store → PostgreSQL**.
 Store decorators add caching, retry logic, and timing instrumentation
 transparently.
 
-The project builds four binaries:
+The root module builds four binaries:
 
 - **`chitd`** — the chat server
 - **`chit-mcp`** — MCP stdio server that lets AI agents act as normal users
@@ -61,6 +61,14 @@ The project builds four binaries:
 - **`chit-claude`** — bridge that drives headless Claude Code sessions from
   Chit channels (thread = session; see
   [Headless Claude Code](docs/src/content/docs/deployment/headless-claude.mdx))
+
+## Clients
+
+- **`chit-tui`** ([clients/chit-tui](clients/chit-tui/)) — terminal client
+  built with Bubble Tea. Lives in its own nested Go module so the
+  charmbracelet dependency tree stays out of the server build; talks to chitd
+  exclusively over the REST API and WebSocket (`make build-tui`,
+  `make test-tui`).
 
 ## Security Model
 

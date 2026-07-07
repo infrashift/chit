@@ -6,12 +6,11 @@ description: Directory layout and file organization of Chit TUI.
 ## Top Level
 
 ```
-chit-tui/
+clients/chit-tui/            (in the Chit monorepo)
 ├── cmd/chit-tui/main.go     Entry point
 ├── internal/                 All application code
-├── docs/                     Documentation site (Astro + Starlight)
 ├── Makefile                  Build, test, lint, cover targets
-├── go.mod                    Go module definition
+├── go.mod                    Go module definition (nested module)
 ├── .golangci.yml             Linter configuration
 ├── .gitignore
 ├── README.md

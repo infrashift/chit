@@ -83,7 +83,7 @@ export CHIT_AUTH_HEADER=X-User-Id
 
 ### `CHIT_THEME`
 
-Select a built-in theme by name, or a custom theme by filename (without `.json`). See the [Themes guide](/chit-tui/guides/themes/) for details.
+Select a built-in theme by name, or a custom theme by filename (without `.json`). See the [Themes guide](/chit/tui/guides/themes/) for details.
 
 ```bash
 export CHIT_THEME=catppuccin

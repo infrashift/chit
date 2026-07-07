@@ -189,11 +189,11 @@ idempotent and safe to run multiple times.
 
 ### Step 2: Build and Launch Chit TUI
 
-From the **chit-tui** repository, build the binary and launch it pointing at
-the Oathkeeper proxy:
+From `clients/chit-tui` in the Chit repository, build the binary and launch
+it pointing at the Oathkeeper proxy:
 
 ```bash
-cd ../chit-tui
+cd clients/chit-tui
 make build
 
 CHIT_SERVER_URL=http://localhost:4455 ./bin/chit-tui

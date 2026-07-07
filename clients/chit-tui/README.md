@@ -22,9 +22,9 @@ A terminal user interface for the [Chit](https://github.com/infrashift/chit) mes
 ## Installation
 
 ```bash
-# Clone and build
-git clone https://github.com/infrashift/chit-tui.git
-cd chit-tui
+# Clone the Chit monorepo and build the TUI (nested Go module)
+git clone https://github.com/infrashift/chit.git
+cd chit/clients/chit-tui
 make build
 
 # Binary is at bin/chit-tui

@@ -11,11 +11,12 @@ description: How to install Chit TUI from source.
 
 ## Build from Source
 
-Clone the repository and build:
+The TUI lives in the Chit monorepo under `clients/chit-tui`. Clone the
+repository and build:
 
 ```bash
-git clone https://github.com/infrashift/chit-tui.git
-cd chit-tui
+git clone https://github.com/infrashift/chit.git
+cd chit/clients/chit-tui
 make build
 ```
 
@@ -40,5 +41,5 @@ cp bin/chit-tui ~/.local/bin/
 Or use `go install` directly:
 
 ```bash
-go install github.com/infrashift/chit-tui/cmd/chit-tui@latest
+go install github.com/infrashift/chit/clients/chit-tui/cmd/chit-tui@latest
 ```
