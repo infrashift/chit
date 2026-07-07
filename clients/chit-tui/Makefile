@@ -2,18 +2,20 @@ BINARY  := chit-tui
 BIN_DIR := bin
 CMD     := ./cmd/chit-tui
 
-.PHONY: all build test cover lint clean docs-dev e2e-build e2e-build-server test-e2e test-e2e-clean
+.PHONY: all build test cover lint clean e2e-build e2e-build-server test-e2e test-e2e-clean
 
 all: lint test build
 
+# GOWORK=off keeps this module resolving standalone from its own go.mod even
+# though it sits inside the chit workspace (see go.work at the repo root).
 build:
-	go build -o $(BIN_DIR)/$(BINARY) $(CMD)
+	GOWORK=off go build -o $(BIN_DIR)/$(BINARY) $(CMD)
 
 test:
-	go test ./...
+	GOWORK=off go test ./...
 
 cover:
-	go test -coverprofile=coverage.out ./...
+	GOWORK=off go test -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out
 	@rm -f coverage.out
 
@@ -23,16 +25,13 @@ lint:
 clean:
 	rm -rf $(BIN_DIR) coverage.out
 
-docs-dev:
-	cd docs && bun --bun run dev
-
 # --- E2E Testing ---
 
 E2E_POD     := chit-tui-e2e
 E2E_IMAGE   := chit-tui-e2e:latest
 PG_IMAGE    := docker.io/library/postgres:17-alpine
 CHIT_IMAGE  := chit-e2e:latest
-CHIT_SRC    ?= ../chit
+CHIT_SRC    ?= ../..
 
 e2e-build:
 	podman build -t $(E2E_IMAGE) -f Containerfiles/Containerfile.e2e .

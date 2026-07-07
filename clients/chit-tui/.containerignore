@@ -1,0 +1,6 @@
+# Keep the TUI e2e image context lean
+.git/
+bin/
+*.test
+*.out
+Containerfiles/

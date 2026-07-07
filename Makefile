@@ -1,4 +1,4 @@
-.PHONY: build build-mcp build-reconcile build-claude build-all run test test-container test-e2e test-e2e-clean lint validate-spec cue-validate reconcile migrate-up migrate-down kube-migrate kube-build kube-up kube-down kube-restart kube-logs kube-clean uat-up uat-seed-kratos uat-down uat-clean docs-dev clean
+.PHONY: build build-mcp build-reconcile build-claude build-tui build-all run test test-tui test-all test-container test-e2e test-e2e-tui test-e2e-clean lint lint-tui validate-spec cue-validate reconcile migrate-up migrate-down kube-migrate kube-build kube-up kube-down kube-restart kube-logs kube-clean uat-up uat-seed-kratos uat-down uat-clean docs-dev clean
 
 BINARY=bin/chitd
 MCP_BINARY=bin/chit-mcp
@@ -14,19 +14,24 @@ E2E_IMAGE=chit-e2e:latest
 PG_IMAGE=docker.io/library/postgres:17-alpine
 
 
+# Server-module Go invocations run with GOWORK=off so each module in the
+# workspace (root + clients/chit-tui) resolves standalone from its own go.mod.
 build:
-	go build -o $(BINARY) ./cmd/chitd
+	GOWORK=off go build -o $(BINARY) ./cmd/chitd
 
 build-mcp:
-	go build -o $(MCP_BINARY) ./cmd/chit-mcp
+	GOWORK=off go build -o $(MCP_BINARY) ./cmd/chit-mcp
 
 build-reconcile:
-	go build -o $(RECONCILE_BINARY) ./cmd/chit-reconcile
+	GOWORK=off go build -o $(RECONCILE_BINARY) ./cmd/chit-reconcile
 
 build-claude:
-	go build -o $(CLAUDE_BINARY) ./cmd/chit-claude
+	GOWORK=off go build -o $(CLAUDE_BINARY) ./cmd/chit-claude
 
-build-all: build build-mcp build-reconcile build-claude
+build-tui:
+	$(MAKE) -C clients/chit-tui build
+
+build-all: build build-mcp build-reconcile build-claude build-tui
 
 validate-spec:
 	go run github.com/getkin/kin-openapi/cmd/validate@latest api/openapi.yaml
@@ -35,7 +40,12 @@ run: build
 	./$(BINARY)
 
 test:
-	go test -race -count=1 ./...
+	GOWORK=off go test -race -count=1 ./...
+
+test-tui:
+	$(MAKE) -C clients/chit-tui test
+
+test-all: test test-tui
 
 test-container:
 	podman build -t chit-test:latest -f Containerfiles/Containerfile.test .
@@ -60,6 +70,12 @@ test-e2e-clean:
 
 lint:
 	golangci-lint run
+
+lint-tui:
+	$(MAKE) -C clients/chit-tui lint
+
+test-e2e-tui:
+	$(MAKE) -C clients/chit-tui test-e2e
 
 ## --- CUE / Reconciler ---
 
