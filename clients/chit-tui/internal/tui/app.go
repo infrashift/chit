@@ -80,8 +80,13 @@ type Model struct {
 	me                    *model.User
 	activeTeam            *model.Team
 	activeChan            *model.Channel
+	teams                 []*model.Team
 	channels              []*model.Channel
+	channelsByTeam        map[string][]*model.Channel
 	dmChannels            []*model.Channel
+	unread                map[string]int64
+	mentions              map[string]int64
+	dmDisplayNames        map[string]string
 	users                 map[string]*model.User
 	channelMembers        map[string][]*model.ChannelMember
 	threadCounts          map[string]int
@@ -95,6 +100,7 @@ type Model struct {
 	kratosClient          *auth.KratosClient
 	sessionStore          *auth.SessionStore
 	focus                 FocusArea
+	channelAutoSelected   bool
 	wsConnected           bool
 	lastWSSeq             int64
 	keys                  KeyMap
@@ -133,6 +139,10 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 		tagPicker:      tagpicker.New(s),
 		loginModel:     login.New(s, kratosClient),
 		users:          make(map[string]*model.User),
+		channelsByTeam: make(map[string][]*model.Channel),
+		unread:         make(map[string]int64),
+		mentions:       make(map[string]int64),
+		dmDisplayNames: make(map[string]string),
 		channelMembers: make(map[string][]*model.ChannelMember),
 		threadCounts:   make(map[string]int),
 		postTags:       make(map[string][]*model.Tag),
@@ -380,10 +390,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, m.setError(msg.Err)
 		}
+		m.teams = msg.Teams
 		m.sidebar.SetTeams(msg.Teams)
 		if len(msg.Teams) > 0 {
 			m.activeTeam = msg.Teams[0]
-			cmds = append(cmds, FetchChannels(m.client, msg.Teams[0].ID))
+		}
+		for _, t := range msg.Teams {
+			cmds = append(cmds, FetchChannels(m.client, t.ID))
 		}
 		return m, tea.Batch(cmds...)
 
@@ -394,13 +407,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, m.setError(msg.Err)
 		}
-		initialLoad := m.channels == nil
-		m.channels = msg.Channels
-		m.sidebar.SetChannels(msg.Channels)
-		if initialLoad && len(msg.Channels) > 0 {
-			m.activeChan = msg.Channels[0]
-			cmds = append(cmds, FetchPosts(m.client, msg.Channels[0].ID, 0, 60))
-			cmds = append(cmds, ViewChannel(m.client, msg.Channels[0].ID))
+		m.channelsByTeam[msg.TeamID] = msg.Channels
+		m.channels = m.flattenChannels()
+		if m.activeTeam != nil && msg.TeamID == m.activeTeam.ID {
+			m.sidebar.SetChannels(msg.Channels)
+			// Auto-select the first channel only on the very first load, not
+			// on later reloads (e.g. after navigating back to the team list).
+			if !m.channelAutoSelected && m.activeChan == nil && len(msg.Channels) > 0 {
+				m.channelAutoSelected = true
+				m.activeChan = msg.Channels[0]
+				cmds = append(cmds, FetchPosts(m.client, msg.Channels[0].ID, 0, 60))
+				cmds = append(cmds, ViewChannel(m.client, msg.Channels[0].ID))
+			}
 		}
 		for _, ch := range msg.Channels {
 			cmds = append(cmds, FetchChannelMembers(m.client, ch.ID))
@@ -502,8 +520,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ChannelViewedMsg:
 		if msg.Err == nil {
-			m.sidebar.SetUnread(msg.ChannelID, 0)
-			m.sidebar.SetMention(msg.ChannelID, 0)
+			m.setUnread(msg.ChannelID, 0)
+			m.setMention(msg.ChannelID, 0)
 		}
 		return m, nil
 
@@ -515,17 +533,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleWSEvent(msg)
 
 	case sidebar.ChannelSelectedMsg:
-		if m.activeChan != nil && m.activeChan.ID != msg.Channel.ID {
-			cmds = append(cmds, ViewChannel(m.client, m.activeChan.ID))
-		}
-		m.activeChan = msg.Channel
-		cmds = append(cmds, FetchPosts(m.client, msg.Channel.ID, 0, 60))
-		cmds = append(cmds, ViewChannel(m.client, msg.Channel.ID))
-		m.thread.SetVisible(false)
-		m.threadCounts = make(map[string]int)
-		m.viewport.SetThreadCounts(m.threadCounts)
-		m.resizeComponents()
-		return m, tea.Batch(cmds...)
+		return m, m.selectChannel(msg.Channel)
 
 	case sidebar.BackToTeamsMsg:
 		if m.activeChan != nil {
@@ -536,6 +544,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case sidebar.TeamSelectedMsg:
 		m.activeTeam = msg.Team
+		m.sidebar.SetChannels(m.channelsByTeam[msg.Team.ID])
 		cmds = append(cmds, FetchChannels(m.client, msg.Team.ID))
 		return m, tea.Batch(cmds...)
 
@@ -688,23 +697,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.setError(msg.Err)
 		}
 		if msg.Channel != nil {
-			m.activeChan = msg.Channel
-			m.sidebar.ActiveChanID = msg.Channel.ID
-			// Add to DM list if not already present
-			found := false
-			for _, ch := range m.dmChannels {
-				if ch.ID == msg.Channel.ID {
-					found = true
-					break
-				}
-			}
-			if !found {
-				m.dmChannels = append([]*model.Channel{msg.Channel}, m.dmChannels...)
-				m.sidebar.SetDMChannels(m.dmChannels)
-			}
-			m.resolveDMDisplayNames()
-			cmds = append(cmds, FetchPosts(m.client, msg.Channel.ID, 0, 60))
-			cmds = append(cmds, ViewChannel(m.client, msg.Channel.ID))
+			m.addDMChannel(msg.Channel)
+			cmds = append(cmds, m.selectChannel(msg.Channel))
 			cmds = append(cmds, FetchDMChannels(m.client))
 		}
 		return m, tea.Batch(cmds...)
@@ -725,22 +719,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.setError(msg.Err)
 		}
 		if msg.Channel != nil {
-			m.activeChan = msg.Channel
-			m.sidebar.ActiveChanID = msg.Channel.ID
-			found := false
-			for _, ch := range m.dmChannels {
-				if ch.ID == msg.Channel.ID {
-					found = true
-					break
-				}
-			}
-			if !found {
-				m.dmChannels = append([]*model.Channel{msg.Channel}, m.dmChannels...)
-				m.sidebar.SetDMChannels(m.dmChannels)
-			}
-			m.resolveDMDisplayNames()
-			cmds = append(cmds, FetchPosts(m.client, msg.Channel.ID, 0, 60))
-			cmds = append(cmds, ViewChannel(m.client, msg.Channel.ID))
+			m.addDMChannel(msg.Channel)
+			cmds = append(cmds, m.selectChannel(msg.Channel))
 			cmds = append(cmds, FetchDMChannels(m.client))
 		}
 		return m, tea.Batch(cmds...)
@@ -774,12 +754,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		if msg.Channel != nil {
-			m.activeChan = msg.Channel
-			m.sidebar.ActiveChanID = msg.Channel.ID
-			m.channels = append([]*model.Channel{msg.Channel}, m.channels...)
-			m.sidebar.SetChannels(m.channels)
-			cmds = append(cmds, FetchPosts(m.client, msg.Channel.ID, 0, 60))
-			cmds = append(cmds, ViewChannel(m.client, msg.Channel.ID))
+			teamID := msg.Channel.TeamID
+			m.channelsByTeam[teamID] = append([]*model.Channel{msg.Channel}, m.channelsByTeam[teamID]...)
+			m.channels = m.flattenChannels()
+			if m.activeTeam != nil && teamID == m.activeTeam.ID {
+				m.sidebar.SetChannels(m.channelsByTeam[teamID])
+			}
+			cmds = append(cmds, m.selectChannel(msg.Channel))
 			cmds = append(cmds, FetchChannelMembers(m.client, msg.Channel.ID))
 			if len(m.pendingMembers) > 0 {
 				members := m.pendingMembers
@@ -1052,6 +1033,92 @@ func (m *Model) setFocus(area FocusArea) tea.Cmd {
 	return nil
 }
 
+// selectChannel makes ch the active channel: marks the previous channel as
+// viewed, loads posts, resets thread state, and derives the active team.
+func (m *Model) selectChannel(ch *model.Channel) tea.Cmd {
+	var cmds []tea.Cmd
+	if m.activeChan != nil && m.activeChan.ID != ch.ID {
+		cmds = append(cmds, ViewChannel(m.client, m.activeChan.ID))
+	}
+	m.activeChan = ch
+	m.channelAutoSelected = true
+	m.sidebar.ActiveChanID = ch.ID
+	// DM/group channels have no team; keep the last active team then.
+	if ch.TeamID != "" {
+		if t := m.teamByID(ch.TeamID); t != nil {
+			m.activeTeam = t
+		}
+	}
+	cmds = append(cmds, FetchPosts(m.client, ch.ID, 0, 60))
+	cmds = append(cmds, ViewChannel(m.client, ch.ID))
+	m.thread.SetVisible(false)
+	m.threadCounts = make(map[string]int)
+	m.viewport.SetThreadCounts(m.threadCounts)
+	m.resizeComponents()
+	return tea.Batch(cmds...)
+}
+
+// addDMChannel prepends a DM/group channel to the list if it is not already
+// present and refreshes derived display names.
+func (m *Model) addDMChannel(ch *model.Channel) {
+	for _, existing := range m.dmChannels {
+		if existing.ID == ch.ID {
+			m.resolveDMDisplayNames()
+			return
+		}
+	}
+	m.dmChannels = append([]*model.Channel{ch}, m.dmChannels...)
+	m.sidebar.SetDMChannels(m.dmChannels)
+	m.resolveDMDisplayNames()
+}
+
+// flattenChannels merges the per-team channel lists into one slice, in team
+// order, including any buckets whose team is not (or no longer) known.
+func (m Model) flattenChannels() []*model.Channel {
+	var flat []*model.Channel
+	seen := make(map[string]bool, len(m.channelsByTeam))
+	for _, t := range m.teams {
+		flat = append(flat, m.channelsByTeam[t.ID]...)
+		seen[t.ID] = true
+	}
+	for teamID, chans := range m.channelsByTeam {
+		if !seen[teamID] {
+			flat = append(flat, chans...)
+		}
+	}
+	return flat
+}
+
+// UnreadCount returns the unread count for a channel.
+func (m Model) UnreadCount(channelID string) int64 { return m.unread[channelID] }
+
+// MentionCount returns the mention count for a channel.
+func (m Model) MentionCount(channelID string) int64 { return m.mentions[channelID] }
+
+// teamByID returns the team with the given ID, or nil.
+func (m Model) teamByID(id string) *model.Team {
+	for _, t := range m.teams {
+		if t.ID == id {
+			return t
+		}
+	}
+	return nil
+}
+
+// setUnread updates the root unread count for a channel and mirrors it into
+// the sidebar badges.
+func (m *Model) setUnread(channelID string, count int64) {
+	m.unread[channelID] = count
+	m.sidebar.SetUnread(channelID, count)
+}
+
+// setMention updates the root mention count for a channel and mirrors it into
+// the sidebar badges.
+func (m *Model) setMention(channelID string, count int64) {
+	m.mentions[channelID] = count
+	m.sidebar.SetMention(channelID, count)
+}
+
 // openDMPicker opens the DM picker overlay and focuses it.
 func (m *Model) openDMPicker() tea.Cmd {
 	cmd := m.setFocus(FocusDMPicker)
@@ -1187,8 +1254,7 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, fetchCmd)
 			}
 		} else {
-			cur := m.sidebar.UnreadCounts[p.ChannelID]
-			m.sidebar.SetUnread(p.ChannelID, cur+1)
+			m.setUnread(p.ChannelID, m.unread[p.ChannelID]+1)
 		}
 
 	case model.WebSocketEventThreadUpdated:
@@ -1217,8 +1283,7 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 	case model.WebSocketEventMentioned:
 		if evt.Broadcast != nil && evt.Broadcast.ChannelID != "" {
 			chanID := evt.Broadcast.ChannelID
-			cur := m.sidebar.MentionCounts[chanID]
-			m.sidebar.SetMention(chanID, cur+1)
+			m.setMention(chanID, m.mentions[chanID]+1)
 		}
 
 	case model.WebSocketEventUserAdded:
@@ -1282,7 +1347,7 @@ func (m *Model) computeUnread(channelID string, members []*model.ChannelMember) 
 			if unread < 0 {
 				unread = 0
 			}
-			m.sidebar.SetUnread(channelID, unread)
+			m.setUnread(channelID, unread)
 			return
 		}
 	}
@@ -1294,7 +1359,7 @@ func (m *Model) computeMentions(channelID string, members []*model.ChannelMember
 	}
 	for _, mem := range members {
 		if mem.UserID == m.me.ID {
-			m.sidebar.SetMention(channelID, mem.MentionCount)
+			m.setMention(channelID, mem.MentionCount)
 			return
 		}
 	}
@@ -1348,6 +1413,7 @@ func (m *Model) resolveDMDisplayNames() {
 				if u.DisplayName != "" {
 					name = u.DisplayName
 				}
+				m.dmDisplayNames[ch.ID] = name
 				m.sidebar.SetDMDisplayName(ch.ID, name)
 			} else {
 				if _, exists := m.users[otherID]; !exists {
@@ -1371,7 +1437,9 @@ func (m *Model) resolveDMDisplayNames() {
 				}
 			}
 			if len(names) > 0 {
-				m.sidebar.SetDMDisplayName(ch.ID, strings.Join(names, ", "))
+				name := strings.Join(names, ", ")
+				m.dmDisplayNames[ch.ID] = name
+				m.sidebar.SetDMDisplayName(ch.ID, name)
 			}
 		}
 	}
@@ -1501,7 +1569,7 @@ func (m Model) activeChannelDisplayName() string {
 		}
 		return m.activeChan.DisplayName
 	case model.ChannelGroup:
-		if name := m.sidebar.GetDMDisplayName(m.activeChan.ID); name != "" {
+		if name := m.dmDisplayNames[m.activeChan.ID]; name != "" {
 			return name
 		}
 		return m.activeChan.DisplayName

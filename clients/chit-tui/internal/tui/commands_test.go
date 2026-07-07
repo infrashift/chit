@@ -28,6 +28,7 @@ type mockClient struct {
 	createdTag      *model.Tag
 	postTags        []*model.Tag
 	lastCreatedPost *model.Post
+	channelsFetched []string // team IDs passed to GetMyChannels
 	err             error
 }
 
@@ -37,7 +38,8 @@ func (m *mockClient) GetMe(_ context.Context) (*model.User, error) {
 func (m *mockClient) GetMyTeams(_ context.Context) ([]*model.Team, error) {
 	return m.teams, m.err
 }
-func (m *mockClient) GetMyChannels(_ context.Context, _ string) ([]*model.Channel, error) {
+func (m *mockClient) GetMyChannels(_ context.Context, teamID string) ([]*model.Channel, error) {
+	m.channelsFetched = append(m.channelsFetched, teamID)
 	return m.channels, m.err
 }
 func (m *mockClient) GetChannelPosts(_ context.Context, _ string, _, _ int) (*model.PostList, error) {
