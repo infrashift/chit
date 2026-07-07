@@ -16,7 +16,6 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/mention"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/palette"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/skinpicker"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui/thread"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/viewport"
@@ -141,18 +140,38 @@ func TestModel_WSEventInsertsPost(t *testing.T) {
 	}
 }
 
-func TestModel_CtrlTTogglesThread(t *testing.T) {
-	m := setupModel(t)
-
-	// Toggle thread open
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+// openThread selects the loaded post and loads its thread, swapping the
+// main pane to the thread view.
+func openThread(t *testing.T, m tui.Model) tui.Model {
+	t.Helper()
+	updated, cmd := m.Update(viewport.PostSelectedMsg{Post: &model.Post{ID: "p1", UserID: "u1", Content: "Hello"}})
 	m = updated.(tui.Model)
+	if cmd == nil {
+		t.Fatal("expected command to fetch thread")
+	}
+	updated, _ = m.Update(tui.ThreadLoadedMsg{
+		PostID: "p1",
+		Posts: &model.PostList{
+			Order: []*model.Post{
+				{ID: "p1", UserID: "u1", Content: "Root post", CreateAt: 1700000000000},
+				{ID: "r1", UserID: "u1", Content: "First reply", RootID: "p1", CreateAt: 1700000001000},
+			},
+		},
+	})
+	return updated.(tui.Model)
+}
 
-	view := m.View()
-	_ = view // Thread panel should now be visible in layout
+func TestModel_PostSelectionSwapsToThreadPane(t *testing.T) {
+	m := setupModel(t)
+	m = openThread(t, m)
 
-	// Toggle thread closed
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	view := testutil.StripANSI(m.View())
+	if !strings.Contains(view, "First reply") {
+		t.Errorf("expected thread content in main pane:\n%s", view)
+	}
+	if !strings.Contains(view, "[esc Back]") {
+		t.Errorf("expected back button on action bar in thread pane:\n%s", view)
+	}
 }
 
 func TestModel_CtrlKOpensPalette(t *testing.T) {
@@ -279,35 +298,59 @@ func TestModel_SendMsgFromInput(t *testing.T) {
 	_ = cmd
 }
 
-func TestModel_ThreadReplyMsg(t *testing.T) {
-	m := setupModel(t)
-	// Load a thread first
-	updated, _ := m.Update(tui.ThreadLoadedMsg{
-		PostID: "p1",
-		Posts: &model.PostList{
-			Order: []*model.Post{{ID: "p1", UserID: "u1", Content: "Root", CreateAt: 1700000000000}},
-		},
-	})
+func TestModel_SendMsgInThreadPaneCreatesReply(t *testing.T) {
+	client := &mockClient{
+		me:       &model.User{ID: "u1", Username: "alice"},
+		teams:    []*model.Team{{ID: "t1", DisplayName: "Engineering"}},
+		channels: []*model.Channel{{ID: "c1", DisplayName: "General"}},
+		posts:    &model.PostList{Order: []*model.Post{{ID: "p1", UserID: "u1", Content: "Hello", CreateAt: 1700000000000}}},
+		commands: []*model.Command{{ID: "cmd1", Slug: "remind", Description: "Set reminder"}},
+		users:    []*model.User{{ID: "u1", Username: "alice"}},
+	}
+	cfg := &config.Config{ServerURL: "http://localhost:8065", SessionToken: "test-token", WSScheme: "ws"}
+	m := tui.NewModel(cfg, client, nil, styles.New(theme.TokyoNight()), nil, nil, nil)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m = updated.(tui.Model)
+	updated, _ = m.Update(tui.UserLoadedMsg{User: &model.User{ID: "u1", Username: "alice"}})
+	m = updated.(tui.Model)
+	updated, _ = m.Update(tui.TeamsLoadedMsg{Teams: []*model.Team{{ID: "t1", DisplayName: "Engineering"}}})
+	m = updated.(tui.Model)
+	updated, _ = m.Update(tui.ChannelsLoadedMsg{TeamID: "t1", Channels: []*model.Channel{{ID: "c1", DisplayName: "General"}}})
+	m = updated.(tui.Model)
+	m = openThread(t, m)
 
-	// Send reply
-	_, cmd := m.Update(thread.ReplyMsg{RootID: "p1", Content: "my reply"})
-	_ = cmd
+	// Sending from the input while in the thread pane creates a reply.
+	_, cmd := m.Update(input.SendMsg{Content: "my reply"})
+	if cmd == nil {
+		t.Fatal("expected command from SendMsg in thread pane")
+	}
+	cmd()
+	if client.lastCreatedPost == nil {
+		t.Fatal("expected CreatePost to be called")
+	}
+	if client.lastCreatedPost.RootID != "p1" {
+		t.Errorf("expected reply RootID p1, got %q", client.lastCreatedPost.RootID)
+	}
+	if client.lastCreatedPost.Content != "my reply" {
+		t.Errorf("expected reply content, got %q", client.lastCreatedPost.Content)
+	}
 }
 
 func TestModel_EscClosesThread(t *testing.T) {
 	m := setupModel(t)
+	m = openThread(t, m)
 
-	// Open thread
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	// Escape returns to the channel pane.
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
 	m = updated.(tui.Model)
 
-	// Escape closes thread when focused
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
-	m = updated.(tui.Model)
-
-	view := m.View()
-	_ = view
+	view := testutil.StripANSI(m.View())
+	if strings.Contains(view, "First reply") {
+		t.Errorf("expected channel view after Esc, still showing thread:\n%s", view)
+	}
+	if strings.Contains(view, "[esc Back]") {
+		t.Errorf("expected back button gone after Esc:\n%s", view)
+	}
 }
 
 func TestModel_WSEventDropsStale(t *testing.T) {
@@ -385,11 +428,11 @@ func TestModel_DelegateKeyToInput(t *testing.T) {
 
 func TestModel_DelegateKeyToThread(t *testing.T) {
 	m := setupModel(t)
-	// Open thread and focus it
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	m = openThread(t, m)
+	// Tab from input focuses the thread pane; send it a scroll key.
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = updated.(tui.Model)
-	// Thread is focused, send a key
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
 	m = updated.(tui.Model)
 	_ = m
 }
@@ -407,10 +450,9 @@ func TestModel_DelegateKeyToPalette(t *testing.T) {
 
 func TestModel_TabWithThread(t *testing.T) {
 	m := setupModel(t)
-	// Open thread
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
-	m = updated.(tui.Model)
-	// Tab cycles through viewport, input, thread
+	m = openThread(t, m)
+	// Tab cycles between thread and input
+	var updated tea.Model
 	for range 5 {
 		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 		m = updated.(tui.Model)

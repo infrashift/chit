@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/testutil"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/thread"
@@ -23,9 +22,6 @@ func TestThread_SetThread(t *testing.T) {
 	reply := &model.Post{ID: "r1", UserID: "u2", Content: "Reply", RootID: "root", CreateAt: 1700000001000}
 	m.SetThread(root, []*model.Post{reply})
 
-	if !m.Visible() {
-		t.Error("expected visible after SetThread")
-	}
 	if m.RootPost().ID != "root" {
 		t.Errorf("root post ID = %q", m.RootPost().ID)
 	}
@@ -52,58 +48,20 @@ func TestThread_View(t *testing.T) {
 	}
 }
 
-func TestThread_ReplyMsg(t *testing.T) {
+func TestThread_Clear(t *testing.T) {
 	m := thread.New(testStyles())
 	m.SetSize(40, 20)
 	m.SetThread(
 		&model.Post{ID: "root", UserID: "u1", Content: "Root", CreateAt: 1700000000000},
-		nil,
+		[]*model.Post{{ID: "r1", UserID: "u2", Content: "Reply", RootID: "root", CreateAt: 1700000001000}},
 	)
-	m.Focus()
 
-	// Type a reply
-	for _, ch := range "my reply" {
-		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ch}})
+	m.Clear()
+	if m.RootPost() != nil {
+		t.Error("expected no root post after Clear")
 	}
-
-	var cmd tea.Cmd
-	m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd == nil {
-		t.Fatal("expected command from enter")
-	}
-	msg := cmd()
-	reply, ok := msg.(thread.ReplyMsg)
-	if !ok {
-		t.Fatalf("expected ReplyMsg, got %T", msg)
-	}
-	if reply.RootID != "root" {
-		t.Errorf("root ID = %q", reply.RootID)
-	}
-	if reply.Content != "my reply" {
-		t.Errorf("content = %q", reply.Content)
-	}
-}
-
-func TestThread_Toggle(t *testing.T) {
-	m := thread.New(testStyles())
-	if m.Visible() {
-		t.Error("should not be visible initially")
-	}
-	m.Toggle()
-	if !m.Visible() {
-		t.Error("should be visible after toggle")
-	}
-	m.Toggle()
-	if m.Visible() {
-		t.Error("should not be visible after double toggle")
-	}
-}
-
-func TestThread_HiddenViewEmpty(t *testing.T) {
-	m := thread.New(testStyles())
-	m.SetSize(40, 20)
-	if m.View() != "" {
-		t.Error("expected empty view when hidden")
+	if len(m.Replies()) != 0 {
+		t.Error("expected no replies after Clear")
 	}
 }
 

@@ -68,9 +68,9 @@ func (m Model) handlePaletteClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// scrollMain scrolls whichever pane the wheel should act on.
+// scrollMain scrolls whichever pane fills the top content area.
 func (m *Model) scrollMain(lines int) {
-	if m.thread.Visible() && m.focus == FocusThread {
+	if m.mainPane == paneThread {
 		m.thread.ScrollBy(lines)
 		return
 	}
@@ -89,11 +89,8 @@ func (m Model) dispatchAction(a actionbar.Action) (tea.Model, tea.Cmd) {
 	case actionbar.ActionNewChannel:
 		return m, m.openChCreator()
 	case actionbar.ActionCloseThread:
-		if m.thread.Visible() {
-			m.thread.SetVisible(false)
-			cmd := m.setFocus(FocusViewport)
-			m.resizeComponents()
-			return m, cmd
+		if m.mainPane == paneThread {
+			return m, m.closeThread()
 		}
 	}
 	return m, nil

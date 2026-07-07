@@ -44,6 +44,14 @@ const (
 	FocusTagPicker
 )
 
+// mainPane selects what fills the top content pane.
+type mainPane int
+
+const (
+	paneChannel mainPane = iota
+	paneThread
+)
+
 // AppState tracks whether we are on the login screen or the main app.
 type AppState int
 
@@ -92,6 +100,7 @@ type Model struct {
 	kratosClient          *auth.KratosClient
 	sessionStore          *auth.SessionStore
 	focus                 FocusArea
+	mainPane              mainPane
 	channelAutoSelected   bool
 	wsConnected           bool
 	lastWSSeq             int64
@@ -325,24 +334,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmd := m.setFocus(FocusInput)
 				return m, cmd
 			}
-			if m.thread.Visible() && m.focus == FocusThread {
-				m.thread.SetVisible(false)
-				cmd := m.setFocus(FocusViewport)
-				m.resizeComponents()
-				return m, cmd
+			if m.mainPane == paneThread {
+				return m, m.closeThread()
 			}
-		}
-
-		if key.Matches(msg, m.keys.ToggleThread) {
-			m.thread.Toggle()
-			var cmd tea.Cmd
-			if m.thread.Visible() {
-				cmd = m.setFocus(FocusThread)
-			} else {
-				cmd = m.setFocus(FocusViewport)
+			if m.focus == FocusInput {
+				return m, m.setFocus(FocusViewport)
 			}
-			m.resizeComponents()
-			return m, cmd
 		}
 
 		if key.Matches(msg, m.keys.TagPicker) && m.focus == FocusViewport {
@@ -529,25 +526,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case viewport.PostSelectedMsg:
 		cmds = append(cmds, FetchThread(m.client, msg.Post.ID))
-		cmd := m.setFocus(FocusThread)
-		cmds = append(cmds, cmd)
+		m.mainPane = paneThread
+		cmds = append(cmds, m.setFocus(FocusInput))
 		m.resizeComponents()
 		return m, tea.Batch(cmds...)
 
 	case input.SendMsg:
-		if m.activeChan != nil && m.me != nil {
-			content, tagNames := tagpicker.StripHashtags(msg.Content)
-			if content == "" && len(tagNames) > 0 {
-				content = msg.Content
-			}
-			m.pendingPostTags = tagNames
-			post := &model.Post{
+		if m.activeChan == nil || m.me == nil {
+			return m, nil
+		}
+		// In the thread pane the input composes a reply to the thread root.
+		if m.mainPane == paneThread && m.thread.RootPost() != nil {
+			reply := &model.Post{
 				ChannelID: m.activeChan.ID,
 				UserID:    m.me.ID,
-				Content:   content,
+				RootID:    m.thread.RootPost().ID,
+				Content:   msg.Content,
 			}
-			cmds = append(cmds, CreatePost(m.client, post))
+			cmds = append(cmds, CreatePost(m.client, reply))
+			return m, tea.Batch(cmds...)
 		}
+		content, tagNames := tagpicker.StripHashtags(msg.Content)
+		if content == "" && len(tagNames) > 0 {
+			content = msg.Content
+		}
+		m.pendingPostTags = tagNames
+		post := &model.Post{
+			ChannelID: m.activeChan.ID,
+			UserID:    m.me.ID,
+			Content:   content,
+		}
+		cmds = append(cmds, CreatePost(m.client, post))
 		return m, tea.Batch(cmds...)
 
 	case input.SlashTriggerMsg:
@@ -562,18 +571,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleLogout()
 		}
 		return m, m.openPalette("/")
-
-	case thread.ReplyMsg:
-		if m.activeChan != nil && m.me != nil {
-			post := &model.Post{
-				ChannelID: m.activeChan.ID,
-				UserID:    m.me.ID,
-				RootID:    msg.RootID,
-				Content:   msg.Content,
-			}
-			cmds = append(cmds, CreatePost(m.client, post))
-		}
-		return m, tea.Batch(cmds...)
 
 	case palette.ChannelChosenMsg:
 		cmds = append(cmds, m.selectChannel(msg.Channel))
@@ -877,18 +874,14 @@ func (m Model) View() string {
 		return m.loginModel.View()
 	}
 
-	mainContent := lipgloss.JoinVertical(lipgloss.Left,
-		m.viewport.View(),
+	top := m.viewport.View()
+	if m.mainPane == paneThread {
+		top = m.thread.View()
+	}
+	layout := lipgloss.JoinVertical(lipgloss.Left,
+		top,
 		m.input.View(),
 	)
-
-	layout := mainContent
-	if m.thread.Visible() {
-		layout = lipgloss.JoinHorizontal(lipgloss.Top,
-			mainContent,
-			m.thread.View(),
-		)
-	}
 
 	// Composite the centered floating overlays.
 	for _, o := range m.centeredOverlays() {
@@ -957,7 +950,7 @@ func (m *Model) syncActionBar() {
 	m.actionBar.SetContext(team, m.activeChannelDisplayName(), user)
 	m.actionBar.SetError(errStr)
 	m.actionBar.SetConnected(m.wsConnected)
-	m.actionBar.SetThreadOpen(m.thread.Visible())
+	m.actionBar.SetThreadOpen(m.mainPane == paneThread)
 }
 
 func (m *Model) setFocus(area FocusArea) tea.Cmd {
@@ -977,7 +970,7 @@ func (m *Model) setFocus(area FocusArea) tea.Cmd {
 	case FocusInput:
 		return m.input.Focus()
 	case FocusThread:
-		return m.thread.Focus()
+		m.thread.Focus()
 	case FocusPalette:
 		m.palette.Focus()
 	case FocusDMPicker:
@@ -1009,7 +1002,8 @@ func (m *Model) selectChannel(ch *model.Channel) tea.Cmd {
 	}
 	cmds = append(cmds, FetchPosts(m.client, ch.ID, 0, 60))
 	cmds = append(cmds, ViewChannel(m.client, ch.ID))
-	m.thread.SetVisible(false)
+	m.mainPane = paneChannel
+	m.thread.Clear()
 	m.threadCounts = make(map[string]int)
 	m.viewport.SetThreadCounts(m.threadCounts)
 	m.resizeComponents()
@@ -1073,6 +1067,15 @@ func (m *Model) setMention(channelID string, count int64) {
 	m.mentions[channelID] = count
 }
 
+// closeThread returns from the thread pane to the channel view.
+func (m *Model) closeThread() tea.Cmd {
+	m.mainPane = paneChannel
+	m.thread.Clear()
+	cmd := m.setFocus(FocusViewport)
+	m.resizeComponents()
+	return cmd
+}
+
 // openChCreator opens the channel creator overlay for the active team.
 func (m *Model) openChCreator() tea.Cmd {
 	if m.activeTeam == nil {
@@ -1100,8 +1103,8 @@ func (m Model) paletteOrigin(view string) (int, int) {
 
 func (m *Model) cycleFocus(dir int) tea.Cmd {
 	areas := []FocusArea{FocusViewport, FocusInput}
-	if m.thread.Visible() {
-		areas = append(areas, FocusThread)
+	if m.mainPane == paneThread {
+		areas = []FocusArea{FocusThread, FocusInput}
 	}
 
 	current := 0
@@ -1117,19 +1120,13 @@ func (m *Model) cycleFocus(dir int) tea.Cmd {
 }
 
 func (m *Model) resizeComponents() {
-	threadWidth := 0
-	if m.thread.Visible() {
-		threadWidth = m.width / 4
-	}
-
-	mainWidth := m.width - threadWidth
 	inputHeight := 5
 	vpHeight := m.height - inputHeight - 1 // -1 for the action bar
 
-	m.viewport.SetSize(mainWidth, vpHeight)
-	m.input.SetSize(mainWidth, inputHeight)
+	m.viewport.SetSize(m.width, vpHeight)
+	m.input.SetSize(m.width, inputHeight)
 	m.actionBar.SetSize(m.width)
-	m.thread.SetSize(threadWidth, m.height-1)
+	m.thread.SetSize(m.width, vpHeight)
 	m.palette.SetSize(m.width, m.height)
 	m.dmPicker.SetSize(m.width, m.height)
 	m.skinPicker.SetSize(m.width, m.height)
@@ -1187,7 +1184,7 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 			if p.RootID != "" {
 				m.threadCounts[p.RootID]++
 				m.viewport.SetThreadCounts(m.threadCounts)
-				if m.thread.Visible() && m.thread.RootPost() != nil && m.thread.RootPost().ID == p.RootID {
+				if m.mainPane == paneThread && m.thread.RootPost() != nil && m.thread.RootPost().ID == p.RootID {
 					m.thread.AppendReply(&p)
 				}
 			}
@@ -1215,7 +1212,7 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 			if err == nil {
 				var p model.Post
 				if json.Unmarshal(data, &p) == nil {
-					if p.RootID != "" && m.thread.Visible() && m.thread.RootPost() != nil && m.thread.RootPost().ID == p.RootID {
+					if p.RootID != "" && m.mainPane == paneThread && m.thread.RootPost() != nil && m.thread.RootPost().ID == p.RootID {
 						m.thread.AppendReply(&p)
 					}
 				}

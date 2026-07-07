@@ -4,17 +4,16 @@ import "github.com/charmbracelet/bubbles/key"
 
 // KeyMap defines the global key bindings.
 type KeyMap struct {
-	Quit         key.Binding
-	Tab          key.Binding
-	ShiftTab     key.Binding
-	ToggleThread key.Binding
-	CmdPalette   key.Binding
-	Search       key.Binding
-	NewDM        key.Binding
-	NewChannel   key.Binding
-	TagPicker    key.Binding
-	Escape       key.Binding
-	Enter        key.Binding
+	Quit       key.Binding
+	Tab        key.Binding
+	ShiftTab   key.Binding
+	CmdPalette key.Binding
+	Search     key.Binding
+	NewDM      key.Binding
+	NewChannel key.Binding
+	TagPicker  key.Binding
+	Escape     key.Binding
+	Enter      key.Binding
 }
 
 // DefaultKeyMap returns the default key bindings.
@@ -32,13 +31,9 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("shift+tab"),
 			key.WithHelp("shift+tab", "prev pane"),
 		),
-		ToggleThread: key.NewBinding(
-			key.WithKeys("ctrl+t"),
-			key.WithHelp("ctrl+t", "toggle thread"),
-		),
 		CmdPalette: key.NewBinding(
 			key.WithKeys("ctrl+k"),
-			key.WithHelp("ctrl+k", "command palette"),
+			key.WithHelp("ctrl+k", "palette"),
 		),
 		Search: key.NewBinding(
 			key.WithKeys("ctrl+s"),
@@ -46,7 +41,7 @@ func DefaultKeyMap() KeyMap {
 		),
 		NewDM: key.NewBinding(
 			key.WithKeys("ctrl+d"),
-			key.WithHelp("ctrl+d", "new DM"),
+			key.WithHelp("ctrl+d", "people"),
 		),
 		NewChannel: key.NewBinding(
 			key.WithKeys("ctrl+n"),

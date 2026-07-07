@@ -1,9 +1,11 @@
+// Package thread renders a thread (root post plus replies) as a read-only
+// pane. It swaps into the main content area; replies are composed in the
+// app's regular input box.
 package thread
 
 import (
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textarea"
 	bvp "github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
@@ -12,21 +14,13 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 )
 
-// ReplyMsg is sent when a reply is composed.
-type ReplyMsg struct {
-	RootID  string
-	Content string
-}
-
-// Model is the thread panel component.
+// Model is the thread pane component.
 type Model struct {
 	viewport        bvp.Model
-	input           textarea.Model
 	rootPost        *model.Post
 	replies         []*model.Post
 	usernames       map[string]string
 	currentUsername string
-	visible         bool
 	focused         bool
 	styles          styles.Styles
 	width           int
@@ -37,27 +31,28 @@ type Model struct {
 
 // New creates a new thread model.
 func New(s styles.Styles) Model {
-	ta := textarea.New()
-	ta.Placeholder = "Reply..."
-	ta.CharLimit = 65535
-	ta.ShowLineNumbers = false
-	ta.SetHeight(3)
 	return Model{
 		viewport:  bvp.New(0, 0),
-		input:     ta,
 		usernames: make(map[string]string),
 		styles:    s,
 		cache:     make(map[string]string),
 	}
 }
 
-// SetThread loads a thread into the panel.
+// SetThread loads a thread into the pane.
 func (m *Model) SetThread(root *model.Post, replies []*model.Post) {
 	m.rootPost = root
 	m.replies = replies
-	m.visible = true
 	m.cache = make(map[string]string)
 	m.updateContent()
+}
+
+// Clear resets the pane when leaving the thread view.
+func (m *Model) Clear() {
+	m.rootPost = nil
+	m.replies = nil
+	m.cache = make(map[string]string)
+	m.viewport.SetContent("")
 }
 
 // SetUsernames sets the username map.
@@ -93,25 +88,14 @@ func (m *Model) AppendReply(p *model.Post) {
 	m.viewport.GotoBottom()
 }
 
-// Toggle toggles visibility.
-func (m *Model) Toggle() { m.visible = !m.visible }
-
-// Visible returns visibility state.
-func (m Model) Visible() bool { return m.visible }
-
-// SetVisible sets visibility.
-func (m *Model) SetVisible(v bool) { m.visible = v }
-
 // Focus sets focus.
-func (m *Model) Focus() tea.Cmd {
+func (m *Model) Focus() {
 	m.focused = true
-	return m.input.Focus()
 }
 
 // Blur removes focus.
 func (m *Model) Blur() {
 	m.focused = false
-	m.input.Blur()
 }
 
 // Focused returns the focus state.
@@ -126,15 +110,12 @@ func (m *Model) SetStyles(s styles.Styles) {
 	m.updateContent()
 }
 
-// SetSize sets the panel dimensions.
+// SetSize sets the pane dimensions.
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
-	inputHeight := 5
 	m.viewport.Width = w - 4
-	m.viewport.Height = max(h-inputHeight-4, 3)
-	m.input.SetWidth(w - 4)
-	m.input.SetHeight(3)
+	m.viewport.Height = max(h-2, 3)
 	m.renderer = nil
 	m.cache = make(map[string]string)
 	m.updateContent()
@@ -146,47 +127,26 @@ func (m *Model) ScrollBy(lines int) {
 	m.viewport.SetYOffset(m.viewport.YOffset + lines)
 }
 
-// Update handles messages.
+// Update handles messages (viewport scrolling only; replies are composed in
+// the app's input box).
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
-	if !m.focused || !m.visible {
+	if !m.focused {
 		return m, nil
 	}
 
-	keyMsg, ok := msg.(tea.KeyMsg)
-	if ok && keyMsg.Type == tea.KeyEnter {
-		content := strings.TrimSpace(m.input.Value())
-		if content != "" && m.rootPost != nil {
-			m.input.Reset()
-			rootID := m.rootPost.ID
-			return m, func() tea.Msg {
-				return ReplyMsg{RootID: rootID, Content: content}
-			}
-		}
-		return m, nil
-	}
-
-	var cmds []tea.Cmd
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)
-	cmds = append(cmds, cmd)
-	m.input, cmd = m.input.Update(msg)
-	cmds = append(cmds, cmd)
-	return m, tea.Batch(cmds...)
+	return m, cmd
 }
 
-// View renders the thread panel.
+// View renders the thread pane.
 func (m Model) View() string {
-	if !m.visible {
-		return ""
-	}
-
 	borderStyle := m.styles.ThreadPanel
 	if m.focused {
 		borderStyle = borderStyle.BorderForeground(m.styles.ActiveBorder.GetBorderBottomForeground())
 	}
 
-	content := m.viewport.View() + "\n" + m.input.View()
-	return borderStyle.Width(m.width - 2).Height(m.height - 2).Render(content)
+	return borderStyle.Width(m.width - 2).Height(m.height - 2).Render(m.viewport.View())
 }
 
 func (m *Model) allPosts() []*model.Post {
