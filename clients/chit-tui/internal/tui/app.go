@@ -16,12 +16,11 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/actionbar"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/chcreator"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui/cmdpalette"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/dmpicker"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/input"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/login"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/mention"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui/search"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/palette"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/sidebar"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/skinpicker"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/tagpicker"
@@ -40,8 +39,7 @@ const (
 	FocusViewport
 	FocusInput
 	FocusThread
-	FocusCmdPalette
-	FocusSearch
+	FocusPalette
 	FocusDMPicker
 	FocusSkinPicker
 	FocusChCreator
@@ -69,8 +67,7 @@ type Model struct {
 	input                 input.Model
 	thread                thread.Model
 	actionBar             actionbar.Model
-	cmdPalette            cmdpalette.Model
-	search                search.Model
+	palette               palette.Model
 	mention               mention.Model
 	dmPicker              dmpicker.Model
 	skinPicker            skinpicker.Model
@@ -130,8 +127,7 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 		input:          input.New(s),
 		actionBar:      actionbar.New(s),
 		thread:         thread.New(s),
-		cmdPalette:     cmdpalette.New(s),
-		search:         search.New(s),
+		palette:        palette.New(s),
 		mention:        mention.New(s),
 		dmPicker:       dmpicker.New(s),
 		skinPicker:     skinpicker.New(s),
@@ -154,6 +150,10 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 		keys:           DefaultKeyMap(),
 		styles:         s,
 	}
+	// The palette shares the root's badge and DM-name maps by reference, so
+	// root-side updates are visible without further plumbing.
+	m.palette.SetCounts(m.unread, m.mentions)
+	m.palette.SetDMDisplayNames(m.dmDisplayNames)
 	m.sidebar.Focus()
 	return m
 }
@@ -236,6 +236,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
+		// Intercept keys when the palette is visible; it handles Esc itself,
+		// so refocus the input once it closes.
+		if m.palette.Visible() {
+			var cmd tea.Cmd
+			m.palette, cmd = m.palette.Update(msg)
+			if !m.palette.Visible() && m.focus == FocusPalette {
+				return m, tea.Batch(cmd, m.setFocus(FocusInput))
+			}
+			return m, cmd
+		}
+
 		// Intercept keys when skin picker is visible
 		if m.skinPicker.Visible() {
 			var cmd tea.Cmd
@@ -281,20 +292,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		if key.Matches(msg, m.keys.NewDM) && m.focus != FocusDMPicker {
-			return m, m.openDMPicker()
+		if key.Matches(msg, m.keys.NewDM) {
+			return m, m.openPalette("@")
 		}
 
 		if key.Matches(msg, m.keys.NewChannel) && m.focus != FocusChCreator && m.activeTeam != nil {
 			return m, m.openChCreator()
 		}
 
-		if key.Matches(msg, m.keys.CmdPalette) && m.focus != FocusCmdPalette {
-			return m, m.openCmdPalette()
+		if key.Matches(msg, m.keys.CmdPalette) {
+			return m, m.openPalette("")
 		}
 
-		if key.Matches(msg, m.keys.Search) && m.focus != FocusSearch {
-			return m, m.openSearch()
+		if key.Matches(msg, m.keys.Search) {
+			return m, m.openPalette("?")
 		}
 
 		if key.Matches(msg, m.keys.Escape) {
@@ -317,16 +328,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmd := m.setFocus(FocusInput)
 					return m, tea.Batch(cmd, CreateChannel(m.client, ch))
 				}
-				cmd := m.setFocus(FocusInput)
-				return m, cmd
-			}
-			if m.search.Visible() {
-				m.search.Close()
-				cmd := m.setFocus(FocusViewport)
-				return m, cmd
-			}
-			if m.cmdPalette.Visible() {
-				m.cmdPalette.Close()
 				cmd := m.setFocus(FocusInput)
 				return m, cmd
 			}
@@ -392,6 +393,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.teams = msg.Teams
 		m.sidebar.SetTeams(msg.Teams)
+		m.palette.SetTeams(msg.Teams)
 		if len(msg.Teams) > 0 {
 			m.activeTeam = msg.Teams[0]
 		}
@@ -409,6 +411,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.channelsByTeam[msg.TeamID] = msg.Channels
 		m.channels = m.flattenChannels()
+		m.palette.SetChannels(m.channels)
 		if m.activeTeam != nil && msg.TeamID == m.activeTeam.ID {
 			m.sidebar.SetChannels(msg.Channels)
 			// Auto-select the first channel only on the very first load, not
@@ -494,7 +497,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			return m, m.setError(msg.Err)
 		}
-		m.cmdPalette.SetCommands(msg.Commands)
+		m.palette.SetCommands(msg.Commands)
 		return m, nil
 
 	case UsersLoadedMsg:
@@ -582,9 +585,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if trimmed == "/logout" {
 			return m.handleLogout()
 		}
-		cmd := m.setFocus(FocusCmdPalette)
-		m.cmdPalette.Open()
-		return m, cmd
+		return m, m.openPalette("/")
 
 	case thread.ReplyMsg:
 		if m.activeChan != nil && m.me != nil {
@@ -598,11 +599,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 
-	case cmdpalette.CommandSelectedMsg:
+	case palette.ChannelChosenMsg:
+		cmds = append(cmds, m.selectChannel(msg.Channel))
+		cmds = append(cmds, m.setFocus(FocusInput))
+		return m, tea.Batch(cmds...)
+
+	case palette.CommandChosenMsg:
 		cmd := m.setFocus(FocusInput)
 		return m, cmd
 
-	case search.SubmitMsg:
+	case palette.UserChosenMsg:
+		if m.me != nil {
+			cmds = append(cmds, CreateDMChannel(m.client, m.me.ID, msg.User.ID))
+		}
+		return m, tea.Batch(cmds...)
+
+	case palette.UserQueryMsg:
+		cmds = append(cmds, SearchUsersCmd(m.client, msg.Term))
+		return m, tea.Batch(cmds...)
+
+	case palette.DebounceMsg:
+		var cmd tea.Cmd
+		m.palette, cmd = m.palette.Update(msg)
+		return m, cmd
+
+	case palette.SearchSubmitMsg:
 		if m.activeChan != nil {
 			term, tagNames := tagpicker.StripHashtags(msg.Term)
 			var tagIDs []string
@@ -620,17 +641,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case SearchResultsMsg:
 		if msg.Err != nil {
-			cmd := m.setError(msg.Err)
-			m.search.SetError(msg.Err.Error())
-			return m, cmd
+			return m, m.setError(msg.Err)
 		}
 		if msg.Posts != nil {
-			m.search.SetResults(msg.Posts.Order)
+			m.palette.SetUsernames(m.usernameMap())
+			m.palette.SetSearchResults(msg.Posts.Order)
 		}
 		return m, nil
 
-	case search.ResultSelectedMsg:
-		m.search.Close()
+	case palette.PostChosenMsg:
 		cmd := m.setFocus(FocusViewport)
 		return m, cmd
 
@@ -655,6 +674,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.dmChannels = msg.Channels
 		m.sidebar.SetDMChannels(msg.Channels)
+		m.palette.SetDMChannels(msg.Channels)
 		m.resolveDMDisplayNames()
 		// Fetch members for DM channels (for unread counts)
 		for _, ch := range msg.Channels {
@@ -681,6 +701,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					filtered = append(filtered, u)
 				}
 			}
+		}
+		// Both the palette ("@" mode) and the DM picker (member selection)
+		// consume user searches; route to whichever is open.
+		if m.palette.Visible() {
+			m.palette.SetUsers(filtered)
+			return m, nil
 		}
 		m.dmPicker.SetResults(filtered)
 		return m, nil
@@ -757,6 +783,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			teamID := msg.Channel.TeamID
 			m.channelsByTeam[teamID] = append([]*model.Channel{msg.Channel}, m.channelsByTeam[teamID]...)
 			m.channels = m.flattenChannels()
+			m.palette.SetChannels(m.channels)
 			if m.activeTeam != nil && teamID == m.activeTeam.ID {
 				m.sidebar.SetChannels(m.channelsByTeam[teamID])
 			}
@@ -843,8 +870,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.SetStyles(newStyles)
 		m.input.SetStyles(newStyles)
 		m.thread.SetStyles(newStyles)
-		m.cmdPalette.SetStyles(newStyles)
-		m.search.SetStyles(newStyles)
+		m.palette.SetStyles(newStyles)
 		m.mention.SetStyles(newStyles)
 		m.dmPicker.SetStyles(newStyles)
 		m.skinPicker.SetStyles(newStyles)
@@ -901,12 +927,10 @@ func (m Model) View() string {
 		)
 	}
 
-	// Overlay command palette
-	if m.cmdPalette.Visible() {
-		paletteView := m.cmdPalette.View()
-		paletteWidth := lipgloss.Width(paletteView)
-		paletteX := (m.width - paletteWidth) / 2
-		paletteY := 2
+	// Overlay unified palette
+	if m.palette.Visible() {
+		paletteView := m.palette.View()
+		paletteX, paletteY := m.paletteOrigin(paletteView)
 		layout = placeOverlay(paletteX, paletteY, paletteView, layout)
 	}
 
@@ -959,15 +983,6 @@ func (m Model) View() string {
 		layout = placeOverlay(pickerX, pickerY, pickerView, layout)
 	}
 
-	// Overlay search
-	if m.search.Visible() {
-		searchView := m.search.View()
-		searchWidth := lipgloss.Width(searchView)
-		searchX := (m.width - searchWidth) / 2
-		searchY := 2
-		layout = placeOverlay(searchX, searchY, searchView, layout)
-	}
-
 	// Action/status bar (m is a value receiver, so these mutations are local
 	// to this render).
 	m.syncActionBar()
@@ -1000,8 +1015,7 @@ func (m *Model) setFocus(area FocusArea) tea.Cmd {
 	m.viewport.Blur()
 	m.input.Blur()
 	m.thread.Blur()
-	m.cmdPalette.Blur()
-	m.search.Blur()
+	m.palette.Blur()
 	m.dmPicker.Blur()
 	m.skinPicker.Blur()
 	m.chCreator.Blur()
@@ -1017,10 +1031,8 @@ func (m *Model) setFocus(area FocusArea) tea.Cmd {
 		return m.input.Focus()
 	case FocusThread:
 		return m.thread.Focus()
-	case FocusCmdPalette:
-		m.cmdPalette.Focus()
-	case FocusSearch:
-		m.search.Focus()
+	case FocusPalette:
+		m.palette.Focus()
 	case FocusDMPicker:
 		m.dmPicker.Focus()
 	case FocusSkinPicker:
@@ -1069,6 +1081,7 @@ func (m *Model) addDMChannel(ch *model.Channel) {
 	}
 	m.dmChannels = append([]*model.Channel{ch}, m.dmChannels...)
 	m.sidebar.SetDMChannels(m.dmChannels)
+	m.palette.SetDMChannels(m.dmChannels)
 	m.resolveDMDisplayNames()
 }
 
@@ -1119,13 +1132,6 @@ func (m *Model) setMention(channelID string, count int64) {
 	m.sidebar.SetMention(channelID, count)
 }
 
-// openDMPicker opens the DM picker overlay and focuses it.
-func (m *Model) openDMPicker() tea.Cmd {
-	cmd := m.setFocus(FocusDMPicker)
-	m.dmPicker.Open()
-	return cmd
-}
-
 // openChCreator opens the channel creator overlay for the active team.
 func (m *Model) openChCreator() tea.Cmd {
 	if m.activeTeam == nil {
@@ -1136,18 +1142,19 @@ func (m *Model) openChCreator() tea.Cmd {
 	return cmd
 }
 
-// openCmdPalette opens the command palette overlay and focuses it.
-func (m *Model) openCmdPalette() tea.Cmd {
-	cmd := m.setFocus(FocusCmdPalette)
-	m.cmdPalette.Open()
+// openPalette opens the unified palette with the query pre-filled to select
+// a mode ("" channels, "@" people, "/" commands, "?" search).
+func (m *Model) openPalette(prefix string) tea.Cmd {
+	cmd := m.setFocus(FocusPalette)
+	m.palette.SetActiveChannel(m.activeChannelDisplayName())
+	m.palette.Open(prefix)
 	return cmd
 }
 
-// openSearch opens the search overlay and focuses it.
-func (m *Model) openSearch() tea.Cmd {
-	cmd := m.setFocus(FocusSearch)
-	m.search.Open()
-	return cmd
+// paletteOrigin returns the screen position of the palette overlay. It is the
+// single source of truth shared by View and mouse hit-testing.
+func (m Model) paletteOrigin(view string) (int, int) {
+	return (m.width - lipgloss.Width(view)) / 2, 2
 }
 
 func (m *Model) cycleFocus(dir int) tea.Cmd {
@@ -1183,8 +1190,7 @@ func (m *Model) resizeComponents() {
 	m.input.SetSize(mainWidth, inputHeight)
 	m.actionBar.SetSize(m.width)
 	m.thread.SetSize(threadWidth, m.height-1)
-	m.cmdPalette.SetSize(m.width, m.height)
-	m.search.SetSize(m.width, m.height)
+	m.palette.SetSize(m.width, m.height)
 	m.dmPicker.SetSize(m.width, m.height)
 	m.skinPicker.SetSize(m.width, m.height)
 	m.chCreator.SetSize(m.width, m.height)
@@ -1202,10 +1208,8 @@ func (m Model) delegateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.input, cmd = m.input.Update(msg)
 	case FocusThread:
 		m.thread, cmd = m.thread.Update(msg)
-	case FocusCmdPalette:
-		m.cmdPalette, cmd = m.cmdPalette.Update(msg)
-	case FocusSearch:
-		m.search, cmd = m.search.Update(msg)
+	case FocusPalette:
+		m.palette, cmd = m.palette.Update(msg)
 	case FocusDMPicker:
 		m.dmPicker, cmd = m.dmPicker.Update(msg)
 	case FocusSkinPicker:

@@ -2,26 +2,40 @@ package tui
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/actionbar"
 )
 
 // wheelScrollLines is how many lines one mouse-wheel notch scrolls.
 const wheelScrollLines = 3
 
-// handleMouse routes mouse events: wheel scrolls the main pane, left-clicks
-// on the bottom action bar dispatch the corresponding action.
+// handleMouse routes mouse events: wheel scrolls the main pane (or moves the
+// palette cursor), left-clicks select palette rows or trigger action-bar
+// buttons.
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	switch msg.Button {
 	case tea.MouseButtonWheelUp:
-		m.scrollMain(-wheelScrollLines)
+		if m.palette.Visible() {
+			m.palette.MoveCursor(-1)
+		} else {
+			m.scrollMain(-wheelScrollLines)
+		}
 		return m, nil
 	case tea.MouseButtonWheelDown:
-		m.scrollMain(wheelScrollLines)
+		if m.palette.Visible() {
+			m.palette.MoveCursor(1)
+		} else {
+			m.scrollMain(wheelScrollLines)
+		}
 		return m, nil
 	}
 
 	if msg.Action != tea.MouseActionRelease || msg.Button != tea.MouseButtonLeft {
 		return m, nil
+	}
+
+	if m.palette.Visible() {
+		return m.handlePaletteClick(msg)
 	}
 
 	// Bar clicks are ignored while an overlay is open so a click can't stack
@@ -31,6 +45,26 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m.dispatchAction(m.actionBar.HitTest(msg.X))
 	}
 
+	return m, nil
+}
+
+// handlePaletteClick selects the clicked palette row, or closes the palette
+// when the click lands outside it.
+func (m Model) handlePaletteClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	view := m.palette.View()
+	px, py := m.paletteOrigin(view)
+	w, h := lipgloss.Width(view), lipgloss.Height(view)
+
+	inside := msg.X >= px && msg.X < px+w && msg.Y >= py && msg.Y < py+h
+	if !inside {
+		m.palette.Close()
+		return m, m.setFocus(FocusInput)
+	}
+
+	if idx, ok := m.palette.RowAt(msg.Y - py); ok {
+		cmd := m.palette.ChooseRow(idx)
+		return m, cmd
+	}
 	return m, nil
 }
 
@@ -47,11 +81,11 @@ func (m *Model) scrollMain(lines int) {
 func (m Model) dispatchAction(a actionbar.Action) (tea.Model, tea.Cmd) {
 	switch a {
 	case actionbar.ActionPalette:
-		return m, m.openCmdPalette()
+		return m, m.openPalette("")
 	case actionbar.ActionSearch:
-		return m, m.openSearch()
+		return m, m.openPalette("?")
 	case actionbar.ActionPeople:
-		return m, m.openDMPicker()
+		return m, m.openPalette("@")
 	case actionbar.ActionNewChannel:
 		return m, m.openChCreator()
 	case actionbar.ActionCloseThread:
@@ -67,6 +101,6 @@ func (m Model) dispatchAction(a actionbar.Action) (tea.Model, tea.Cmd) {
 
 // anyOverlayVisible reports whether any floating overlay is currently open.
 func (m Model) anyOverlayVisible() bool {
-	return m.cmdPalette.Visible() || m.search.Visible() || m.dmPicker.Visible() ||
+	return m.palette.Visible() || m.dmPicker.Visible() ||
 		m.skinPicker.Visible() || m.chCreator.Visible() || m.tagPicker.Visible()
 }

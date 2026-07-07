@@ -11,11 +11,10 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/testutil"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/chcreator"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui/cmdpalette"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/dmpicker"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/input"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/mention"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui/search"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/palette"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/sidebar"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/skinpicker"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/thread"
@@ -163,9 +162,26 @@ func TestModel_CtrlKOpensPalette(t *testing.T) {
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
 	m = updated.(tui.Model)
 
-	view := m.View()
+	view := testutil.StripANSI(m.View())
+	if !strings.Contains(view, "↵ select") {
+		t.Errorf("expected palette footer in view:\n%s", view)
+	}
+	if !strings.Contains(view, "General") {
+		t.Errorf("expected channel rows in palette view:\n%s", view)
+	}
+}
+
+func TestModel_PaletteSlashModeListsCommands(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = updated.(tui.Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(tui.Model)
+
+	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "remind") {
-		t.Errorf("expected 'remind' in palette view:\n%s", view)
+		t.Errorf("expected 'remind' in command mode view:\n%s", view)
 	}
 }
 
@@ -195,11 +211,11 @@ func TestModel_PostSelectedOpensThread(t *testing.T) {
 	}
 }
 
-func TestModel_CommandSelectedMsg(t *testing.T) {
+func TestModel_CommandChosenMsg(t *testing.T) {
 	m := setupModel(t)
 
 	cmd := &model.Command{ID: "cmd1", Slug: "remind"}
-	updated, _ := m.Update(cmdpalette.CommandSelectedMsg{Command: cmd})
+	updated, _ := m.Update(palette.CommandChosenMsg{Command: cmd})
 	m = updated.(tui.Model)
 
 	// Focus should return to input
@@ -470,7 +486,7 @@ func TestModel_SearchResultsMsg(t *testing.T) {
 func TestModel_SearchResultSelected(t *testing.T) {
 	m := setupModel(t)
 
-	updated, _ := m.Update(search.ResultSelectedMsg{
+	updated, _ := m.Update(palette.PostChosenMsg{
 		Post: &model.Post{ID: "p1", Content: "result"},
 	})
 	m = updated.(tui.Model)
@@ -480,7 +496,7 @@ func TestModel_SearchResultSelected(t *testing.T) {
 func TestModel_SearchSubmitMsg(t *testing.T) {
 	m := setupModel(t)
 
-	_, cmd := m.Update(search.SubmitMsg{Term: "hello"})
+	_, cmd := m.Update(palette.SearchSubmitMsg{Term: "hello"})
 	if cmd == nil {
 		t.Error("expected command to search posts")
 	}
@@ -801,22 +817,21 @@ func TestModel_ErrorMsgsFromLoaders(t *testing.T) {
 	}
 }
 
-func TestModel_CtrlDOpensDMPicker(t *testing.T) {
+func TestModel_CtrlDOpensPalettePeopleMode(t *testing.T) {
 	m := setupModel(t)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
 	m = updated.(tui.Model)
 
-	view := m.View()
-	if !strings.Contains(view, "Search users") {
-		t.Errorf("expected DM picker in view:\n%s", view)
+	view := testutil.StripANSI(m.View())
+	if !strings.Contains(view, "Type a name") {
+		t.Errorf("expected palette people mode in view:\n%s", view)
 	}
 }
 
-func TestModel_EscClosesDMPicker(t *testing.T) {
+func TestModel_EscClosesPeopleMode(t *testing.T) {
 	m := setupModel(t)
 
-	// Open DM picker
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
 	m = updated.(tui.Model)
 
@@ -824,9 +839,9 @@ func TestModel_EscClosesDMPicker(t *testing.T) {
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
 	m = updated.(tui.Model)
 
-	view := m.View()
-	if strings.Contains(view, "Search users") {
-		t.Errorf("DM picker should be closed:\n%s", view)
+	view := testutil.StripANSI(m.View())
+	if strings.Contains(view, "Type a name") {
+		t.Errorf("palette should be closed:\n%s", view)
 	}
 }
 

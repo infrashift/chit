@@ -54,7 +54,7 @@ func TestModel_MouseWheelDownAfterUpRestoresBottom(t *testing.T) {
 	}
 }
 
-func TestModel_MouseClickBarOpensCmdPalette(t *testing.T) {
+func TestModel_MouseClickBarOpensPalette(t *testing.T) {
 	m := setupModel(t)
 
 	// Bar is the last row; the first button "[^K Jump]" spans columns [1,10).
@@ -62,12 +62,12 @@ func TestModel_MouseClickBarOpensCmdPalette(t *testing.T) {
 	m = updated.(tui.Model)
 
 	view := testutil.StripANSI(m.View())
-	if !strings.Contains(view, "Search commands") {
-		t.Errorf("expected command palette open after bar click:\n%s", view)
+	if !strings.Contains(view, "↵ select") {
+		t.Errorf("expected palette open after bar click:\n%s", view)
 	}
 }
 
-func TestModel_MouseClickBarOpensSearch(t *testing.T) {
+func TestModel_MouseClickBarOpensSearchMode(t *testing.T) {
 	m := setupModel(t)
 
 	// Second button "[^S Search]" spans columns [11,22).
@@ -75,16 +75,56 @@ func TestModel_MouseClickBarOpensSearch(t *testing.T) {
 	m = updated.(tui.Model)
 
 	view := testutil.StripANSI(m.View())
-	if !strings.Contains(view, "Search posts") {
-		t.Errorf("expected search overlay open after bar click:\n%s", view)
+	if !strings.Contains(view, "Search in General") {
+		t.Errorf("expected palette search mode after bar click:\n%s", view)
+	}
+}
+
+func TestModel_MouseClickOutsidePaletteCloses(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = updated.(tui.Model)
+
+	// Click far outside the palette (bottom bar area) — closes the palette.
+	updated, _ = m.Update(tea.MouseMsg{X: 12, Y: 39, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft})
+	m = updated.(tui.Model)
+
+	view := testutil.StripANSI(m.View())
+	if strings.Contains(view, "↵ select") {
+		t.Errorf("expected palette to close on outside click:\n%s", view)
+	}
+}
+
+func TestModel_MouseClickPaletteRowSelectsChannel(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = updated.(tui.Model)
+
+	// The palette is centered at y=2; content rows start after the chrome
+	// (2) plus input and context lines (2). Row 0 is "General".
+	pv := testutil.StripANSI(m.View())
+	if !strings.Contains(pv, "General") {
+		t.Fatalf("expected General row in palette:\n%s", pv)
+	}
+	updated, cmd := m.Update(tea.MouseMsg{X: 60, Y: 6, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft})
+	m = updated.(tui.Model)
+	if cmd == nil {
+		t.Fatal("expected command from palette row click")
+	}
+
+	view := testutil.StripANSI(m.View())
+	if strings.Contains(view, "↵ select") {
+		t.Errorf("expected palette closed after row click:\n%s", view)
 	}
 }
 
 func TestModel_MouseClickBarIgnoredWhenOverlayOpen(t *testing.T) {
 	m := setupModel(t)
 
-	// Open the command palette via its key first.
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+	// Open the channel creator (a non-palette overlay).
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
 	m = updated.(tui.Model)
 
 	// Click the search button on the bar — must not stack a second overlay.
@@ -92,11 +132,32 @@ func TestModel_MouseClickBarIgnoredWhenOverlayOpen(t *testing.T) {
 	m = updated.(tui.Model)
 
 	view := testutil.StripANSI(m.View())
-	if strings.Contains(view, "Search posts") {
-		t.Errorf("expected bar click to be ignored while palette is open:\n%s", view)
+	if strings.Contains(view, "↵ select") {
+		t.Errorf("expected bar click to be ignored while channel creator is open:\n%s", view)
 	}
-	if !strings.Contains(view, "Search commands") {
-		t.Errorf("expected command palette to remain open:\n%s", view)
+	if !strings.Contains(view, "Create Channel") {
+		t.Errorf("expected channel creator to remain open:\n%s", view)
+	}
+}
+
+func TestModel_MouseWheelMovesPaletteCursor(t *testing.T) {
+	m := setupModel(t)
+
+	// Two channels so the cursor has somewhere to go.
+	updated, _ := m.Update(tui.ChannelsLoadedMsg{TeamID: "t1", Channels: []*model.Channel{
+		{ID: "c1", DisplayName: "General", TeamID: "t1"},
+		{ID: "c2", DisplayName: "Random", TeamID: "t1"},
+	}})
+	m = updated.(tui.Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = updated.(tui.Model)
+	before := m.View()
+
+	updated, _ = m.Update(tea.MouseMsg{X: 60, Y: 6, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
+	m = updated.(tui.Model)
+
+	if after := m.View(); after == before {
+		t.Error("expected palette cursor to move on wheel scroll")
 	}
 }
 
