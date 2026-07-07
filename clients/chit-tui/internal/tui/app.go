@@ -21,7 +21,6 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/login"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/mention"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/palette"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui/sidebar"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/skinpicker"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/tagpicker"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/thread"
@@ -35,8 +34,7 @@ import (
 type FocusArea int
 
 const (
-	FocusSidebar FocusArea = iota
-	FocusViewport
+	FocusViewport FocusArea = iota
 	FocusInput
 	FocusThread
 	FocusPalette
@@ -45,8 +43,6 @@ const (
 	FocusChCreator
 	FocusTagPicker
 )
-
-const sidebarWidth = 30
 
 // AppState tracks whether we are on the login screen or the main app.
 type AppState int
@@ -62,7 +58,6 @@ type Model struct {
 	cfg                   *config.Config
 	client                api.ChitClient
 	wsClient              ws.WSClient
-	sidebar               sidebar.Model
 	viewport              viewport.Model
 	input                 input.Model
 	thread                thread.Model
@@ -122,7 +117,6 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 		cfg:            cfg,
 		client:         client,
 		wsClient:       wsClient,
-		sidebar:        sidebar.New(s),
 		viewport:       viewport.New(s),
 		input:          input.New(s),
 		actionBar:      actionbar.New(s),
@@ -146,7 +140,7 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 		tokenStore:     tokenStore,
 		kratosClient:   kratosClient,
 		sessionStore:   sessionStore,
-		focus:          FocusSidebar,
+		focus:          FocusInput,
 		keys:           DefaultKeyMap(),
 		styles:         s,
 	}
@@ -154,7 +148,7 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 	// root-side updates are visible without further plumbing.
 	m.palette.SetCounts(m.unread, m.mentions)
 	m.palette.SetDMDisplayNames(m.dmDisplayNames)
-	m.sidebar.Focus()
+	_ = m.input.Focus()
 	return m
 }
 
@@ -392,7 +386,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.setError(msg.Err)
 		}
 		m.teams = msg.Teams
-		m.sidebar.SetTeams(msg.Teams)
 		m.palette.SetTeams(msg.Teams)
 		if len(msg.Teams) > 0 {
 			m.activeTeam = msg.Teams[0]
@@ -413,7 +406,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.channels = m.flattenChannels()
 		m.palette.SetChannels(m.channels)
 		if m.activeTeam != nil && msg.TeamID == m.activeTeam.ID {
-			m.sidebar.SetChannels(msg.Channels)
 			// Auto-select the first channel only on the very first load, not
 			// on later reloads (e.g. after navigating back to the team list).
 			if !m.channelAutoSelected && m.activeChan == nil && len(msg.Channels) > 0 {
@@ -534,22 +526,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case WebSocketEventMsg:
 		return m.handleWSEvent(msg)
-
-	case sidebar.ChannelSelectedMsg:
-		return m, m.selectChannel(msg.Channel)
-
-	case sidebar.BackToTeamsMsg:
-		if m.activeChan != nil {
-			cmds = append(cmds, ViewChannel(m.client, m.activeChan.ID))
-		}
-		m.activeChan = nil
-		return m, tea.Batch(cmds...)
-
-	case sidebar.TeamSelectedMsg:
-		m.activeTeam = msg.Team
-		m.sidebar.SetChannels(m.channelsByTeam[msg.Team.ID])
-		cmds = append(cmds, FetchChannels(m.client, msg.Team.ID))
-		return m, tea.Batch(cmds...)
 
 	case viewport.PostSelectedMsg:
 		cmds = append(cmds, FetchThread(m.client, msg.Post.ID))
@@ -673,7 +649,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.setError(msg.Err)
 		}
 		m.dmChannels = msg.Channels
-		m.sidebar.SetDMChannels(msg.Channels)
 		m.palette.SetDMChannels(msg.Channels)
 		m.resolveDMDisplayNames()
 		// Fetch members for DM channels (for unread counts)
@@ -784,9 +759,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.channelsByTeam[teamID] = append([]*model.Channel{msg.Channel}, m.channelsByTeam[teamID]...)
 			m.channels = m.flattenChannels()
 			m.palette.SetChannels(m.channels)
-			if m.activeTeam != nil && teamID == m.activeTeam.ID {
-				m.sidebar.SetChannels(m.channelsByTeam[teamID])
-			}
 			cmds = append(cmds, m.selectChannel(msg.Channel))
 			cmds = append(cmds, FetchChannelMembers(m.client, msg.Channel.ID))
 			if len(m.pendingMembers) > 0 {
@@ -866,7 +838,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		t := theme.LoadNamed(msg.Name)
 		newStyles := styles.New(t)
 		m.styles = newStyles
-		m.sidebar.SetStyles(newStyles)
 		m.viewport.SetStyles(newStyles)
 		m.input.SetStyles(newStyles)
 		m.thread.SetStyles(newStyles)
@@ -906,87 +877,66 @@ func (m Model) View() string {
 		return m.loginModel.View()
 	}
 
-	sidebarView := m.sidebar.View()
-
 	mainContent := lipgloss.JoinVertical(lipgloss.Left,
 		m.viewport.View(),
 		m.input.View(),
 	)
 
-	var layout string
+	layout := mainContent
 	if m.thread.Visible() {
 		layout = lipgloss.JoinHorizontal(lipgloss.Top,
-			sidebarView,
 			mainContent,
 			m.thread.View(),
 		)
-	} else {
-		layout = lipgloss.JoinHorizontal(lipgloss.Top,
-			sidebarView,
-			mainContent,
-		)
 	}
 
-	// Overlay unified palette
-	if m.palette.Visible() {
-		paletteView := m.palette.View()
-		paletteX, paletteY := m.paletteOrigin(paletteView)
-		layout = placeOverlay(paletteX, paletteY, paletteView, layout)
+	// Composite the centered floating overlays.
+	for _, o := range m.centeredOverlays() {
+		if !o.visible() {
+			continue
+		}
+		view := o.view()
+		x := (m.width - lipgloss.Width(view)) / 2
+		layout = placeOverlay(x, overlayY, view, layout)
 	}
 
-	// Overlay mention autocomplete
+	// The mention autocomplete is anchored above the input box instead.
 	if m.mention.Visible() {
 		mentionView := m.mention.View()
 		mentionHeight := lipgloss.Height(mentionView)
 		inputHeight := 5
-		mentionX := sidebarWidth + 1
 		mentionY := m.height - inputHeight - mentionHeight - 1
 		if mentionY < 0 {
 			mentionY = 0
 		}
-		layout = placeOverlay(mentionX, mentionY, mentionView, layout)
-	}
-
-	// Overlay DM picker
-	if m.dmPicker.Visible() {
-		pickerView := m.dmPicker.View()
-		pickerWidth := lipgloss.Width(pickerView)
-		pickerX := (m.width - pickerWidth) / 2
-		pickerY := 2
-		layout = placeOverlay(pickerX, pickerY, pickerView, layout)
-	}
-
-	// Overlay skin picker
-	if m.skinPicker.Visible() {
-		pickerView := m.skinPicker.View()
-		pickerWidth := lipgloss.Width(pickerView)
-		pickerX := (m.width - pickerWidth) / 2
-		pickerY := 2
-		layout = placeOverlay(pickerX, pickerY, pickerView, layout)
-	}
-
-	// Overlay channel creator
-	if m.chCreator.Visible() {
-		creatorView := m.chCreator.View()
-		creatorWidth := lipgloss.Width(creatorView)
-		creatorX := (m.width - creatorWidth) / 2
-		creatorY := 2
-		layout = placeOverlay(creatorX, creatorY, creatorView, layout)
-	}
-
-	// Overlay tag picker
-	if m.tagPicker.Visible() {
-		pickerView := m.tagPicker.View()
-		pickerWidth := lipgloss.Width(pickerView)
-		pickerX := (m.width - pickerWidth) / 2
-		pickerY := 2
-		layout = placeOverlay(pickerX, pickerY, pickerView, layout)
+		layout = placeOverlay(1, mentionY, mentionView, layout)
 	}
 
 	// Action/status bar (m is a value receiver, so these mutations are local
 	// to this render).
 	m.syncActionBar()
 	return lipgloss.JoinVertical(lipgloss.Left, layout, m.actionBar.View())
+}
+
+// overlayY is the row where centered floating overlays are anchored.
+const overlayY = 2
+
+// overlayRef is one floating overlay's hooks for the View compositor.
+type overlayRef struct {
+	visible func() bool
+	view    func() string
+}
+
+// centeredOverlays lists the centered floating overlays in z-order
+// (later entries render on top).
+func (m *Model) centeredOverlays() []overlayRef {
+	return []overlayRef{
+		{m.dmPicker.Visible, m.dmPicker.View},
+		{m.skinPicker.Visible, m.skinPicker.View},
+		{m.chCreator.Visible, m.chCreator.View},
+		{m.tagPicker.Visible, m.tagPicker.View},
+		{m.palette.Visible, m.palette.View},
+	}
 }
 
 // syncActionBar pushes the current model state into the action bar before it
@@ -1011,7 +961,6 @@ func (m *Model) syncActionBar() {
 }
 
 func (m *Model) setFocus(area FocusArea) tea.Cmd {
-	m.sidebar.Blur()
 	m.viewport.Blur()
 	m.input.Blur()
 	m.thread.Blur()
@@ -1023,8 +972,6 @@ func (m *Model) setFocus(area FocusArea) tea.Cmd {
 
 	m.focus = area
 	switch area {
-	case FocusSidebar:
-		m.sidebar.Focus()
 	case FocusViewport:
 		m.viewport.Focus()
 	case FocusInput:
@@ -1054,7 +1001,6 @@ func (m *Model) selectChannel(ch *model.Channel) tea.Cmd {
 	}
 	m.activeChan = ch
 	m.channelAutoSelected = true
-	m.sidebar.ActiveChanID = ch.ID
 	// DM/group channels have no team; keep the last active team then.
 	if ch.TeamID != "" {
 		if t := m.teamByID(ch.TeamID); t != nil {
@@ -1080,7 +1026,6 @@ func (m *Model) addDMChannel(ch *model.Channel) {
 		}
 	}
 	m.dmChannels = append([]*model.Channel{ch}, m.dmChannels...)
-	m.sidebar.SetDMChannels(m.dmChannels)
 	m.palette.SetDMChannels(m.dmChannels)
 	m.resolveDMDisplayNames()
 }
@@ -1118,18 +1063,14 @@ func (m Model) teamByID(id string) *model.Team {
 	return nil
 }
 
-// setUnread updates the root unread count for a channel and mirrors it into
-// the sidebar badges.
+// setUnread updates the unread count for a channel.
 func (m *Model) setUnread(channelID string, count int64) {
 	m.unread[channelID] = count
-	m.sidebar.SetUnread(channelID, count)
 }
 
-// setMention updates the root mention count for a channel and mirrors it into
-// the sidebar badges.
+// setMention updates the mention count for a channel.
 func (m *Model) setMention(channelID string, count int64) {
 	m.mentions[channelID] = count
-	m.sidebar.SetMention(channelID, count)
 }
 
 // openChCreator opens the channel creator overlay for the active team.
@@ -1154,11 +1095,11 @@ func (m *Model) openPalette(prefix string) tea.Cmd {
 // paletteOrigin returns the screen position of the palette overlay. It is the
 // single source of truth shared by View and mouse hit-testing.
 func (m Model) paletteOrigin(view string) (int, int) {
-	return (m.width - lipgloss.Width(view)) / 2, 2
+	return (m.width - lipgloss.Width(view)) / 2, overlayY
 }
 
 func (m *Model) cycleFocus(dir int) tea.Cmd {
-	areas := []FocusArea{FocusSidebar, FocusViewport, FocusInput}
+	areas := []FocusArea{FocusViewport, FocusInput}
 	if m.thread.Visible() {
 		areas = append(areas, FocusThread)
 	}
@@ -1181,11 +1122,10 @@ func (m *Model) resizeComponents() {
 		threadWidth = m.width / 4
 	}
 
-	mainWidth := m.width - sidebarWidth - threadWidth
+	mainWidth := m.width - threadWidth
 	inputHeight := 5
-	vpHeight := m.height - inputHeight - 1 // -1 for status bar
+	vpHeight := m.height - inputHeight - 1 // -1 for the action bar
 
-	m.sidebar.SetSize(sidebarWidth, m.height-1)
 	m.viewport.SetSize(mainWidth, vpHeight)
 	m.input.SetSize(mainWidth, inputHeight)
 	m.actionBar.SetSize(m.width)
@@ -1200,8 +1140,6 @@ func (m *Model) resizeComponents() {
 func (m Model) delegateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch m.focus {
-	case FocusSidebar:
-		m.sidebar, cmd = m.sidebar.Update(msg)
 	case FocusViewport:
 		m.viewport, cmd = m.viewport.Update(msg)
 	case FocusInput:
@@ -1418,7 +1356,6 @@ func (m *Model) resolveDMDisplayNames() {
 					name = u.DisplayName
 				}
 				m.dmDisplayNames[ch.ID] = name
-				m.sidebar.SetDMDisplayName(ch.ID, name)
 			} else {
 				if _, exists := m.users[otherID]; !exists {
 					m.users[otherID] = nil
@@ -1441,9 +1378,7 @@ func (m *Model) resolveDMDisplayNames() {
 				}
 			}
 			if len(names) > 0 {
-				name := strings.Join(names, ", ")
-				m.dmDisplayNames[ch.ID] = name
-				m.sidebar.SetDMDisplayName(ch.ID, name)
+				m.dmDisplayNames[ch.ID] = strings.Join(names, ", ")
 			}
 		}
 	}

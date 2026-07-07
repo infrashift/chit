@@ -15,7 +15,6 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/input"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/mention"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/palette"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui/sidebar"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/skinpicker"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/thread"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
@@ -92,15 +91,15 @@ func TestModel_WindowSize(t *testing.T) {
 func TestModel_TabCyclesFocus(t *testing.T) {
 	m := setupModel(t)
 
-	// Start at sidebar, tab moves to viewport
+	// Start at input, tab moves to viewport
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = updated.(tui.Model)
 
-	// Tab again moves to input
+	// Tab again wraps back to input
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = updated.(tui.Model)
 
-	// Tab again wraps to sidebar
+	// And again to viewport
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = updated.(tui.Model)
 
@@ -114,7 +113,7 @@ func TestModel_TabCyclesFocus(t *testing.T) {
 func TestModel_ChannelSelectLoadsPosts(t *testing.T) {
 	m := setupModel(t)
 	ch := &model.Channel{ID: "c2", DisplayName: "Random"}
-	_, cmd := m.Update(sidebar.ChannelSelectedMsg{Channel: ch})
+	_, cmd := m.Update(palette.ChannelChosenMsg{Channel: ch})
 	if cmd == nil {
 		t.Error("expected command to fetch posts")
 	}
@@ -246,7 +245,7 @@ func TestModel_ViewLoading(t *testing.T) {
 func TestModel_ShiftTabCyclesFocusBackward(t *testing.T) {
 	m := setupModel(t)
 
-	// Start at sidebar, shift-tab wraps to input
+	// Start at input, shift-tab wraps to viewport
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	m = updated.(tui.Model)
 
@@ -278,15 +277,6 @@ func TestModel_SendMsgFromInput(t *testing.T) {
 	m = updated.(tui.Model)
 	_ = m
 	_ = cmd
-}
-
-func TestModel_TeamSelected(t *testing.T) {
-	m := setupModel(t)
-	tm := &model.Team{ID: "t2", DisplayName: "Design"}
-	_, cmd := m.Update(sidebar.TeamSelectedMsg{Team: tm})
-	if cmd == nil {
-		t.Error("expected command to fetch channels")
-	}
 }
 
 func TestModel_ThreadReplyMsg(t *testing.T) {
@@ -369,14 +359,6 @@ func TestModel_SlashTriggerOpensPalette(t *testing.T) {
 	_ = m
 }
 
-func TestModel_DelegateKeyToSidebar(t *testing.T) {
-	m := setupModel(t)
-	// Focus is on sidebar by default, send a key
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
-	m = updated.(tui.Model)
-	_ = m
-}
-
 func TestModel_DelegateKeyToViewport(t *testing.T) {
 	m := setupModel(t)
 	// Tab to viewport
@@ -428,7 +410,7 @@ func TestModel_TabWithThread(t *testing.T) {
 	// Open thread
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
 	m = updated.(tui.Model)
-	// Tab cycles through sidebar, viewport, input, thread
+	// Tab cycles through viewport, input, thread
 	for range 5 {
 		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 		m = updated.(tui.Model)
@@ -552,9 +534,16 @@ func TestModel_ChannelMembersComputesUnread(t *testing.T) {
 	})
 	m = updated.(tui.Model)
 
-	view := m.View()
+	if got := m.UnreadCount("c1"); got != 3 {
+		t.Fatalf("expected unread count 3, got %d", got)
+	}
+
+	// The palette shows the badge.
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = updated.(tui.Model)
+	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "(3)") {
-		t.Errorf("expected unread badge '(3)' in view:\n%s", view)
+		t.Errorf("expected unread badge '(3)' in palette view:\n%s", view)
 	}
 }
 
@@ -1048,9 +1037,12 @@ func TestModel_DMDisplayNameResolution(t *testing.T) {
 	})
 	m = updated.(tui.Model)
 
-	view := m.View()
+	// The resolved name shows up in the palette's DM rows.
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = updated.(tui.Model)
+	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "Bob Smith") {
-		t.Errorf("expected resolved DM display name 'Bob Smith' in view:\n%s", view)
+		t.Errorf("expected resolved DM display name 'Bob Smith' in palette:\n%s", view)
 	}
 }
 
@@ -1090,9 +1082,11 @@ func TestModel_DMDisplayNameResolution_MeArrivesAfterDMChannels(t *testing.T) {
 	})
 	m = updated.(tui.Model)
 
-	view := m.View()
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = updated.(tui.Model)
+	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "Bob Smith") {
-		t.Errorf("expected resolved DM display name 'Bob Smith' in view:\n%s", view)
+		t.Errorf("expected resolved DM display name 'Bob Smith' in palette:\n%s", view)
 	}
 }
 
@@ -1107,7 +1101,7 @@ func TestModel_StatusBarDMChannel(t *testing.T) {
 
 	// Switch to DM channel
 	dmCh := &model.Channel{ID: "dm1", Name: "u1__u2", Type: "D"}
-	updated, _ = m.Update(sidebar.ChannelSelectedMsg{Channel: dmCh})
+	updated, _ = m.Update(palette.ChannelChosenMsg{Channel: dmCh})
 	m = updated.(tui.Model)
 
 	view := m.View()
@@ -1150,9 +1144,15 @@ func TestModel_DMChannelsUnreadComputed(t *testing.T) {
 	})
 	m = updated.(tui.Model)
 
-	view := m.View()
+	if got := m.UnreadCount("dm1"); got != 3 {
+		t.Fatalf("expected DM unread count 3, got %d", got)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = updated.(tui.Model)
+	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "(3)") {
-		t.Errorf("expected unread badge '(3)' for DM channel in view:\n%s", view)
+		t.Errorf("expected unread badge '(3)' for DM channel in palette view:\n%s", view)
 	}
 }
 
@@ -1292,9 +1292,11 @@ func TestModel_GroupDisplayNameResolution(t *testing.T) {
 	})
 	m = updated.(tui.Model)
 
-	view := m.View()
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = updated.(tui.Model)
+	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "bob") || !strings.Contains(view, "charlie") {
-		t.Errorf("expected group display names in view:\n%s", view)
+		t.Errorf("expected group display names in palette:\n%s", view)
 	}
 }
 
@@ -1320,7 +1322,7 @@ func TestModel_StatusBarGroupChannel(t *testing.T) {
 
 	// Switch to group channel
 	groupCh := &model.Channel{ID: "g1", Name: "u1__u2__u3", Type: "G"}
-	updated, _ = m.Update(sidebar.ChannelSelectedMsg{Channel: groupCh})
+	updated, _ = m.Update(palette.ChannelChosenMsg{Channel: groupCh})
 	m = updated.(tui.Model)
 
 	view := m.View()
@@ -1469,80 +1471,6 @@ func TestModel_WSEventChannelCreatedOtherTeam(t *testing.T) {
 	}
 	_, _ = m.Update(wsEvt)
 	// Should not trigger FetchChannels for other team
-}
-
-func TestModel_SidebarResponsiveOnInit(t *testing.T) {
-	m := setupModel(t)
-
-	// Without any Tab cycling, pressing Enter in the sidebar should produce
-	// a ChannelSelectedMsg because focus starts on the sidebar.
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-
-	if cmd == nil {
-		t.Fatal("expected a command from Enter on sidebar; got nil — sidebar is not responding to keys")
-	}
-}
-
-func TestModel_BackToTeamsClearsActiveChan(t *testing.T) {
-	m := setupModel(t)
-
-	// activeChan is set from setupModel (c1). Send BackToTeamsMsg.
-	updated, _ := m.Update(sidebar.BackToTeamsMsg{})
-	m = updated.(tui.Model)
-
-	// Now a WS post to c1 should increment unread, not append to viewport.
-	wsEvt := tui.WebSocketEventMsg{
-		Event: model.WebSocketEvent{
-			Event:    model.WebSocketEventPosted,
-			Sequence: 1,
-			Data: map[string]any{
-				"id": "p10", "channel_id": "c1", "user_id": "u1",
-				"content": "should be unread", "create_at": float64(1700000010000),
-			},
-		},
-	}
-	updated, _ = m.Update(wsEvt)
-	m = updated.(tui.Model)
-
-	view := testutil.StripANSI(m.View())
-	if strings.Contains(view, "should be unread") {
-		t.Error("post should NOT appear in viewport after BackToTeamsMsg; expected unread increment instead")
-	}
-}
-
-func TestModel_ChannelsReloadNoAutoSelect(t *testing.T) {
-	m := setupModel(t)
-
-	// Back to teams → activeChan cleared
-	updated, _ := m.Update(sidebar.BackToTeamsMsg{})
-	m = updated.(tui.Model)
-
-	// Re-load channels (simulating team re-selection)
-	updated, _ = m.Update(tui.ChannelsLoadedMsg{
-		TeamID:   "t1",
-		Channels: []*model.Channel{{ID: "c1", DisplayName: "General"}},
-	})
-	m = updated.(tui.Model)
-
-	// activeChan should still be nil — verify by sending a WS post.
-	// It should increment unread, NOT appear in viewport.
-	wsEvt := tui.WebSocketEventMsg{
-		Event: model.WebSocketEvent{
-			Event:    model.WebSocketEventPosted,
-			Sequence: 1,
-			Data: map[string]any{
-				"id": "p30", "channel_id": "c1", "user_id": "u2",
-				"content": "after reload", "create_at": float64(1700000030000),
-			},
-		},
-	}
-	updated, _ = m.Update(wsEvt)
-	m = updated.(tui.Model)
-
-	view := testutil.StripANSI(m.View())
-	if strings.Contains(view, "after reload") {
-		t.Error("post should not appear in viewport after channel reload without explicit selection")
-	}
 }
 
 func TestModel_WSEventChannelCreatedGroup(t *testing.T) {

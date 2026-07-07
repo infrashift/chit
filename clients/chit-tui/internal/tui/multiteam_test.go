@@ -8,7 +8,7 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/testutil"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui/sidebar"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/palette"
 )
 
 // runCmds executes a command (unwrapping batches) and returns the messages.
@@ -63,7 +63,7 @@ func TestModel_SelectChannelFromOtherTeamSwitchesActiveTeam(t *testing.T) {
 	m = updated.(tui.Model)
 
 	// Selecting the team-2 channel should switch the active team context.
-	updated, _ = m.Update(sidebar.ChannelSelectedMsg{Channel: &model.Channel{ID: "c2", DisplayName: "Mockups", TeamID: "t2"}})
+	updated, _ = m.Update(palette.ChannelChosenMsg{Channel: &model.Channel{ID: "c2", DisplayName: "Mockups", TeamID: "t2"}})
 	m = updated.(tui.Model)
 
 	view := testutil.StripANSI(m.View())
@@ -76,7 +76,7 @@ func TestModel_SelectDMChannelKeepsActiveTeam(t *testing.T) {
 	m := setupModel(t)
 
 	dmCh := &model.Channel{ID: "dm1", Name: "u1__u2", Type: model.ChannelDirect}
-	updated, _ := m.Update(sidebar.ChannelSelectedMsg{Channel: dmCh})
+	updated, _ := m.Update(palette.ChannelChosenMsg{Channel: dmCh})
 	m = updated.(tui.Model)
 
 	view := testutil.StripANSI(m.View())
