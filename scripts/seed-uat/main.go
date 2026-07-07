@@ -27,7 +27,8 @@ var users = []seedUser{
 	{"diana", "Diana Drake", "diana@example.com", "d1a4a000-0000-4000-a000-000000000004", "system_user", model.ActorTypeUser},
 	{"eve", "Eve Ellis", "eve@example.com", "e0e00000-0000-4000-a000-000000000005", "system_user", model.ActorTypeUser},
 	// The MCP agent is an equal actor: a normal user row with actor_type=agent,
-	// added to the same team and channel. Point CHIT_MCP_AGENT_USER_ID at its ID.
+	// added to the same team and channel. Point CHIT_MCP_AGENT_KRATOS_ID at its
+	// Kratos ID.
 	{"chit-agent", "Chit Agent", "agent@example.com", "a9e47000-0000-4000-a000-000000000006", "system_user", model.ActorTypeAgent},
 }
 

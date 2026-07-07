@@ -1,4 +1,4 @@
-.PHONY: build build-mcp build-reconcile build-claude build-tui build-all run test test-tui test-all test-container test-e2e test-e2e-tui test-e2e-clean lint lint-tui validate-spec cue-validate reconcile migrate-up migrate-down kube-migrate kube-build kube-up kube-down kube-restart kube-logs kube-clean uat-up uat-seed-kratos uat-down uat-clean docs-dev clean
+.PHONY: build build-mcp build-reconcile build-claude build-tui build-all run test test-tui test-all test-container test-e2e test-e2e-tui test-e2e-clean lint lint-tui check-deps validate-spec cue-validate reconcile migrate-up migrate-down kube-migrate kube-build kube-up kube-down kube-restart kube-logs kube-clean uat-up uat-seed-kratos uat-down uat-clean docs-dev clean
 
 BINARY=bin/chitd
 MCP_BINARY=bin/chit-mcp
@@ -70,6 +70,29 @@ test-e2e-clean:
 
 lint:
 	golangci-lint run
+
+# Dependency-boundary guards: the client binaries (chit-claude, chit-mcp)
+# talk to chitd over HTTP/WS only and must never link server-side deps;
+# chitd must not link the MCP SDK; TUI (charmbracelet) deps must never
+# enter the server module. Run with GOWORK=off so each check reflects the
+# root module standalone.
+check-deps:
+	@echo "checking cmd/chit-claude stays a pure HTTP/WS client..."
+	@! GOWORK=off go list -deps ./cmd/chit-claude | grep -qE 'jackc/pgx|cuelang|modelcontextprotocol|kin-openapi|nats-io' \
+		|| (echo 'FAIL: chit-claude gained a server-side dependency' && exit 1)
+	@echo "checking cmd/chit-mcp stays a pure HTTP/WS client..."
+	@! GOWORK=off go list -deps ./cmd/chit-mcp | grep -qE 'jackc/pgx|cuelang|kin-openapi|nats-io' \
+		|| (echo 'FAIL: chit-mcp gained a server-side dependency' && exit 1)
+	@echo "checking cmd/chit-reconcile links no runtime server deps..."
+	@! GOWORK=off go list -deps ./cmd/chit-reconcile | grep -qE 'jackc/pgx|modelcontextprotocol|kin-openapi|nats-io' \
+		|| (echo 'FAIL: chit-reconcile gained a runtime server dependency' && exit 1)
+	@echo "checking cmd/chitd does not link the MCP SDK..."
+	@! GOWORK=off go list -deps ./cmd/chitd | grep -q modelcontextprotocol \
+		|| (echo 'FAIL: chitd gained the MCP SDK' && exit 1)
+	@echo "checking TUI deps stay out of the server module..."
+	@! GOWORK=off go list -m all | grep -qi charmbracelet \
+		|| (echo 'FAIL: charmbracelet deps leaked into the server module' && exit 1)
+	@echo "check-deps: all dependency boundaries hold"
 
 lint-tui:
 	$(MAKE) -C clients/chit-tui lint

@@ -26,6 +26,8 @@ jobs:
         run: go build ./...
       - name: Unit tests (race)
         run: go test -race -count=1 ./...
+      - name: Dependency boundaries
+        run: make check-deps
 
   tui-build-and-test:
     name: TUI build & tests
