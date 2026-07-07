@@ -54,7 +54,7 @@ func (s *ChitMCPServer) registerResources() {
 }
 
 func (s *ChitMCPServer) handleAgentIdentity(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
-	user, err := s.app.GetUser(ctx, s.agentUserID)
+	user, err := s.client.Me(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get agent user: %w", err)
 	}
@@ -71,7 +71,7 @@ func (s *ChitMCPServer) handleChannelResource(ctx context.Context, req *mcp.Read
 	if channelID == "" {
 		return nil, fmt.Errorf("invalid channel URI: %s", req.Params.URI)
 	}
-	channel, err := s.app.GetChannel(ctx, channelID)
+	channel, err := s.client.GetChannel(ctx, channelID)
 	if err != nil {
 		return nil, fmt.Errorf("get channel: %w", err)
 	}
@@ -89,11 +89,7 @@ func (s *ChitMCPServer) handleChannelRecentResource(ctx context.Context, req *mc
 	if channelID == "" {
 		return nil, fmt.Errorf("invalid channel recent URI: %s", req.Params.URI)
 	}
-	opts := model.GetPostsOptions{
-		Page:    0,
-		PerPage: 20,
-	}
-	posts, err := s.app.GetPostsForChannel(ctx, channelID, s.agentUserID, opts)
+	posts, err := s.client.GetChannelPosts(ctx, channelID, 0, 20, 0)
 	if err != nil {
 		return nil, fmt.Errorf("get channel posts: %w", err)
 	}
@@ -110,11 +106,11 @@ func (s *ChitMCPServer) handleThreadResource(ctx context.Context, req *mcp.ReadR
 	if postID == "" {
 		return nil, fmt.Errorf("invalid thread URI: %s", req.Params.URI)
 	}
-	thread, err := s.app.GetThread(ctx, postID, s.agentUserID)
+	posts, err := s.client.GetThread(ctx, postID)
 	if err != nil {
 		return nil, fmt.Errorf("get thread: %w", err)
 	}
-	data, _ := json.Marshal(thread)
+	data, _ := json.Marshal(&model.PostList{Order: posts})
 	return &mcp.ReadResourceResult{
 		Contents: []*mcp.ResourceContents{
 			{URI: req.Params.URI, MIMEType: "application/json", Text: string(data)},
@@ -128,7 +124,7 @@ func (s *ChitMCPServer) handleTeamChannelsResource(ctx context.Context, req *mcp
 	if teamID == "" {
 		return nil, fmt.Errorf("invalid team channels URI: %s", req.Params.URI)
 	}
-	channels, err := s.app.GetChannelsForTeam(ctx, teamID, s.agentUserID, 0, 200)
+	channels, err := s.client.GetChannelsForTeam(ctx, teamID, 0, 200)
 	if err != nil {
 		return nil, fmt.Errorf("get team channels: %w", err)
 	}

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/infrashift/chit/internal/chitclient"
 	"github.com/infrashift/chit/internal/model"
 )
 
@@ -16,12 +17,10 @@ const sessionProp = "claude_session_id"
 // accumulate while a claude run is in progress.
 const perThreadQueueSize = 16
 
-func logf(msg string, args ...any) { slog.Info(msg, args...) }
-
 // Bridge wires Chit posts to headless Claude Code runs.
 type Bridge struct {
 	cfg    *Config
-	client *ChitClient
+	client *chitclient.Client
 	runner *ClaudeRunner
 
 	agentUserID string
@@ -41,7 +40,7 @@ func New(cfg *Config) *Bridge {
 	}
 	return &Bridge{
 		cfg:      cfg,
-		client:   NewChitClient(cfg.ServerURL, cfg.AgentKratosID, cfg.ProxySecret),
+		client:   chitclient.New(cfg.ServerURL, cfg.AgentKratosID, cfg.ProxySecret),
 		runner:   NewClaudeRunner(cfg),
 		channels: channels,
 		sessions: make(map[string]string),

@@ -57,16 +57,12 @@ func (s *ChitMCPServer) handleSummarizeChannel(ctx context.Context, req *mcp.Get
 		fmt.Sscanf(n, "%d", &perPage)
 	}
 
-	channel, err := s.app.GetChannel(ctx, channelID)
+	channel, err := s.client.GetChannel(ctx, channelID)
 	if err != nil {
 		return nil, fmt.Errorf("get channel: %w", err)
 	}
 
-	opts := model.GetPostsOptions{
-		Page:    0,
-		PerPage: perPage,
-	}
-	posts, err := s.app.GetPostsForChannel(ctx, channelID, s.agentUserID, opts)
+	posts, err := s.client.GetChannelPosts(ctx, channelID, 0, perPage, 0)
 	if err != nil {
 		return nil, fmt.Errorf("get channel posts: %w", err)
 	}
@@ -100,12 +96,12 @@ func (s *ChitMCPServer) handleDraftReply(ctx context.Context, req *mcp.GetPrompt
 
 	instructions := req.Params.Arguments["instructions"]
 
-	thread, err := s.app.GetThread(ctx, postID, s.agentUserID)
+	posts, err := s.client.GetThread(ctx, postID)
 	if err != nil {
 		return nil, fmt.Errorf("get thread: %w", err)
 	}
 
-	threadJSON, _ := json.Marshal(thread)
+	threadJSON, _ := json.Marshal(&model.PostList{Order: posts})
 
 	promptText := fmt.Sprintf(
 		"Draft a reply to the following thread conversation.\n\nThread (JSON):\n%s",

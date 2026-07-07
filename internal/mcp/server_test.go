@@ -273,7 +273,7 @@ func TestMCP_MarkThreadRead(t *testing.T) {
 	ctx, cs, _, cleanup := setupTestMCP(t)
 	defer cleanup()
 
-	res := callTool(t, ctx, cs, "mark_thread_read", map[string]any{"post_id": rootPostID})
+	res := callTool(t, ctx, cs, "mark_thread_read", map[string]any{"team_id": teamID, "post_id": rootPostID})
 	text := extractText(t, res)
 	if text != "Thread marked as read" {
 		t.Fatalf("unexpected response: %q", text)
@@ -286,6 +286,7 @@ func TestMCP_FollowThread(t *testing.T) {
 
 	// Follow
 	res := callTool(t, ctx, cs, "follow_thread", map[string]any{
+		"team_id":   teamID,
 		"post_id":   rootPostID,
 		"following": true,
 	})
@@ -296,6 +297,7 @@ func TestMCP_FollowThread(t *testing.T) {
 
 	// Unfollow
 	res = callTool(t, ctx, cs, "follow_thread", map[string]any{
+		"team_id":   teamID,
 		"post_id":   rootPostID,
 		"following": false,
 	})

@@ -43,8 +43,7 @@ type Config struct {
 	LogLevel  string `koanf:"log_level"`
 	LogFormat string `koanf:"log_format"`
 
-	EnableOpenAPIValidation bool   `koanf:"enable_openapi_validation"`
-	MCPAgentUserID          string `koanf:"mcp_agent_user_id"`
+	EnableOpenAPIValidation bool `koanf:"enable_openapi_validation"`
 
 	// Slash Commands
 	CommandsCUEDir     string `koanf:"commands_cue_dir"`
