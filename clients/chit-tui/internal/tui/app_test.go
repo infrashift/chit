@@ -1272,34 +1272,6 @@ func TestModel_SkinPickerKeyInterception(t *testing.T) {
 
 // --- Group Channel Tests ---
 
-func TestModel_GroupCreatedMsg(t *testing.T) {
-	m := setupModel(t)
-
-	updated, cmd := m.Update(tui.GroupCreatedMsg{
-		Channel: &model.Channel{ID: "g1", Name: "u1__u2__u3", Type: "G"},
-	})
-	m = updated.(tui.Model)
-
-	if cmd == nil {
-		t.Error("expected commands from GroupCreatedMsg")
-	}
-	_ = m.View()
-}
-
-func TestModel_GroupCreatedMsg_Error(t *testing.T) {
-	m := setupModel(t)
-
-	updated, _ := m.Update(tui.GroupCreatedMsg{
-		Err: &model.AppError{Message: "group fail"},
-	})
-	m = updated.(tui.Model)
-
-	view := m.View()
-	if !strings.Contains(view, "group fail") {
-		t.Errorf("expected error in view:\n%s", view)
-	}
-}
-
 func TestModel_GroupDisplayNameResolution(t *testing.T) {
 	m := setupModel(t)
 

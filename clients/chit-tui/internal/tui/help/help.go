@@ -81,12 +81,12 @@ func (m Model) View() string {
 		return ""
 	}
 
-	header := m.styles.SidebarActive.Render("Keyboard")
+	header := m.styles.ListItemActive.Render("Keyboard")
 	items := []string{header}
 	for _, b := range keyBindings {
 		items = append(items, m.renderBinding(b))
 	}
-	items = append(items, "", m.styles.SidebarActive.Render("Mouse"))
+	items = append(items, "", m.styles.ListItemActive.Render("Mouse"))
 	for _, b := range mouseBindings {
 		items = append(items, m.renderBinding(b))
 	}
@@ -98,7 +98,7 @@ func (m Model) View() string {
 
 func (m Model) renderBinding(b binding) string {
 	key := m.styles.MentionText.Render(padRight(b.keys, 8))
-	return "  " + key + "  " + m.styles.SidebarItem.Render(b.desc)
+	return "  " + key + "  " + m.styles.ListItem.Render(b.desc)
 }
 
 func padRight(s string, n int) string {

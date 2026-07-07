@@ -35,10 +35,9 @@ func main() {
 	sessionStore := auth.NewSessionStore(cfg.SessionFile)
 
 	// Pre-populate token: env var > stored session file > empty (triggers login).
-	fromEnv := false
 	if cfg.HasToken() {
+		// Env-sourced tokens skip validation.
 		tokenStore.Set(cfg.SessionToken)
-		fromEnv = true
 	} else {
 		if stored, err := sessionStore.Load(); err == nil && stored.Token != "" {
 			// Validate stored token before using it.
@@ -48,7 +47,6 @@ func main() {
 			// If validation fails, token stays empty → login screen.
 		}
 	}
-	_ = fromEnv // suppress unused warning; env-sourced tokens skip validation
 
 	client := api.NewClientWithTokenFn(cfg.ServerURL, tokenStore.Get, cfg.AuthHeader)
 	wsClient := ws.NewWSClientWithHeader(cfg.WSURL(), tokenStore.Get(), 256, cfg.AuthHeader)

@@ -173,9 +173,6 @@ func (m *Model) ScrollBy(lines int) {
 	m.viewport.SetYOffset(m.viewport.YOffset + lines)
 }
 
-// YOffset returns the current scroll offset in lines.
-func (m Model) YOffset() int { return m.viewport.YOffset }
-
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	if !m.focused {

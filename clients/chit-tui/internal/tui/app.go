@@ -227,12 +227,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loginModel, _ = m.loginModel.Update(msg)
 		return m, nil
 
-	case AuthExpiredMsg:
-		return m.handleAuthExpired()
-
-	case LogoutMsg:
-		return m.handleLogout()
-
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
 
@@ -652,17 +646,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 
-	case GroupCreatedMsg:
-		if msg.Err != nil {
-			return m, m.setError(msg.Err)
-		}
-		if msg.Channel != nil {
-			m.addDMChannel(msg.Channel)
-			cmds = append(cmds, m.selectChannel(msg.Channel))
-			cmds = append(cmds, FetchDMChannels(m.client))
-		}
-		return m, tea.Batch(cmds...)
-
 	case chcreator.ChannelSubmittedMsg:
 		if msg.Channel.Type == model.ChannelPrivate {
 			m.pendingPrivateChannel = msg.Channel
@@ -1058,18 +1041,11 @@ func (m *Model) addDMChannel(ch *model.Channel) {
 }
 
 // flattenChannels merges the per-team channel lists into one slice, in team
-// order, including any buckets whose team is not (or no longer) known.
+// order. Buckets are only ever keyed by known team IDs.
 func (m Model) flattenChannels() []*model.Channel {
 	var flat []*model.Channel
-	seen := make(map[string]bool, len(m.channelsByTeam))
 	for _, t := range m.teams {
 		flat = append(flat, m.channelsByTeam[t.ID]...)
-		seen[t.ID] = true
-	}
-	for teamID, chans := range m.channelsByTeam {
-		if !seen[teamID] {
-			flat = append(flat, chans...)
-		}
 	}
 	return flat
 }

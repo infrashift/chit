@@ -14,7 +14,7 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 )
 
-const maxGroupSelection = 7 // max selectable users (self added automatically → 8 total)
+const maxGroupSelection = 7 // cap on members selectable in one picker session
 
 // MembersPickedMsg is sent when members are selected for a private channel.
 type MembersPickedMsg struct {
@@ -225,9 +225,9 @@ func (m Model) View() string {
 			label = "[ ] " + label
 		}
 		if i == m.cursor {
-			label = m.styles.SidebarActive.Render("> " + label)
+			label = m.styles.ListItemActive.Render("> " + label)
 		} else {
-			label = m.styles.SidebarItem.Render("  " + label)
+			label = m.styles.ListItem.Render("  " + label)
 		}
 		items = append(items, label)
 	}

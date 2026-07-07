@@ -272,15 +272,15 @@ func (m Model) View() string {
 	}
 
 	var items []string
-	items = append(items, m.styles.SidebarActive.Render("Create Channel"))
+	items = append(items, m.styles.ListItemActive.Render("Create Channel"))
 	items = append(items, "")
 
 	// Display Name
 	label := "Display Name"
 	if m.activeField == fieldDisplayName {
-		label = m.styles.SidebarActive.Render("> " + label)
+		label = m.styles.ListItemActive.Render("> " + label)
 	} else {
-		label = m.styles.SidebarItem.Render("  " + label)
+		label = m.styles.ListItem.Render("  " + label)
 	}
 	items = append(items, label)
 	items = append(items, "  "+m.displayName.View())
@@ -289,9 +289,9 @@ func (m Model) View() string {
 	// Channel Name
 	label = "Channel Name"
 	if m.activeField == fieldName {
-		label = m.styles.SidebarActive.Render("> " + label)
+		label = m.styles.ListItemActive.Render("> " + label)
 	} else {
-		label = m.styles.SidebarItem.Render("  " + label)
+		label = m.styles.ListItem.Render("  " + label)
 	}
 	items = append(items, label)
 	items = append(items, "  "+m.name.View())
@@ -300,17 +300,17 @@ func (m Model) View() string {
 	// Type toggle
 	label = "Type"
 	if m.activeField == fieldType {
-		label = m.styles.SidebarActive.Render("> " + label)
+		label = m.styles.ListItemActive.Render("> " + label)
 	} else {
-		label = m.styles.SidebarItem.Render("  " + label)
+		label = m.styles.ListItem.Render("  " + label)
 	}
 	var openLabel, privateLabel string
 	if m.channelType == model.ChannelOpen {
-		openLabel = m.styles.SidebarActive.Render("[Open]")
-		privateLabel = m.styles.SidebarItem.Render(" Private ")
+		openLabel = m.styles.ListItemActive.Render("[Open]")
+		privateLabel = m.styles.ListItem.Render(" Private ")
 	} else {
-		openLabel = m.styles.SidebarItem.Render(" Open ")
-		privateLabel = m.styles.SidebarActive.Render("[Private]")
+		openLabel = m.styles.ListItem.Render(" Open ")
+		privateLabel = m.styles.ListItemActive.Render("[Private]")
 	}
 	items = append(items, label)
 	items = append(items, "  "+openLabel+"  "+privateLabel)
@@ -319,9 +319,9 @@ func (m Model) View() string {
 	// Purpose
 	label = "Purpose"
 	if m.activeField == fieldPurpose {
-		label = m.styles.SidebarActive.Render("> " + label)
+		label = m.styles.ListItemActive.Render("> " + label)
 	} else {
-		label = m.styles.SidebarItem.Render("  " + label)
+		label = m.styles.ListItem.Render("  " + label)
 	}
 	items = append(items, label)
 	items = append(items, "  "+m.purpose.View())

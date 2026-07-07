@@ -98,12 +98,6 @@ type DMCreatedMsg struct {
 	Err     error
 }
 
-// GroupCreatedMsg is sent when a group channel is created.
-type GroupCreatedMsg struct {
-	Channel *model.Channel
-	Err     error
-}
-
 // ChannelCreatedMsg is sent when a team channel is created.
 type ChannelCreatedMsg struct {
 	Channel *model.Channel
@@ -154,12 +148,6 @@ type ChannelMemberAddedMsg struct {
 type AllMembersAddedMsg struct {
 	ChannelID string
 }
-
-// AuthExpiredMsg signals that the session has expired and re-login is needed.
-type AuthExpiredMsg struct{}
-
-// LogoutMsg signals that the user wants to log out.
-type LogoutMsg struct{}
 
 // ErrMsg is a generic error message.
 type ErrMsg struct {

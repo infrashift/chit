@@ -17,12 +17,3 @@ type Team struct {
 	UpdateAt    int64  `json:"update_at"`
 	DeleteAt    int64  `json:"delete_at"`
 }
-
-// TeamMember mirrors the server's TeamMember model.
-type TeamMember struct {
-	TeamID   string `json:"team_id"`
-	UserID   string `json:"user_id"`
-	Roles    string `json:"roles"`
-	CreateAt int64  `json:"create_at"`
-	DeleteAt int64  `json:"delete_at"`
-}

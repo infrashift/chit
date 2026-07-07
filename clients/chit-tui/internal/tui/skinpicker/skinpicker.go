@@ -109,16 +109,16 @@ func (m Model) View() string {
 	}
 
 	var items []string
-	items = append(items, m.styles.SidebarActive.Render("Select Theme"))
+	items = append(items, m.styles.ListItemActive.Render("Select Theme"))
 	items = append(items, "")
 
 	maxItems := min(len(m.skins), max((m.height/2)-4, 5))
 	for i := range maxItems {
 		name := m.skins[i]
 		if i == m.cursor {
-			items = append(items, m.styles.SidebarActive.Render("> "+name))
+			items = append(items, m.styles.ListItemActive.Render("> "+name))
 		} else {
-			items = append(items, m.styles.SidebarItem.Render("  "+name))
+			items = append(items, m.styles.ListItem.Render("  "+name))
 		}
 	}
 

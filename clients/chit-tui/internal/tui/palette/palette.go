@@ -549,9 +549,9 @@ func (m Model) View() string {
 	for i := start; i < end; i++ {
 		line := m.rows[i].label
 		if i == m.cursor {
-			line = m.styles.SidebarActive.Render("> " + line)
+			line = m.styles.ListItemActive.Render("> " + line)
 		} else {
-			line = m.styles.SidebarItem.Render("  " + line)
+			line = m.styles.ListItem.Render("  " + line)
 		}
 		items = append(items, line)
 	}

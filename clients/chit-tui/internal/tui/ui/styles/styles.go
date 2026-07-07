@@ -9,9 +9,8 @@ import (
 
 // Styles holds all lipgloss styles for the TUI.
 type Styles struct {
-	Sidebar              lipgloss.Style
-	SidebarItem          lipgloss.Style
-	SidebarActive        lipgloss.Style
+	ListItem             lipgloss.Style
+	ListItemActive       lipgloss.Style
 	Viewport             lipgloss.Style
 	Input                lipgloss.Style
 	ThreadPanel          lipgloss.Style
@@ -23,7 +22,6 @@ type Styles struct {
 	UnreadBadge          lipgloss.Style
 	PinBadge             lipgloss.Style
 	ErrorText            lipgloss.Style
-	Border               lipgloss.Style
 	ActiveBorder         lipgloss.Style
 	MentionBadge         lipgloss.Style
 	MentionText          lipgloss.Style
@@ -40,25 +38,16 @@ type Styles struct {
 
 // New creates Styles from a Theme.
 func New(t theme.Theme) Styles {
-	border := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(t.Border)
-
 	activeBorder := lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(t.ActiveBorder)
 
 	return Styles{
-		Sidebar: lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(t.Border).
-			Padding(0, 1),
-
-		SidebarItem: lipgloss.NewStyle().
+		ListItem: lipgloss.NewStyle().
 			Foreground(t.Foreground).
 			Padding(0, 1),
 
-		SidebarActive: lipgloss.NewStyle().
+		ListItemActive: lipgloss.NewStyle().
 			Foreground(t.ChannelActive).
 			Bold(true).
 			Padding(0, 1),
@@ -110,7 +99,6 @@ func New(t theme.Theme) Styles {
 		ErrorText: lipgloss.NewStyle().
 			Foreground(t.Error),
 
-		Border:       border,
 		ActiveBorder: activeBorder,
 
 		MentionBadge: lipgloss.NewStyle().

@@ -11,9 +11,8 @@ func TestNew_ReturnsValidStyles(t *testing.T) {
 	s := styles.New(theme.TokyoNight())
 
 	// Verify styles are callable (render empty string without panic).
-	_ = s.Sidebar.Render("")
-	_ = s.SidebarItem.Render("")
-	_ = s.SidebarActive.Render("")
+	_ = s.ListItem.Render("")
+	_ = s.ListItemActive.Render("")
 	_ = s.Viewport.Render("")
 	_ = s.Input.Render("")
 	_ = s.ThreadPanel.Render("")
@@ -24,7 +23,6 @@ func TestNew_ReturnsValidStyles(t *testing.T) {
 	_ = s.UnreadBadge.Render("3")
 	_ = s.PinBadge.Render("pinned")
 	_ = s.ErrorText.Render("err")
-	_ = s.Border.Render("")
 	_ = s.ActiveBorder.Render("")
 	_ = s.MentionBadge.Render("@2")
 	_ = s.MentionText.Render("@alice")

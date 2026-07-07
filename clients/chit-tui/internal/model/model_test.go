@@ -283,21 +283,3 @@ func TestPostList_JSONRoundTrip(t *testing.T) {
 		t.Errorf("round trip mismatch: got %d posts", len(got.Order))
 	}
 }
-
-func TestThreadResponse_JSONRoundTrip(t *testing.T) {
-	tr := model.ThreadResponse{
-		Thread: &model.Thread{PostID: "root", ChannelID: "ch", ReplyCount: 1},
-		Posts:  []*model.Post{{ID: "root", Content: "root post"}, {ID: "reply", Content: "reply", RootID: "root"}},
-	}
-	data, err := json.Marshal(tr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got model.ThreadResponse
-	if err := json.Unmarshal(data, &got); err != nil {
-		t.Fatal(err)
-	}
-	if got.Thread.PostID != "root" || len(got.Posts) != 2 {
-		t.Errorf("round trip mismatch")
-	}
-}

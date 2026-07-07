@@ -302,20 +302,6 @@ func TestCreateDMChannel_ReturnsDMCreatedMsg(t *testing.T) {
 	}
 }
 
-func TestCreateGroupChannel_ReturnsGroupCreatedMsg(t *testing.T) {
-	client := &mockClient{groupChannel: &model.Channel{ID: "g1", Type: "G"}}
-	cmd := tui.CreateGroupChannel(client, []string{"u1", "u2", "u3"})
-	msg := cmd()
-
-	loaded, ok := msg.(tui.GroupCreatedMsg)
-	if !ok {
-		t.Fatalf("expected GroupCreatedMsg, got %T", msg)
-	}
-	if loaded.Channel.ID != "g1" {
-		t.Errorf("channel ID = %q", loaded.Channel.ID)
-	}
-}
-
 func TestCreateChannel_ReturnsChannelCreatedMsg(t *testing.T) {
 	client := &mockClient{createdChannel: &model.Channel{ID: "ch1", Type: "O", Name: "deploy"}}
 	cmd := tui.CreateChannel(client, &model.Channel{TeamID: "t1", Name: "deploy", Type: "O"})
@@ -341,20 +327,6 @@ func TestFetchAllTags_ReturnsAllTagsLoadedMsg(t *testing.T) {
 	}
 	if len(loaded.Tags) != 1 {
 		t.Errorf("tags count = %d", len(loaded.Tags))
-	}
-}
-
-func TestCreateTagCmd_ReturnsTagCreatedMsg(t *testing.T) {
-	client := &mockClient{createdTag: &model.Tag{ID: "t1", Name: "urgent"}}
-	cmd := tui.CreateTagCmd(client, "urgent")
-	msg := cmd()
-
-	loaded, ok := msg.(tui.TagCreatedMsg)
-	if !ok {
-		t.Fatalf("expected TagCreatedMsg, got %T", msg)
-	}
-	if loaded.Tag.ID != "t1" {
-		t.Errorf("tag ID = %q", loaded.Tag.ID)
 	}
 }
 
@@ -400,23 +372,6 @@ func TestRemoveTagFromPostCmd_ReturnsTagRemovedFromPostMsg(t *testing.T) {
 	}
 	if loaded.PostID != "p1" || loaded.TagID != "t1" {
 		t.Errorf("unexpected msg: %+v", loaded)
-	}
-}
-
-func TestAddChannelMemberCmd_ReturnsChannelMemberAddedMsg(t *testing.T) {
-	client := &mockClient{}
-	cmd := tui.AddChannelMemberCmd(client, "c1", "u2")
-	msg := cmd()
-
-	loaded, ok := msg.(tui.ChannelMemberAddedMsg)
-	if !ok {
-		t.Fatalf("expected ChannelMemberAddedMsg, got %T", msg)
-	}
-	if loaded.ChannelID != "c1" || loaded.UserID != "u2" {
-		t.Errorf("unexpected msg: %+v", loaded)
-	}
-	if loaded.Err != nil {
-		t.Errorf("unexpected error: %v", loaded.Err)
 	}
 }
 

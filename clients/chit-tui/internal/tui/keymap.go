@@ -14,7 +14,6 @@ type KeyMap struct {
 	TagPicker  key.Binding
 	Help       key.Binding
 	Escape     key.Binding
-	Enter      key.Binding
 }
 
 // DefaultKeyMap returns the default key bindings.
@@ -59,10 +58,6 @@ func DefaultKeyMap() KeyMap {
 		Escape: key.NewBinding(
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "close overlay"),
-		),
-		Enter: key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "send/select"),
 		),
 	}
 }

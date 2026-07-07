@@ -104,11 +104,6 @@ func MockHandler(status int, body any) http.HandlerFunc {
 	}
 }
 
-// NewMockServer creates a test HTTP server with a custom handler.
-func NewMockServer(handler http.Handler) *httptest.Server {
-	return httptest.NewServer(handler)
-}
-
 // NewMockServerMux creates a test HTTP server with a ServeMux.
 // Register routes on the returned mux before making requests.
 func NewMockServerMux() (*httptest.Server, *http.ServeMux) {

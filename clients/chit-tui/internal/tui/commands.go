@@ -132,14 +132,6 @@ func CreateDMChannel(client api.ChitClient, userID1, userID2 string) tea.Cmd {
 	}
 }
 
-// CreateGroupChannel returns a command that creates a group channel.
-func CreateGroupChannel(client api.ChitClient, userIDs []string) tea.Cmd {
-	return func() tea.Msg {
-		ch, err := client.CreateGroupChannel(context.Background(), userIDs)
-		return GroupCreatedMsg{Channel: ch, Err: err}
-	}
-}
-
 // CreateChannel returns a command that creates a team channel.
 func CreateChannel(client api.ChitClient, channel *model.Channel) tea.Cmd {
 	return func() tea.Msg {
@@ -153,14 +145,6 @@ func FetchAllTags(client api.ChitClient) tea.Cmd {
 	return func() tea.Msg {
 		tags, err := client.GetAllTags(context.Background())
 		return AllTagsLoadedMsg{Tags: tags, Err: err}
-	}
-}
-
-// CreateTagCmd returns a command that creates a tag.
-func CreateTagCmd(client api.ChitClient, name string) tea.Cmd {
-	return func() tea.Msg {
-		tag, err := client.CreateTag(context.Background(), name)
-		return TagCreatedMsg{Tag: tag, Err: err}
 	}
 }
 
@@ -185,14 +169,6 @@ func RemoveTagFromPostCmd(client api.ChitClient, postID, tagID string) tea.Cmd {
 	return func() tea.Msg {
 		err := client.RemoveTagFromPost(context.Background(), postID, tagID)
 		return TagRemovedFromPostMsg{PostID: postID, TagID: tagID, Err: err}
-	}
-}
-
-// AddChannelMemberCmd returns a command that adds a user to a channel.
-func AddChannelMemberCmd(client api.ChitClient, channelID, userID string) tea.Cmd {
-	return func() tea.Msg {
-		err := client.AddChannelMember(context.Background(), channelID, userID)
-		return ChannelMemberAddedMsg{ChannelID: channelID, UserID: userID, Err: err}
 	}
 }
 
