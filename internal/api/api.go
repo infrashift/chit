@@ -124,6 +124,7 @@ func New(a *app.App) http.Handler {
 			r.Post("/posts/{id}/tags", addTagToPost(a))
 			r.Delete("/posts/{id}/tags/{tag_id}", removeTagFromPost(a))
 			r.Get("/posts/{id}/tags", getTagsForPost(a))
+			r.Post("/posts/tags", getTagsForPosts(a))
 
 			// Commands
 			r.Get("/commands", listCommands(a))

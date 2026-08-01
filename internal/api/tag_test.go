@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -106,5 +107,69 @@ func TestGetTagsForPost(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
+	}
+}
+
+// The batch endpoint exists so opening a channel costs one request rather
+// than one per message.
+func TestGetTagsForPosts(t *testing.T) {
+	a, _, cleanup := setupTestApp(t)
+	defer cleanup()
+
+	handler := getTagsForPosts(a)
+	body := `{"post_ids":["` + testRootPost + `"]}`
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	r = authedRequest(r, testUser())
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var got map[string][]*model.Tag
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v (body %s)", err, w.Body.String())
+	}
+}
+
+func TestGetTagsForPosts_EmptyRequest(t *testing.T) {
+	a, _, cleanup := setupTestApp(t)
+	defer cleanup()
+
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"post_ids":[]}`))
+	r.Header.Set("Content-Type", "application/json")
+	r = authedRequest(r, testUser())
+	w := httptest.NewRecorder()
+
+	getTagsForPosts(a).ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for an empty batch, got %d", w.Code)
+	}
+}
+
+// The batch is bounded so a client cannot ask for an unbounded set at once.
+func TestGetTagsForPosts_RejectsOversizedBatch(t *testing.T) {
+	a, _, cleanup := setupTestApp(t)
+	defer cleanup()
+
+	ids := make([]string, 500)
+	for i := range ids {
+		ids[i] = testRootPost
+	}
+	body, _ := json.Marshal(map[string][]string{"post_ids": ids})
+
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(string(body)))
+	r.Header.Set("Content-Type", "application/json")
+	r = authedRequest(r, testUser())
+	w := httptest.NewRecorder()
+
+	getTagsForPosts(a).ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for an oversized batch, got %d", w.Code)
 	}
 }

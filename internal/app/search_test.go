@@ -17,15 +17,19 @@ type searchMockPostStore struct {
 	getResults    map[string]*model.Post
 }
 
-func (s *searchMockPostStore) Save(_ context.Context, p *model.Post) (*model.Post, error) { return p, nil }
+func (s *searchMockPostStore) Save(_ context.Context, p *model.Post) (*model.Post, error) {
+	return p, nil
+}
 func (s *searchMockPostStore) Get(_ context.Context, id string) (*model.Post, error) {
 	if p, ok := s.getResults[id]; ok {
 		return p, nil
 	}
 	return nil, errNotFound
 }
-func (s *searchMockPostStore) Update(_ context.Context, p *model.Post) (*model.Post, error) { return p, nil }
-func (s *searchMockPostStore) Delete(_ context.Context, _ string, _ int64) error            { return nil }
+func (s *searchMockPostStore) Update(_ context.Context, p *model.Post) (*model.Post, error) {
+	return p, nil
+}
+func (s *searchMockPostStore) Delete(_ context.Context, _ string, _ int64) error { return nil }
 func (s *searchMockPostStore) GetPostsForChannel(_ context.Context, _ string, _ model.GetPostsOptions) (*model.PostList, error) {
 	return &model.PostList{}, nil
 }
@@ -48,11 +52,18 @@ type searchMockTagStore struct {
 	filterPostIDsRes []string
 }
 
-func (s searchMockTagStore) Save(_ context.Context, _ *model.Tag) (*model.Tag, error)         { return nil, nil }
-func (s searchMockTagStore) GetAll(_ context.Context) ([]*model.Tag, error)                 { return nil, nil }
-func (s searchMockTagStore) AddTagToPost(_ context.Context, _, _ string) error                { return nil }
-func (s searchMockTagStore) RemoveTagFromPost(_ context.Context, _, _ string) error           { return nil }
-func (s searchMockTagStore) GetTagsForPost(_ context.Context, _ string) ([]*model.Tag, error) { return nil, nil }
+func (s searchMockTagStore) Save(_ context.Context, _ *model.Tag) (*model.Tag, error) {
+	return nil, nil
+}
+func (s searchMockTagStore) GetAll(_ context.Context) ([]*model.Tag, error)         { return nil, nil }
+func (s searchMockTagStore) AddTagToPost(_ context.Context, _, _ string) error      { return nil }
+func (s searchMockTagStore) RemoveTagFromPost(_ context.Context, _, _ string) error { return nil }
+func (s searchMockTagStore) GetTagsForPost(_ context.Context, _ string) ([]*model.Tag, error) {
+	return nil, nil
+}
+func (s searchMockTagStore) GetTagsForPosts(_ context.Context, _ []string) (map[string][]*model.Tag, error) {
+	return map[string][]*model.Tag{}, nil
+}
 func (s searchMockTagStore) GetPostIDsByTags(_ context.Context, _ []string, _, _ int) ([]string, error) {
 	return s.postIDsByTags, nil
 }

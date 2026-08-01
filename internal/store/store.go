@@ -100,6 +100,8 @@ type TagStore interface {
 	AddTagToPost(ctx context.Context, messageID, tagID string) error
 	RemoveTagFromPost(ctx context.Context, messageID, tagID string) error
 	GetTagsForPost(ctx context.Context, messageID string) ([]*model.Tag, error)
+	// GetTagsForPosts is the bulk form, keyed by post ID.
+	GetTagsForPosts(ctx context.Context, messageIDs []string) (map[string][]*model.Tag, error)
 	GetPostIDsByTags(ctx context.Context, tagIDs []string, page, perPage int) ([]string, error)
 	FilterPostIDsByTags(ctx context.Context, postIDs []string, tagIDs []string) ([]string, error)
 }
