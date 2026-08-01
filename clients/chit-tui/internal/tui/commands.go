@@ -41,6 +41,14 @@ func FetchPosts(client api.ChitClient, channelID string, page, perPage int) tea.
 	}
 }
 
+// FetchOlderPosts returns a command that fetches the next page of history.
+func FetchOlderPosts(client api.ChitClient, channelID string, page, perPage int) tea.Cmd {
+	return func() tea.Msg {
+		pl, err := client.GetChannelPosts(context.Background(), channelID, page, perPage)
+		return OlderPostsLoadedMsg{ChannelID: channelID, Page: page, Posts: pl, Err: err}
+	}
+}
+
 // CreatePost returns a command that creates a post.
 func CreatePost(client api.ChitClient, post *model.Post) tea.Cmd {
 	return func() tea.Msg {
@@ -108,6 +116,23 @@ func ListenWebSocket(wsClient ws.WSClient) tea.Cmd {
 	}
 }
 
+// ListenWSState waits for the next connection-state transition. It runs
+// alongside ListenWebSocket: events and transport state arrive on separate
+// channels so a quiet connection is still distinguishable from a dead one.
+func ListenWSState(wsClient ws.WSClient) tea.Cmd {
+	return func() tea.Msg {
+		st, ok := <-wsClient.State()
+		if !ok {
+			return nil
+		}
+		return WSStateMsg{
+			Connected:    st.Connected,
+			Err:          st.Err,
+			Unauthorized: st.Unauthorized,
+		}
+	}
+}
+
 // FetchDMChannels returns a command that fetches the user's DM channels.
 func FetchDMChannels(client api.ChitClient) tea.Cmd {
 	return func() tea.Msg {
@@ -153,6 +178,30 @@ func FetchPostTags(client api.ChitClient, postID string) tea.Cmd {
 	return func() tea.Msg {
 		tags, err := client.GetTagsForPost(context.Background(), postID)
 		return PostTagsLoadedMsg{PostID: postID, Tags: tags, Err: err}
+	}
+}
+
+// FetchPostsTags fetches tags for a whole page of history in one request.
+func FetchPostsTags(client api.ChitClient, postIDs []string) tea.Cmd {
+	return func() tea.Msg {
+		tags, err := client.GetTagsForPosts(context.Background(), postIDs)
+		return PostsTagsLoadedMsg{Tags: tags, Err: err}
+	}
+}
+
+// EditPost returns a command that edits a post's text.
+func EditPost(client api.ChitClient, postID, content string) tea.Cmd {
+	return func() tea.Msg {
+		updated, err := client.UpdatePost(context.Background(), postID, content)
+		return PostEditedMsg{Post: updated, Err: err}
+	}
+}
+
+// DeletePost returns a command that deletes a post.
+func DeletePost(client api.ChitClient, postID string) tea.Cmd {
+	return func() tea.Msg {
+		err := client.DeletePost(context.Background(), postID)
+		return PostDeletedMsg{PostID: postID, Err: err}
 	}
 }
 

@@ -139,3 +139,39 @@ func (s *SqlTagStore) FilterPostIDsByTags(ctx context.Context, postIDs []string,
 	}
 	return ids, rows.Err()
 }
+
+// GetTagsForPosts returns the tags of many posts in one query, keyed by post
+// ID. Posts with no tags are absent from the map.
+//
+// It exists because the client needs the tags of a whole page of history at
+// once; asking per post issued sixty round trips per channel open, enough to
+// trip the server's own rate limit.
+func (s *SqlTagStore) GetTagsForPosts(ctx context.Context, messageIDs []string) (map[string][]*model.Tag, error) {
+	result := make(map[string][]*model.Tag)
+	if len(messageIDs) == 0 {
+		return result, nil
+	}
+
+	query := `SELECT mt.message_id, t.id, t.name
+		FROM tags t
+		INNER JOIN message_tags mt ON t.id = mt.tag_id
+		WHERE mt.message_id = ANY($1)
+		ORDER BY mt.message_id, t.name`
+
+	rows, err := s.sqlStore.pool.Query(ctx, query, messageIDs)
+	if err != nil {
+		return nil, fmt.Errorf("get tags for posts: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var postID string
+		t := &model.Tag{}
+		if err := rows.Scan(&postID, &t.ID, &t.Name); err != nil {
+			return nil, fmt.Errorf("scan tag: %w", err)
+		}
+		result[postID] = append(result[postID], t)
+	}
+
+	return result, rows.Err()
+}

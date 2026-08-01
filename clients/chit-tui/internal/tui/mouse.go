@@ -21,7 +21,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.scrollUnderPointer(msg.Y, -wheelScrollLines)
-		return m, nil
+		return m, m.maybeLoadOlder()
 	case tea.MouseButtonWheelDown:
 		if m.palette.Visible() {
 			m.palette.MoveCursor(1)

@@ -13,6 +13,8 @@ type KeyMap struct {
 	NewChannel key.Binding
 	TagPicker  key.Binding
 	Copy       key.Binding
+	Edit       key.Binding
+	Delete     key.Binding
 	Help       key.Binding
 	Escape     key.Binding
 }
@@ -55,6 +57,14 @@ func DefaultKeyMap() KeyMap {
 		Copy: key.NewBinding(
 			key.WithKeys("y"),
 			key.WithHelp("y", "copy selection"),
+		),
+		Edit: key.NewBinding(
+			key.WithKeys("e"),
+			key.WithHelp("e", "edit your post"),
+		),
+		Delete: key.NewBinding(
+			key.WithKeys("d"),
+			key.WithHelp("d", "delete your post"),
 		),
 		Help: key.NewBinding(
 			key.WithKeys("?"),

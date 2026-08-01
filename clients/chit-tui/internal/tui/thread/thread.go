@@ -218,3 +218,25 @@ func (m *Model) renderPost(p *model.Post, width int) string {
 	m.cache[p.ID] = rendered
 	return rendered
 }
+
+// UpdatePost replaces the root post or one of the replies in place, and
+// reports whether it was present. An edit to a post being read in a thread
+// should show there too, not only in the channel.
+func (m *Model) UpdatePost(p *model.Post) bool {
+	if m.rootPost != nil && m.rootPost.ID == p.ID {
+		m.rootPost = p
+		delete(m.cache, p.ID)
+		m.updateContent()
+		return true
+	}
+	for i, reply := range m.replies {
+		if reply.ID != p.ID {
+			continue
+		}
+		m.replies[i] = p
+		delete(m.cache, p.ID)
+		m.updateContent()
+		return true
+	}
+	return false
+}

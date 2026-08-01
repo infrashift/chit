@@ -117,10 +117,27 @@ type Model struct {
 	height                int
 	err                   error
 	errSeq                uint64
+	// History paging. historyPage is the newest page already loaded;
+	// loadingOlder guards against firing repeatedly while a fetch is in
+	// flight, and historyExhausted stops asking once the server runs out.
+	historyPage      int
+	loadingOlder     bool
+	historyExhausted bool
+	// editingPostID is set while a post is being edited; sending replaces
+	// that post instead of creating a new one.
+	editingPostID string
 	// searchTerm is the last submitted search, kept so a chosen result can
 	// be highlighted in the history.
 	searchTerm string
 }
+
+// Connection-state notices. They travel through the same transient status
+// line as errors because that is the only place the UI can say something
+// in passing.
+var (
+	errDisconnected = errors.New("connection lost — reconnecting")
+	errReconnected  = errors.New("reconnected — reloading messages")
+)
 
 // errSearchHitNotLoaded reports a result that is outside the loaded history.
 var errSearchHitNotLoaded = errors.New(
@@ -320,6 +337,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Editing loads the post back into the input; sending replaces it.
+		// Only your own posts, matching what the server enforces.
+		if key.Matches(msg, m.keys.Edit) && m.focus == FocusViewport {
+			if p := m.ownSelectedPost(); p != nil {
+				m.editingPostID = p.ID
+				m.input.SetValue(p.Content)
+				return m, m.setFocus(FocusInput)
+			}
+		}
+
+		if key.Matches(msg, m.keys.Delete) && m.focus == FocusViewport {
+			if p := m.ownSelectedPost(); p != nil {
+				return m, DeletePost(m.client, p.ID)
+			}
+		}
+
 		if key.Matches(msg, m.keys.TagPicker) {
 			// In the history pane the subject is the post under the cursor;
 			// in a thread there is no cursor, so it is the root post.
@@ -398,9 +431,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, ViewChannel(m.client, msg.Channels[0].ID))
 			}
 		}
-		for _, ch := range msg.Channels {
-			cmds = append(cmds, FetchChannelMembers(m.client, ch.ID))
-		}
 		return m, tea.Batch(cmds...)
 
 	case PostsLoadedMsg:
@@ -411,10 +441,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.setError(msg.Err)
 		}
 		m.viewport.SetPosts(msg.Posts.Order)
+		m.historyPage = 0
+		m.loadingOlder = false
+		// A short first page means there is nothing older to ask for.
+		m.historyExhausted = len(msg.Posts.Order) < historyPageSize
 		m.resolvePostUsers(msg.Posts.Order)
 		m.postTags = make(map[string][]*model.Tag)
-		for _, p := range msg.Posts.Order {
-			cmds = append(cmds, FetchPostTags(m.client, p.ID))
+		if ids := postIDs(msg.Posts.Order); len(ids) > 0 {
+			cmds = append(cmds, FetchPostsTags(m.client, ids))
 		}
 		if fetchCmd := m.fetchMissingUsers(); fetchCmd != nil {
 			cmds = append(cmds, fetchCmd)
@@ -430,6 +464,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pendingPostTags = nil
 			return m, cmd
 		}
+		// Show the message immediately rather than waiting for the WebSocket
+		// echo. With the socket down the echo never arrives, so the input
+		// cleared and the message simply vanished.
+		if msg.Post != nil && msg.Post.Type != postTypeCommandResponse &&
+			m.activeChan != nil && msg.Post.ChannelID == m.activeChan.ID &&
+			!m.viewport.HasPost(msg.Post.ID) {
+			m.viewport.AppendPost(msg.Post)
+			m.resolvePostUsers([]*model.Post{msg.Post})
+			if fetchCmd := m.fetchMissingUsers(); fetchCmd != nil {
+				cmds = append(cmds, fetchCmd)
+			}
+		}
+
 		if msg.Post != nil && len(m.pendingPostTags) > 0 {
 			for _, tagName := range m.pendingPostTags {
 				found := false
@@ -503,9 +550,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case WSStateMsg:
+		// Keep listening for the next transition before doing anything else,
+		// or a single drop would be the last one ever reported.
+		cmds = append(cmds, ListenWSState(m.wsClient))
+
+		if msg.Unauthorized {
+			m.wsConnected = false
+			return m.handleAuthExpired()
+		}
+
+		wasConnected := m.wsConnected
+		m.wsConnected = msg.Connected
+
+		if msg.Connected && !wasConnected {
+			// Events that arrived while the socket was down are gone for
+			// good — the stream has no replay — so re-read the channel
+			// rather than leaving a silent hole in the history.
+			if m.activeChan != nil {
+				cmds = append(cmds, FetchPosts(m.client, m.activeChan.ID, 0, 60))
+			}
+			cmds = append(cmds, m.setError(errReconnected))
+		}
+		if !msg.Connected && wasConnected {
+			cmds = append(cmds, m.setError(errDisconnected))
+		}
+		return m, tea.Batch(cmds...)
+
 	case WSConnectedMsg:
 		m.wsConnected = true
-		return m, ListenWebSocket(m.wsClient)
+		// Both listeners start here: one for events, one for transport
+		// state. Returning only the first is what left disconnects silent.
+		return m, tea.Batch(ListenWebSocket(m.wsClient), ListenWSState(m.wsClient))
 
 	case WebSocketEventMsg:
 		return m.handleWSEvent(msg)
@@ -536,6 +612,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if content == "" && len(tagNames) > 0 {
 			content = msg.Content
 		}
+		if m.editingPostID != "" {
+			id := m.editingPostID
+			m.editingPostID = ""
+			m.pendingPostTags = nil
+			return m, EditPost(m.client, id, content)
+		}
+
 		m.pendingPostTags = tagNames
 		post := &model.Post{
 			ChannelID: m.activeChan.ID,
@@ -668,7 +751,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dmChannels = msg.Channels
 		m.palette.SetDMChannels(msg.Channels)
 		m.resolveDMDisplayNames()
-		// Fetch members for DM channels (for unread counts)
+		// DM channels need their members for unread counts. This is still one
+		// request each, but the DM list is small and bounded by conversations
+		// the user actually has, unlike the channel list.
 		for _, ch := range msg.Channels {
 			cmds = append(cmds, FetchChannelMembers(m.client, ch.ID))
 		}
@@ -875,6 +960,67 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.viewport.ClearSelection()
 		return m, m.setError(fmt.Errorf("copied %d %s to the clipboard", msg.lines, noun))
+
+	case OlderPostsLoadedMsg:
+		m.loadingOlder = false
+		if msg.Err != nil {
+			return m, m.setError(msg.Err)
+		}
+		if m.activeChan == nil || msg.ChannelID != m.activeChan.ID {
+			// The reader moved on while this was in flight.
+			return m, nil
+		}
+		older := msg.Posts.Order
+		if len(older) < historyPageSize {
+			m.historyExhausted = true
+		}
+		if len(older) == 0 {
+			return m, nil
+		}
+		m.historyPage = msg.Page
+		m.viewport.PrependPosts(older)
+		m.resolvePostUsers(older)
+		if ids := postIDs(older); len(ids) > 0 {
+			cmds = append(cmds, FetchPostsTags(m.client, ids))
+		}
+		if fetchCmd := m.fetchMissingUsers(); fetchCmd != nil {
+			cmds = append(cmds, fetchCmd)
+		}
+		return m, tea.Batch(cmds...)
+
+	case PostEditedMsg:
+		if msg.Err != nil {
+			return m, m.setError(msg.Err)
+		}
+		if msg.Post != nil {
+			m.viewport.UpdatePost(msg.Post)
+			m.thread.UpdatePost(msg.Post)
+		}
+		return m, nil
+
+	case PostDeletedMsg:
+		if msg.Err != nil {
+			return m, m.setError(msg.Err)
+		}
+		m.viewport.RemovePost(msg.PostID)
+		return m, nil
+
+	case PostsTagsLoadedMsg:
+		if msg.Err != nil {
+			// Tags are decoration; a failure here should not disturb the
+			// channel, but it should not vanish silently either.
+			return m, m.setError(msg.Err)
+		}
+		for postID, tags := range msg.Tags {
+			m.postTags[postID] = tags
+			names := make([]string, 0, len(tags))
+			for _, t := range tags {
+				names = append(names, t.Name)
+			}
+			m.viewport.SetPostTags(postID, names)
+		}
+		m.thread.SetPostTags(m.postTags)
+		return m, nil
 
 	case ClearErrMsg:
 		if msg.Seq == m.errSeq {
@@ -1122,6 +1268,12 @@ func (m *Model) selectChannel(ch *model.Channel) tea.Cmd {
 	}
 	cmds = append(cmds, FetchPosts(m.client, ch.ID, 0, 60))
 	cmds = append(cmds, ViewChannel(m.client, ch.ID))
+	// Members are only read for the active channel, to build the @-mention
+	// list, so they are fetched on entry rather than for every channel in
+	// every team up front.
+	if _, have := m.channelMembers[ch.ID]; !have {
+		cmds = append(cmds, FetchChannelMembers(m.client, ch.ID))
+	}
 	m.mainPane = paneChannel
 	m.thread.Clear()
 	m.threadCounts = make(map[string]int)
@@ -1259,6 +1411,11 @@ func (m Model) delegateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.focus {
 	case FocusViewport:
 		m.viewport, cmd = m.viewport.Update(msg)
+		// Scrolling or moving the cursor may have reached the oldest loaded
+		// post, which is the cue to fetch the page before it.
+		if older := m.maybeLoadOlder(); older != nil {
+			return m, tea.Batch(cmd, older)
+		}
 	case FocusInput:
 		m.input, cmd = m.input.Update(msg)
 	case FocusThread:
@@ -1290,6 +1447,10 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 		if m.activeChan != nil && p.ChannelID == m.activeChan.ID {
+			// The sender already appended this from the HTTP response.
+			if m.viewport.HasPost(p.ID) {
+				return m, tea.Batch(cmds...)
+			}
 			m.viewport.AppendPost(&p)
 			if p.RootID != "" {
 				m.threadCounts[p.RootID]++
@@ -1304,6 +1465,54 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 			}
 		} else {
 			m.setUnread(p.ChannelID, m.unread[p.ChannelID]+1)
+		}
+
+	case model.WebSocketEventPostEdited,
+		model.WebSocketEventPostPinned,
+		model.WebSocketEventPostUnpinned:
+		// All three carry the full post, so one path updates in place.
+		if p := decodePost(evt.Data); p != nil {
+			m.viewport.UpdatePost(p)
+			if m.mainPane == paneThread {
+				m.thread.UpdatePost(p)
+			}
+		}
+
+	case model.WebSocketEventPostDeleted:
+		postID, _ := evt.Data["post_id"].(string)
+		if postID != "" {
+			m.viewport.RemovePost(postID)
+			// Leave a thread whose root just disappeared, rather than
+			// showing an empty pane.
+			if m.mainPane == paneThread && m.thread.RootPost() != nil &&
+				m.thread.RootPost().ID == postID {
+				cmds = append(cmds, m.closeThread())
+			}
+		}
+
+	case model.WebSocketEventChannelUpdated:
+		if ch := decodeChannel(evt.Data); ch != nil {
+			m.replaceChannel(ch)
+		}
+
+	case model.WebSocketEventChannelDeleted:
+		channelID, _ := evt.Data["channel_id"].(string)
+		if channelID != "" {
+			cmds = append(cmds, m.removeChannel(channelID)...)
+		}
+
+	case model.WebSocketEventUserRemoved:
+		channelID, _ := evt.Data["channel_id"].(string)
+		userID, _ := evt.Data["user_id"].(string)
+		if m.me != nil && userID == m.me.ID {
+			// Removed from a channel: it is no longer reachable.
+			cmds = append(cmds, m.removeChannel(channelID)...)
+		} else if channelID != "" {
+			// Someone else left; the @-mention list is now stale.
+			delete(m.channelMembers, channelID)
+			if m.activeChan != nil && m.activeChan.ID == channelID {
+				cmds = append(cmds, FetchChannelMembers(m.client, channelID))
+			}
 		}
 
 	case model.WebSocketEventCommandResponse:
@@ -1711,6 +1920,142 @@ func (m *Model) registerCommandResponseAuthor(slug string) {
 	}
 	names[commandResponseUserID] = name
 	m.viewport.SetUsernames(names)
+}
+
+// decodePost re-decodes an event payload into a post. Event data arrives as a
+// generic map, so it is round-tripped through JSON rather than asserted field
+// by field.
+func decodePost(data map[string]any) *model.Post {
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return nil
+	}
+	var p model.Post
+	if err := json.Unmarshal(raw, &p); err != nil || p.ID == "" {
+		return nil
+	}
+	return &p
+}
+
+// decodeChannel re-decodes an event payload into a channel.
+func decodeChannel(data map[string]any) *model.Channel {
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return nil
+	}
+	var c model.Channel
+	if err := json.Unmarshal(raw, &c); err != nil || c.ID == "" {
+		return nil
+	}
+	return &c
+}
+
+// replaceChannel swaps an updated channel into every list holding it, so a
+// rename shows up without a reload.
+func (m *Model) replaceChannel(ch *model.Channel) {
+	replace := func(list []*model.Channel) {
+		for i, existing := range list {
+			if existing.ID == ch.ID {
+				list[i] = ch
+			}
+		}
+	}
+	replace(m.channels)
+	replace(m.dmChannels)
+	for _, list := range m.channelsByTeam {
+		replace(list)
+	}
+	if m.activeChan != nil && m.activeChan.ID == ch.ID {
+		m.activeChan = ch
+	}
+	m.palette.SetChannels(m.channels)
+	m.palette.SetDMChannels(m.dmChannels)
+}
+
+// removeChannel drops a channel that no longer exists or is no longer
+// reachable, moving off it first if it is the one being viewed.
+func (m *Model) removeChannel(channelID string) []tea.Cmd {
+	if channelID == "" {
+		return nil
+	}
+
+	drop := func(list []*model.Channel) []*model.Channel {
+		out := list[:0]
+		for _, ch := range list {
+			if ch.ID != channelID {
+				out = append(out, ch)
+			}
+		}
+		return out
+	}
+	m.channels = drop(m.channels)
+	m.dmChannels = drop(m.dmChannels)
+	for team, list := range m.channelsByTeam {
+		m.channelsByTeam[team] = drop(list)
+	}
+	delete(m.channelMembers, channelID)
+	delete(m.unread, channelID)
+	delete(m.mentions, channelID)
+
+	m.palette.SetChannels(m.channels)
+	m.palette.SetDMChannels(m.dmChannels)
+
+	var cmds []tea.Cmd
+	if m.activeChan != nil && m.activeChan.ID == channelID {
+		m.activeChan = nil
+		m.viewport.SetPosts(nil)
+		if len(m.channels) > 0 {
+			cmds = append(cmds, m.selectChannel(m.channels[0]))
+		}
+		cmds = append(cmds, m.setError(errChannelGone))
+	}
+	return cmds
+}
+
+// errChannelGone explains why the view moved on its own.
+var errChannelGone = errors.New("this channel is no longer available")
+
+// postTypeCommandResponse marks the synthetic post the server returns when a
+// message turns out to be a slash command. It is delivered separately as an
+// ephemeral event and must not be appended twice.
+const postTypeCommandResponse = "command_response"
+
+// historyPageSize is how many posts a page of history holds. A short page
+// means the server has no more to give.
+const historyPageSize = 60
+
+// maybeLoadOlder fetches the next page when the reader reaches the top of the
+// loaded history. Without it the channel is capped at the first page and
+// older messages are simply unreachable.
+func (m *Model) maybeLoadOlder() tea.Cmd {
+	if m.activeChan == nil || m.loadingOlder || m.historyExhausted {
+		return nil
+	}
+	if !m.viewport.AtTop() {
+		return nil
+	}
+	m.loadingOlder = true
+	return FetchOlderPosts(m.client, m.activeChan.ID, m.historyPage+1, historyPageSize)
+}
+
+// ownSelectedPost returns the selected post when the current user wrote it.
+// The server refuses edits and deletes from anyone else, so the keys are
+// inert on other people's messages rather than producing an error.
+func (m Model) ownSelectedPost() *model.Post {
+	p := m.viewport.SelectedPost()
+	if p == nil || m.me == nil || p.UserID != m.me.ID {
+		return nil
+	}
+	return p
+}
+
+// postIDs collects the IDs of a page of posts.
+func postIDs(posts []*model.Post) []string {
+	ids := make([]string, 0, len(posts))
+	for _, p := range posts {
+		ids = append(ids, p.ID)
+	}
+	return ids
 }
 
 // SelectedPostID returns the ID of the post under the history cursor, or "".

@@ -6,6 +6,7 @@ import (
 
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui"
+	"github.com/infrashift/chit/clients/chit-tui/internal/ws"
 )
 
 // mockClient implements api.ChitClient for testing.
@@ -115,6 +116,28 @@ func (m *mockClient) AddTagToPost(_ context.Context, _, _ string) error {
 func (m *mockClient) RemoveTagFromPost(_ context.Context, _, _ string) error {
 	return m.err
 }
+func (m *mockClient) GetTagsForPosts(_ context.Context, ids []string) (map[string][]*model.Tag, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	out := make(map[string][]*model.Tag, len(ids))
+	for _, id := range ids {
+		if len(m.postTags) > 0 {
+			out[id] = m.postTags
+		}
+	}
+	return out, nil
+}
+
+func (m *mockClient) UpdatePost(_ context.Context, postID, content string) (*model.Post, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &model.Post{ID: postID, Content: content, UserID: "u1", ChannelID: "c1"}, nil
+}
+
+func (m *mockClient) DeletePost(_ context.Context, _ string) error { return m.err }
+
 func (m *mockClient) AddChannelMember(_ context.Context, _, _ string) error {
 	return m.err
 }
@@ -126,15 +149,20 @@ func (m *mockClient) RemoveChannelMember(_ context.Context, _, _ string) error {
 // mockWSClient implements ws.WSClient for testing.
 type mockWSClient struct {
 	events chan model.WebSocketEvent
+	state  chan ws.ConnState
 }
 
 func newMockWSClient() *mockWSClient {
-	return &mockWSClient{events: make(chan model.WebSocketEvent, 10)}
+	return &mockWSClient{
+		events: make(chan model.WebSocketEvent, 10),
+		state:  make(chan ws.ConnState, 10),
+	}
 }
 
 func (m *mockWSClient) Connect() error                      { return nil }
 func (m *mockWSClient) Close() error                        { close(m.events); return nil }
 func (m *mockWSClient) Events() <-chan model.WebSocketEvent { return m.events }
+func (m *mockWSClient) State() <-chan ws.ConnState          { return m.state }
 func (m *mockWSClient) Send(_ model.WebSocketMessage) error { return nil }
 func (m *mockWSClient) SetToken(_ string)                   {}
 

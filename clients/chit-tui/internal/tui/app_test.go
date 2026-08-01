@@ -1,11 +1,13 @@
 package tui_test
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/infrashift/chit/clients/chit-tui/internal/api"
 	"github.com/infrashift/chit/clients/chit-tui/internal/config"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/testutil"
@@ -37,6 +39,20 @@ func testModel() tui.Model {
 		users:    []*model.User{{ID: "u1", Username: "alice"}},
 	}
 	return tui.NewModel(cfg, client, nil, s, nil, nil, nil)
+}
+
+// modelWithClient builds a sized, logged-in model backed by a specific client,
+// so tests can observe the requests it makes.
+func modelWithClient(t *testing.T, client api.ChitClient) tui.Model {
+	t.Helper()
+
+	cfg := &config.Config{ServerURL: "http://localhost:8065"}
+	m := tui.NewModel(cfg, client, nil, styles.New(theme.TokyoNight()), nil, nil, nil)
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = updated.(tui.Model)
+	updated, _ = m.Update(tui.UserLoadedMsg{User: &model.User{ID: "u1", Username: "alice"}})
+	return updated.(tui.Model)
 }
 
 func setupModel(t *testing.T) tui.Model {
@@ -2008,5 +2024,505 @@ func TestModel_SearchResultOutsideHistoryReportsError(t *testing.T) {
 	}
 	if !strings.Contains(testutil.StripANSI(m.View()), "older than the loaded history") {
 		t.Errorf("no explanation shown:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+// The action-bar indicator used to stay green while the socket was dead:
+// reconnect was internal to the ws client and nothing was emitted on drop.
+func TestModel_DisconnectIsVisible(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.WSConnectedMsg{})
+	m = updated.(tui.Model)
+	connected := testutil.StripANSI(m.View())
+
+	updated, _ = m.Update(tui.WSStateMsg{Connected: false})
+	m = updated.(tui.Model)
+	dropped := testutil.StripANSI(m.View())
+
+	if dropped == connected {
+		t.Error("the view is identical connected and disconnected")
+	}
+	if !strings.Contains(dropped, "connection lost") {
+		t.Errorf("no disconnect notice shown:\n%s", dropped)
+	}
+}
+
+// Events during the gap are lost for good, so coming back has to re-read the
+// channel rather than leaving a silent hole.
+func TestModel_ReconnectBackfillsPosts(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.WSStateMsg{Connected: false})
+	m = updated.(tui.Model)
+
+	updated, cmd := m.Update(tui.WSStateMsg{Connected: true})
+	m = updated.(tui.Model)
+
+	if cmd == nil {
+		t.Fatal("reconnecting produced no commands; nothing was refetched")
+	}
+	if !strings.Contains(testutil.StripANSI(m.View()), "reconnected") {
+		t.Errorf("no reconnect notice shown:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+// A state change must re-arm the listener, or the first drop is the last one
+// ever reported.
+func TestModel_StateListenerReArms(t *testing.T) {
+	m := setupModel(t)
+
+	_, cmd := m.Update(tui.WSStateMsg{Connected: false})
+	if cmd == nil {
+		t.Fatal("no command returned; the listener was not re-armed")
+	}
+}
+
+// Rejected credentials cannot be fixed by retrying, so they must send the
+// user back to the login screen instead of reconnecting forever.
+func TestModel_UnauthorizedTriggersReLogin(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.WSStateMsg{Connected: false, Unauthorized: true})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "Chit Login") {
+		t.Errorf("expected the login screen:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+// countingClient records how many times each endpoint is called, so the
+// request-count guarantees below are asserted rather than assumed.
+type countingClient struct {
+	*mockClient
+	tagBatchCalls  int
+	tagSingleCalls int
+	memberCalls    int
+}
+
+func (c *countingClient) GetTagsForPosts(ctx context.Context, ids []string) (map[string][]*model.Tag, error) {
+	c.tagBatchCalls++
+	return c.mockClient.GetTagsForPosts(ctx, ids)
+}
+
+func (c *countingClient) GetTagsForPost(ctx context.Context, id string) ([]*model.Tag, error) {
+	c.tagSingleCalls++
+	return c.mockClient.GetTagsForPost(ctx, id)
+}
+
+func (c *countingClient) GetChannelMembers(ctx context.Context, id string) ([]*model.ChannelMember, error) {
+	c.memberCalls++
+	return c.mockClient.GetChannelMembers(ctx, id)
+}
+
+// Loading a page of history used to issue one tag request per post — sixty
+// per channel open, against a server limited to 10 rps with a burst of 50.
+func TestModel_ChannelLoadIssuesOneTagRequest(t *testing.T) {
+	client := &countingClient{mockClient: &mockClient{}}
+	m := modelWithClient(t, client)
+
+	posts := make([]*model.Post, 0, 60)
+	for i := range 60 {
+		posts = append(posts, &model.Post{
+			ID: fmt.Sprintf("p%d", i), UserID: "u1",
+			Content: "hi", CreateAt: 1700000000000,
+		})
+	}
+
+	_, cmd := m.Update(tui.PostsLoadedMsg{ChannelID: "c1", Posts: &model.PostList{Order: posts}})
+	drain(cmd)
+
+	if client.tagSingleCalls != 0 {
+		t.Errorf("per-post tag requests = %d, want 0", client.tagSingleCalls)
+	}
+	if client.tagBatchCalls != 1 {
+		t.Errorf("batched tag requests = %d, want exactly 1", client.tagBatchCalls)
+	}
+}
+
+// Members are only ever read for the active channel, so loading the channel
+// list must not fetch them for every channel in every team.
+func TestModel_ChannelListDoesNotFetchAllMembers(t *testing.T) {
+	client := &countingClient{mockClient: &mockClient{}}
+	m := modelWithClient(t, client)
+
+	channels := make([]*model.Channel, 0, 30)
+	for i := range 30 {
+		channels = append(channels, &model.Channel{
+			ID: fmt.Sprintf("c%d", i), DisplayName: fmt.Sprintf("Channel %d", i),
+		})
+	}
+
+	_, cmd := m.Update(tui.ChannelsLoadedMsg{TeamID: "t1", Channels: channels})
+	drain(cmd)
+
+	// At most the one channel auto-selected on load.
+	if client.memberCalls > 1 {
+		t.Errorf("member requests = %d for %d channels, want at most 1",
+			client.memberCalls, len(channels))
+	}
+}
+
+// drain runs a command tree to completion so the requests it issues are
+// counted. tea.Batch returns its children as a BatchMsg.
+func drain(cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	switch msg := cmd().(type) {
+	case tea.BatchMsg:
+		for _, c := range msg {
+			drain(c)
+		}
+	}
+}
+
+// A sent message used to appear only via the WebSocket echo, so with the
+// socket down the input cleared and the message vanished.
+func TestModel_OwnPostAppearsWithoutTheEcho(t *testing.T) {
+	m := setupModel(t)
+
+	post := &model.Post{ID: "new1", ChannelID: "c1", UserID: "u1",
+		Content: "sent while offline", CreateAt: 1700000009000}
+
+	updated, _ := m.Update(tui.PostCreatedMsg{Post: post})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "sent while offline") {
+		t.Errorf("own post not shown without the echo:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+// When the echo does arrive it must not duplicate the message.
+func TestModel_EchoDoesNotDuplicateOwnPost(t *testing.T) {
+	m := setupModel(t)
+
+	post := &model.Post{ID: "new1", ChannelID: "c1", UserID: "u1",
+		Content: "only once", CreateAt: 1700000009000}
+
+	updated, _ := m.Update(tui.PostCreatedMsg{Post: post})
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(tui.WebSocketEventMsg{Event: model.WebSocketEvent{
+		Event: model.WebSocketEventPosted,
+		Data: map[string]any{
+			"id": "new1", "channel_id": "c1", "user_id": "u1",
+			"content": "only once", "create_at": 1700000009000,
+		},
+	}})
+	m = updated.(tui.Model)
+
+	if n := strings.Count(testutil.StripANSI(m.View()), "only once"); n != 1 {
+		t.Errorf("message appears %d times, want 1", n)
+	}
+}
+
+// The synthetic post returned for a slash command is delivered separately as
+// an ephemeral event; appending it here would show it twice.
+func TestModel_CommandResponsePostIsNotAppended(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.PostCreatedMsg{Post: &model.Post{
+		ID: "cr1", ChannelID: "c1", UserID: "u1",
+		Type: "command_response", Content: "ephemeral reply",
+	}})
+	m = updated.(tui.Model)
+
+	if strings.Contains(testutil.StripANSI(m.View()), "ephemeral reply") {
+		t.Error("the command-response post was appended to the history")
+	}
+}
+
+// Ten of the fifteen declared event types had no handler, so the UI silently
+// drifted out of step with the server until a reload.
+func TestModel_PostEditedUpdatesInPlace(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.WebSocketEventMsg{Event: model.WebSocketEvent{
+		Event: model.WebSocketEventPostEdited,
+		Data: map[string]any{
+			"id": "p1", "channel_id": "c1", "user_id": "u1",
+			"content": "edited text", "create_at": 1700000000000,
+		},
+	}})
+	m = updated.(tui.Model)
+
+	view := testutil.StripANSI(m.View())
+	if !strings.Contains(view, "edited text") {
+		t.Errorf("edit not applied:\n%s", view)
+	}
+	if strings.Contains(view, "Hello") {
+		t.Errorf("the old text is still shown:\n%s", view)
+	}
+}
+
+func TestModel_PostDeletedRemovesIt(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.WebSocketEventMsg{Event: model.WebSocketEvent{
+		Event: model.WebSocketEventPostDeleted,
+		Data:  map[string]any{"post_id": "p1", "channel_id": "c1"},
+	}})
+	m = updated.(tui.Model)
+
+	if strings.Contains(testutil.StripANSI(m.View()), "Hello") {
+		t.Errorf("deleted post is still shown:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+// A rename should appear without a reload.
+func TestModel_ChannelUpdatedRenames(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.WebSocketEventMsg{Event: model.WebSocketEvent{
+		Event: model.WebSocketEventChannelUpdated,
+		Data:  map[string]any{"id": "c1", "display_name": "Renamed Channel"},
+	}})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "Renamed Channel") {
+		t.Errorf("rename not shown:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+// Being removed from the channel you are reading has to move you off it,
+// rather than leaving a view you can no longer refresh.
+func TestModel_RemovedFromActiveChannel(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.WebSocketEventMsg{Event: model.WebSocketEvent{
+		Event: model.WebSocketEventUserRemoved,
+		Data:  map[string]any{"channel_id": "c1", "user_id": "u1"},
+	}})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "no longer available") {
+		t.Errorf("no explanation shown:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+// Someone else leaving only invalidates the cached member list.
+func TestModel_OtherUserRemovedRefetchesMembers(t *testing.T) {
+	m := setupModel(t)
+
+	updated, cmd := m.Update(tui.WebSocketEventMsg{Event: model.WebSocketEvent{
+		Event: model.WebSocketEventUserRemoved,
+		Data:  map[string]any{"channel_id": "c1", "user_id": "someone-else"},
+	}})
+	m = updated.(tui.Model)
+
+	if cmd == nil {
+		t.Error("no refetch issued; the mention list stays stale")
+	}
+	if strings.Contains(testutil.StripANSI(m.View()), "no longer available") {
+		t.Error("another user leaving should not move me off the channel")
+	}
+}
+
+func TestModel_ChannelDeletedMovesAway(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.WebSocketEventMsg{Event: model.WebSocketEvent{
+		Event: model.WebSocketEventChannelDeleted,
+		Data:  map[string]any{"channel_id": "c1"},
+	}})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "no longer available") {
+		t.Errorf("no explanation shown:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+// Editing loads the post back into the input; sending then replaces it
+// rather than creating a new message.
+func TestModel_EditLoadsPostIntoInput(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab}) // focus history
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "Hello") {
+		t.Errorf("post text was not loaded into the input:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+func TestModel_SendWhileEditingUpdatesThePost(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(tui.Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	m = updated.(tui.Model)
+
+	updated, cmd := m.Update(input.SendMsg{Content: "revised text"})
+	m = updated.(tui.Model)
+	if cmd == nil {
+		t.Fatal("no command issued for the edit")
+	}
+
+	// Run it and feed the result back, as the runtime would.
+	if edited, ok := cmd().(tui.PostEditedMsg); ok {
+		updated, _ = m.Update(edited)
+		m = updated.(tui.Model)
+	} else {
+		t.Fatalf("expected PostEditedMsg, got %T", cmd())
+	}
+
+	view := testutil.StripANSI(m.View())
+	if !strings.Contains(view, "revised text") {
+		t.Errorf("edit not applied:\n%s", view)
+	}
+}
+
+// The server refuses edits from anyone but the author, so the keys must be
+// inert on other people's messages rather than producing an error.
+func TestModel_CannotEditSomeoneElsesPost(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.PostsLoadedMsg{
+		ChannelID: "c1",
+		Posts: &model.PostList{Order: []*model.Post{
+			{ID: "p9", UserID: "someone-else", Content: "not mine", CreateAt: 1700000000000},
+		}},
+	})
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(tui.Model)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m = updated.(tui.Model)
+
+	if cmd != nil {
+		t.Error("delete was issued for another user's post")
+	}
+	if !strings.Contains(testutil.StripANSI(m.View()), "not mine") {
+		t.Error("the post was removed locally despite not being ours")
+	}
+}
+
+func TestModel_DeleteRemovesOwnPost(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.PostDeletedMsg{PostID: "p1"})
+	m = updated.(tui.Model)
+
+	if strings.Contains(testutil.StripANSI(m.View()), "Hello") {
+		t.Errorf("post still shown after delete:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+// fullPage builds a page of history of the size the client asks for.
+func fullPage(t *testing.T, prefix string, n int) []*model.Post {
+	t.Helper()
+	posts := make([]*model.Post, 0, n)
+	for i := range n {
+		posts = append(posts, &model.Post{
+			ID: fmt.Sprintf("%s%d", prefix, i), ChannelID: "c1", UserID: "u1",
+			Content:  fmt.Sprintf("%s message %d", prefix, i),
+			CreateAt: int64(1700000000000 + i*1000),
+		})
+	}
+	return posts
+}
+
+// History was capped at the first page, so older messages were unreachable.
+func TestModel_ScrollingToTopLoadsOlderPosts(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.PostsLoadedMsg{
+		ChannelID: "c1", Posts: &model.PostList{Order: fullPage(t, "recent", 60)},
+	})
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(tui.Model)
+
+	// Scroll to the very top.
+	var cmd tea.Cmd
+	for range 200 {
+		updated, cmd = m.Update(tea.MouseMsg{
+			X: 5, Y: 5, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp,
+		})
+		m = updated.(tui.Model)
+		if cmd != nil {
+			break
+		}
+	}
+
+	if cmd == nil {
+		t.Fatal("reaching the top issued no fetch; older history is unreachable")
+	}
+	if msg, ok := cmd().(tui.OlderPostsLoadedMsg); !ok {
+		t.Errorf("expected OlderPostsLoadedMsg, got %T", cmd())
+	} else if msg.Page != 1 {
+		t.Errorf("requested page %d, want 1", msg.Page)
+	}
+}
+
+// Older posts go before the loaded ones, and the reader stays put.
+func TestModel_OlderPostsArePrepended(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.PostsLoadedMsg{
+		ChannelID: "c1", Posts: &model.PostList{Order: fullPage(t, "recent", 60)},
+	})
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(tui.OlderPostsLoadedMsg{
+		ChannelID: "c1", Page: 1,
+		Posts: &model.PostList{Order: fullPage(t, "older", 60)},
+	})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "recent message") {
+		t.Error("the current page was replaced instead of extended")
+	}
+}
+
+// A short page means the server has nothing older, so stop asking.
+func TestModel_ShortPageStopsPaging(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.PostsLoadedMsg{
+		ChannelID: "c1", Posts: &model.PostList{Order: fullPage(t, "recent", 3)},
+	})
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(tui.Model)
+
+	for range 50 {
+		var cmd tea.Cmd
+		updated, cmd = m.Update(tea.MouseMsg{
+			X: 5, Y: 5, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp,
+		})
+		m = updated.(tui.Model)
+		if cmd != nil {
+			t.Fatal("kept paging after a short first page")
+		}
+	}
+}
+
+// A page that arrives after the reader has moved on must not be spliced into
+// the channel they are now looking at.
+func TestModel_OlderPostsForAnotherChannelIgnored(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.PostsLoadedMsg{
+		ChannelID: "c1", Posts: &model.PostList{Order: fullPage(t, "recent", 60)},
+	})
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(tui.OlderPostsLoadedMsg{
+		ChannelID: "other", Page: 1,
+		Posts: &model.PostList{Order: fullPage(t, "elsewhere", 60)},
+	})
+	m = updated.(tui.Model)
+
+	if strings.Contains(testutil.StripANSI(m.View()), "elsewhere message") {
+		t.Error("a page for another channel was spliced in")
 	}
 }

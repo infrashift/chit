@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -84,6 +85,39 @@ func getTagsForPost(a *app.App) http.HandlerFunc {
 			WriteAppError(w, "getTagsForPost", err)
 			return
 		}
+		WriteJSON(w, http.StatusOK, tags)
+	}
+}
+
+// getTagsForPosts returns tags for a batch of posts. It exists so opening a
+// channel costs one request instead of one per message.
+func getTagsForPosts(a *app.App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := ContextGetUser(r)
+
+		var body struct {
+			PostIDs []string `json:"post_ids"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			WriteError(w, model.NewBadRequestError("getTagsForPosts", "invalid request body"))
+			return
+		}
+
+		// Bounded so a client cannot ask for the tags of an unbounded set in
+		// one request; a page of history is well under this.
+		const maxPosts = 200
+		if len(body.PostIDs) > maxPosts {
+			WriteError(w, model.NewBadRequestError("getTagsForPosts",
+				fmt.Sprintf("post_ids is limited to %d entries", maxPosts)))
+			return
+		}
+
+		tags, err := a.GetTagsForPosts(r.Context(), body.PostIDs, user.ID)
+		if err != nil {
+			WriteAppError(w, "getTagsForPosts", err)
+			return
+		}
+
 		WriteJSON(w, http.StatusOK, tags)
 	}
 }

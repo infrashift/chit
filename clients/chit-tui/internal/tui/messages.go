@@ -80,6 +80,16 @@ type ChannelMembersLoadedMsg struct {
 // WSConnectedMsg signals that the WebSocket connection succeeded.
 type WSConnectedMsg struct{}
 
+// WSStateMsg reports a WebSocket connect or disconnect. It is distinct from
+// WSConnectedMsg, which only ever meant "the initial dial returned".
+type WSStateMsg struct {
+	Connected bool
+	Err       error
+	// Unauthorized marks a failure retrying cannot fix; the session is gone
+	// and the user has to sign in again.
+	Unauthorized bool
+}
+
 // DMChannelsLoadedMsg is sent when DM channels are fetched.
 type DMChannelsLoadedMsg struct {
 	Channels []*model.Channel
@@ -123,6 +133,12 @@ type PostTagsLoadedMsg struct {
 	Err    error
 }
 
+// PostsTagsLoadedMsg carries tags for many posts, keyed by post ID.
+type PostsTagsLoadedMsg struct {
+	Tags map[string][]*model.Tag
+	Err  error
+}
+
 // TagAddedToPostMsg is sent when a tag is added to a post.
 type TagAddedToPostMsg struct {
 	PostID string
@@ -157,4 +173,25 @@ type ErrMsg struct {
 // ClearErrMsg is sent after a timeout to auto-dismiss a status bar error.
 type ClearErrMsg struct {
 	Seq uint64
+}
+
+// PostEditedMsg reports the result of editing a post.
+type PostEditedMsg struct {
+	Post *model.Post
+	Err  error
+}
+
+// PostDeletedMsg reports the result of deleting a post.
+type PostDeletedMsg struct {
+	PostID string
+	Err    error
+}
+
+// OlderPostsLoadedMsg carries an older page of history, to be prepended
+// rather than replacing what is displayed.
+type OlderPostsLoadedMsg struct {
+	ChannelID string
+	Page      int
+	Posts     *model.PostList
+	Err       error
 }

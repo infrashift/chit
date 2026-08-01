@@ -20,6 +20,8 @@ type ChitClient interface {
 	GetMyChannels(ctx context.Context, teamID string) ([]*model.Channel, error)
 	GetChannelPosts(ctx context.Context, channelID string, page, perPage int) (*model.PostList, error)
 	CreatePost(ctx context.Context, post *model.Post) (*model.Post, error)
+	UpdatePost(ctx context.Context, postID, content string) (*model.Post, error)
+	DeletePost(ctx context.Context, postID string) error
 	GetPost(ctx context.Context, postID string) (*model.Post, error)
 	PinPost(ctx context.Context, postID string) error
 	UnpinPost(ctx context.Context, postID string) error
@@ -37,6 +39,9 @@ type ChitClient interface {
 	GetAllTags(ctx context.Context) ([]*model.Tag, error)
 	CreateTag(ctx context.Context, name string) (*model.Tag, error)
 	GetTagsForPost(ctx context.Context, postID string) ([]*model.Tag, error)
+	// GetTagsForPosts fetches tags for many posts in one request, so opening
+	// a channel does not cost one round trip per message.
+	GetTagsForPosts(ctx context.Context, postIDs []string) (map[string][]*model.Tag, error)
 	AddTagToPost(ctx context.Context, postID, tagID string) error
 	RemoveTagFromPost(ctx context.Context, postID, tagID string) error
 	AddChannelMember(ctx context.Context, channelID, userID string) error
@@ -83,6 +88,21 @@ func (c *httpClient) get(ctx context.Context, path string, out any) error {
 	if err != nil {
 		return err
 	}
+	return c.do(req, out)
+}
+
+// put issues a PUT with a JSON body. Editing is the only thing that needs it,
+// so it mirrors post rather than generalising further.
+func (c *httpClient) put(ctx context.Context, path string, body, out any) error {
+	data, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, "PUT", c.baseURL+path, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
 	return c.do(req, out)
 }
 
@@ -248,6 +268,20 @@ func (c *httpClient) CreateChannel(ctx context.Context, channel *model.Channel) 
 	return &ch, err
 }
 
+// UpdatePost edits a post's text. The server rejects anyone but the author or
+// a system admin.
+func (c *httpClient) UpdatePost(ctx context.Context, postID, content string) (*model.Post, error) {
+	var updated model.Post
+	err := c.put(ctx, fmt.Sprintf("/posts/%s", postID),
+		map[string]string{"content": content}, &updated)
+	return &updated, err
+}
+
+// DeletePost soft-deletes a post.
+func (c *httpClient) DeletePost(ctx context.Context, postID string) error {
+	return c.del(ctx, fmt.Sprintf("/posts/%s", postID))
+}
+
 func (c *httpClient) GetAllTags(ctx context.Context) ([]*model.Tag, error) {
 	var tags []*model.Tag
 	err := c.get(ctx, "/tags", &tags)
@@ -263,6 +297,15 @@ func (c *httpClient) CreateTag(ctx context.Context, name string) (*model.Tag, er
 func (c *httpClient) GetTagsForPost(ctx context.Context, postID string) ([]*model.Tag, error) {
 	var tags []*model.Tag
 	err := c.get(ctx, fmt.Sprintf("/posts/%s/tags", postID), &tags)
+	return tags, err
+}
+
+func (c *httpClient) GetTagsForPosts(ctx context.Context, postIDs []string) (map[string][]*model.Tag, error) {
+	tags := make(map[string][]*model.Tag)
+	if len(postIDs) == 0 {
+		return tags, nil
+	}
+	err := c.post(ctx, "/posts/tags", map[string][]string{"post_ids": postIDs}, &tags)
 	return tags, err
 }
 

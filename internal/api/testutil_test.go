@@ -715,6 +715,20 @@ func (s *mockTagStore) RemoveTagFromPost(_ context.Context, messageID, tagID str
 	return nil
 }
 
+func (s *mockTagStore) GetTagsForPosts(ctx context.Context, messageIDs []string) (map[string][]*model.Tag, error) {
+	out := make(map[string][]*model.Tag, len(messageIDs))
+	for _, id := range messageIDs {
+		tags, err := s.GetTagsForPost(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if len(tags) > 0 {
+			out[id] = tags
+		}
+	}
+	return out, nil
+}
+
 func (s *mockTagStore) GetTagsForPost(_ context.Context, messageID string) ([]*model.Tag, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
