@@ -117,6 +117,12 @@ type Model struct {
 	height                int
 	err                   error
 	errSeq                uint64
+	// History paging. historyPage is the newest page already loaded;
+	// loadingOlder guards against firing repeatedly while a fetch is in
+	// flight, and historyExhausted stops asking once the server runs out.
+	historyPage      int
+	loadingOlder     bool
+	historyExhausted bool
 	// editingPostID is set while a post is being edited; sending replaces
 	// that post instead of creating a new one.
 	editingPostID string
@@ -435,6 +441,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.setError(msg.Err)
 		}
 		m.viewport.SetPosts(msg.Posts.Order)
+		m.historyPage = 0
+		m.loadingOlder = false
+		// A short first page means there is nothing older to ask for.
+		m.historyExhausted = len(msg.Posts.Order) < historyPageSize
 		m.resolvePostUsers(msg.Posts.Order)
 		m.postTags = make(map[string][]*model.Tag)
 		if ids := postIDs(msg.Posts.Order); len(ids) > 0 {
@@ -951,6 +961,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.ClearSelection()
 		return m, m.setError(fmt.Errorf("copied %d %s to the clipboard", msg.lines, noun))
 
+	case OlderPostsLoadedMsg:
+		m.loadingOlder = false
+		if msg.Err != nil {
+			return m, m.setError(msg.Err)
+		}
+		if m.activeChan == nil || msg.ChannelID != m.activeChan.ID {
+			// The reader moved on while this was in flight.
+			return m, nil
+		}
+		older := msg.Posts.Order
+		if len(older) < historyPageSize {
+			m.historyExhausted = true
+		}
+		if len(older) == 0 {
+			return m, nil
+		}
+		m.historyPage = msg.Page
+		m.viewport.PrependPosts(older)
+		m.resolvePostUsers(older)
+		if ids := postIDs(older); len(ids) > 0 {
+			cmds = append(cmds, FetchPostsTags(m.client, ids))
+		}
+		if fetchCmd := m.fetchMissingUsers(); fetchCmd != nil {
+			cmds = append(cmds, fetchCmd)
+		}
+		return m, tea.Batch(cmds...)
+
 	case PostEditedMsg:
 		if msg.Err != nil {
 			return m, m.setError(msg.Err)
@@ -1374,6 +1411,11 @@ func (m Model) delegateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.focus {
 	case FocusViewport:
 		m.viewport, cmd = m.viewport.Update(msg)
+		// Scrolling or moving the cursor may have reached the oldest loaded
+		// post, which is the cue to fetch the page before it.
+		if older := m.maybeLoadOlder(); older != nil {
+			return m, tea.Batch(cmd, older)
+		}
 	case FocusInput:
 		m.input, cmd = m.input.Update(msg)
 	case FocusThread:
@@ -1977,6 +2019,24 @@ var errChannelGone = errors.New("this channel is no longer available")
 // message turns out to be a slash command. It is delivered separately as an
 // ephemeral event and must not be appended twice.
 const postTypeCommandResponse = "command_response"
+
+// historyPageSize is how many posts a page of history holds. A short page
+// means the server has no more to give.
+const historyPageSize = 60
+
+// maybeLoadOlder fetches the next page when the reader reaches the top of the
+// loaded history. Without it the channel is capped at the first page and
+// older messages are simply unreachable.
+func (m *Model) maybeLoadOlder() tea.Cmd {
+	if m.activeChan == nil || m.loadingOlder || m.historyExhausted {
+		return nil
+	}
+	if !m.viewport.AtTop() {
+		return nil
+	}
+	m.loadingOlder = true
+	return FetchOlderPosts(m.client, m.activeChan.ID, m.historyPage+1, historyPageSize)
+}
 
 // ownSelectedPost returns the selected post when the current user wrote it.
 // The server refuses edits and deletes from anyone else, so the keys are

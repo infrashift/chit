@@ -126,6 +126,35 @@ func (m *Model) RemovePost(id string) bool {
 	return false
 }
 
+// PrependPosts inserts older posts before the ones already loaded, keeping
+// the reader where they are. Appending would put them at the wrong end, and
+// re-setting the whole list would jump the view to the bottom.
+func (m *Model) PrependPosts(older []*model.Post) {
+	if len(older) == 0 {
+		return
+	}
+
+	// Older arrives newest-first, like the rest of the history API; reverse
+	// it so the combined list stays chronological.
+	reversed := make([]*model.Post, len(older))
+	for i, p := range older {
+		reversed[len(older)-1-i] = p
+	}
+
+	linesBefore := len(m.plainLines)
+	m.posts = append(reversed, m.posts...)
+	m.cursor += len(reversed)
+	m.updateContent()
+
+	// Hold the reader's position: everything they were looking at has moved
+	// down by however many lines were inserted above it.
+	m.viewport.SetYOffset(m.viewport.YOffset + (len(m.plainLines) - linesBefore))
+}
+
+// AtTop reports whether the view is scrolled to the oldest loaded post, which
+// is when there is any point fetching more.
+func (m Model) AtTop() bool { return m.viewport.YOffset <= 0 }
+
 // SetUsernames updates the username map and re-renders only posts whose
 // displayed username actually changed.
 func (m *Model) SetUsernames(names map[string]string) {

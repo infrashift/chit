@@ -41,6 +41,14 @@ func FetchPosts(client api.ChitClient, channelID string, page, perPage int) tea.
 	}
 }
 
+// FetchOlderPosts returns a command that fetches the next page of history.
+func FetchOlderPosts(client api.ChitClient, channelID string, page, perPage int) tea.Cmd {
+	return func() tea.Msg {
+		pl, err := client.GetChannelPosts(context.Background(), channelID, page, perPage)
+		return OlderPostsLoadedMsg{ChannelID: channelID, Page: page, Posts: pl, Err: err}
+	}
+}
+
 // CreatePost returns a command that creates a post.
 func CreatePost(client api.ChitClient, post *model.Post) tea.Cmd {
 	return func() tea.Msg {

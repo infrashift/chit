@@ -2413,3 +2413,116 @@ func TestModel_DeleteRemovesOwnPost(t *testing.T) {
 		t.Errorf("post still shown after delete:\n%s", testutil.StripANSI(m.View()))
 	}
 }
+
+// fullPage builds a page of history of the size the client asks for.
+func fullPage(t *testing.T, prefix string, n int) []*model.Post {
+	t.Helper()
+	posts := make([]*model.Post, 0, n)
+	for i := range n {
+		posts = append(posts, &model.Post{
+			ID: fmt.Sprintf("%s%d", prefix, i), ChannelID: "c1", UserID: "u1",
+			Content:  fmt.Sprintf("%s message %d", prefix, i),
+			CreateAt: int64(1700000000000 + i*1000),
+		})
+	}
+	return posts
+}
+
+// History was capped at the first page, so older messages were unreachable.
+func TestModel_ScrollingToTopLoadsOlderPosts(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.PostsLoadedMsg{
+		ChannelID: "c1", Posts: &model.PostList{Order: fullPage(t, "recent", 60)},
+	})
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(tui.Model)
+
+	// Scroll to the very top.
+	var cmd tea.Cmd
+	for range 200 {
+		updated, cmd = m.Update(tea.MouseMsg{
+			X: 5, Y: 5, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp,
+		})
+		m = updated.(tui.Model)
+		if cmd != nil {
+			break
+		}
+	}
+
+	if cmd == nil {
+		t.Fatal("reaching the top issued no fetch; older history is unreachable")
+	}
+	if msg, ok := cmd().(tui.OlderPostsLoadedMsg); !ok {
+		t.Errorf("expected OlderPostsLoadedMsg, got %T", cmd())
+	} else if msg.Page != 1 {
+		t.Errorf("requested page %d, want 1", msg.Page)
+	}
+}
+
+// Older posts go before the loaded ones, and the reader stays put.
+func TestModel_OlderPostsArePrepended(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.PostsLoadedMsg{
+		ChannelID: "c1", Posts: &model.PostList{Order: fullPage(t, "recent", 60)},
+	})
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(tui.OlderPostsLoadedMsg{
+		ChannelID: "c1", Page: 1,
+		Posts: &model.PostList{Order: fullPage(t, "older", 60)},
+	})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "recent message") {
+		t.Error("the current page was replaced instead of extended")
+	}
+}
+
+// A short page means the server has nothing older, so stop asking.
+func TestModel_ShortPageStopsPaging(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.PostsLoadedMsg{
+		ChannelID: "c1", Posts: &model.PostList{Order: fullPage(t, "recent", 3)},
+	})
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(tui.Model)
+
+	for range 50 {
+		var cmd tea.Cmd
+		updated, cmd = m.Update(tea.MouseMsg{
+			X: 5, Y: 5, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp,
+		})
+		m = updated.(tui.Model)
+		if cmd != nil {
+			t.Fatal("kept paging after a short first page")
+		}
+	}
+}
+
+// A page that arrives after the reader has moved on must not be spliced into
+// the channel they are now looking at.
+func TestModel_OlderPostsForAnotherChannelIgnored(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.PostsLoadedMsg{
+		ChannelID: "c1", Posts: &model.PostList{Order: fullPage(t, "recent", 60)},
+	})
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(tui.OlderPostsLoadedMsg{
+		ChannelID: "other", Page: 1,
+		Posts: &model.PostList{Order: fullPage(t, "elsewhere", 60)},
+	})
+	m = updated.(tui.Model)
+
+	if strings.Contains(testutil.StripANSI(m.View()), "elsewhere message") {
+		t.Error("a page for another channel was spliced in")
+	}
+}

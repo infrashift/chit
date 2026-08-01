@@ -683,3 +683,75 @@ func TestLineAtAccountsForScroll(t *testing.T) {
 		t.Errorf("LineAt(2) = %d, want 5 after scrolling 3", got)
 	}
 }
+
+// Prepending must keep the reader where they are: the content above them
+// grew, so their position has to move down by the same amount.
+func TestPrependPostsHoldsScrollPosition(t *testing.T) {
+	m := viewport.New(styles.New(theme.TokyoNight()))
+	m.SetSize(80, 10)
+
+	recent := make([]*model.Post, 0, 20)
+	for i := range 20 {
+		recent = append(recent, &model.Post{
+			ID: fmt.Sprintf("r%d", i), UserID: "u1",
+			Content: fmt.Sprintf("recent %d", i), CreateAt: 1700000000000,
+		})
+	}
+	m.SetPosts(recent)
+	m.ScrollBy(-9999) // to the top of what is loaded
+
+	// Whatever line the reader is looking at must stay put, regardless of
+	// which post it belongs to.
+	firstLineBefore := strings.SplitN(testutil.StripANSI(m.View()), "\n", 2)[0]
+
+	older := []*model.Post{
+		{ID: "o1", UserID: "u1", Content: "older one", CreateAt: 1600000001000},
+		{ID: "o2", UserID: "u1", Content: "older two", CreateAt: 1600000000000},
+	}
+	m.PrependPosts(older)
+
+	firstLineAfter := strings.SplitN(testutil.StripANSI(m.View()), "\n", 2)[0]
+	if firstLineAfter != firstLineBefore {
+		t.Errorf("the reader's position moved:\nbefore %q\nafter  %q",
+			firstLineBefore, firstLineAfter)
+	}
+	if !m.HasPost("o1") || !m.HasPost("o2") {
+		t.Error("older posts were not added")
+	}
+}
+
+func TestPrependPostsIgnoresEmpty(t *testing.T) {
+	m := viewport.New(styles.New(theme.TokyoNight()))
+	m.SetSize(80, 10)
+	m.SetPosts([]*model.Post{{ID: "p1", UserID: "u1", Content: "only", CreateAt: 1700000000000}})
+
+	before := m.View()
+	m.PrependPosts(nil)
+
+	if m.View() != before {
+		t.Error("prepending nothing changed the view")
+	}
+}
+
+func TestAtTop(t *testing.T) {
+	m := viewport.New(styles.New(theme.TokyoNight()))
+	m.SetSize(80, 5)
+
+	posts := make([]*model.Post, 0, 30)
+	for i := range 30 {
+		posts = append(posts, &model.Post{
+			ID: fmt.Sprintf("p%d", i), UserID: "u1",
+			Content: fmt.Sprintf("message %d", i), CreateAt: 1700000000000,
+		})
+	}
+	m.SetPosts(posts) // lands at the bottom
+
+	if m.AtTop() {
+		t.Error("AtTop is true at the bottom of a long history")
+	}
+
+	m.ScrollBy(-9999)
+	if !m.AtTop() {
+		t.Error("AtTop is false after scrolling to the top")
+	}
+}

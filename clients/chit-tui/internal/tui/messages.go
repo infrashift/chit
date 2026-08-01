@@ -186,3 +186,12 @@ type PostDeletedMsg struct {
 	PostID string
 	Err    error
 }
+
+// OlderPostsLoadedMsg carries an older page of history, to be prepended
+// rather than replacing what is displayed.
+type OlderPostsLoadedMsg struct {
+	ChannelID string
+	Page      int
+	Posts     *model.PostList
+	Err       error
+}
