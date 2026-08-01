@@ -50,6 +50,11 @@ func (m Model) View() string {
 	if m.Post.IsPinned {
 		badges = append(badges, m.styles.PinBadge.Render("[pinned]"))
 	}
+	// EditAt has always been carried on the model but never shown, so an
+	// edited message was indistinguishable from what was originally sent.
+	if m.Post.EditAt > 0 {
+		badges = append(badges, m.styles.Timestamp.Render("[edited]"))
+	}
 	if m.Post.Type == "encrypted" {
 		badges = append(badges, m.styles.Timestamp.Render("[encrypted]"))
 	}

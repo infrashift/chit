@@ -117,6 +117,9 @@ type Model struct {
 	height                int
 	err                   error
 	errSeq                uint64
+	// editingPostID is set while a post is being edited; sending replaces
+	// that post instead of creating a new one.
+	editingPostID string
 	// searchTerm is the last submitted search, kept so a chosen result can
 	// be highlighted in the history.
 	searchTerm string
@@ -325,6 +328,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if text != "" {
 				return m, copyToClipboard(text)
+			}
+		}
+
+		// Editing loads the post back into the input; sending replaces it.
+		// Only your own posts, matching what the server enforces.
+		if key.Matches(msg, m.keys.Edit) && m.focus == FocusViewport {
+			if p := m.ownSelectedPost(); p != nil {
+				m.editingPostID = p.ID
+				m.input.SetValue(p.Content)
+				return m, m.setFocus(FocusInput)
+			}
+		}
+
+		if key.Matches(msg, m.keys.Delete) && m.focus == FocusViewport {
+			if p := m.ownSelectedPost(); p != nil {
+				return m, DeletePost(m.client, p.ID)
 			}
 		}
 
@@ -583,6 +602,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if content == "" && len(tagNames) > 0 {
 			content = msg.Content
 		}
+		if m.editingPostID != "" {
+			id := m.editingPostID
+			m.editingPostID = ""
+			m.pendingPostTags = nil
+			return m, EditPost(m.client, id, content)
+		}
+
 		m.pendingPostTags = tagNames
 		post := &model.Post{
 			ChannelID: m.activeChan.ID,
@@ -924,6 +950,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.viewport.ClearSelection()
 		return m, m.setError(fmt.Errorf("copied %d %s to the clipboard", msg.lines, noun))
+
+	case PostEditedMsg:
+		if msg.Err != nil {
+			return m, m.setError(msg.Err)
+		}
+		if msg.Post != nil {
+			m.viewport.UpdatePost(msg.Post)
+			m.thread.UpdatePost(msg.Post)
+		}
+		return m, nil
+
+	case PostDeletedMsg:
+		if msg.Err != nil {
+			return m, m.setError(msg.Err)
+		}
+		m.viewport.RemovePost(msg.PostID)
+		return m, nil
 
 	case PostsTagsLoadedMsg:
 		if msg.Err != nil {
@@ -1934,6 +1977,17 @@ var errChannelGone = errors.New("this channel is no longer available")
 // message turns out to be a slash command. It is delivered separately as an
 // ephemeral event and must not be appended twice.
 const postTypeCommandResponse = "command_response"
+
+// ownSelectedPost returns the selected post when the current user wrote it.
+// The server refuses edits and deletes from anyone else, so the keys are
+// inert on other people's messages rather than producing an error.
+func (m Model) ownSelectedPost() *model.Post {
+	p := m.viewport.SelectedPost()
+	if p == nil || m.me == nil || p.UserID != m.me.ID {
+		return nil
+	}
+	return p
+}
 
 // postIDs collects the IDs of a page of posts.
 func postIDs(posts []*model.Post) []string {

@@ -20,6 +20,8 @@ type ChitClient interface {
 	GetMyChannels(ctx context.Context, teamID string) ([]*model.Channel, error)
 	GetChannelPosts(ctx context.Context, channelID string, page, perPage int) (*model.PostList, error)
 	CreatePost(ctx context.Context, post *model.Post) (*model.Post, error)
+	UpdatePost(ctx context.Context, postID, content string) (*model.Post, error)
+	DeletePost(ctx context.Context, postID string) error
 	GetPost(ctx context.Context, postID string) (*model.Post, error)
 	PinPost(ctx context.Context, postID string) error
 	UnpinPost(ctx context.Context, postID string) error
@@ -86,6 +88,21 @@ func (c *httpClient) get(ctx context.Context, path string, out any) error {
 	if err != nil {
 		return err
 	}
+	return c.do(req, out)
+}
+
+// put issues a PUT with a JSON body. Editing is the only thing that needs it,
+// so it mirrors post rather than generalising further.
+func (c *httpClient) put(ctx context.Context, path string, body, out any) error {
+	data, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, "PUT", c.baseURL+path, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
 	return c.do(req, out)
 }
 
@@ -249,6 +266,20 @@ func (c *httpClient) CreateChannel(ctx context.Context, channel *model.Channel) 
 	var ch model.Channel
 	err := c.post(ctx, "/channels", channel, &ch)
 	return &ch, err
+}
+
+// UpdatePost edits a post's text. The server rejects anyone but the author or
+// a system admin.
+func (c *httpClient) UpdatePost(ctx context.Context, postID, content string) (*model.Post, error) {
+	var updated model.Post
+	err := c.put(ctx, fmt.Sprintf("/posts/%s", postID),
+		map[string]string{"content": content}, &updated)
+	return &updated, err
+}
+
+// DeletePost soft-deletes a post.
+func (c *httpClient) DeletePost(ctx context.Context, postID string) error {
+	return c.del(ctx, fmt.Sprintf("/posts/%s", postID))
 }
 
 func (c *httpClient) GetAllTags(ctx context.Context) ([]*model.Tag, error) {

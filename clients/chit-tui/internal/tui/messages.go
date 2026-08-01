@@ -174,3 +174,15 @@ type ErrMsg struct {
 type ClearErrMsg struct {
 	Seq uint64
 }
+
+// PostEditedMsg reports the result of editing a post.
+type PostEditedMsg struct {
+	Post *model.Post
+	Err  error
+}
+
+// PostDeletedMsg reports the result of deleting a post.
+type PostDeletedMsg struct {
+	PostID string
+	Err    error
+}

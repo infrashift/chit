@@ -129,6 +129,15 @@ func (m *mockClient) GetTagsForPosts(_ context.Context, ids []string) (map[strin
 	return out, nil
 }
 
+func (m *mockClient) UpdatePost(_ context.Context, postID, content string) (*model.Post, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &model.Post{ID: postID, Content: content, UserID: "u1", ChannelID: "c1"}, nil
+}
+
+func (m *mockClient) DeletePost(_ context.Context, _ string) error { return m.err }
+
 func (m *mockClient) AddChannelMember(_ context.Context, _, _ string) error {
 	return m.err
 }

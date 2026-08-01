@@ -191,3 +191,24 @@ func TestPostView_NoTags(t *testing.T) {
 		t.Errorf("expected no tag badges:\n%s", view)
 	}
 }
+
+// An edited message must be distinguishable from what was originally sent.
+func TestView_ShowsEditedBadge(t *testing.T) {
+	s := styles.New(theme.TokyoNight())
+
+	original := post.New(&model.Post{
+		ID: "p1", UserID: "u1", Content: "hi", CreateAt: 1700000000000,
+	}, "alice", s, 80, nil, "", 0, nil).View()
+
+	edited := post.New(&model.Post{
+		ID: "p1", UserID: "u1", Content: "hi", CreateAt: 1700000000000,
+		EditAt: 1700000005000,
+	}, "alice", s, 80, nil, "", 0, nil).View()
+
+	if !strings.Contains(testutil.StripANSI(edited), "[edited]") {
+		t.Errorf("no edited badge:\n%s", testutil.StripANSI(edited))
+	}
+	if strings.Contains(testutil.StripANSI(original), "[edited]") {
+		t.Error("unedited post shows the badge")
+	}
+}

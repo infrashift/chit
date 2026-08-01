@@ -2332,3 +2332,84 @@ func TestModel_ChannelDeletedMovesAway(t *testing.T) {
 		t.Errorf("no explanation shown:\n%s", testutil.StripANSI(m.View()))
 	}
 }
+
+// Editing loads the post back into the input; sending then replaces it
+// rather than creating a new message.
+func TestModel_EditLoadsPostIntoInput(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab}) // focus history
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "Hello") {
+		t.Errorf("post text was not loaded into the input:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+func TestModel_SendWhileEditingUpdatesThePost(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(tui.Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	m = updated.(tui.Model)
+
+	updated, cmd := m.Update(input.SendMsg{Content: "revised text"})
+	m = updated.(tui.Model)
+	if cmd == nil {
+		t.Fatal("no command issued for the edit")
+	}
+
+	// Run it and feed the result back, as the runtime would.
+	if edited, ok := cmd().(tui.PostEditedMsg); ok {
+		updated, _ = m.Update(edited)
+		m = updated.(tui.Model)
+	} else {
+		t.Fatalf("expected PostEditedMsg, got %T", cmd())
+	}
+
+	view := testutil.StripANSI(m.View())
+	if !strings.Contains(view, "revised text") {
+		t.Errorf("edit not applied:\n%s", view)
+	}
+}
+
+// The server refuses edits from anyone but the author, so the keys must be
+// inert on other people's messages rather than producing an error.
+func TestModel_CannotEditSomeoneElsesPost(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.PostsLoadedMsg{
+		ChannelID: "c1",
+		Posts: &model.PostList{Order: []*model.Post{
+			{ID: "p9", UserID: "someone-else", Content: "not mine", CreateAt: 1700000000000},
+		}},
+	})
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(tui.Model)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m = updated.(tui.Model)
+
+	if cmd != nil {
+		t.Error("delete was issued for another user's post")
+	}
+	if !strings.Contains(testutil.StripANSI(m.View()), "not mine") {
+		t.Error("the post was removed locally despite not being ours")
+	}
+}
+
+func TestModel_DeleteRemovesOwnPost(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.PostDeletedMsg{PostID: "p1"})
+	m = updated.(tui.Model)
+
+	if strings.Contains(testutil.StripANSI(m.View()), "Hello") {
+		t.Errorf("post still shown after delete:\n%s", testutil.StripANSI(m.View()))
+	}
+}

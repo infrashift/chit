@@ -181,6 +181,22 @@ func FetchPostsTags(client api.ChitClient, postIDs []string) tea.Cmd {
 	}
 }
 
+// EditPost returns a command that edits a post's text.
+func EditPost(client api.ChitClient, postID, content string) tea.Cmd {
+	return func() tea.Msg {
+		updated, err := client.UpdatePost(context.Background(), postID, content)
+		return PostEditedMsg{Post: updated, Err: err}
+	}
+}
+
+// DeletePost returns a command that deletes a post.
+func DeletePost(client api.ChitClient, postID string) tea.Cmd {
+	return func() tea.Msg {
+		err := client.DeletePost(context.Background(), postID)
+		return PostDeletedMsg{PostID: postID, Err: err}
+	}
+}
+
 // AddTagToPostCmd returns a command that adds a tag to a post.
 func AddTagToPostCmd(client api.ChitClient, postID, tagID string) tea.Cmd {
 	return func() tea.Msg {
