@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -766,7 +767,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case skinpicker.SkinSelectedMsg:
-		t := theme.LoadNamed(msg.Name)
+		t, _, err := theme.ResolveNamed(msg.Name, config.ThemesDir())
+		if err != nil {
+			// The name came from a list this component built, so a failure
+			// here means the file changed underneath us.
+			errCmd := m.setError(fmt.Errorf("load theme %q: %w", msg.Name, err))
+			return m, tea.Batch(m.setFocus(FocusInput), errCmd)
+		}
+
+		// Persist so the choice survives a restart. Failing to write is worth
+		// surfacing but must not undo the theme change for this session.
+		var saveCmd tea.Cmd
+		if err := config.SaveTheme(msg.Name); err != nil {
+			saveCmd = m.setError(fmt.Errorf("theme applied but not saved: %w", err))
+		}
+
 		newStyles := styles.New(t)
 		m.styles = newStyles
 		m.viewport.SetStyles(newStyles)
@@ -777,8 +792,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, o := range m.overlays() {
 			o.setStyles(newStyles)
 		}
-		cmd := m.setFocus(FocusInput)
-		return m, cmd
+		return m, tea.Batch(m.setFocus(FocusInput), saveCmd)
 
 	case ClearErrMsg:
 		if msg.Seq == m.errSeq {

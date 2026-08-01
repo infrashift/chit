@@ -179,3 +179,66 @@ func TestEmbeddedSchemaMatchesFile(t *testing.T) {
 		t.Error("embedded config schema differs from schema/config.cue")
 	}
 }
+
+// A value CUE cannot encode discards the document rather than panicking. TOML
+// cannot express such a value, so this path is only reachable directly — but
+// it is the backstop that keeps a decoding surprise from taking down startup.
+func TestVetConfigDiscardsUnencodableDocument(t *testing.T) {
+	raw := map[string]any{"theme": make(chan int)}
+	var warnings []string
+
+	vetConfig(raw, &warnings)
+
+	if len(raw) != 0 {
+		t.Errorf("document should have been discarded, still holds %v", raw)
+	}
+	if len(warnings) == 0 {
+		t.Error("expected a warning")
+	}
+}
+
+// vetConfig leaves a valid document untouched.
+func TestVetConfigAcceptsValidDocument(t *testing.T) {
+	raw := map[string]any{"theme": "kanagawa", "appearance": "dark"}
+	var warnings []string
+
+	vetConfig(raw, &warnings)
+
+	if len(raw) != 2 {
+		t.Errorf("valid keys were dropped: %v", raw)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("valid document warned: %v", warnings)
+	}
+}
+
+func TestWriteConfigFailsOnMissingDirectory(t *testing.T) {
+	err := writeConfig(filepath.Join(t.TempDir(), "no-such-dir", "config.toml"), "theme = \"x\"\n")
+	if err == nil {
+		t.Error("expected an error when the parent directory does not exist")
+	}
+}
+
+// The rename is the last step and the one that can fail after a good write —
+// for instance when something already occupies the destination path.
+func TestWriteConfigFailsWhenDestinationIsADirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeConfig(dir, "theme = \"x\"\n"); err == nil {
+		t.Error("expected an error when the destination is a directory")
+	}
+
+	// The temp file must not be left behind.
+	entries, err := os.ReadDir(filepath.Dir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".config-") {
+			t.Errorf("temp file %q was left behind", e.Name())
+		}
+	}
+}

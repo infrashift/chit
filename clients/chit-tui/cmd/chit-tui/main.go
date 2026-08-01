@@ -12,7 +12,6 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/config"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 	"github.com/infrashift/chit/clients/chit-tui/internal/ws"
 )
 
@@ -24,6 +23,17 @@ var termResponseRe = regexp.MustCompile(
 )
 
 func main() {
+	opts, err := parseFlags(os.Stderr, os.Args[1:])
+	if err != nil {
+		// flag already reported the problem and printed usage.
+		os.Exit(2)
+	}
+
+	if opts.listThemes {
+		listThemes(os.Stdout)
+		return
+	}
+
 	cfg, warnings, err := config.Load()
 	// Warnings describe settings that were ignored. They are printed even when
 	// the load then fails, since an ignored setting is often the reason.
@@ -32,6 +42,17 @@ func main() {
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Resolved before the program starts: detecting terminal darkness queries
+	// the terminal, and the reply would land in the input stream otherwise.
+	activeTheme, themeWarnings, err := resolveTheme(opts, cfg)
+	for _, w := range themeWarnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "theme error: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -56,7 +77,7 @@ func main() {
 	client := api.NewClientWithTokenFn(cfg.ServerURL, tokenStore.Get, cfg.AuthHeader)
 	wsClient := ws.NewWSClientWithHeader(cfg.WSURL(), tokenStore.Get(), 256, cfg.AuthHeader)
 
-	s := styles.New(theme.LoadNamed(cfg.ThemeName))
+	s := styles.New(activeTheme)
 	m := tui.NewModel(cfg, client, wsClient, s, tokenStore, kratosClient, sessionStore)
 
 	// Filter out terminal response sequences (OSC replies, cursor position
