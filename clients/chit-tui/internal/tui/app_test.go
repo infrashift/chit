@@ -2176,3 +2176,159 @@ func drain(cmd tea.Cmd) {
 		}
 	}
 }
+
+// A sent message used to appear only via the WebSocket echo, so with the
+// socket down the input cleared and the message vanished.
+func TestModel_OwnPostAppearsWithoutTheEcho(t *testing.T) {
+	m := setupModel(t)
+
+	post := &model.Post{ID: "new1", ChannelID: "c1", UserID: "u1",
+		Content: "sent while offline", CreateAt: 1700000009000}
+
+	updated, _ := m.Update(tui.PostCreatedMsg{Post: post})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "sent while offline") {
+		t.Errorf("own post not shown without the echo:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+// When the echo does arrive it must not duplicate the message.
+func TestModel_EchoDoesNotDuplicateOwnPost(t *testing.T) {
+	m := setupModel(t)
+
+	post := &model.Post{ID: "new1", ChannelID: "c1", UserID: "u1",
+		Content: "only once", CreateAt: 1700000009000}
+
+	updated, _ := m.Update(tui.PostCreatedMsg{Post: post})
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(tui.WebSocketEventMsg{Event: model.WebSocketEvent{
+		Event: model.WebSocketEventPosted,
+		Data: map[string]any{
+			"id": "new1", "channel_id": "c1", "user_id": "u1",
+			"content": "only once", "create_at": 1700000009000,
+		},
+	}})
+	m = updated.(tui.Model)
+
+	if n := strings.Count(testutil.StripANSI(m.View()), "only once"); n != 1 {
+		t.Errorf("message appears %d times, want 1", n)
+	}
+}
+
+// The synthetic post returned for a slash command is delivered separately as
+// an ephemeral event; appending it here would show it twice.
+func TestModel_CommandResponsePostIsNotAppended(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.PostCreatedMsg{Post: &model.Post{
+		ID: "cr1", ChannelID: "c1", UserID: "u1",
+		Type: "command_response", Content: "ephemeral reply",
+	}})
+	m = updated.(tui.Model)
+
+	if strings.Contains(testutil.StripANSI(m.View()), "ephemeral reply") {
+		t.Error("the command-response post was appended to the history")
+	}
+}
+
+// Ten of the fifteen declared event types had no handler, so the UI silently
+// drifted out of step with the server until a reload.
+func TestModel_PostEditedUpdatesInPlace(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.WebSocketEventMsg{Event: model.WebSocketEvent{
+		Event: model.WebSocketEventPostEdited,
+		Data: map[string]any{
+			"id": "p1", "channel_id": "c1", "user_id": "u1",
+			"content": "edited text", "create_at": 1700000000000,
+		},
+	}})
+	m = updated.(tui.Model)
+
+	view := testutil.StripANSI(m.View())
+	if !strings.Contains(view, "edited text") {
+		t.Errorf("edit not applied:\n%s", view)
+	}
+	if strings.Contains(view, "Hello") {
+		t.Errorf("the old text is still shown:\n%s", view)
+	}
+}
+
+func TestModel_PostDeletedRemovesIt(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.WebSocketEventMsg{Event: model.WebSocketEvent{
+		Event: model.WebSocketEventPostDeleted,
+		Data:  map[string]any{"post_id": "p1", "channel_id": "c1"},
+	}})
+	m = updated.(tui.Model)
+
+	if strings.Contains(testutil.StripANSI(m.View()), "Hello") {
+		t.Errorf("deleted post is still shown:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+// A rename should appear without a reload.
+func TestModel_ChannelUpdatedRenames(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.WebSocketEventMsg{Event: model.WebSocketEvent{
+		Event: model.WebSocketEventChannelUpdated,
+		Data:  map[string]any{"id": "c1", "display_name": "Renamed Channel"},
+	}})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "Renamed Channel") {
+		t.Errorf("rename not shown:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+// Being removed from the channel you are reading has to move you off it,
+// rather than leaving a view you can no longer refresh.
+func TestModel_RemovedFromActiveChannel(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.WebSocketEventMsg{Event: model.WebSocketEvent{
+		Event: model.WebSocketEventUserRemoved,
+		Data:  map[string]any{"channel_id": "c1", "user_id": "u1"},
+	}})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "no longer available") {
+		t.Errorf("no explanation shown:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+// Someone else leaving only invalidates the cached member list.
+func TestModel_OtherUserRemovedRefetchesMembers(t *testing.T) {
+	m := setupModel(t)
+
+	updated, cmd := m.Update(tui.WebSocketEventMsg{Event: model.WebSocketEvent{
+		Event: model.WebSocketEventUserRemoved,
+		Data:  map[string]any{"channel_id": "c1", "user_id": "someone-else"},
+	}})
+	m = updated.(tui.Model)
+
+	if cmd == nil {
+		t.Error("no refetch issued; the mention list stays stale")
+	}
+	if strings.Contains(testutil.StripANSI(m.View()), "no longer available") {
+		t.Error("another user leaving should not move me off the channel")
+	}
+}
+
+func TestModel_ChannelDeletedMovesAway(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.WebSocketEventMsg{Event: model.WebSocketEvent{
+		Event: model.WebSocketEventChannelDeleted,
+		Data:  map[string]any{"channel_id": "c1"},
+	}})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "no longer available") {
+		t.Errorf("no explanation shown:\n%s", testutil.StripANSI(m.View()))
+	}
+}

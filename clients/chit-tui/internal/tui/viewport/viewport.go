@@ -82,6 +82,50 @@ func (m *Model) AppendPost(p *model.Post) {
 	m.viewport.GotoBottom()
 }
 
+// HasPost reports whether a post is already displayed. Both the HTTP response
+// to sending and the WebSocket echo carry the same post, so whichever arrives
+// second must not duplicate it.
+func (m Model) HasPost(id string) bool {
+	for _, p := range m.posts {
+		if p.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// UpdatePost replaces a post in place, keeping its position in the history,
+// and reports whether it was present.
+func (m *Model) UpdatePost(p *model.Post) bool {
+	for i, existing := range m.posts {
+		if existing.ID != p.ID {
+			continue
+		}
+		m.posts[i] = p
+		delete(m.cache, p.ID)
+		m.updateContent()
+		return true
+	}
+	return false
+}
+
+// RemovePost drops a post from the history and reports whether it was present.
+func (m *Model) RemovePost(id string) bool {
+	for i, p := range m.posts {
+		if p.ID != id {
+			continue
+		}
+		m.posts = append(m.posts[:i], m.posts[i+1:]...)
+		delete(m.cache, id)
+		if m.cursor >= len(m.posts) {
+			m.cursor = len(m.posts) - 1
+		}
+		m.updateContent()
+		return true
+	}
+	return false
+}
+
 // SetUsernames updates the username map and re-renders only posts whose
 // displayed username actually changed.
 func (m *Model) SetUsernames(names map[string]string) {

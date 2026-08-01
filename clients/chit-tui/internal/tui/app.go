@@ -435,6 +435,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pendingPostTags = nil
 			return m, cmd
 		}
+		// Show the message immediately rather than waiting for the WebSocket
+		// echo. With the socket down the echo never arrives, so the input
+		// cleared and the message simply vanished.
+		if msg.Post != nil && msg.Post.Type != postTypeCommandResponse &&
+			m.activeChan != nil && msg.Post.ChannelID == m.activeChan.ID &&
+			!m.viewport.HasPost(msg.Post.ID) {
+			m.viewport.AppendPost(msg.Post)
+			m.resolvePostUsers([]*model.Post{msg.Post})
+			if fetchCmd := m.fetchMissingUsers(); fetchCmd != nil {
+				cmds = append(cmds, fetchCmd)
+			}
+		}
+
 		if msg.Post != nil && len(m.pendingPostTags) > 0 {
 			for _, tagName := range m.pendingPostTags {
 				found := false
@@ -1349,6 +1362,10 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 		if m.activeChan != nil && p.ChannelID == m.activeChan.ID {
+			// The sender already appended this from the HTTP response.
+			if m.viewport.HasPost(p.ID) {
+				return m, tea.Batch(cmds...)
+			}
 			m.viewport.AppendPost(&p)
 			if p.RootID != "" {
 				m.threadCounts[p.RootID]++
@@ -1363,6 +1380,54 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 			}
 		} else {
 			m.setUnread(p.ChannelID, m.unread[p.ChannelID]+1)
+		}
+
+	case model.WebSocketEventPostEdited,
+		model.WebSocketEventPostPinned,
+		model.WebSocketEventPostUnpinned:
+		// All three carry the full post, so one path updates in place.
+		if p := decodePost(evt.Data); p != nil {
+			m.viewport.UpdatePost(p)
+			if m.mainPane == paneThread {
+				m.thread.UpdatePost(p)
+			}
+		}
+
+	case model.WebSocketEventPostDeleted:
+		postID, _ := evt.Data["post_id"].(string)
+		if postID != "" {
+			m.viewport.RemovePost(postID)
+			// Leave a thread whose root just disappeared, rather than
+			// showing an empty pane.
+			if m.mainPane == paneThread && m.thread.RootPost() != nil &&
+				m.thread.RootPost().ID == postID {
+				cmds = append(cmds, m.closeThread())
+			}
+		}
+
+	case model.WebSocketEventChannelUpdated:
+		if ch := decodeChannel(evt.Data); ch != nil {
+			m.replaceChannel(ch)
+		}
+
+	case model.WebSocketEventChannelDeleted:
+		channelID, _ := evt.Data["channel_id"].(string)
+		if channelID != "" {
+			cmds = append(cmds, m.removeChannel(channelID)...)
+		}
+
+	case model.WebSocketEventUserRemoved:
+		channelID, _ := evt.Data["channel_id"].(string)
+		userID, _ := evt.Data["user_id"].(string)
+		if m.me != nil && userID == m.me.ID {
+			// Removed from a channel: it is no longer reachable.
+			cmds = append(cmds, m.removeChannel(channelID)...)
+		} else if channelID != "" {
+			// Someone else left; the @-mention list is now stale.
+			delete(m.channelMembers, channelID)
+			if m.activeChan != nil && m.activeChan.ID == channelID {
+				cmds = append(cmds, FetchChannelMembers(m.client, channelID))
+			}
 		}
 
 	case model.WebSocketEventCommandResponse:
@@ -1771,6 +1836,104 @@ func (m *Model) registerCommandResponseAuthor(slug string) {
 	names[commandResponseUserID] = name
 	m.viewport.SetUsernames(names)
 }
+
+// decodePost re-decodes an event payload into a post. Event data arrives as a
+// generic map, so it is round-tripped through JSON rather than asserted field
+// by field.
+func decodePost(data map[string]any) *model.Post {
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return nil
+	}
+	var p model.Post
+	if err := json.Unmarshal(raw, &p); err != nil || p.ID == "" {
+		return nil
+	}
+	return &p
+}
+
+// decodeChannel re-decodes an event payload into a channel.
+func decodeChannel(data map[string]any) *model.Channel {
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return nil
+	}
+	var c model.Channel
+	if err := json.Unmarshal(raw, &c); err != nil || c.ID == "" {
+		return nil
+	}
+	return &c
+}
+
+// replaceChannel swaps an updated channel into every list holding it, so a
+// rename shows up without a reload.
+func (m *Model) replaceChannel(ch *model.Channel) {
+	replace := func(list []*model.Channel) {
+		for i, existing := range list {
+			if existing.ID == ch.ID {
+				list[i] = ch
+			}
+		}
+	}
+	replace(m.channels)
+	replace(m.dmChannels)
+	for _, list := range m.channelsByTeam {
+		replace(list)
+	}
+	if m.activeChan != nil && m.activeChan.ID == ch.ID {
+		m.activeChan = ch
+	}
+	m.palette.SetChannels(m.channels)
+	m.palette.SetDMChannels(m.dmChannels)
+}
+
+// removeChannel drops a channel that no longer exists or is no longer
+// reachable, moving off it first if it is the one being viewed.
+func (m *Model) removeChannel(channelID string) []tea.Cmd {
+	if channelID == "" {
+		return nil
+	}
+
+	drop := func(list []*model.Channel) []*model.Channel {
+		out := list[:0]
+		for _, ch := range list {
+			if ch.ID != channelID {
+				out = append(out, ch)
+			}
+		}
+		return out
+	}
+	m.channels = drop(m.channels)
+	m.dmChannels = drop(m.dmChannels)
+	for team, list := range m.channelsByTeam {
+		m.channelsByTeam[team] = drop(list)
+	}
+	delete(m.channelMembers, channelID)
+	delete(m.unread, channelID)
+	delete(m.mentions, channelID)
+
+	m.palette.SetChannels(m.channels)
+	m.palette.SetDMChannels(m.dmChannels)
+
+	var cmds []tea.Cmd
+	if m.activeChan != nil && m.activeChan.ID == channelID {
+		m.activeChan = nil
+		m.viewport.SetPosts(nil)
+		if len(m.channels) > 0 {
+			cmds = append(cmds, m.selectChannel(m.channels[0]))
+		}
+		cmds = append(cmds, m.setError(errChannelGone))
+	}
+	return cmds
+}
+
+// errChannelGone explains why the view moved on its own.
+var errChannelGone = errors.New("this channel is no longer available")
+
+// postTypeCommandResponse marks the synthetic post the server returns when a
+// message turns out to be a slash command. It is delivered separately as an
+// ephemeral event and must not be appended twice.
+const postTypeCommandResponse = "command_response"
 
 // postIDs collects the IDs of a page of posts.
 func postIDs(posts []*model.Post) []string {
