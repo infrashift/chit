@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -544,10 +545,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case ChannelViewedMsg:
-		if msg.Err == nil {
-			m.setUnread(msg.ChannelID, 0)
-			m.setMention(msg.ChannelID, 0)
+		if msg.Err != nil {
+			// Marking read failed, so the badge is about to disagree with
+			// what the reader just did. Saying so beats leaving them to
+			// wonder why the channel still looks unread.
+			return m, m.setError(fmt.Errorf("could not mark the channel read: %w", msg.Err))
 		}
+		m.setUnread(msg.ChannelID, 0)
+		m.setMention(msg.ChannelID, 0)
 		return m, nil
 
 	case WSStateMsg:
@@ -872,7 +877,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case PostTagsLoadedMsg:
 		if msg.Err != nil {
-			return m, nil
+			// Tags are decoration, but silently never appearing looks like
+			// the post has none.
+			return m, m.setError(fmt.Errorf("could not load tags: %w", msg.Err))
 		}
 		m.postTags[msg.PostID] = msg.Tags
 		var names []string
@@ -1438,12 +1445,12 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 
 	switch evt.Event {
 	case model.WebSocketEventPosted:
-		data, err := json.Marshal(evt.Data)
-		if err != nil {
-			return m, tea.Batch(cmds...)
-		}
-		var p model.Post
-		if err := json.Unmarshal(data, &p); err != nil {
+		p := decodePost(evt.Data)
+		if p == nil {
+			// A payload the client cannot read means the two sides disagree
+			// about the schema. Dropped silently, that looks like messages
+			// simply never arriving.
+			slog.Warn("could not decode a posted event", "event", evt.Event)
 			return m, tea.Batch(cmds...)
 		}
 		if m.activeChan != nil && p.ChannelID == m.activeChan.ID {
@@ -1451,15 +1458,15 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 			if m.viewport.HasPost(p.ID) {
 				return m, tea.Batch(cmds...)
 			}
-			m.viewport.AppendPost(&p)
+			m.viewport.AppendPost(p)
 			if p.RootID != "" {
 				m.threadCounts[p.RootID]++
 				m.viewport.SetThreadCounts(m.threadCounts)
 				if m.mainPane == paneThread && m.thread.RootPost() != nil && m.thread.RootPost().ID == p.RootID {
-					m.thread.AppendReply(&p)
+					m.thread.AppendReply(p)
 				}
 			}
-			m.resolvePostUsers([]*model.Post{&p})
+			m.resolvePostUsers([]*model.Post{p})
 			if fetchCmd := m.fetchMissingUsers(); fetchCmd != nil {
 				cmds = append(cmds, fetchCmd)
 			}
@@ -1536,24 +1543,21 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 
 	case model.WebSocketEventThreadUpdated:
 		if threadData, ok := evt.Data["thread"]; ok {
-			data, err := json.Marshal(threadData)
-			if err == nil {
-				var t model.Thread
-				if json.Unmarshal(data, &t) == nil {
-					m.threadCounts[t.PostID] = t.ReplyCount
-					m.viewport.SetThreadCounts(m.threadCounts)
-				}
+			var t model.Thread
+			if err := reDecode(threadData, &t); err != nil {
+				slog.Warn("could not decode a thread_updated payload", "error", err)
+			} else {
+				m.threadCounts[t.PostID] = t.ReplyCount
+				m.viewport.SetThreadCounts(m.threadCounts)
 			}
 		}
 		if postData, ok := evt.Data["post"]; ok {
-			data, err := json.Marshal(postData)
-			if err == nil {
-				var p model.Post
-				if json.Unmarshal(data, &p) == nil {
-					if p.RootID != "" && m.mainPane == paneThread && m.thread.RootPost() != nil && m.thread.RootPost().ID == p.RootID {
-						m.thread.AppendReply(&p)
-					}
-				}
+			var p model.Post
+			if err := reDecode(postData, &p); err != nil {
+				slog.Warn("could not decode a thread_updated post", "error", err)
+			} else if p.RootID != "" && m.mainPane == paneThread &&
+				m.thread.RootPost() != nil && m.thread.RootPost().ID == p.RootID {
+				m.thread.AppendReply(&p)
 			}
 		}
 
@@ -1779,21 +1783,30 @@ func (m Model) handleLoginSuccess(msg login.LoginSuccessMsg) (tea.Model, tea.Cmd
 	if m.cfg != nil {
 		serverURL = m.cfg.ServerURL
 	}
-	_ = m.sessionStore.Save(auth.StoredSession{
+	// A failed save means this login will not survive a restart. It does not
+	// stop the session working now, so it is a warning rather than a failure.
+	var saveCmd tea.Cmd
+	if err := m.sessionStore.Save(auth.StoredSession{
 		ServerURL: serverURL,
 		Token:     msg.Token,
 		ExpiresAt: msg.ExpiresAt,
-	})
+	}); err != nil {
+		saveCmd = m.setError(fmt.Errorf("signed in, but the session could not be saved: %w", err))
+	}
 
 	m.appState = AppStateRunning
-	return m, m.initRunning()
+	return m, tea.Batch(m.initRunning(), saveCmd)
 }
 
 func (m Model) handleAuthExpired() (tea.Model, tea.Cmd) {
 	m.appState = AppStateReLogin
 	m.wsConnected = false
 	m.loginModel.Reset()
-	_ = m.sessionStore.Clear()
+	// A stored token that cannot be cleared would be retried on next start
+	// and fail the same way, so this is worth knowing about.
+	if err := m.sessionStore.Clear(); err != nil {
+		slog.Warn("could not clear the stored session", "error", err)
+	}
 
 	// Close existing WS connection.
 	if m.wsClient != nil {
@@ -1807,7 +1820,12 @@ func (m Model) handleLogout() (tea.Model, tea.Cmd) {
 	if m.tokenStore != nil {
 		m.tokenStore.Set("")
 	}
-	_ = m.sessionStore.Clear()
+	// Logging out and leaving the token on disk would sign the user straight
+	// back in on next start, which is the opposite of what they asked for.
+	var clearCmd tea.Cmd
+	if err := m.sessionStore.Clear(); err != nil {
+		clearCmd = m.setError(fmt.Errorf("signed out, but the stored session remains: %w", err))
+	}
 
 	m.appState = AppStateLogin
 	m.wsConnected = false
@@ -1817,7 +1835,7 @@ func (m Model) handleLogout() (tea.Model, tea.Cmd) {
 		_ = m.wsClient.Close()
 	}
 
-	return m, nil
+	return m, clearCmd
 }
 
 // activeChannelDisplayName resolves the human-readable name of the active
@@ -1920,6 +1938,17 @@ func (m *Model) registerCommandResponseAuthor(slug string) {
 	}
 	names[commandResponseUserID] = name
 	m.viewport.SetUsernames(names)
+}
+
+// reDecode round-trips a decoded event field back through JSON into a typed
+// value. Event payloads arrive as generic maps, so this is how they are read
+// without asserting field by field.
+func reDecode(v any, out any) error {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(raw, out)
 }
 
 // decodePost re-decodes an event payload into a post. Event data arrives as a

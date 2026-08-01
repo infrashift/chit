@@ -2,6 +2,7 @@ package tui_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -2524,5 +2525,49 @@ func TestModel_OlderPostsForAnotherChannelIgnored(t *testing.T) {
 
 	if strings.Contains(testutil.StripANSI(m.View()), "elsewhere message") {
 		t.Error("a page for another channel was spliced in")
+	}
+}
+
+// Failing to mark a channel read leaves its badge disagreeing with what the
+// reader just did; it used to say nothing at all.
+func TestModel_ChannelViewedErrorIsReported(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.ChannelViewedMsg{
+		ChannelID: "c1", Err: errors.New("boom"),
+	})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "mark the channel read") {
+		t.Errorf("no explanation shown:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+// Tags that silently never load look like a post that has none.
+func TestModel_TagLoadErrorIsReported(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.PostTagsLoadedMsg{
+		PostID: "p1", Err: errors.New("boom"),
+	})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "load tags") {
+		t.Errorf("no explanation shown:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+// A payload the client cannot read must not look like a message that never
+// arrived; it is dropped, but not silently.
+func TestModel_UndecodablePostedEventDoesNotCrash(t *testing.T) {
+	m := setupModel(t)
+
+	_, cmd := m.Update(tui.WebSocketEventMsg{Event: model.WebSocketEvent{
+		Event: model.WebSocketEventPosted,
+		Data:  map[string]any{"id": 12345}, // wrong type for a string field
+	}})
+
+	if cmd == nil {
+		t.Error("the listener was not re-armed after an undecodable event")
 	}
 }
