@@ -88,118 +88,6 @@ type themeFile struct {
 	SearchMatchActive string `json:"search_match_active"`
 }
 
-// TokyoNight returns the default Tokyo Night theme.
-func TokyoNight() Theme {
-	return Theme{
-		Name:          "Tokyo Night",
-		Author:        "chit-tui",
-		Background:    hexColor("#1a1b26"),
-		Foreground:    hexColor("#c0caf5"),
-		Subtle:        hexColor("#565f89"),
-		Accent:        hexColor("#7aa2f7"),
-		Error:         hexColor("#f7768e"),
-		Success:       hexColor("#9ece6a"),
-		Warning:       hexColor("#e0af68"),
-		Border:        hexColor("#3b4261"),
-		ActiveBorder:  hexColor("#7aa2f7"),
-		Highlight:     hexColor("#292e42"),
-		Muted:         hexColor("#545c7e"),
-		Username:      hexColor("#bb9af7"),
-		Timestamp:     hexColor("#565f89"),
-		UnreadBadge:   hexColor("#7aa2f7"),
-		PinBadge:      hexColor("#e0af68"),
-		ChannelActive: hexColor("#7aa2f7"),
-		MentionBadge:  hexColor("#f7768e"),
-		MentionText:   hexColor("#7aa2f7"),
-		MentionSelfBg: hexColor("#e0af68"),
-		TagBadge:      hexColor("#9ece6a"),
-	}.derive()
-}
-
-// Catppuccin returns the Catppuccin Mocha theme.
-func Catppuccin() Theme {
-	return Theme{
-		Name:          "Catppuccin Mocha",
-		Author:        "catppuccin",
-		Background:    hexColor("#1e1e2e"),
-		Foreground:    hexColor("#cdd6f4"),
-		Subtle:        hexColor("#6c7086"),
-		Accent:        hexColor("#89b4fa"),
-		Error:         hexColor("#f38ba8"),
-		Success:       hexColor("#a6e3a1"),
-		Warning:       hexColor("#f9e2af"),
-		Border:        hexColor("#313244"),
-		ActiveBorder:  hexColor("#89b4fa"),
-		Highlight:     hexColor("#313244"),
-		Muted:         hexColor("#585b70"),
-		Username:      hexColor("#cba6f7"),
-		Timestamp:     hexColor("#6c7086"),
-		UnreadBadge:   hexColor("#89b4fa"),
-		PinBadge:      hexColor("#f9e2af"),
-		ChannelActive: hexColor("#89b4fa"),
-		MentionBadge:  hexColor("#f38ba8"),
-		MentionText:   hexColor("#89b4fa"),
-		MentionSelfBg: hexColor("#f9e2af"),
-		TagBadge:      hexColor("#a6e3a1"),
-	}.derive()
-}
-
-// Kanagawa returns the Kanagawa theme.
-func Kanagawa() Theme {
-	return Theme{
-		Name:          "Kanagawa",
-		Author:        "rebelot",
-		Background:    hexColor("#1f1f28"),
-		Foreground:    hexColor("#dcd7ba"),
-		Subtle:        hexColor("#727169"),
-		Accent:        hexColor("#7e9cd8"),
-		Error:         hexColor("#e82424"),
-		Success:       hexColor("#98bb6c"),
-		Warning:       hexColor("#e6c384"),
-		Border:        hexColor("#2a2a37"),
-		ActiveBorder:  hexColor("#7e9cd8"),
-		Highlight:     hexColor("#2a2a37"),
-		Muted:         hexColor("#54546d"),
-		Username:      hexColor("#957fb8"),
-		Timestamp:     hexColor("#727169"),
-		UnreadBadge:   hexColor("#7fb4ca"),
-		PinBadge:      hexColor("#e6c384"),
-		ChannelActive: hexColor("#7e9cd8"),
-		MentionBadge:  hexColor("#e82424"),
-		MentionText:   hexColor("#7e9cd8"),
-		MentionSelfBg: hexColor("#e6c384"),
-		TagBadge:      hexColor("#98bb6c"),
-	}.derive()
-}
-
-// Nightfox returns the Nightfox theme.
-func Nightfox() Theme {
-	return Theme{
-		Name:          "Nightfox",
-		Author:        "EdenEast",
-		Background:    hexColor("#192330"),
-		Foreground:    hexColor("#cdcecf"),
-		Subtle:        hexColor("#71839b"),
-		Accent:        hexColor("#719cd6"),
-		Error:         hexColor("#c94f6d"),
-		Success:       hexColor("#81b29a"),
-		Warning:       hexColor("#dbc074"),
-		Border:        hexColor("#29394f"),
-		ActiveBorder:  hexColor("#719cd6"),
-		Highlight:     hexColor("#29394f"),
-		Muted:         hexColor("#575860"),
-		Username:      hexColor("#9d79d6"),
-		Timestamp:     hexColor("#71839b"),
-		UnreadBadge:   hexColor("#63cdcf"),
-		PinBadge:      hexColor("#dbc074"),
-		ChannelActive: hexColor("#719cd6"),
-		MentionBadge:  hexColor("#c94f6d"),
-		MentionText:   hexColor("#719cd6"),
-		MentionSelfBg: hexColor("#dbc074"),
-		TagBadge:      hexColor("#81b29a"),
-	}.derive()
-}
-
 // LoadFromFile loads a theme from a JSON file.
 func LoadFromFile(path string) (Theme, error) {
 	data, err := os.ReadFile(path)
@@ -216,14 +104,6 @@ func ParseJSON(data []byte) (Theme, error) {
 		return Theme{}, err
 	}
 	return tf.toTheme(), nil
-}
-
-// builtinThemes maps names to built-in theme constructors.
-var builtinThemes = map[string]func() Theme{
-	"tokyo-night": TokyoNight,
-	"catppuccin":  Catppuccin,
-	"kanagawa":    Kanagawa,
-	"nightfox":    Nightfox,
 }
 
 // ListAvailable returns sorted names of all available themes.
@@ -257,8 +137,8 @@ func LoadNamed(name string) Theme {
 	if name == "" {
 		return TokyoNight()
 	}
-	if fn, ok := builtinThemes[name]; ok {
-		return fn()
+	if t, ok := Lookup(name); ok {
+		return t
 	}
 	dir := skinsDir()
 	path := filepath.Join(dir, name+".json")
