@@ -103,6 +103,184 @@ rm ~/.config/chit-tui/session.json
 
 Or use the `/logout` slash command in chit-tui.
 
+## Running several clients at once
+
+Anything involving two people — a mention arriving, a membership change
+broadcasting, a reply appearing in someone else's thread — needs more than one
+client. You can run as many as you like on a single machine.
+
+:::caution[This is why a second client appears impossible]
+Every client writes its session to the same file, `~/.config/chit-tui/session.json`,
+unless told otherwise. Start a second client without changing that and it
+overwrites the first one's token: both windows end up logged in as whoever
+authenticated last. Give each client its own `CHIT_SESSION_FILE` and they stay
+independent.
+:::
+
+Give each client its own session file, and its own config file if you want to
+tell them apart at a glance:
+
+```bash
+mkdir -p /tmp/uat
+
+# Terminal 1 — alice
+CHIT_SERVER_URL=http://localhost:4455 \
+CHIT_SESSION_FILE=/tmp/uat/alice-session.json \
+CHIT_CONFIG_FILE=/tmp/uat/alice-config.toml \
+./clients/chit-tui/bin/chit-tui --theme tokyo-night
+
+# Terminal 2 — bob
+CHIT_SERVER_URL=http://localhost:4455 \
+CHIT_SESSION_FILE=/tmp/uat/bob-session.json \
+CHIT_CONFIG_FILE=/tmp/uat/bob-config.toml \
+./clients/chit-tui/bin/chit-tui --theme catppuccin-latte
+
+# Terminal 3 — chad
+CHIT_SERVER_URL=http://localhost:4455 \
+CHIT_SESSION_FILE=/tmp/uat/chad-session.json \
+CHIT_CONFIG_FILE=/tmp/uat/chad-config.toml \
+./clients/chit-tui/bin/chit-tui --theme kanagawa
+```
+
+Distinct themes are worth the trouble: with three identical windows it is easy
+to type into the wrong one and misread the result.
+
+### Skipping the login screen
+
+Logging in three times is tedious. Point the client at chitd directly (port
+8065, bypassing Oathkeeper) and present the user's Kratos ID as a header —
+`CHIT_SESSION_TOKEN` is sent as whatever `CHIT_AUTH_HEADER` names:
+
+```bash
+CHIT_SERVER_URL=http://localhost:8065 \
+CHIT_AUTH_HEADER=X-User-Id \
+CHIT_SESSION_TOKEN=<kratos-id-from-seed-output> \
+CHIT_SESSION_FILE=/tmp/uat/bob-session.json \
+./clients/chit-tui/bin/chit-tui
+```
+
+Get the IDs from the database:
+
+```bash
+podman exec chit-uat-db-postgres psql -U chit -d chit \
+  -tAc "select username || ' ' || kratos_id from users order by username;"
+```
+
+This trusts the header outright, so it is a UAT-only shortcut — it works
+because chitd is reachable directly. Never expose port 8065 beyond the host.
+
+### Driving clients without separate terminals
+
+`tmux` runs each client in its own detached session, which is also how you
+script a scenario:
+
+```bash
+tmux new-session -d -s uat-alice -x 120 -y 30 \
+  "CHIT_SERVER_URL=http://localhost:8065 CHIT_AUTH_HEADER=X-User-Id \
+   CHIT_SESSION_TOKEN=<alice-kratos-id> \
+   CHIT_SESSION_FILE=/tmp/uat/alice-session.json \
+   ./clients/chit-tui/bin/chit-tui --theme tokyo-night"
+
+tmux send-keys -t uat-alice "/invite bob" Enter   # type into it
+tmux capture-pane -t uat-alice -p                 # read the screen
+tmux attach -t uat-alice                          # watch interactively
+tmux kill-session -t uat-alice                    # done
+```
+
+`capture-pane -p -e` keeps the ANSI escapes, which is how you verify a theme
+actually applied rather than just that the client started.
+
+## Enabling slash commands
+
+Slash commands are authorized through Keto, and a freshly seeded environment
+grants nobody anything — `/invite`, `/kick` and even `/help` are all denied
+until two things happen. Both are needed; the symptom of missing either is a
+silent refusal with `"authorized":false` in the chitd log.
+
+### 1. Push the command grants
+
+`make uat-up` does not run the reconciler, so the role→command tuples do not
+exist yet:
+
+```bash
+CHIT_DATABASE_URL="postgres://chit:chit@localhost:5432/chit?sslmode=disable" \
+CHIT_KETO_WRITE_URL=http://localhost:4467 \
+make reconcile
+```
+
+### 2. Bind the seeded users to roles
+
+The reconciler reads actor→role bindings from `auth/actors/`, which ships with
+its example commented out because user IDs are generated per environment. Bind
+the seeded users directly:
+
+```bash
+bind() {  # $1=role  $2=user-id
+  curl -s -o /dev/null -w "%{http_code}\n" \
+    -X PUT http://localhost:4467/admin/relation-tuples \
+    -H 'Content-Type: application/json' \
+    -d "{\"namespace\":\"chit/command\",\"object\":\"Role:$1\",
+         \"relation\":\"member\",\"subject_id\":\"Actor:$2\"}"
+}
+
+while IFS='|' read -r name id; do
+  case "$name" in
+    alice)      role=admin ;;
+    chit-agent) role=agent ;;
+    *)          role=user  ;;
+  esac
+  printf '%-12s -> %-6s ' "$name" "$role"
+  bind "$role" "$id"
+done < <(podman exec chit-uat-db-postgres psql -U chit -d chit \
+           -tAc "select username||'|'||id from users order by username;" | tr -d ' ')
+```
+
+Note the namespace is `chit/command`, not `command`; the wrong one returns
+`404 Unknown namespace`.
+
+Confirm a user can execute a command before testing through the UI:
+
+```bash
+curl -s -X POST http://localhost:4466/relation-tuples/check \
+  -H 'Content-Type: application/json' \
+  -d '{"namespace":"chit/command","object":"Command:invite",
+       "relation":"execute","subject_id":"Actor:<alice-user-id>"}'
+# {"allowed":true}
+```
+
+Use the chit **user** ID here (the `users.id` column), not the Kratos ID.
+
+### Worked example: `/invite`
+
+With two clients running and the steps above done:
+
+1. As alice, create a channel bob is not in. An open channel automatically
+   includes the whole team, so remove him first:
+   ```bash
+   curl -X DELETE -H "X-User-Id: <alice-kratos-id>" \
+     "http://localhost:8065/api/v1/channels/<channel-id>/members/<bob-user-id>"
+   ```
+2. In alice's client, jump to that channel (`Ctrl+K`) and send `/invite bob`.
+3. Alice sees an ephemeral reply attributed to `/invite`:
+   `Added `bob` to the channel.` It is visible only to her and is not
+   persisted.
+4. In bob's client, press `Ctrl+K` — the channel now appears in his list.
+
+Confirm server-side:
+
+```bash
+podman exec chit-uat-db-postgres psql -U chit -d chit -tAc \
+  "select string_agg(u.username, ',' order by u.username)
+     from channels c
+     join channel_members cm on cm.channel_id = c.id
+     join users u on u.id = cm.user_id
+    where c.name = '<channel-name>';"
+```
+
+`/kick` follows the same flow. Removing yourself is leaving and any member may
+do it; removing somebody else requires the `system_admin` role, so it succeeds
+as alice and returns 403 as anyone else.
+
 ## Testing with curl
 
 For direct API testing, you can still bypass auth by hitting the chitd server
@@ -112,6 +290,18 @@ directly (port 8065) with the `X-User-Id` header:
 ALICE="X-User-Id: a11ce000-0000-4000-a000-000000000001"
 BOB="X-User-Id: b0b00000-0000-4000-a000-000000000002"
 ```
+
+:::caution[These IDs change once you seed Kratos]
+The values above are the placeholders `scripts/seed-uat` assigns. Running
+`make uat-seed-kratos` creates real Kratos identities and rebinds each user to
+a new random ID, after which these headers resolve to nobody. Read the current
+values instead:
+
+```bash
+podman exec chit-uat-db-postgres psql -U chit -d chit \
+  -tAc "select username || ' ' || kratos_id from users order by username;"
+```
+:::
 
 ### Who am I
 
