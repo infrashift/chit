@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 )
@@ -222,7 +224,15 @@ func (c *httpClient) GetMyDirectChannels(ctx context.Context) ([]*model.Channel,
 
 func (c *httpClient) SearchUsers(ctx context.Context, term string, page, perPage int) ([]*model.User, error) {
 	var users []*model.User
-	err := c.get(ctx, fmt.Sprintf("/users?term=%s&page=%d&per_page=%d", term, page, perPage), &users)
+	// The term is user input and goes into a query string, so it has to be
+	// escaped: a space or an ampersand would otherwise split the parameter
+	// and silently search for something else.
+	q := url.Values{}
+	q.Set("term", term)
+	q.Set("page", strconv.Itoa(page))
+	q.Set("per_page", strconv.Itoa(perPage))
+
+	err := c.get(ctx, "/users?"+q.Encode(), &users)
 	return users, err
 }
 

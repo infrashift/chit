@@ -1972,3 +1972,41 @@ func TestModel_TagPickerOpensFromThread(t *testing.T) {
 			testutil.StripANSI(m.View()))
 	}
 }
+
+// Choosing a search result used to only move focus, leaving the reader
+// wherever they already were — which made search results useless.
+func TestModel_SearchResultJumpsToPost(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.PostsLoadedMsg{
+		ChannelID: "c1",
+		Posts: &model.PostList{Order: []*model.Post{
+			{ID: "p1", UserID: "u1", Content: "first", CreateAt: 1700000000000},
+			{ID: "p2", UserID: "u1", Content: "needle here", CreateAt: 1700000001000},
+		}},
+	})
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(palette.PostChosenMsg{Post: &model.Post{ID: "p2"}})
+	m = updated.(tui.Model)
+
+	if got := m.SelectedPostID(); got != "p2" {
+		t.Errorf("selected post = %q, want p2", got)
+	}
+}
+
+// A hit outside the loaded window must say so rather than appear to do
+// nothing.
+func TestModel_SearchResultOutsideHistoryReportsError(t *testing.T) {
+	m := setupModel(t)
+
+	updated, cmd := m.Update(palette.PostChosenMsg{Post: &model.Post{ID: "ancient"}})
+	m = updated.(tui.Model)
+
+	if cmd == nil {
+		t.Error("no command returned; the user gets no feedback")
+	}
+	if !strings.Contains(testutil.StripANSI(m.View()), "older than the loaded history") {
+		t.Errorf("no explanation shown:\n%s", testutil.StripANSI(m.View()))
+	}
+}

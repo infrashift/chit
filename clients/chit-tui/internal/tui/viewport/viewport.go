@@ -29,6 +29,7 @@ type Model struct {
 	postTags        map[string][]string // postID -> tag names
 	cursor          int
 	postLineOffsets []int // line offset of each post in the rendered content
+	searchTerm      string
 	focused         bool
 	styles          styles.Styles
 	width           int
@@ -298,7 +299,7 @@ func (m *Model) updateContent() {
 
 		m.postLineOffsets[i] = lineCount
 		if cached, ok := m.cache[p.ID]; ok {
-			rendered := cached
+			rendered := m.highlightMatches(cached)
 			if i == m.cursor && m.focused {
 				rendered = m.styles.SelectedPost.Render(rendered)
 			}
@@ -313,7 +314,7 @@ func (m *Model) updateContent() {
 		pb := post.New(p, username, m.styles, m.width-4, m.renderer, m.currentUsername, m.threadCounts[p.ID], m.postTagNames(p.ID))
 		rendered := pb.View()
 		m.cache[p.ID] = rendered
-		display := rendered
+		display := m.highlightMatches(rendered)
 		if i == m.cursor && m.focused {
 			display = m.styles.SelectedPost.Render(rendered)
 		}
@@ -334,4 +335,73 @@ func (m *Model) scrollToCursor() {
 	} else if target >= m.viewport.YOffset+m.viewport.Height {
 		m.viewport.SetYOffset(target - m.viewport.Height + 3)
 	}
+}
+
+// ScrollToPost moves the cursor to the given post and scrolls it into view.
+// It reports whether the post is currently loaded; a search can return a hit
+// that is older than the window of posts the client holds.
+func (m *Model) ScrollToPost(postID string) bool {
+	for i, p := range m.posts {
+		if p.ID != postID {
+			continue
+		}
+		m.cursor = i
+		m.updateContent()
+		m.scrollToCursor()
+		return true
+	}
+	return false
+}
+
+// SetSearchTerm highlights every occurrence of term across the history, and
+// marks one post as the active hit. An empty term clears the highlighting.
+func (m *Model) SetSearchTerm(term string) {
+	if m.searchTerm == term {
+		return
+	}
+	m.searchTerm = term
+	// Highlighting is baked into the rendered text, so the cache has to go.
+	m.cache = make(map[string]string)
+	m.updateContent()
+}
+
+// SearchTerm returns the active highlight term.
+func (m Model) SearchTerm() string { return m.searchTerm }
+
+// highlightMatches wraps each case-insensitive occurrence of the search term
+// in the match style. It operates on already-rendered text, so it skips
+// anything inside an ANSI escape sequence — otherwise a term like "m" would
+// match inside a color code and corrupt the output.
+func (m Model) highlightMatches(rendered string) string {
+	if m.searchTerm == "" {
+		return rendered
+	}
+
+	term := strings.ToLower(m.searchTerm)
+	var b strings.Builder
+	lower := strings.ToLower(rendered)
+
+	for i := 0; i < len(rendered); {
+		// Copy escape sequences through untouched.
+		if rendered[i] == 0x1b {
+			end := strings.IndexByte(rendered[i:], 'm')
+			if end < 0 {
+				b.WriteString(rendered[i:])
+				break
+			}
+			b.WriteString(rendered[i : i+end+1])
+			i += end + 1
+			continue
+		}
+
+		if strings.HasPrefix(lower[i:], term) {
+			b.WriteString(m.styles.SearchMatch.Render(rendered[i : i+len(term)]))
+			i += len(term)
+			continue
+		}
+
+		b.WriteByte(rendered[i])
+		i++
+	}
+	return b.String()
 }

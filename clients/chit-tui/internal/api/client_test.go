@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/infrashift/chit/clients/chit-tui/internal/api"
@@ -522,5 +523,31 @@ func TestGetMe_ErrorResponse(t *testing.T) {
 	}
 	if apiErr.StatusCode != 401 {
 		t.Errorf("StatusCode = %d, want 401", apiErr.StatusCode)
+	}
+}
+
+// The term goes into a query string, so spaces and ampersands have to be
+// escaped or the parameter splits and the server searches for something else.
+func TestSearchUsers_EscapesTerm(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+
+	c := api.NewClient(srv.URL, "token")
+
+	if _, err := c.SearchUsers(context.Background(), "ann & bob", 0, 10); err != nil {
+		t.Fatalf("SearchUsers: %v", err)
+	}
+
+	parsed, err := url.ParseQuery(gotQuery)
+	if err != nil {
+		t.Fatalf("server received an unparseable query %q: %v", gotQuery, err)
+	}
+	if got := parsed.Get("term"); got != "ann & bob" {
+		t.Errorf("term = %q, want %q (raw query: %s)", got, "ann & bob", gotQuery)
 	}
 }

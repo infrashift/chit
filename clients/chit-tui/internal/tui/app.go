@@ -113,7 +113,14 @@ type Model struct {
 	height                int
 	err                   error
 	errSeq                uint64
+	// searchTerm is the last submitted search, kept so a chosen result can
+	// be highlighted in the history.
+	searchTerm string
 }
+
+// errSearchHitNotLoaded reports a result that is outside the loaded history.
+var errSearchHitNotLoaded = errors.New(
+	"that message is older than the loaded history; scroll back to reach it")
 
 // NewModel creates the root model.
 func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s styles.Styles, tokenStore *auth.TokenStore, kratosClient *auth.KratosClient, sessionStore *auth.SessionStore) Model {
@@ -592,6 +599,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
+			m.searchTerm = term
 			cmds = append(cmds, SearchPosts(m.client, m.activeChan.ID, term, tagIDs))
 		}
 		return m, tea.Batch(cmds...)
@@ -607,7 +615,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case palette.PostChosenMsg:
+		// Jumping to the hit is the point of searching; previously this only
+		// moved focus and left the reader wherever they already were.
 		cmd := m.setFocus(FocusViewport)
+		if msg.Post != nil {
+			m.viewport.SetSearchTerm(m.searchTerm)
+			if !m.viewport.ScrollToPost(msg.Post.ID) {
+				// The hit is older than the posts held in memory. Say so
+				// rather than silently doing nothing.
+				return m, tea.Batch(cmd, m.setError(errSearchHitNotLoaded))
+			}
+		}
 		return m, cmd
 
 	case input.AtTriggerMsg:
@@ -1065,6 +1083,9 @@ func (m *Model) selectChannel(ch *model.Channel) tea.Cmd {
 	}
 	m.activeChan = ch
 	m.channelAutoSelected = true
+	// A highlight from a search in the previous channel would otherwise
+	// carry over and mark unrelated text here.
+	m.clearSearchHighlight()
 	// DM/group channels have no team; keep the last active team then.
 	if ch.TeamID != "" {
 		if t := m.teamByID(ch.TeamID); t != nil {
@@ -1132,6 +1153,13 @@ func (m *Model) setMention(channelID string, count int64) {
 }
 
 // closeThread returns from the thread pane to the channel view.
+// clearSearchHighlight removes match highlighting. A highlight that outlives
+// the search reads as if the term were still active.
+func (m *Model) clearSearchHighlight() {
+	m.searchTerm = ""
+	m.viewport.SetSearchTerm("")
+}
+
 func (m *Model) closeThread() tea.Cmd {
 	m.mainPane = paneChannel
 	m.thread.Clear()
@@ -1656,4 +1684,13 @@ func (m *Model) registerCommandResponseAuthor(slug string) {
 	}
 	names[commandResponseUserID] = name
 	m.viewport.SetUsernames(names)
+}
+
+// SelectedPostID returns the ID of the post under the history cursor, or "".
+// Exported for tests, which cannot reach the viewport's cursor otherwise.
+func (m Model) SelectedPostID() string {
+	if p := m.viewport.SelectedPost(); p != nil {
+		return p.ID
+	}
+	return ""
 }

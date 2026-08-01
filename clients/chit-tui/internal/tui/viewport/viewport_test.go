@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/testutil"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/viewport"
@@ -448,5 +449,92 @@ func TestViewport_FocusBlur(t *testing.T) {
 	m.Blur()
 	if m.Focused() {
 		t.Error("should not be focused after blur")
+	}
+}
+
+func TestScrollToPost(t *testing.T) {
+	m := viewport.New(styles.New(theme.TokyoNight()))
+	m.SetSize(80, 20)
+	m.SetPosts([]*model.Post{
+		{ID: "p1", UserID: "u1", Content: "first", CreateAt: 1700000000000},
+		{ID: "p2", UserID: "u1", Content: "second", CreateAt: 1700000001000},
+		{ID: "p3", UserID: "u1", Content: "third", CreateAt: 1700000002000},
+	})
+
+	if !m.ScrollToPost("p3") {
+		t.Fatal("ScrollToPost returned false for a loaded post")
+	}
+	if got := m.SelectedPost(); got == nil || got.ID != "p3" {
+		t.Errorf("SelectedPost = %v, want p3", got)
+	}
+}
+
+// A search can return a hit older than the loaded window; the caller needs to
+// know so it can say so rather than appearing to do nothing.
+func TestScrollToPostReportsMissing(t *testing.T) {
+	m := viewport.New(styles.New(theme.TokyoNight()))
+	m.SetSize(80, 20)
+	m.SetPosts([]*model.Post{{ID: "p1", UserID: "u1", Content: "only", CreateAt: 1700000000000}})
+
+	if m.ScrollToPost("nope") {
+		t.Error("ScrollToPost returned true for a post that is not loaded")
+	}
+}
+
+func TestSearchTermHighlighting(t *testing.T) {
+	m := viewport.New(styles.New(theme.TokyoNight()))
+	m.SetSize(80, 20)
+	m.SetPosts([]*model.Post{
+		{ID: "p1", UserID: "u1", Content: "the quick brown fox", CreateAt: 1700000000000},
+	})
+
+	plain := testutil.StripANSI(m.View())
+	m.SetSearchTerm("quick")
+
+	if m.SearchTerm() != "quick" {
+		t.Errorf("SearchTerm = %q", m.SearchTerm())
+	}
+	// The visible text must be unchanged — only its styling differs.
+	if got := testutil.StripANSI(m.View()); got != plain {
+		t.Errorf("highlighting altered the text:\n%s\nwant:\n%s", got, plain)
+	}
+	// And the styled output must actually differ.
+	if m.View() == plain {
+		t.Error("no styling was applied for the search term")
+	}
+}
+
+// Highlighting operates on rendered text containing ANSI escapes. A term that
+// appears inside an escape sequence must not be matched, or the output is
+// corrupted.
+func TestSearchTermDoesNotMatchInsideEscapes(t *testing.T) {
+	m := viewport.New(styles.New(theme.TokyoNight()))
+	m.SetSize(80, 20)
+	m.SetPosts([]*model.Post{
+		{ID: "p1", UserID: "u1", Content: "hello world", CreateAt: 1700000000000},
+	})
+
+	before := testutil.StripANSI(m.View())
+	// "m" terminates every SGR sequence, so a naive matcher corrupts them.
+	m.SetSearchTerm("m")
+
+	if got := testutil.StripANSI(m.View()); got != before {
+		t.Errorf("matching inside escape sequences corrupted the output:\n%s", got)
+	}
+}
+
+func TestSetSearchTermClearing(t *testing.T) {
+	m := viewport.New(styles.New(theme.TokyoNight()))
+	m.SetSize(80, 20)
+	m.SetPosts([]*model.Post{
+		{ID: "p1", UserID: "u1", Content: "alpha beta", CreateAt: 1700000000000},
+	})
+
+	original := m.View()
+	m.SetSearchTerm("alpha")
+	m.SetSearchTerm("")
+
+	if m.View() != original {
+		t.Error("clearing the search term did not restore the original rendering")
 	}
 }
