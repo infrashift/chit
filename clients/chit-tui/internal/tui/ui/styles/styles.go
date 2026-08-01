@@ -1,11 +1,38 @@
 package styles
 
 import (
+	"image/color"
+
 	"github.com/charmbracelet/glamour/ansi"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/markdown"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
+
+// fg, bg, and border apply a theme color only when it is set. A nil slot leaves
+// the attribute off entirely so the terminal's own default shows through, which
+// is what makes transparent-background themes work.
+
+func fg(s lipgloss.Style, c color.Color) lipgloss.Style {
+	if c == nil {
+		return s
+	}
+	return s.Foreground(theme.Lip(c))
+}
+
+func bg(s lipgloss.Style, c color.Color) lipgloss.Style {
+	if c == nil {
+		return s
+	}
+	return s.Background(theme.Lip(c))
+}
+
+func border(s lipgloss.Style, c color.Color) lipgloss.Style {
+	if c == nil {
+		return s
+	}
+	return s.BorderForeground(theme.Lip(c))
+}
 
 // Styles holds all lipgloss styles for the TUI.
 type Styles struct {
@@ -33,118 +60,97 @@ type Styles struct {
 	ReplyIndent          lipgloss.Style
 	TagBadge             lipgloss.Style
 	DaySeparator         lipgloss.Style
+	Selection            lipgloss.Style
+	SearchMatch          lipgloss.Style
+	SearchMatchActive    lipgloss.Style
 	MarkdownStyleConfig  ansi.StyleConfig
 }
 
 // New creates Styles from a Theme.
 func New(t theme.Theme) Styles {
-	activeBorder := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(t.ActiveBorder)
+	base := lipgloss.NewStyle()
+	rounded := base.BorderStyle(lipgloss.RoundedBorder())
+	double := base.BorderStyle(lipgloss.DoubleBorder())
 
 	return Styles{
-		ListItem: lipgloss.NewStyle().
-			Foreground(t.Foreground).
+		ListItem: fg(base, t.Foreground).
 			Padding(0, 1),
 
-		ListItemActive: lipgloss.NewStyle().
-			Foreground(t.ChannelActive).
+		ListItemActive: fg(base, t.ChannelActive).
 			Bold(true).
 			Padding(0, 1),
 
-		Viewport: lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(t.Border).
+		Viewport: border(rounded, t.Border).
 			Padding(0, 1),
 
-		Input: lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(t.Border).
+		Input: border(rounded, t.Border).
 			Padding(0, 1),
 
-		ThreadPanel: lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(t.Border).
+		ThreadPanel: border(rounded, t.Border).
 			Padding(0, 1),
 
-		CmdPalette: lipgloss.NewStyle().
-			BorderStyle(lipgloss.DoubleBorder()).
-			BorderForeground(t.Accent).
+		CmdPalette: border(double, t.Accent).
 			Padding(1, 2),
 
-		StatusBar: lipgloss.NewStyle().
-			Background(t.Highlight).
-			Foreground(t.Subtle).
+		StatusBar: fg(bg(base, t.Highlight), t.Subtle).
 			Padding(0, 1),
 
-		BarButton: lipgloss.NewStyle().
-			Background(t.Highlight).
-			Foreground(t.Accent).
+		BarButton: fg(bg(base, t.Highlight), t.Accent).
 			Bold(true),
 
-		Username: lipgloss.NewStyle().
-			Foreground(t.Username).
+		Username: fg(base, t.Username).
 			Bold(true),
 
-		Timestamp: lipgloss.NewStyle().
-			Foreground(t.Timestamp),
+		Timestamp: fg(base, t.Timestamp),
 
-		UnreadBadge: lipgloss.NewStyle().
-			Foreground(t.UnreadBadge).
+		UnreadBadge: fg(base, t.UnreadBadge).
 			Bold(true),
 
-		PinBadge: lipgloss.NewStyle().
-			Foreground(t.PinBadge),
+		PinBadge: fg(base, t.PinBadge),
 
-		ErrorText: lipgloss.NewStyle().
-			Foreground(t.Error),
+		ErrorText: fg(base, t.Error),
 
-		ActiveBorder: activeBorder,
+		ActiveBorder: border(rounded, t.ActiveBorder),
 
-		MentionBadge: lipgloss.NewStyle().
-			Foreground(t.MentionBadge).
+		MentionBadge: fg(base, t.MentionBadge).
 			Bold(true),
 
-		MentionText: lipgloss.NewStyle().
-			Foreground(t.MentionText).
+		MentionText: fg(base, t.MentionText).
 			Bold(true),
 
-		MentionSelfHighlight: lipgloss.NewStyle().
-			Foreground(t.Foreground).
-			Background(t.MentionSelfBg).
+		MentionSelfHighlight: fg(bg(base, t.MentionSelfBg), t.Foreground).
 			Bold(true),
 
-		AutocompletePanel: lipgloss.NewStyle().
-			BorderStyle(lipgloss.DoubleBorder()).
-			BorderForeground(t.Accent).
+		AutocompletePanel: border(double, t.Accent).
 			Padding(0, 1),
 
-		AutocompleteItem: lipgloss.NewStyle().
-			Foreground(t.Foreground),
+		AutocompleteItem: fg(base, t.Foreground),
 
-		AutocompleteActive: lipgloss.NewStyle().
-			Foreground(t.ChannelActive).
+		AutocompleteActive: fg(base, t.ChannelActive).
 			Bold(true),
 
-		SelectedPost: lipgloss.NewStyle().
-			Background(t.Highlight).
+		SelectedPost: bg(base, t.Highlight).
 			Padding(0, 1),
 
-		ReplyIndent: lipgloss.NewStyle().
+		ReplyIndent: border(base.
 			BorderStyle(lipgloss.ThickBorder()).
 			BorderLeft(true).
 			BorderTop(false).
 			BorderRight(false).
-			BorderBottom(false).
-			BorderForeground(t.Subtle).
+			BorderBottom(false), t.Subtle).
 			PaddingLeft(1),
 
-		TagBadge: lipgloss.NewStyle().
-			Foreground(t.TagBadge).
+		TagBadge: fg(base, t.TagBadge).
 			Bold(true),
 
-		DaySeparator: lipgloss.NewStyle().
-			Foreground(t.Muted),
+		DaySeparator: fg(base, t.Muted),
+
+		Selection: bg(base, t.Selection),
+
+		SearchMatch: bg(base, t.SearchMatch),
+
+		SearchMatchActive: fg(bg(base, t.SearchMatchActive), t.Foreground).
+			Bold(true),
 
 		MarkdownStyleConfig: markdown.StyleConfig(t),
 	}
