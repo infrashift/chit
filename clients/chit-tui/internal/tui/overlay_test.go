@@ -7,6 +7,11 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// isASCIILetter reports whether b terminates an ANSI escape sequence.
+func isASCIILetter(b byte) bool {
+	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z')
+}
+
 func TestPlaceOverlay_BasicASCII(t *testing.T) {
 	bg := "AAAAAAAAAA\nBBBBBBBBBB\nCCCCCCCCCC"
 	fg := "xx\nyy"
@@ -117,7 +122,7 @@ func stripANSI(s string) string {
 		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
 			// Skip until we find the terminating letter
 			j := i + 2
-			for j < len(s) && !((s[j] >= 'A' && s[j] <= 'Z') || (s[j] >= 'a' && s[j] <= 'z')) {
+			for j < len(s) && !isASCIILetter(s[j]) {
 				j++
 			}
 			if j < len(s) {

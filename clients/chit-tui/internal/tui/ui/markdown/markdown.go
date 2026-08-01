@@ -1,8 +1,9 @@
 package markdown
 
 import (
+	"image/color"
+
 	"github.com/charmbracelet/glamour/ansi"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
 
@@ -219,8 +220,11 @@ func StyleConfig(t theme.Theme) ansi.StyleConfig {
 	}
 }
 
-func colorStr(c lipgloss.Color) *string {
-	s := string(c)
+// colorStr renders a theme color as the hex string glamour expects. Colors with
+// no RGB form (nil, ANSI indices) yield an empty string, which glamour treats as
+// "inherit" rather than painting a color.
+func colorStr(c color.Color) *string {
+	s := theme.Hex(c)
 	return &s
 }
 

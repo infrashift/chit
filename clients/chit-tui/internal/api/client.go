@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 )
@@ -38,6 +40,7 @@ type ChitClient interface {
 	AddTagToPost(ctx context.Context, postID, tagID string) error
 	RemoveTagFromPost(ctx context.Context, postID, tagID string) error
 	AddChannelMember(ctx context.Context, channelID, userID string) error
+	RemoveChannelMember(ctx context.Context, channelID, userID string) error
 }
 
 type httpClient struct {
@@ -221,7 +224,15 @@ func (c *httpClient) GetMyDirectChannels(ctx context.Context) ([]*model.Channel,
 
 func (c *httpClient) SearchUsers(ctx context.Context, term string, page, perPage int) ([]*model.User, error) {
 	var users []*model.User
-	err := c.get(ctx, fmt.Sprintf("/users?term=%s&page=%d&per_page=%d", term, page, perPage), &users)
+	// The term is user input and goes into a query string, so it has to be
+	// escaped: a space or an ampersand would otherwise split the parameter
+	// and silently search for something else.
+	q := url.Values{}
+	q.Set("term", term)
+	q.Set("page", strconv.Itoa(page))
+	q.Set("per_page", strconv.Itoa(perPage))
+
+	err := c.get(ctx, "/users?"+q.Encode(), &users)
 	return users, err
 }
 
@@ -265,4 +276,10 @@ func (c *httpClient) RemoveTagFromPost(ctx context.Context, postID, tagID string
 
 func (c *httpClient) AddChannelMember(ctx context.Context, channelID, userID string) error {
 	return c.post(ctx, fmt.Sprintf("/channels/%s/members", channelID), map[string]string{"user_id": userID}, nil)
+}
+
+// RemoveChannelMember removes a user from a channel. Removing yourself is
+// leaving; removing anyone else requires system-admin rights server-side.
+func (c *httpClient) RemoveChannelMember(ctx context.Context, channelID, userID string) error {
+	return c.del(ctx, fmt.Sprintf("/channels/%s/members/%s", channelID, userID))
 }

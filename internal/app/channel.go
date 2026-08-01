@@ -257,11 +257,22 @@ func (a *App) AddChannelMember(ctx context.Context, channelID, userID, actorID s
 	return saved, nil
 }
 
-// RemoveChannelMember removes a user from a channel on behalf of actorID, who
-// must be a channel member (leaving is removing yourself).
+// RemoveChannelMember removes a user from a channel on behalf of actorID.
+//
+// Leaving is always permitted for a member removing themselves. Removing
+// somebody else additionally requires system-admin rights: /kick is declared
+// admin-only in the CUE command registry, but that restriction lives in the
+// command layer and is bypassed entirely by a direct REST call, so it is
+// enforced here too.
 func (a *App) RemoveChannelMember(ctx context.Context, channelID, userID, actorID string) error {
 	if err := a.requireChannelMember(ctx, channelID, actorID); err != nil {
 		return err
+	}
+	if userID != actorID {
+		if user, uerr := a.Store.User().Get(ctx, actorID); uerr != nil || !user.IsSystemAdmin() {
+			return model.NewForbiddenError("App.RemoveChannelMember",
+				"only a system admin may remove another member")
+		}
 	}
 
 	if err := a.Store.Channel().RemoveMember(ctx, channelID, userID); err != nil {

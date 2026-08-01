@@ -65,6 +65,7 @@ func TestAddTagToPost(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	r = withChiParam(r, "id", testRootPost)
+	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, r)
@@ -81,6 +82,7 @@ func TestRemoveTagFromPost(t *testing.T) {
 	handler := removeTagFromPost(a)
 	r := httptest.NewRequest(http.MethodDelete, "/", nil)
 	r = withChiParams(r, map[string]string{"id": testRootPost, "tag_id": testTagID})
+	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, r)
@@ -97,6 +99,7 @@ func TestGetTagsForPost(t *testing.T) {
 	handler := getTagsForPost(a)
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r = withChiParam(r, "id", testRootPost)
+	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, r)

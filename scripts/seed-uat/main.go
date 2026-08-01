@@ -63,6 +63,20 @@ func main() {
 			log.Fatalf("Failed to check user %s: %v", u.Username, err)
 		}
 
+		// The Kratos ID may have moved: seed-kratos creates real identities
+		// and rebinds these users to them, so the hardcoded ID above stops
+		// matching. Fall back to the username, which is the stable identity
+		// here and is what the unique constraint is on — without this, a
+		// second `make uat-up` after seeding Kratos fails on a duplicate.
+		if existing, err := store.User().GetByUsername(ctx, u.Username); err == nil {
+			userIDs[i] = existing.ID
+			fmt.Printf("  User %-8s already exists  id=%s (kratos_id=%s)\n",
+				u.Username, existing.ID, existing.KratosID)
+			continue
+		} else if !isNotFound(err) {
+			log.Fatalf("Failed to check user %s by username: %v", u.Username, err)
+		}
+
 		saved, err := store.User().Save(ctx, &model.User{
 			KratosID:    u.KratosID,
 			Username:    u.Username,

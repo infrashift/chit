@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -30,6 +31,10 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/viewport"
 	"github.com/infrashift/chit/clients/chit-tui/internal/ws"
 )
+
+// inputHeight is the height of the message input box, in rows. Layout and
+// mouse hit-testing both depend on it, so it lives in one place.
+const inputHeight = 5
 
 // FocusArea defines which component has focus.
 type FocusArea int
@@ -112,7 +117,14 @@ type Model struct {
 	height                int
 	err                   error
 	errSeq                uint64
+	// searchTerm is the last submitted search, kept so a chosen result can
+	// be highlighted in the history.
+	searchTerm string
 }
+
+// errSearchHitNotLoaded reports a result that is outside the loaded history.
+var errSearchHitNotLoaded = errors.New(
+	"that message is older than the loaded history; scroll back to reach it")
 
 // NewModel creates the root model.
 func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s styles.Styles, tokenStore *auth.TokenStore, kratosClient *auth.KratosClient, sessionStore *auth.SessionStore) Model {
@@ -294,8 +306,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		if key.Matches(msg, m.keys.TagPicker) && m.focus == FocusViewport {
-			sel := m.viewport.SelectedPost()
+		// Copy the mouse selection, or the post under the cursor when there
+		// is none — so the key is useful without a mouse.
+		if key.Matches(msg, m.keys.Copy) && m.focus == FocusViewport {
+			text := m.viewport.SelectedText()
+			if text == "" {
+				if p := m.viewport.SelectedPost(); p != nil {
+					text = p.Content
+				}
+			}
+			if text != "" {
+				return m, copyToClipboard(text)
+			}
+		}
+
+		if key.Matches(msg, m.keys.TagPicker) {
+			// In the history pane the subject is the post under the cursor;
+			// in a thread there is no cursor, so it is the root post.
+			var sel *model.Post
+			switch m.focus {
+			case FocusViewport:
+				sel = m.viewport.SelectedPost()
+			case FocusThread:
+				sel = m.thread.RootPost()
+			}
 			if sel != nil {
 				cmd := m.setFocus(FocusTagPicker)
 				m.tagPicker.Open(sel.ID, m.allTags, m.postTags[sel.ID])
@@ -513,16 +547,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case input.SlashTriggerMsg:
 		trimmed := strings.TrimSpace(msg.Input)
-		if trimmed == "/skin" {
+
+		// /skin and /logout act on this client alone; the server knows
+		// nothing about them.
+		switch trimmed {
+		case "/skin", "/theme":
 			m.skinPicker.SetSkins(theme.ListAvailable())
 			cmd := m.setFocus(FocusSkinPicker)
 			m.skinPicker.Open()
 			return m, cmd
-		}
-		if trimmed == "/logout" {
+		case "/logout":
 			return m.handleLogout()
+		case "/":
+			// A bare slash is a request to browse, not to send.
+			return m, m.openPalette("/")
 		}
-		return m, m.openPalette("/")
+
+		// Everything else goes to the server, which owns the command
+		// registry, authorization, and the "unknown command" reply. Anything
+		// that is not a command — a path like /usr/local/bin — is persisted
+		// as an ordinary message.
+		if m.activeChan == nil || m.me == nil {
+			return m, nil
+		}
+		return m, CreatePost(m.client, &model.Post{
+			ChannelID: m.activeChan.ID,
+			UserID:    m.me.ID,
+			Content:   trimmed,
+		})
 
 	case palette.ChannelChosenMsg:
 		cmds = append(cmds, m.selectChannel(msg.Channel))
@@ -530,8 +582,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case palette.CommandChosenMsg:
-		cmd := m.setFocus(FocusInput)
-		return m, cmd
+		// Insert rather than execute: most commands take arguments, and the
+		// palette has no way to collect them. The user completes the line and
+		// presses Enter, which sends it like any other message.
+		if msg.Command != nil {
+			m.input.SetValue("/" + msg.Command.Slug + " ")
+		}
+		return m, m.setFocus(FocusInput)
 
 	case palette.UserChosenMsg:
 		if m.me != nil {
@@ -560,6 +617,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
+			m.searchTerm = term
 			cmds = append(cmds, SearchPosts(m.client, m.activeChan.ID, term, tagIDs))
 		}
 		return m, tea.Batch(cmds...)
@@ -575,7 +633,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case palette.PostChosenMsg:
+		// Jumping to the hit is the point of searching; previously this only
+		// moved focus and left the reader wherever they already were.
 		cmd := m.setFocus(FocusViewport)
+		if msg.Post != nil {
+			m.viewport.SetSearchTerm(m.searchTerm)
+			if !m.viewport.ScrollToPost(msg.Post.ID) {
+				// The hit is older than the posts held in memory. Say so
+				// rather than silently doing nothing.
+				return m, tea.Batch(cmd, m.setError(errSearchHitNotLoaded))
+			}
+		}
 		return m, cmd
 
 	case input.AtTriggerMsg:
@@ -727,6 +795,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			names = append(names, t.Name)
 		}
 		m.viewport.SetPostTags(msg.PostID, names)
+		// The thread pane renders the same posts, so it needs the tags too;
+		// otherwise a post shows its tags in the channel and loses them the
+		// moment it is opened as a thread.
+		m.thread.SetPostTags(m.postTags)
 		return m, nil
 
 	case tagpicker.TagToggledMsg:
@@ -766,7 +838,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case skinpicker.SkinSelectedMsg:
-		t := theme.LoadNamed(msg.Name)
+		t, _, err := theme.ResolveNamed(msg.Name, config.ThemesDir())
+		if err != nil {
+			// The name came from a list this component built, so a failure
+			// here means the file changed underneath us.
+			errCmd := m.setError(fmt.Errorf("load theme %q: %w", msg.Name, err))
+			return m, tea.Batch(m.setFocus(FocusInput), errCmd)
+		}
+
+		// Persist so the choice survives a restart. Failing to write is worth
+		// surfacing but must not undo the theme change for this session.
+		var saveCmd tea.Cmd
+		if err := config.SaveTheme(msg.Name); err != nil {
+			saveCmd = m.setError(fmt.Errorf("theme applied but not saved: %w", err))
+		}
+
 		newStyles := styles.New(t)
 		m.styles = newStyles
 		m.viewport.SetStyles(newStyles)
@@ -777,8 +863,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, o := range m.overlays() {
 			o.setStyles(newStyles)
 		}
-		cmd := m.setFocus(FocusInput)
-		return m, cmd
+		return m, tea.Batch(m.setFocus(FocusInput), saveCmd)
+
+	case clipboardCopiedMsg:
+		// OSC 52 gives no delivery confirmation, and several terminals ignore
+		// it outright, so say what was sent rather than leaving the user to
+		// guess whether anything happened.
+		noun := "lines"
+		if msg.lines == 1 {
+			noun = "line"
+		}
+		m.viewport.ClearSelection()
+		return m, m.setError(fmt.Errorf("copied %d %s to the clipboard", msg.lines, noun))
 
 	case ClearErrMsg:
 		if msg.Seq == m.errSeq {
@@ -829,7 +925,6 @@ func (m Model) View() string {
 	if m.mention.Visible() {
 		mentionView := m.mention.View()
 		mentionHeight := lipgloss.Height(mentionView)
-		inputHeight := 5
 		mentionY := m.height - inputHeight - mentionHeight - 1
 		if mentionY < 0 {
 			mentionY = 0
@@ -969,6 +1064,12 @@ func (m *Model) syncActionBar() {
 	m.actionBar.SetError(errStr)
 	m.actionBar.SetConnected(m.wsConnected)
 	m.actionBar.SetThreadOpen(m.mainPane == paneThread)
+
+	// Replying needs a focused history pane with a post under the cursor;
+	// the button appears only then, which is also the hint that the pane has
+	// to be focused first.
+	m.actionBar.SetCanReply(m.mainPane == paneChannel &&
+		m.focus == FocusViewport && m.viewport.SelectedPost() != nil)
 }
 
 func (m *Model) setFocus(area FocusArea) tea.Cmd {
@@ -1010,6 +1111,9 @@ func (m *Model) selectChannel(ch *model.Channel) tea.Cmd {
 	}
 	m.activeChan = ch
 	m.channelAutoSelected = true
+	// A highlight from a search in the previous channel would otherwise
+	// carry over and mark unrelated text here.
+	m.clearSearchHighlight()
 	// DM/group channels have no team; keep the last active team then.
 	if ch.TeamID != "" {
 		if t := m.teamByID(ch.TeamID); t != nil {
@@ -1077,6 +1181,13 @@ func (m *Model) setMention(channelID string, count int64) {
 }
 
 // closeThread returns from the thread pane to the channel view.
+// clearSearchHighlight removes match highlighting. A highlight that outlives
+// the search reads as if the term were still active.
+func (m *Model) clearSearchHighlight() {
+	m.searchTerm = ""
+	m.viewport.SetSearchTerm("")
+}
+
 func (m *Model) closeThread() tea.Cmd {
 	m.mainPane = paneChannel
 	m.thread.Clear()
@@ -1129,7 +1240,6 @@ func (m *Model) cycleFocus(dir int) tea.Cmd {
 }
 
 func (m *Model) resizeComponents() {
-	inputHeight := 5
 	vpHeight := m.height - inputHeight - 1 // -1 for the action bar
 
 	m.viewport.SetSize(m.width, vpHeight)
@@ -1194,6 +1304,25 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 			}
 		} else {
 			m.setUnread(p.ChannelID, m.unread[p.ChannelID]+1)
+		}
+
+	case model.WebSocketEventCommandResponse:
+		// Ephemeral: broadcast to the invoking user only, never persisted.
+		// It is shown as a post so multi-line output such as /help stays
+		// readable, and it disappears on the next channel load.
+		text, _ := evt.Data["text"].(string)
+		channelID, _ := evt.Data["channel_id"].(string)
+		slug, _ := evt.Data["command_slug"].(string)
+
+		if text != "" && m.activeChan != nil && channelID == m.activeChan.ID {
+			m.viewport.AppendPost(&model.Post{
+				ID:        commandResponseUserID + ":" + slug,
+				ChannelID: channelID,
+				UserID:    commandResponseUserID,
+				Content:   text,
+				CreateAt:  time.Now().UnixMilli(),
+			})
+			m.registerCommandResponseAuthor(slug)
 		}
 
 	case model.WebSocketEventThreadUpdated:
@@ -1563,3 +1692,36 @@ func splitLines(s string) []string {
 	lines = append(lines, s[start:])
 	return lines
 }
+
+// commandResponseUserID labels ephemeral command output. It is not a real
+// user, so it can never collide with one: user IDs are UUIDs.
+const commandResponseUserID = "chit:command-response"
+
+// registerCommandResponseAuthor names the pseudo-author after the command that
+// produced the output, so a reply reads as coming from "/help" rather than
+// from whoever happened to type it.
+func (m *Model) registerCommandResponseAuthor(slug string) {
+	name := "/" + slug
+	if slug == "" {
+		name = "command"
+	}
+	names := make(map[string]string, len(m.users)+1)
+	for id, u := range m.users {
+		names[id] = u.Username
+	}
+	names[commandResponseUserID] = name
+	m.viewport.SetUsernames(names)
+}
+
+// SelectedPostID returns the ID of the post under the history cursor, or "".
+// Exported for tests, which cannot reach the viewport's cursor otherwise.
+func (m Model) SelectedPostID() string {
+	if p := m.viewport.SelectedPost(); p != nil {
+		return p.ID
+	}
+	return ""
+}
+
+// HasSelection reports whether the history pane holds a selection. Exported
+// for tests, which cannot reach the viewport otherwise.
+func (m Model) HasSelection() bool { return m.viewport.HasSelection() }

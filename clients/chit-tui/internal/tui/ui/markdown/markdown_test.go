@@ -23,12 +23,12 @@ func TestStyleConfig_HeadingColors(t *testing.T) {
 		color *string
 		want  string
 	}{
-		{"H1", sc.H1.Color, string(th.Username)},
-		{"H2", sc.H2.Color, string(th.Warning)},
-		{"H3", sc.H3.Color, string(th.Success)},
-		{"H4", sc.H4.Color, string(th.Accent)},
-		{"H5", sc.H5.Color, string(th.Subtle)},
-		{"H6", sc.H6.Color, string(th.Muted)},
+		{"H1", sc.H1.Color, theme.Hex(th.Username)},
+		{"H2", sc.H2.Color, theme.Hex(th.Warning)},
+		{"H3", sc.H3.Color, theme.Hex(th.Success)},
+		{"H4", sc.H4.Color, theme.Hex(th.Accent)},
+		{"H5", sc.H5.Color, theme.Hex(th.Subtle)},
+		{"H6", sc.H6.Color, theme.Hex(th.Muted)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -46,8 +46,8 @@ func TestStyleConfig_LinkStyle(t *testing.T) {
 	th := theme.TokyoNight()
 	sc := markdown.StyleConfig(th)
 
-	if sc.Link.Color == nil || *sc.Link.Color != string(th.Accent) {
-		t.Errorf("Link.Color = %v, want %q", sc.Link.Color, string(th.Accent))
+	if sc.Link.Color == nil || *sc.Link.Color != theme.Hex(th.Accent) {
+		t.Errorf("Link.Color = %v, want %q", sc.Link.Color, theme.Hex(th.Accent))
 	}
 	if sc.Link.Underline == nil || !*sc.Link.Underline {
 		t.Error("Link.Underline should be true")
@@ -58,11 +58,11 @@ func TestStyleConfig_CodeStyle(t *testing.T) {
 	th := theme.TokyoNight()
 	sc := markdown.StyleConfig(th)
 
-	if sc.Code.Color == nil || *sc.Code.Color != string(th.Success) {
-		t.Errorf("Code.Color = %v, want %q", sc.Code.Color, string(th.Success))
+	if sc.Code.Color == nil || *sc.Code.Color != theme.Hex(th.Success) {
+		t.Errorf("Code.Color = %v, want %q", sc.Code.Color, theme.Hex(th.Success))
 	}
-	if sc.Code.BackgroundColor == nil || *sc.Code.BackgroundColor != string(th.Highlight) {
-		t.Errorf("Code.BackgroundColor = %v, want %q", sc.Code.BackgroundColor, string(th.Highlight))
+	if sc.Code.BackgroundColor == nil || *sc.Code.BackgroundColor != theme.Hex(th.Highlight) {
+		t.Errorf("Code.BackgroundColor = %v, want %q", sc.Code.BackgroundColor, theme.Hex(th.Highlight))
 	}
 }
 

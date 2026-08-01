@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"log"
+	"strings"
 
 	"github.com/infrashift/chit/internal/model"
 )
@@ -34,6 +35,18 @@ func (a *App) zincSearch(ctx context.Context, channelID, query string, page, per
 // the caller must be a member; otherwise results are filtered to channels the
 // caller is a member of.
 func (a *App) SearchPosts(ctx context.Context, channelID, userID, query string, tagIDs []string, page, perPage int) (*model.PostList, error) {
+	return a.SearchPostsFrom(ctx, channelID, userID, query, "", tagIDs, page, perPage)
+}
+
+// SearchPostsFrom is SearchPosts with an optional author filter. fromUsername
+// restricts results to posts written by that user.
+//
+// The author filter is applied after the backend returns a page, not pushed
+// into the query, so a page can come back smaller than perPage when most of
+// its hits are by other people. That is a fair trade here: it works
+// identically against the ZincSearch index and the SQL fallback, and needs no
+// second index. Push it down if result sets ever get large enough to matter.
+func (a *App) SearchPostsFrom(ctx context.Context, channelID, userID, query, fromUsername string, tagIDs []string, page, perPage int) (*model.PostList, error) {
 	if channelID != "" {
 		if err := a.requireChannelMember(ctx, channelID, userID); err != nil {
 			return nil, err
@@ -100,6 +113,18 @@ func (a *App) SearchPosts(ctx context.Context, channelID, userID, query string, 
 		return &model.PostList{Order: []*model.Post{}}, nil
 	}
 
+	// Resolve the author filter once, before walking the results.
+	var fromUserID string
+	if fromUsername != "" {
+		author, err := a.Store.User().GetByUsername(ctx, strings.TrimPrefix(fromUsername, "@"))
+		if err != nil {
+			// An unknown author matches nothing, which is more useful than
+			// silently returning everything.
+			return &model.PostList{Order: []*model.Post{}}, nil
+		}
+		fromUserID = author.ID
+	}
+
 	// Filter results to channels the caller can access. Membership is checked
 	// once per distinct channel in the result set.
 	allowed := map[string]bool{}
@@ -119,6 +144,9 @@ func (a *App) SearchPosts(ctx context.Context, channelID, userID, query string, 
 			allowed[post.ChannelID] = ok
 		}
 		if !ok {
+			continue
+		}
+		if fromUserID != "" && post.UserID != fromUserID {
 			continue
 		}
 		posts = append(posts, post)

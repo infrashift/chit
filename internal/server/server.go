@@ -165,6 +165,13 @@ func (s *Server) initCommands() {
 		}
 		return &command.CommandResult{ResponseText: text}, nil
 	})
+	handlers["invite"] = command.HandlerFunc(func(ctx context.Context, actorID, channelID, args string) (*command.CommandResult, error) {
+		return s.app.HandleInvite(ctx, actorID, channelID, args)
+	})
+	handlers["kick"] = command.HandlerFunc(func(ctx context.Context, actorID, channelID, args string) (*command.CommandResult, error) {
+		return s.app.HandleKick(ctx, actorID, channelID, args)
+	})
+
 	s.app.CommandHandlers = handlers
 
 	// Audit logger.

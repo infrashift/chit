@@ -2,176 +2,90 @@ package theme
 
 import (
 	"encoding/json"
+	"image/color"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
-// Theme defines all colors used throughout the TUI.
+// Theme defines all colors used throughout the TUI. Colors are
+// image/color.Color so palettes can be derived arithmetically; a nil slot means
+// "terminal default" and the style helpers skip the attribute entirely.
 type Theme struct {
 	Name          string
 	Author        string
-	Background    lipgloss.Color
-	Foreground    lipgloss.Color
-	Subtle        lipgloss.Color
-	Accent        lipgloss.Color
-	Error         lipgloss.Color
-	Success       lipgloss.Color
-	Warning       lipgloss.Color
-	Border        lipgloss.Color
-	ActiveBorder  lipgloss.Color
-	Highlight     lipgloss.Color
-	Muted         lipgloss.Color
-	Username      lipgloss.Color
-	Timestamp     lipgloss.Color
-	UnreadBadge   lipgloss.Color
-	PinBadge      lipgloss.Color
-	ChannelActive lipgloss.Color
-	MentionBadge  lipgloss.Color
-	MentionText   lipgloss.Color
-	MentionSelfBg lipgloss.Color
-	TagBadge      lipgloss.Color
+	Background    color.Color
+	Foreground    color.Color
+	Subtle        color.Color
+	Accent        color.Color
+	Error         color.Color
+	Success       color.Color
+	Warning       color.Color
+	Border        color.Color
+	ActiveBorder  color.Color
+	Highlight     color.Color
+	Muted         color.Color
+	Username      color.Color
+	Timestamp     color.Color
+	UnreadBadge   color.Color
+	PinBadge      color.Color
+	ChannelActive color.Color
+	MentionBadge  color.Color
+	MentionText   color.Color
+	MentionSelfBg color.Color
+	TagBadge      color.Color
+
+	// Derived slots. Left unset by the built-in constructors and computed by
+	// derive() from the base palette, so a theme only has to declare the
+	// colors it actually cares about. A theme file may still set them.
+	Selection         color.Color
+	SearchMatch       color.Color
+	SearchMatchActive color.Color
+}
+
+// derive fills any unset derived slot from the base palette. It is idempotent,
+// so a theme file that sets a slot explicitly keeps its value.
+func (t Theme) derive() Theme {
+	if t.Selection == nil {
+		t.Selection = Blend(t.Background, t.Accent, 25)
+	}
+	if t.SearchMatch == nil {
+		t.SearchMatch = Blend(t.Background, t.Warning, 30)
+	}
+	if t.SearchMatchActive == nil {
+		t.SearchMatchActive = Blend(t.Background, t.Warning, 60)
+	}
+	return t
 }
 
 // themeFile is the JSON representation of a theme file.
 type themeFile struct {
-	Name          string `json:"name"`
-	Author        string `json:"author"`
-	Background    string `json:"background"`
-	Foreground    string `json:"foreground"`
-	Subtle        string `json:"subtle"`
-	Accent        string `json:"accent"`
-	Error         string `json:"error"`
-	Success       string `json:"success"`
-	Warning       string `json:"warning"`
-	Border        string `json:"border"`
-	ActiveBorder  string `json:"active_border"`
-	Highlight     string `json:"highlight"`
-	Muted         string `json:"muted"`
-	Username      string `json:"username"`
-	Timestamp     string `json:"timestamp"`
-	UnreadBadge   string `json:"unread_badge"`
-	PinBadge      string `json:"pin_badge"`
-	ChannelActive string `json:"channel_active"`
-	MentionBadge  string `json:"mention_badge"`
-	MentionText   string `json:"mention_text"`
-	MentionSelfBg string `json:"mention_self_bg"`
-	TagBadge      string `json:"tag_badge"`
-}
-
-// TokyoNight returns the default Tokyo Night theme.
-func TokyoNight() Theme {
-	return Theme{
-		Name:          "Tokyo Night",
-		Author:        "chit-tui",
-		Background:    lipgloss.Color("#1a1b26"),
-		Foreground:    lipgloss.Color("#c0caf5"),
-		Subtle:        lipgloss.Color("#565f89"),
-		Accent:        lipgloss.Color("#7aa2f7"),
-		Error:         lipgloss.Color("#f7768e"),
-		Success:       lipgloss.Color("#9ece6a"),
-		Warning:       lipgloss.Color("#e0af68"),
-		Border:        lipgloss.Color("#3b4261"),
-		ActiveBorder:  lipgloss.Color("#7aa2f7"),
-		Highlight:     lipgloss.Color("#292e42"),
-		Muted:         lipgloss.Color("#545c7e"),
-		Username:      lipgloss.Color("#bb9af7"),
-		Timestamp:     lipgloss.Color("#565f89"),
-		UnreadBadge:   lipgloss.Color("#7aa2f7"),
-		PinBadge:      lipgloss.Color("#e0af68"),
-		ChannelActive: lipgloss.Color("#7aa2f7"),
-		MentionBadge:  lipgloss.Color("#f7768e"),
-		MentionText:   lipgloss.Color("#7aa2f7"),
-		MentionSelfBg: lipgloss.Color("#e0af68"),
-		TagBadge:      lipgloss.Color("#9ece6a"),
-	}
-}
-
-// Catppuccin returns the Catppuccin Mocha theme.
-func Catppuccin() Theme {
-	return Theme{
-		Name:          "Catppuccin Mocha",
-		Author:        "catppuccin",
-		Background:    lipgloss.Color("#1e1e2e"),
-		Foreground:    lipgloss.Color("#cdd6f4"),
-		Subtle:        lipgloss.Color("#6c7086"),
-		Accent:        lipgloss.Color("#89b4fa"),
-		Error:         lipgloss.Color("#f38ba8"),
-		Success:       lipgloss.Color("#a6e3a1"),
-		Warning:       lipgloss.Color("#f9e2af"),
-		Border:        lipgloss.Color("#313244"),
-		ActiveBorder:  lipgloss.Color("#89b4fa"),
-		Highlight:     lipgloss.Color("#313244"),
-		Muted:         lipgloss.Color("#585b70"),
-		Username:      lipgloss.Color("#cba6f7"),
-		Timestamp:     lipgloss.Color("#6c7086"),
-		UnreadBadge:   lipgloss.Color("#89b4fa"),
-		PinBadge:      lipgloss.Color("#f9e2af"),
-		ChannelActive: lipgloss.Color("#89b4fa"),
-		MentionBadge:  lipgloss.Color("#f38ba8"),
-		MentionText:   lipgloss.Color("#89b4fa"),
-		MentionSelfBg: lipgloss.Color("#f9e2af"),
-		TagBadge:      lipgloss.Color("#a6e3a1"),
-	}
-}
-
-// Kanagawa returns the Kanagawa theme.
-func Kanagawa() Theme {
-	return Theme{
-		Name:          "Kanagawa",
-		Author:        "rebelot",
-		Background:    lipgloss.Color("#1f1f28"),
-		Foreground:    lipgloss.Color("#dcd7ba"),
-		Subtle:        lipgloss.Color("#727169"),
-		Accent:        lipgloss.Color("#7e9cd8"),
-		Error:         lipgloss.Color("#e82424"),
-		Success:       lipgloss.Color("#98bb6c"),
-		Warning:       lipgloss.Color("#e6c384"),
-		Border:        lipgloss.Color("#2a2a37"),
-		ActiveBorder:  lipgloss.Color("#7e9cd8"),
-		Highlight:     lipgloss.Color("#2a2a37"),
-		Muted:         lipgloss.Color("#54546d"),
-		Username:      lipgloss.Color("#957fb8"),
-		Timestamp:     lipgloss.Color("#727169"),
-		UnreadBadge:   lipgloss.Color("#7fb4ca"),
-		PinBadge:      lipgloss.Color("#e6c384"),
-		ChannelActive: lipgloss.Color("#7e9cd8"),
-		MentionBadge:  lipgloss.Color("#e82424"),
-		MentionText:   lipgloss.Color("#7e9cd8"),
-		MentionSelfBg: lipgloss.Color("#e6c384"),
-		TagBadge:      lipgloss.Color("#98bb6c"),
-	}
-}
-
-// Nightfox returns the Nightfox theme.
-func Nightfox() Theme {
-	return Theme{
-		Name:          "Nightfox",
-		Author:        "EdenEast",
-		Background:    lipgloss.Color("#192330"),
-		Foreground:    lipgloss.Color("#cdcecf"),
-		Subtle:        lipgloss.Color("#71839b"),
-		Accent:        lipgloss.Color("#719cd6"),
-		Error:         lipgloss.Color("#c94f6d"),
-		Success:       lipgloss.Color("#81b29a"),
-		Warning:       lipgloss.Color("#dbc074"),
-		Border:        lipgloss.Color("#29394f"),
-		ActiveBorder:  lipgloss.Color("#719cd6"),
-		Highlight:     lipgloss.Color("#29394f"),
-		Muted:         lipgloss.Color("#575860"),
-		Username:      lipgloss.Color("#9d79d6"),
-		Timestamp:     lipgloss.Color("#71839b"),
-		UnreadBadge:   lipgloss.Color("#63cdcf"),
-		PinBadge:      lipgloss.Color("#dbc074"),
-		ChannelActive: lipgloss.Color("#719cd6"),
-		MentionBadge:  lipgloss.Color("#c94f6d"),
-		MentionText:   lipgloss.Color("#719cd6"),
-		MentionSelfBg: lipgloss.Color("#dbc074"),
-		TagBadge:      lipgloss.Color("#81b29a"),
-	}
+	Name              string `json:"name"`
+	Author            string `json:"author"`
+	Background        string `json:"background"`
+	Foreground        string `json:"foreground"`
+	Subtle            string `json:"subtle"`
+	Accent            string `json:"accent"`
+	Error             string `json:"error"`
+	Success           string `json:"success"`
+	Warning           string `json:"warning"`
+	Border            string `json:"border"`
+	ActiveBorder      string `json:"active_border"`
+	Highlight         string `json:"highlight"`
+	Muted             string `json:"muted"`
+	Username          string `json:"username"`
+	Timestamp         string `json:"timestamp"`
+	UnreadBadge       string `json:"unread_badge"`
+	PinBadge          string `json:"pin_badge"`
+	ChannelActive     string `json:"channel_active"`
+	MentionBadge      string `json:"mention_badge"`
+	MentionText       string `json:"mention_text"`
+	MentionSelfBg     string `json:"mention_self_bg"`
+	TagBadge          string `json:"tag_badge"`
+	Selection         string `json:"selection"`
+	SearchMatch       string `json:"search_match"`
+	SearchMatchActive string `json:"search_match_active"`
 }
 
 // LoadFromFile loads a theme from a JSON file.
@@ -190,14 +104,6 @@ func ParseJSON(data []byte) (Theme, error) {
 		return Theme{}, err
 	}
 	return tf.toTheme(), nil
-}
-
-// builtinThemes maps names to built-in theme constructors.
-var builtinThemes = map[string]func() Theme{
-	"tokyo-night": TokyoNight,
-	"catppuccin":  Catppuccin,
-	"kanagawa":    Kanagawa,
-	"nightfox":    Nightfox,
 }
 
 // ListAvailable returns sorted names of all available themes.
@@ -231,8 +137,8 @@ func LoadNamed(name string) Theme {
 	if name == "" {
 		return TokyoNight()
 	}
-	if fn, ok := builtinThemes[name]; ok {
-		return fn()
+	if t, ok := Lookup(name); ok {
+		return t
 	}
 	dir := skinsDir()
 	path := filepath.Join(dir, name+".json")
@@ -251,11 +157,11 @@ func skinsDir() string {
 	return filepath.Join(configDir, "chit", "skins")
 }
 
-func colorOrDefault(val string, def lipgloss.Color) lipgloss.Color {
-	if val == "" {
-		return def
+func colorOrDefault(val string, def color.Color) color.Color {
+	if c := hexColor(val); c != nil {
+		return c
 	}
-	return lipgloss.Color(val)
+	return def
 }
 
 func (tf themeFile) toTheme() Theme {
@@ -283,5 +189,11 @@ func (tf themeFile) toTheme() Theme {
 		MentionText:   colorOrDefault(tf.MentionText, d.MentionText),
 		MentionSelfBg: colorOrDefault(tf.MentionSelfBg, d.MentionSelfBg),
 		TagBadge:      colorOrDefault(tf.TagBadge, d.TagBadge),
-	}
+
+		// Left nil unless the file sets them, so derive() can compute them
+		// from whatever palette the file actually declared.
+		Selection:         hexColor(tf.Selection),
+		SearchMatch:       hexColor(tf.SearchMatch),
+		SearchMatchActive: hexColor(tf.SearchMatchActive),
+	}.derive()
 }

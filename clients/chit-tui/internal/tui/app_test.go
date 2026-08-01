@@ -1210,15 +1210,34 @@ func TestModel_SlashSkinOpensSkinPicker(t *testing.T) {
 	}
 }
 
-func TestModel_SlashOtherOpensPalette(t *testing.T) {
+// A bare slash is a request to browse the command list.
+func TestModel_BareSlashOpensPalette(t *testing.T) {
 	m := setupModel(t)
 
-	updated, _ := m.Update(input.SlashTriggerMsg{Input: "/remind"})
+	updated, _ := m.Update(input.SlashTriggerMsg{Input: "/"})
 	m = updated.(tui.Model)
 
-	view := m.View()
+	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "remind") {
-		t.Errorf("expected command palette with 'remind' in view:\n%s", view)
+		t.Errorf("expected the command palette in view:\n%s", view)
+	}
+}
+
+// Anything else goes to the server, which owns the command registry and the
+// unknown-command reply. Opening the palette here used to discard the text.
+func TestModel_SlashCommandIsSentToServer(t *testing.T) {
+	m := setupModel(t)
+
+	updated, cmd := m.Update(input.SlashTriggerMsg{Input: "/invite bob"})
+	m = updated.(tui.Model)
+
+	if cmd == nil {
+		t.Fatal("no command returned; the slash text was dropped")
+	}
+
+	view := testutil.StripANSI(m.View())
+	if strings.Contains(view, "Commands") {
+		t.Errorf("the palette opened instead of sending:\n%s", view)
 	}
 }
 
@@ -1788,5 +1807,206 @@ func TestModel_SendMsg_HashtagWithTextStripsCorrectly(t *testing.T) {
 	}
 	if client.lastCreatedPost.Content != "blah blah" {
 		t.Errorf("expected content %q, got %q", "blah blah", client.lastCreatedPost.Content)
+	}
+}
+
+// The bug this guards: the client intercepted every "/"-prefixed message and
+// discarded it, so an ordinary message that happens to start with a slash —
+// a path, say — could never be sent, silently. The server's parser rejects
+// "/usr/local/bin" as a command, so it must arrive as a normal post.
+func TestModel_SlashPrefixedMessageIsNotSwallowed(t *testing.T) {
+	tests := []string{
+		"/usr/local/bin",
+		"/etc/hosts is the file",
+		"/",
+	}
+
+	for _, content := range tests {
+		t.Run(content, func(t *testing.T) {
+			m := setupModel(t)
+
+			updated, cmd := m.Update(input.SlashTriggerMsg{Input: content})
+			m = updated.(tui.Model)
+
+			if content == "/" {
+				// A bare slash browses instead of sending.
+				view := testutil.StripANSI(m.View())
+				if !strings.Contains(view, "remind") {
+					t.Errorf("bare slash should open the palette:\n%s", view)
+				}
+				return
+			}
+
+			if cmd == nil {
+				t.Fatalf("%q produced no command; the message was dropped", content)
+			}
+		})
+	}
+}
+
+// Choosing a command from the palette used to do nothing at all. It now
+// prefills the input so arguments can be typed.
+func TestModel_CommandChosenPrefillsInput(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(palette.CommandChosenMsg{
+		Command: &model.Command{ID: "cmd1", Slug: "invite"},
+	})
+	m = updated.(tui.Model)
+
+	view := testutil.StripANSI(m.View())
+	if !strings.Contains(view, "/invite") {
+		t.Errorf("expected the input prefilled with /invite:\n%s", view)
+	}
+}
+
+// The ephemeral reply to a command is broadcast only to the invoker and is
+// never persisted, so it had no handler and simply vanished.
+func TestModel_CommandResponseIsDisplayed(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.WebSocketEventMsg{Event: model.WebSocketEvent{
+		Event: model.WebSocketEventCommandResponse,
+		Data: map[string]any{
+			"text":         "bob was added to the channel",
+			"channel_id":   "c1",
+			"command_slug": "invite",
+		},
+	}})
+	m = updated.(tui.Model)
+
+	view := testutil.StripANSI(m.View())
+	if !strings.Contains(view, "bob was added to the channel") {
+		t.Errorf("command response is not shown:\n%s", view)
+	}
+	if !strings.Contains(view, "/invite") {
+		t.Errorf("response is not attributed to the command:\n%s", view)
+	}
+}
+
+// A response for another channel must not leak into the current one.
+func TestModel_CommandResponseForOtherChannelIsIgnored(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.WebSocketEventMsg{Event: model.WebSocketEvent{
+		Event: model.WebSocketEventCommandResponse,
+		Data: map[string]any{
+			"text":       "secret from elsewhere",
+			"channel_id": "other-channel",
+		},
+	}})
+	m = updated.(tui.Model)
+
+	if strings.Contains(testutil.StripANSI(m.View()), "secret from elsewhere") {
+		t.Error("a response for another channel was displayed")
+	}
+}
+
+// The Reply button is the only on-screen hint that replying exists, and that
+// the history pane must be focused first. It appears only when a reply is
+// actually possible.
+func TestModel_ReplyButtonAppearsWhenHistoryFocused(t *testing.T) {
+	m := setupModel(t)
+
+	// Input is focused at startup, so there is nothing to reply to yet.
+	if strings.Contains(testutil.StripANSI(m.View()), "Reply") {
+		t.Error("Reply button shown while the input is focused")
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "Reply") {
+		t.Errorf("Reply button missing after focusing history:\n%s",
+			testutil.StripANSI(m.View()))
+	}
+}
+
+// Clicking Reply must take the same path as pressing enter.
+func TestModel_ReplyButtonOpensThread(t *testing.T) {
+	m := setupModel(t)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(tui.Model)
+
+	view := testutil.StripANSI(m.View())
+	col := strings.Index(view[strings.LastIndex(view, "\n")+1:], "Reply")
+	if col < 0 {
+		t.Fatalf("Reply button not found on the action bar:\n%s", view)
+	}
+
+	_, cmd := m.Update(tea.MouseMsg{
+		X: col, Y: 39, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft,
+	})
+	if cmd == nil {
+		t.Error("clicking Reply produced no command")
+	}
+}
+
+// Tagging worked only in the history pane, so a post's tags were unreachable
+// once it was open as a thread.
+func TestModel_TagPickerOpensFromThread(t *testing.T) {
+	m := setupModel(t)
+
+	// Open the thread, then focus its pane — enter opens the thread but
+	// leaves focus on the input so a reply can be typed straight away.
+	updated, _ := m.Update(viewport.PostSelectedMsg{
+		Post: &model.Post{ID: "p1", UserID: "u1", Content: "root"},
+	})
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(tui.ThreadLoadedMsg{
+		Posts: &model.PostList{Order: []*model.Post{
+			{ID: "p1", UserID: "u1", Content: "root", CreateAt: 1700000000000},
+		}},
+	})
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "Filter tags") {
+		t.Errorf("tag picker did not open from the thread pane:\n%s",
+			testutil.StripANSI(m.View()))
+	}
+}
+
+// Choosing a search result used to only move focus, leaving the reader
+// wherever they already were — which made search results useless.
+func TestModel_SearchResultJumpsToPost(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.PostsLoadedMsg{
+		ChannelID: "c1",
+		Posts: &model.PostList{Order: []*model.Post{
+			{ID: "p1", UserID: "u1", Content: "first", CreateAt: 1700000000000},
+			{ID: "p2", UserID: "u1", Content: "needle here", CreateAt: 1700000001000},
+		}},
+	})
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(palette.PostChosenMsg{Post: &model.Post{ID: "p2"}})
+	m = updated.(tui.Model)
+
+	if got := m.SelectedPostID(); got != "p2" {
+		t.Errorf("selected post = %q, want p2", got)
+	}
+}
+
+// A hit outside the loaded window must say so rather than appear to do
+// nothing.
+func TestModel_SearchResultOutsideHistoryReportsError(t *testing.T) {
+	m := setupModel(t)
+
+	updated, cmd := m.Update(palette.PostChosenMsg{Post: &model.Post{ID: "ancient"}})
+	m = updated.(tui.Model)
+
+	if cmd == nil {
+		t.Error("no command returned; the user gets no feedback")
+	}
+	if !strings.Contains(testutil.StripANSI(m.View()), "older than the loaded history") {
+		t.Errorf("no explanation shown:\n%s", testutil.StripANSI(m.View()))
 	}
 }

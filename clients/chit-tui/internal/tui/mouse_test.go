@@ -187,3 +187,71 @@ func TestModel_ActionBarShowsConnectionState(t *testing.T) {
 		t.Errorf("expected connected indicator after WSConnectedMsg:\n%s", view)
 	}
 }
+
+// The wheel used to scroll the history no matter where the pointer was, so
+// scrolling over the input box moved the wrong pane.
+func TestMouse_WheelOverInputDoesNotScrollHistory(t *testing.T) {
+	m := setupModel(t)
+
+	before := testutil.StripANSI(m.View())
+
+	// A row inside the input box, which sits below the history pane.
+	updated, _ := m.Update(tea.MouseMsg{
+		X: 10, Y: 37, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp,
+	})
+	m = updated.(tui.Model)
+
+	if testutil.StripANSI(m.View()) != before {
+		t.Error("wheel over the input scrolled the history")
+	}
+}
+
+// Press anchors a selection and picks the post under the pointer, so a plain
+// click behaves like choosing a post.
+func TestMouse_PressInHistorySelectsPost(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tea.MouseMsg{
+		X: 5, Y: 2, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
+	})
+	m = updated.(tui.Model)
+
+	if m.SelectedPostID() == "" {
+		t.Error("pressing in the history selected no post")
+	}
+}
+
+// Motion after a press extends the selection; without it a drag does nothing.
+func TestMouse_DragExtendsSelection(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tea.MouseMsg{
+		X: 5, Y: 2, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
+	})
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(tea.MouseMsg{
+		X: 5, Y: 4, Action: tea.MouseActionMotion, Button: tea.MouseButtonLeft,
+	})
+	m = updated.(tui.Model)
+
+	if !m.HasSelection() {
+		t.Error("dragging did not produce a selection")
+	}
+}
+
+// A click on the action bar must still reach the bar rather than being
+// swallowed by the selection handling added above it.
+func TestMouse_ActionBarStillReachable(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tea.MouseMsg{
+		X: 3, Y: 39, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft,
+	})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "Jump to channel") {
+		t.Errorf("clicking the bar did not open the palette:\n%s",
+			testutil.StripANSI(m.View()))
+	}
+}

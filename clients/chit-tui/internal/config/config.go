@@ -1,7 +1,7 @@
 package config
 
 import (
-	"errors"
+	"fmt"
 	"os"
 )
 
@@ -11,6 +11,9 @@ type Config struct {
 	SessionToken string
 	WSScheme     string
 	ThemeName    string
+	ThemeDark    string
+	ThemeLight   string
+	Appearance   string
 	AuthHeader   string
 	SessionFile  string
 }
@@ -21,35 +24,50 @@ const (
 	DefaultAuthHeader = "X-Session-Token"
 )
 
-// Load reads configuration from environment variables.
-func Load() (*Config, error) {
-	cfg := &Config{
-		ServerURL:    os.Getenv("CHIT_SERVER_URL"),
-		SessionToken: os.Getenv("CHIT_SESSION_TOKEN"),
-		WSScheme:     os.Getenv("CHIT_WS_SCHEME"),
-		ThemeName:    os.Getenv("CHIT_THEME"),
-		AuthHeader:   os.Getenv("CHIT_AUTH_HEADER"),
-		SessionFile:  os.Getenv("CHIT_SESSION_FILE"),
-	}
+// Load reads configuration from the config file and the environment.
+//
+// Precedence is environment > config file > built-in default, the usual
+// ordering: the file is the persistent choice, an environment variable is a
+// deliberate override for one invocation and so wins. Warnings describe
+// settings that were ignored; they are advisory and never fatal.
+func Load() (*Config, []string, error) {
+	file, warnings := LoadFile(FilePath())
 
-	if cfg.WSScheme == "" {
-		cfg.WSScheme = DefaultWSScheme
-	}
-	if cfg.AuthHeader == "" {
-		cfg.AuthHeader = DefaultAuthHeader
+	cfg := &Config{
+		ServerURL:    firstNonEmpty(os.Getenv("CHIT_SERVER_URL"), file.ServerURL),
+		SessionToken: os.Getenv("CHIT_SESSION_TOKEN"),
+		WSScheme:     firstNonEmpty(os.Getenv("CHIT_WS_SCHEME"), file.WSScheme, DefaultWSScheme),
+		ThemeName:    firstNonEmpty(os.Getenv("CHIT_THEME"), file.Theme),
+		ThemeDark:    file.ThemeDark,
+		ThemeLight:   file.ThemeLight,
+		Appearance:   file.Appearance,
+		AuthHeader:   firstNonEmpty(os.Getenv("CHIT_AUTH_HEADER"), file.AuthHeader, DefaultAuthHeader),
+		SessionFile:  firstNonEmpty(os.Getenv("CHIT_SESSION_FILE"), file.SessionFile),
 	}
 
 	if err := cfg.Validate(); err != nil {
-		return nil, err
+		return nil, warnings, err
 	}
 
-	return cfg, nil
+	return cfg, warnings, nil
+}
+
+// firstNonEmpty returns the first value that is set, which is how each setting
+// walks its precedence chain.
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // Validate checks that required fields are set.
 func (c *Config) Validate() error {
 	if c.ServerURL == "" {
-		return errors.New("CHIT_SERVER_URL is required")
+		return fmt.Errorf("no server URL configured: set CHIT_SERVER_URL, "+
+			"or add server_url to %s", FilePath())
 	}
 	return nil
 }

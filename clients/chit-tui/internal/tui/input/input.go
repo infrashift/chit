@@ -194,3 +194,10 @@ func (m Model) View() string {
 	}
 	return borderStyle.Width(m.width - 2).Render(m.textarea.View())
 }
+
+// SetValue replaces the input contents and puts the cursor at the end, so a
+// command inserted from the palette can be completed by typing.
+func (m *Model) SetValue(s string) {
+	m.textarea.SetValue(s)
+	m.textarea.CursorEnd()
+}

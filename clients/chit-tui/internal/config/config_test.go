@@ -11,7 +11,7 @@ func TestLoad_FromEnv(t *testing.T) {
 	t.Setenv("CHIT_SESSION_TOKEN", "test-token-123")
 	t.Setenv("CHIT_WS_SCHEME", "")
 
-	cfg, err := config.Load()
+	cfg, _, err := config.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestLoad_MissingServerURL(t *testing.T) {
 	t.Setenv("CHIT_SERVER_URL", "")
 	t.Setenv("CHIT_SESSION_TOKEN", "token")
 
-	_, err := config.Load()
+	_, _, err := config.Load()
 	if err == nil {
 		t.Fatal("expected error for missing server URL")
 	}
@@ -40,7 +40,7 @@ func TestLoad_MissingToken(t *testing.T) {
 	t.Setenv("CHIT_SERVER_URL", "http://localhost:8065")
 	t.Setenv("CHIT_SESSION_TOKEN", "")
 
-	cfg, err := config.Load()
+	cfg, _, err := config.Load()
 	if err != nil {
 		t.Fatalf("missing token should not be an error: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestConfig_DefaultWSScheme(t *testing.T) {
 	t.Setenv("CHIT_SESSION_TOKEN", "tok")
 	t.Setenv("CHIT_WS_SCHEME", "")
 
-	cfg, err := config.Load()
+	cfg, _, err := config.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestConfig_DefaultAuthHeader(t *testing.T) {
 	t.Setenv("CHIT_SESSION_TOKEN", "tok")
 	t.Setenv("CHIT_AUTH_HEADER", "")
 
-	cfg, err := config.Load()
+	cfg, _, err := config.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestConfig_CustomAuthHeader(t *testing.T) {
 	t.Setenv("CHIT_SESSION_TOKEN", "tok")
 	t.Setenv("CHIT_AUTH_HEADER", "X-User-Id")
 
-	cfg, err := config.Load()
+	cfg, _, err := config.Load()
 	if err != nil {
 		t.Fatal(err)
 	}

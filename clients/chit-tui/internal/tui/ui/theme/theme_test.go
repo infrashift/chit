@@ -15,25 +15,25 @@ func TestTokyoNight_HasAllColors(t *testing.T) {
 		name  string
 		color string
 	}{
-		{"Background", string(tn.Background)},
-		{"Foreground", string(tn.Foreground)},
-		{"Subtle", string(tn.Subtle)},
-		{"Accent", string(tn.Accent)},
-		{"Error", string(tn.Error)},
-		{"Success", string(tn.Success)},
-		{"Warning", string(tn.Warning)},
-		{"Border", string(tn.Border)},
-		{"ActiveBorder", string(tn.ActiveBorder)},
-		{"Highlight", string(tn.Highlight)},
-		{"Muted", string(tn.Muted)},
-		{"Username", string(tn.Username)},
-		{"Timestamp", string(tn.Timestamp)},
-		{"UnreadBadge", string(tn.UnreadBadge)},
-		{"PinBadge", string(tn.PinBadge)},
-		{"ChannelActive", string(tn.ChannelActive)},
-		{"MentionBadge", string(tn.MentionBadge)},
-		{"MentionText", string(tn.MentionText)},
-		{"MentionSelfBg", string(tn.MentionSelfBg)},
+		{"Background", theme.Hex(tn.Background)},
+		{"Foreground", theme.Hex(tn.Foreground)},
+		{"Subtle", theme.Hex(tn.Subtle)},
+		{"Accent", theme.Hex(tn.Accent)},
+		{"Error", theme.Hex(tn.Error)},
+		{"Success", theme.Hex(tn.Success)},
+		{"Warning", theme.Hex(tn.Warning)},
+		{"Border", theme.Hex(tn.Border)},
+		{"ActiveBorder", theme.Hex(tn.ActiveBorder)},
+		{"Highlight", theme.Hex(tn.Highlight)},
+		{"Muted", theme.Hex(tn.Muted)},
+		{"Username", theme.Hex(tn.Username)},
+		{"Timestamp", theme.Hex(tn.Timestamp)},
+		{"UnreadBadge", theme.Hex(tn.UnreadBadge)},
+		{"PinBadge", theme.Hex(tn.PinBadge)},
+		{"ChannelActive", theme.Hex(tn.ChannelActive)},
+		{"MentionBadge", theme.Hex(tn.MentionBadge)},
+		{"MentionText", theme.Hex(tn.MentionText)},
+		{"MentionSelfBg", theme.Hex(tn.MentionSelfBg)},
 	}
 
 	for _, c := range checks {
@@ -82,11 +82,11 @@ func TestParseJSON_FullTheme(t *testing.T) {
 	if th.Name != "Dracula" {
 		t.Errorf("name = %q, want %q", th.Name, "Dracula")
 	}
-	if string(th.Background) != "#282a36" {
-		t.Errorf("background = %q", string(th.Background))
+	if theme.Hex(th.Background) != "#282a36" {
+		t.Errorf("background = %q", theme.Hex(th.Background))
 	}
-	if string(th.Error) != "#ff5555" {
-		t.Errorf("error = %q", string(th.Error))
+	if theme.Hex(th.Error) != "#ff5555" {
+		t.Errorf("error = %q", theme.Hex(th.Error))
 	}
 }
 
@@ -100,13 +100,13 @@ func TestParseJSON_PartialTheme_DefaultsFilled(t *testing.T) {
 	if th.Name != "Partial" {
 		t.Errorf("name = %q", th.Name)
 	}
-	if string(th.Background) != "#000000" {
-		t.Errorf("background = %q", string(th.Background))
+	if theme.Hex(th.Background) != "#000000" {
+		t.Errorf("background = %q", theme.Hex(th.Background))
 	}
 	// Unspecified fields should fall back to TokyoNight defaults
 	def := theme.TokyoNight()
 	if th.Foreground != def.Foreground {
-		t.Errorf("foreground = %q, want default %q", string(th.Foreground), string(def.Foreground))
+		t.Errorf("foreground = %q, want default %q", theme.Hex(th.Foreground), theme.Hex(def.Foreground))
 	}
 }
 
@@ -132,8 +132,8 @@ func TestLoadFromFile(t *testing.T) {
 	if th.Name != "TestTheme" {
 		t.Errorf("name = %q", th.Name)
 	}
-	if string(th.Accent) != "#ff0000" {
-		t.Errorf("accent = %q", string(th.Accent))
+	if theme.Hex(th.Accent) != "#ff0000" {
+		t.Errorf("accent = %q", theme.Hex(th.Accent))
 	}
 }
 
@@ -172,25 +172,25 @@ func assertThemeComplete(t *testing.T, th theme.Theme) {
 		name  string
 		color string
 	}{
-		{"Background", string(th.Background)},
-		{"Foreground", string(th.Foreground)},
-		{"Subtle", string(th.Subtle)},
-		{"Accent", string(th.Accent)},
-		{"Error", string(th.Error)},
-		{"Success", string(th.Success)},
-		{"Warning", string(th.Warning)},
-		{"Border", string(th.Border)},
-		{"ActiveBorder", string(th.ActiveBorder)},
-		{"Highlight", string(th.Highlight)},
-		{"Muted", string(th.Muted)},
-		{"Username", string(th.Username)},
-		{"Timestamp", string(th.Timestamp)},
-		{"UnreadBadge", string(th.UnreadBadge)},
-		{"PinBadge", string(th.PinBadge)},
-		{"ChannelActive", string(th.ChannelActive)},
-		{"MentionBadge", string(th.MentionBadge)},
-		{"MentionText", string(th.MentionText)},
-		{"MentionSelfBg", string(th.MentionSelfBg)},
+		{"Background", theme.Hex(th.Background)},
+		{"Foreground", theme.Hex(th.Foreground)},
+		{"Subtle", theme.Hex(th.Subtle)},
+		{"Accent", theme.Hex(th.Accent)},
+		{"Error", theme.Hex(th.Error)},
+		{"Success", theme.Hex(th.Success)},
+		{"Warning", theme.Hex(th.Warning)},
+		{"Border", theme.Hex(th.Border)},
+		{"ActiveBorder", theme.Hex(th.ActiveBorder)},
+		{"Highlight", theme.Hex(th.Highlight)},
+		{"Muted", theme.Hex(th.Muted)},
+		{"Username", theme.Hex(th.Username)},
+		{"Timestamp", theme.Hex(th.Timestamp)},
+		{"UnreadBadge", theme.Hex(th.UnreadBadge)},
+		{"PinBadge", theme.Hex(th.PinBadge)},
+		{"ChannelActive", theme.Hex(th.ChannelActive)},
+		{"MentionBadge", theme.Hex(th.MentionBadge)},
+		{"MentionText", theme.Hex(th.MentionText)},
+		{"MentionSelfBg", theme.Hex(th.MentionSelfBg)},
 	}
 	for _, c := range colors {
 		if c.color == "" {
