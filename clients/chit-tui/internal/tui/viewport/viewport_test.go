@@ -755,3 +755,39 @@ func TestAtTop(t *testing.T) {
 		t.Error("AtTop is false after scrolling to the top")
 	}
 }
+
+// An empty pane is ambiguous — still loading, or nothing to show? Both cases
+// used to render an identical blank bordered box.
+func TestEmptyAndLoadingStates(t *testing.T) {
+	m := viewport.New(styles.New(theme.TokyoNight()))
+	m.SetSize(80, 10)
+
+	t.Run("empty says so", func(t *testing.T) {
+		view := testutil.StripANSI(m.View())
+		if !strings.Contains(view, "No messages yet") {
+			t.Errorf("no empty-state text:\n%s", view)
+		}
+	})
+
+	t.Run("loading is distinguishable from empty", func(t *testing.T) {
+		m.SetLoading(true)
+		view := testutil.StripANSI(m.View())
+		if !strings.Contains(view, "Loading") {
+			t.Errorf("no loading text:\n%s", view)
+		}
+		if strings.Contains(view, "No messages yet") {
+			t.Error("loading pane claims the channel is empty")
+		}
+	})
+
+	t.Run("posts replace the placeholder", func(t *testing.T) {
+		m.SetLoading(false)
+		m.SetPosts([]*model.Post{
+			{ID: "p1", UserID: "u1", Content: "hello", CreateAt: 1700000000000},
+		})
+		view := testutil.StripANSI(m.View())
+		if strings.Contains(view, "No messages yet") || strings.Contains(view, "Loading") {
+			t.Errorf("placeholder still shown with posts:\n%s", view)
+		}
+	})
+}

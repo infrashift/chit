@@ -35,6 +35,7 @@ type Model struct {
 	selAnchor       int
 	selHead         int
 	selActive       bool
+	loading         bool
 	searchTerm      string
 	focused         bool
 	styles          styles.Styles
@@ -327,8 +328,33 @@ func (m Model) View() string {
 	if m.focused {
 		borderStyle = borderStyle.BorderForeground(m.styles.ActiveBorder.GetBorderBottomForeground())
 	}
-	return borderStyle.Width(m.width - 2).Height(m.height - 2).Render(m.viewport.View())
+
+	body := m.viewport.View()
+	// An empty pane is ambiguous: still loading, or nothing to show? Say
+	// which, rather than rendering a blank bordered box.
+	if len(m.posts) == 0 {
+		body = m.styles.DaySeparator.Render(m.placeholder())
+	}
+
+	return borderStyle.Width(m.width - 2).Height(m.height - 2).Render(body)
 }
+
+// placeholder is the text shown when there are no posts to render.
+func (m Model) placeholder() string {
+	if m.loading {
+		return "Loading messages…"
+	}
+	return "No messages yet — type below to start the conversation."
+}
+
+// SetLoading marks a fetch as in flight, so the pane can say so instead of
+// showing a stale or blank view while the request is out.
+func (m *Model) SetLoading(loading bool) { m.loading = loading }
+
+// Note: a "loading older" banner is deliberately not injected into the
+// rendered content. Every line of that content is indexed for selection and
+// click-to-select, so an extra line would shift the map and make clicks
+// resolve to the wrong post. The status line carries that notice instead.
 
 func (m *Model) ensureRenderer() {
 	if m.renderer == nil {

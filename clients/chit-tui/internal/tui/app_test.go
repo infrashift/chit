@@ -2456,10 +2456,24 @@ func TestModel_ScrollingToTopLoadsOlderPosts(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("reaching the top issued no fetch; older history is unreachable")
 	}
-	if msg, ok := cmd().(tui.OlderPostsLoadedMsg); !ok {
-		t.Errorf("expected OlderPostsLoadedMsg, got %T", cmd())
-	} else if msg.Page != 1 {
-		t.Errorf("requested page %d, want 1", msg.Page)
+	// The fetch is batched with a "loading older" notice whose auto-clear is
+	// a ten-second tick, so the batch is inspected rather than run.
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("expected a batch, got %T", cmd())
+	}
+	var loaded *tui.OlderPostsLoadedMsg
+	for _, c := range batch {
+		if msg, ok := c().(tui.OlderPostsLoadedMsg); ok {
+			loaded = &msg
+			break
+		}
+	}
+	if loaded == nil {
+		t.Fatal("no OlderPostsLoadedMsg produced")
+	}
+	if loaded.Page != 1 {
+		t.Errorf("requested page %d, want 1", loaded.Page)
 	}
 }
 

@@ -435,12 +435,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case PostsLoadedMsg:
+		m.viewport.SetLoading(false)
 		if msg.Err != nil {
 			if api.IsUnauthorized(msg.Err) {
 				return m.handleAuthExpired()
 			}
 			return m, m.setError(msg.Err)
 		}
+		m.viewport.SetLoading(false)
 		m.viewport.SetPosts(msg.Posts.Order)
 		m.historyPage = 0
 		m.loadingOlder = false
@@ -1273,7 +1275,9 @@ func (m *Model) selectChannel(ch *model.Channel) tea.Cmd {
 			m.activeTeam = t
 		}
 	}
-	cmds = append(cmds, FetchPosts(m.client, ch.ID, 0, 60))
+	m.viewport.SetPosts(nil)
+	m.viewport.SetLoading(true)
+	cmds = append(cmds, FetchPosts(m.client, ch.ID, 0, historyPageSize))
 	cmds = append(cmds, ViewChannel(m.client, ch.ID))
 	// Members are only read for the active channel, to build the @-mention
 	// list, so they are fetched on entry rather than for every channel in
@@ -2041,6 +2045,10 @@ func (m *Model) removeChannel(channelID string) []tea.Cmd {
 	return cmds
 }
 
+// errLoadingOlder is a notice, not a failure: fetching a page of older
+// history can take a moment and the view does not otherwise change.
+var errLoadingOlder = errors.New("loading older messages…")
+
 // errChannelGone explains why the view moved on its own.
 var errChannelGone = errors.New("this channel is no longer available")
 
@@ -2064,7 +2072,10 @@ func (m *Model) maybeLoadOlder() tea.Cmd {
 		return nil
 	}
 	m.loadingOlder = true
-	return FetchOlderPosts(m.client, m.activeChan.ID, m.historyPage+1, historyPageSize)
+	return tea.Batch(
+		FetchOlderPosts(m.client, m.activeChan.ID, m.historyPage+1, historyPageSize),
+		m.setError(errLoadingOlder),
+	)
 }
 
 // ownSelectedPost returns the selected post when the current user wrote it.
