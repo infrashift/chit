@@ -1,11 +1,13 @@
 package tui_test
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/infrashift/chit/clients/chit-tui/internal/api"
 	"github.com/infrashift/chit/clients/chit-tui/internal/config"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/testutil"
@@ -37,6 +39,20 @@ func testModel() tui.Model {
 		users:    []*model.User{{ID: "u1", Username: "alice"}},
 	}
 	return tui.NewModel(cfg, client, nil, s, nil, nil, nil)
+}
+
+// modelWithClient builds a sized, logged-in model backed by a specific client,
+// so tests can observe the requests it makes.
+func modelWithClient(t *testing.T, client api.ChitClient) tui.Model {
+	t.Helper()
+
+	cfg := &config.Config{ServerURL: "http://localhost:8065"}
+	m := tui.NewModel(cfg, client, nil, styles.New(theme.TokyoNight()), nil, nil, nil)
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = updated.(tui.Model)
+	updated, _ = m.Update(tui.UserLoadedMsg{User: &model.User{ID: "u1", Username: "alice"}})
+	return updated.(tui.Model)
 }
 
 func setupModel(t *testing.T) tui.Model {
@@ -2072,5 +2088,91 @@ func TestModel_UnauthorizedTriggersReLogin(t *testing.T) {
 
 	if !strings.Contains(testutil.StripANSI(m.View()), "Chit Login") {
 		t.Errorf("expected the login screen:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+// countingClient records how many times each endpoint is called, so the
+// request-count guarantees below are asserted rather than assumed.
+type countingClient struct {
+	*mockClient
+	tagBatchCalls  int
+	tagSingleCalls int
+	memberCalls    int
+}
+
+func (c *countingClient) GetTagsForPosts(ctx context.Context, ids []string) (map[string][]*model.Tag, error) {
+	c.tagBatchCalls++
+	return c.mockClient.GetTagsForPosts(ctx, ids)
+}
+
+func (c *countingClient) GetTagsForPost(ctx context.Context, id string) ([]*model.Tag, error) {
+	c.tagSingleCalls++
+	return c.mockClient.GetTagsForPost(ctx, id)
+}
+
+func (c *countingClient) GetChannelMembers(ctx context.Context, id string) ([]*model.ChannelMember, error) {
+	c.memberCalls++
+	return c.mockClient.GetChannelMembers(ctx, id)
+}
+
+// Loading a page of history used to issue one tag request per post — sixty
+// per channel open, against a server limited to 10 rps with a burst of 50.
+func TestModel_ChannelLoadIssuesOneTagRequest(t *testing.T) {
+	client := &countingClient{mockClient: &mockClient{}}
+	m := modelWithClient(t, client)
+
+	posts := make([]*model.Post, 0, 60)
+	for i := range 60 {
+		posts = append(posts, &model.Post{
+			ID: fmt.Sprintf("p%d", i), UserID: "u1",
+			Content: "hi", CreateAt: 1700000000000,
+		})
+	}
+
+	_, cmd := m.Update(tui.PostsLoadedMsg{ChannelID: "c1", Posts: &model.PostList{Order: posts}})
+	drain(cmd)
+
+	if client.tagSingleCalls != 0 {
+		t.Errorf("per-post tag requests = %d, want 0", client.tagSingleCalls)
+	}
+	if client.tagBatchCalls != 1 {
+		t.Errorf("batched tag requests = %d, want exactly 1", client.tagBatchCalls)
+	}
+}
+
+// Members are only ever read for the active channel, so loading the channel
+// list must not fetch them for every channel in every team.
+func TestModel_ChannelListDoesNotFetchAllMembers(t *testing.T) {
+	client := &countingClient{mockClient: &mockClient{}}
+	m := modelWithClient(t, client)
+
+	channels := make([]*model.Channel, 0, 30)
+	for i := range 30 {
+		channels = append(channels, &model.Channel{
+			ID: fmt.Sprintf("c%d", i), DisplayName: fmt.Sprintf("Channel %d", i),
+		})
+	}
+
+	_, cmd := m.Update(tui.ChannelsLoadedMsg{TeamID: "t1", Channels: channels})
+	drain(cmd)
+
+	// At most the one channel auto-selected on load.
+	if client.memberCalls > 1 {
+		t.Errorf("member requests = %d for %d channels, want at most 1",
+			client.memberCalls, len(channels))
+	}
+}
+
+// drain runs a command tree to completion so the requests it issues are
+// counted. tea.Batch returns its children as a BatchMsg.
+func drain(cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	switch msg := cmd().(type) {
+	case tea.BatchMsg:
+		for _, c := range msg {
+			drain(c)
+		}
 	}
 }

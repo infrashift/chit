@@ -133,6 +133,12 @@ type PostTagsLoadedMsg struct {
 	Err    error
 }
 
+// PostsTagsLoadedMsg carries tags for many posts, keyed by post ID.
+type PostsTagsLoadedMsg struct {
+	Tags map[string][]*model.Tag
+	Err  error
+}
+
 // TagAddedToPostMsg is sent when a tag is added to a post.
 type TagAddedToPostMsg struct {
 	PostID string

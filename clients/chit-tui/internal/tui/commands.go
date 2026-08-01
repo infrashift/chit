@@ -173,6 +173,14 @@ func FetchPostTags(client api.ChitClient, postID string) tea.Cmd {
 	}
 }
 
+// FetchPostsTags fetches tags for a whole page of history in one request.
+func FetchPostsTags(client api.ChitClient, postIDs []string) tea.Cmd {
+	return func() tea.Msg {
+		tags, err := client.GetTagsForPosts(context.Background(), postIDs)
+		return PostsTagsLoadedMsg{Tags: tags, Err: err}
+	}
+}
+
 // AddTagToPostCmd returns a command that adds a tag to a post.
 func AddTagToPostCmd(client api.ChitClient, postID, tagID string) tea.Cmd {
 	return func() tea.Msg {

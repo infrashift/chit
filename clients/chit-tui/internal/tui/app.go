@@ -406,9 +406,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, ViewChannel(m.client, msg.Channels[0].ID))
 			}
 		}
-		for _, ch := range msg.Channels {
-			cmds = append(cmds, FetchChannelMembers(m.client, ch.ID))
-		}
 		return m, tea.Batch(cmds...)
 
 	case PostsLoadedMsg:
@@ -421,8 +418,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.SetPosts(msg.Posts.Order)
 		m.resolvePostUsers(msg.Posts.Order)
 		m.postTags = make(map[string][]*model.Tag)
-		for _, p := range msg.Posts.Order {
-			cmds = append(cmds, FetchPostTags(m.client, p.ID))
+		if ids := postIDs(msg.Posts.Order); len(ids) > 0 {
+			cmds = append(cmds, FetchPostsTags(m.client, ids))
 		}
 		if fetchCmd := m.fetchMissingUsers(); fetchCmd != nil {
 			cmds = append(cmds, fetchCmd)
@@ -705,7 +702,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dmChannels = msg.Channels
 		m.palette.SetDMChannels(msg.Channels)
 		m.resolveDMDisplayNames()
-		// Fetch members for DM channels (for unread counts)
+		// DM channels need their members for unread counts. This is still one
+		// request each, but the DM list is small and bounded by conversations
+		// the user actually has, unlike the channel list.
 		for _, ch := range msg.Channels {
 			cmds = append(cmds, FetchChannelMembers(m.client, ch.ID))
 		}
@@ -912,6 +911,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.viewport.ClearSelection()
 		return m, m.setError(fmt.Errorf("copied %d %s to the clipboard", msg.lines, noun))
+
+	case PostsTagsLoadedMsg:
+		if msg.Err != nil {
+			// Tags are decoration; a failure here should not disturb the
+			// channel, but it should not vanish silently either.
+			return m, m.setError(msg.Err)
+		}
+		for postID, tags := range msg.Tags {
+			m.postTags[postID] = tags
+			names := make([]string, 0, len(tags))
+			for _, t := range tags {
+				names = append(names, t.Name)
+			}
+			m.viewport.SetPostTags(postID, names)
+		}
+		m.thread.SetPostTags(m.postTags)
+		return m, nil
 
 	case ClearErrMsg:
 		if msg.Seq == m.errSeq {
@@ -1159,6 +1175,12 @@ func (m *Model) selectChannel(ch *model.Channel) tea.Cmd {
 	}
 	cmds = append(cmds, FetchPosts(m.client, ch.ID, 0, 60))
 	cmds = append(cmds, ViewChannel(m.client, ch.ID))
+	// Members are only read for the active channel, to build the @-mention
+	// list, so they are fetched on entry rather than for every channel in
+	// every team up front.
+	if _, have := m.channelMembers[ch.ID]; !have {
+		cmds = append(cmds, FetchChannelMembers(m.client, ch.ID))
+	}
 	m.mainPane = paneChannel
 	m.thread.Clear()
 	m.threadCounts = make(map[string]int)
@@ -1748,6 +1770,15 @@ func (m *Model) registerCommandResponseAuthor(slug string) {
 	}
 	names[commandResponseUserID] = name
 	m.viewport.SetUsernames(names)
+}
+
+// postIDs collects the IDs of a page of posts.
+func postIDs(posts []*model.Post) []string {
+	ids := make([]string, 0, len(posts))
+	for _, p := range posts {
+		ids = append(ids, p.ID)
+	}
+	return ids
 }
 
 // SelectedPostID returns the ID of the post under the history cursor, or "".

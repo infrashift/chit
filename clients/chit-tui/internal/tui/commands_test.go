@@ -116,6 +116,19 @@ func (m *mockClient) AddTagToPost(_ context.Context, _, _ string) error {
 func (m *mockClient) RemoveTagFromPost(_ context.Context, _, _ string) error {
 	return m.err
 }
+func (m *mockClient) GetTagsForPosts(_ context.Context, ids []string) (map[string][]*model.Tag, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	out := make(map[string][]*model.Tag, len(ids))
+	for _, id := range ids {
+		if len(m.postTags) > 0 {
+			out[id] = m.postTags
+		}
+	}
+	return out, nil
+}
+
 func (m *mockClient) AddChannelMember(_ context.Context, _, _ string) error {
 	return m.err
 }

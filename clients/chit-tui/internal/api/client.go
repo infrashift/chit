@@ -37,6 +37,9 @@ type ChitClient interface {
 	GetAllTags(ctx context.Context) ([]*model.Tag, error)
 	CreateTag(ctx context.Context, name string) (*model.Tag, error)
 	GetTagsForPost(ctx context.Context, postID string) ([]*model.Tag, error)
+	// GetTagsForPosts fetches tags for many posts in one request, so opening
+	// a channel does not cost one round trip per message.
+	GetTagsForPosts(ctx context.Context, postIDs []string) (map[string][]*model.Tag, error)
 	AddTagToPost(ctx context.Context, postID, tagID string) error
 	RemoveTagFromPost(ctx context.Context, postID, tagID string) error
 	AddChannelMember(ctx context.Context, channelID, userID string) error
@@ -263,6 +266,15 @@ func (c *httpClient) CreateTag(ctx context.Context, name string) (*model.Tag, er
 func (c *httpClient) GetTagsForPost(ctx context.Context, postID string) ([]*model.Tag, error) {
 	var tags []*model.Tag
 	err := c.get(ctx, fmt.Sprintf("/posts/%s/tags", postID), &tags)
+	return tags, err
+}
+
+func (c *httpClient) GetTagsForPosts(ctx context.Context, postIDs []string) (map[string][]*model.Tag, error) {
+	tags := make(map[string][]*model.Tag)
+	if len(postIDs) == 0 {
+		return tags, nil
+	}
+	err := c.post(ctx, "/posts/tags", map[string][]string{"post_ids": postIDs}, &tags)
 	return tags, err
 }
 
