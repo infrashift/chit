@@ -11,10 +11,13 @@ import (
 )
 
 type searchPostsBody struct {
-	Terms   string   `json:"terms"`
-	TagIDs  []string `json:"tag_ids"`
-	Page    int      `json:"page"`
-	PerPage int      `json:"per_page"`
+	Terms  string   `json:"terms"`
+	TagIDs []string `json:"tag_ids"`
+	// From restricts results to a single author, by username. A leading @ is
+	// accepted so the value can be pasted straight from a mention.
+	From    string `json:"from"`
+	Page    int    `json:"page"`
+	PerPage int    `json:"per_page"`
 }
 
 // searchPostsGlobal searches across every channel the requesting user is a
@@ -37,7 +40,7 @@ func searchPostsGlobal(a *app.App) http.HandlerFunc {
 		}
 		body.Page, body.PerPage = clampPagination(body.Page, body.PerPage)
 
-		results, err := a.SearchPosts(r.Context(), "", user.ID, body.Terms, body.TagIDs, body.Page, body.PerPage)
+		results, err := a.SearchPostsFrom(r.Context(), "", user.ID, body.Terms, body.From, body.TagIDs, body.Page, body.PerPage)
 		if err != nil {
 			WriteAppError(w, "searchPostsGlobal", err)
 			return
@@ -66,7 +69,7 @@ func searchPostsInTeam(a *app.App) http.HandlerFunc {
 		}
 		body.Page, body.PerPage = clampPagination(body.Page, body.PerPage)
 
-		results, err := a.SearchPosts(r.Context(), "", user.ID, body.Terms, body.TagIDs, body.Page, body.PerPage)
+		results, err := a.SearchPostsFrom(r.Context(), "", user.ID, body.Terms, body.From, body.TagIDs, body.Page, body.PerPage)
 		if err != nil {
 			WriteAppError(w, "searchPostsInTeam", err)
 			return
@@ -95,7 +98,7 @@ func searchPostsInChannel(a *app.App) http.HandlerFunc {
 		}
 		body.Page, body.PerPage = clampPagination(body.Page, body.PerPage)
 
-		results, err := a.SearchPosts(r.Context(), channelID, user.ID, body.Terms, body.TagIDs, body.Page, body.PerPage)
+		results, err := a.SearchPostsFrom(r.Context(), channelID, user.ID, body.Terms, body.From, body.TagIDs, body.Page, body.PerPage)
 		if err != nil {
 			WriteAppError(w, "searchPostsInChannel", err)
 			return
