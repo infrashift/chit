@@ -97,8 +97,8 @@ func (s *Server) initHub() {
 	s.hub = websocket.NewHub(hubMembershipAdapter{store: s.store})
 }
 
-// hubMembershipAdapter exposes channel memberships to the websocket hub
-// without giving it the whole store.
+// hubMembershipAdapter exposes channel and team memberships to the websocket
+// hub without giving it the whole store.
 type hubMembershipAdapter struct {
 	store *sqlstore.SqlStore
 }
@@ -106,6 +106,18 @@ type hubMembershipAdapter struct {
 func (a hubMembershipAdapter) GetChannelIDsForUser(userID string) ([]string, error) {
 	// Hub membership loads are server-internal work, not tied to a request.
 	return a.store.Channel().GetChannelIDsForUser(context.Background(), userID)
+}
+
+func (a hubMembershipAdapter) GetTeamIDsForUser(userID string) ([]string, error) {
+	teams, err := a.store.Team().GetTeamsForUser(context.Background(), userID)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(teams))
+	for i, t := range teams {
+		ids[i] = t.ID
+	}
+	return ids, nil
 }
 
 func (s *Server) initPubSub() error {

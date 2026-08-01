@@ -8,23 +8,40 @@ import (
 
 const sendBufferSize = 256
 
-// MembershipChecker supplies channel memberships so the hub can scope
-// channel-targeted events to members. Defined here (not in store) to avoid an
+// MembershipChecker supplies channel and team memberships so the hub can
+// scope targeted events to members. Defined here (not in store) to avoid an
 // import cycle: app depends on websocket.
 type MembershipChecker interface {
 	GetChannelIDsForUser(userID string) ([]string, error)
+	GetTeamIDsForUser(userID string) ([]string, error)
+}
+
+// memberships holds one user's channel and team sets, loaded atomically so a
+// partially failed load never filters against half the data.
+type memberships struct {
+	channels map[string]struct{}
+	teams    map[string]struct{}
 }
 
 type membershipLoad struct {
-	userID   string
-	channels map[string]struct{}
-	ok       bool
+	userID string
+	sets   memberships
+	ok     bool
 }
 
 type membershipChange struct {
-	userID    string
-	channelID string
-	added     bool
+	userID string
+	id     string // channel or team ID, per team flag
+	team   bool
+	added  bool
+}
+
+// broadcastRequest pairs an event with the connected user that produced it.
+// senderID is empty for trusted server-side events; when set, channel-targeted
+// events are dropped unless the sender is a member of the target channel.
+type broadcastRequest struct {
+	event    *model.WebSocketEvent
+	senderID string
 }
 
 // Hub manages per-user WebSocket connections and event broadcasting.
@@ -32,13 +49,13 @@ type membershipChange struct {
 type Hub struct {
 	checker MembershipChecker
 
-	clients     map[string][]*Client           // userID → connections
-	memberships map[string]map[string]struct{} // userID → channel set
-	loading     map[string]bool                // userID → membership load in flight
+	clients     map[string][]*Client   // userID → connections
+	memberships map[string]memberships // userID → channel/team sets
+	loading     map[string]bool        // userID → membership load in flight
 
 	register         chan *Client
 	unregister       chan *Client
-	broadcast        chan *model.WebSocketEvent
+	broadcast        chan broadcastRequest
 	membershipLoaded chan membershipLoad
 	membershipChange chan membershipChange
 	stop             chan struct{}
@@ -46,18 +63,18 @@ type Hub struct {
 }
 
 // NewHub creates a new WebSocket Hub and starts its event loop.
-// A nil checker disables membership filtering: channel-targeted events are
-// then delivered to every connected user (only safe when no untrusted clients
-// connect, e.g. the MCP server's internal hub).
+// A nil checker disables membership filtering: channel- and team-targeted
+// events are then delivered to every connected user (only safe when no
+// untrusted clients connect, e.g. the MCP server's internal hub).
 func NewHub(checker MembershipChecker) *Hub {
 	h := &Hub{
 		checker:          checker,
 		clients:          make(map[string][]*Client),
-		memberships:      make(map[string]map[string]struct{}),
+		memberships:      make(map[string]memberships),
 		loading:          make(map[string]bool),
 		register:         make(chan *Client),
 		unregister:       make(chan *Client),
-		broadcast:        make(chan *model.WebSocketEvent, 256),
+		broadcast:        make(chan broadcastRequest, 256),
 		membershipLoaded: make(chan membershipLoad),
 		membershipChange: make(chan membershipChange),
 		stop:             make(chan struct{}),
@@ -76,8 +93,8 @@ func (h *Hub) run() {
 			h.addClient(client)
 		case client := <-h.unregister:
 			h.removeClient(client)
-		case event := <-h.broadcast:
-			h.broadcastEvent(event)
+		case req := <-h.broadcast:
+			h.broadcastEvent(req)
 		case load := <-h.membershipLoaded:
 			h.applyMembershipLoad(load)
 		case change := <-h.membershipChange:
@@ -96,8 +113,8 @@ func (h *Hub) addClient(client *Client) {
 }
 
 // loadMemberships starts an async membership load for the user's first
-// connection. Channel-targeted events are dropped for the user until the load
-// completes.
+// connection. Channel- and team-targeted events are dropped for the user
+// until the load completes.
 func (h *Hub) loadMemberships(userID string) {
 	if h.checker == nil || h.loading[userID] {
 		return
@@ -108,15 +125,26 @@ func (h *Hub) loadMemberships(userID string) {
 	h.loading[userID] = true
 
 	go func() {
-		load := membershipLoad{userID: userID, channels: make(map[string]struct{})}
+		load := membershipLoad{userID: userID, sets: memberships{
+			channels: make(map[string]struct{}),
+			teams:    make(map[string]struct{}),
+		}}
 		channelIDs, err := h.checker.GetChannelIDsForUser(userID)
-		if err != nil {
-			slog.Error("websocket: failed to load channel memberships", "user_id", userID, "error", err)
-		} else {
-			load.ok = true
-			for _, id := range channelIDs {
-				load.channels[id] = struct{}{}
+		if err == nil {
+			var teamIDs []string
+			teamIDs, err = h.checker.GetTeamIDsForUser(userID)
+			if err == nil {
+				load.ok = true
+				for _, id := range channelIDs {
+					load.sets.channels[id] = struct{}{}
+				}
+				for _, id := range teamIDs {
+					load.sets.teams[id] = struct{}{}
+				}
 			}
+		}
+		if err != nil {
+			slog.Error("websocket: failed to load memberships", "user_id", userID, "error", err)
 		}
 		select {
 		case h.membershipLoaded <- load:
@@ -133,18 +161,22 @@ func (h *Hub) applyMembershipLoad(load membershipLoad) {
 	if _, connected := h.clients[load.userID]; !connected {
 		return // user disconnected while loading
 	}
-	h.memberships[load.userID] = load.channels
+	h.memberships[load.userID] = load.sets
 }
 
 func (h *Hub) applyMembershipChange(change membershipChange) {
-	channels, ok := h.memberships[change.userID]
+	sets, ok := h.memberships[change.userID]
 	if !ok {
 		return // not connected (or load still in flight — the load will observe the change)
 	}
+	set := sets.channels
+	if change.team {
+		set = sets.teams
+	}
 	if change.added {
-		channels[change.channelID] = struct{}{}
+		set[change.id] = struct{}{}
 	} else {
-		delete(channels, change.channelID)
+		delete(set, change.id)
 	}
 }
 
@@ -168,8 +200,14 @@ func (h *Hub) removeClient(client *Client) {
 	}
 }
 
-func (h *Hub) broadcastEvent(event *model.WebSocketEvent) {
+func (h *Hub) broadcastEvent(req broadcastRequest) {
+	event := req.event
 	if event.Broadcast == nil {
+		return
+	}
+	if !h.senderAllowed(req) {
+		slog.Warn("websocket: dropping client event for non-member sender",
+			"user_id", req.senderID, "event", event.Event, "channel_id", event.Broadcast.ChannelID)
 		return
 	}
 
@@ -194,6 +232,22 @@ func (h *Hub) broadcastEvent(event *model.WebSocketEvent) {
 	}
 }
 
+// senderAllowed reports whether a client-originated event (senderID set) may
+// be broadcast: channel-targeted events require the sender to be a member of
+// the target channel. Server-side events (empty senderID) are always allowed,
+// as is everything on a hub without a checker.
+func (h *Hub) senderAllowed(req broadcastRequest) bool {
+	if req.senderID == "" || h.checker == nil || req.event.Broadcast.ChannelID == "" {
+		return true
+	}
+	sets, ok := h.memberships[req.senderID]
+	if !ok {
+		return false // membership load not completed — same policy as delivery
+	}
+	_, member := sets.channels[req.event.Broadcast.ChannelID]
+	return member
+}
+
 func (h *Hub) shouldSend(event *model.WebSocketEvent, userID string) bool {
 	bc := event.Broadcast
 
@@ -202,19 +256,26 @@ func (h *Hub) shouldSend(event *model.WebSocketEvent, userID string) bool {
 		return bc.UserID == userID
 	}
 
-	// Channel-targeted events go only to channel members. Events are dropped
-	// for users whose membership load has not completed yet.
+	// Channel- and team-targeted events go only to members. Events are
+	// dropped for users whose membership load has not completed yet.
 	if bc.ChannelID != "" && h.checker != nil {
-		channels, ok := h.memberships[userID]
+		sets, ok := h.memberships[userID]
 		if !ok {
 			return false
 		}
-		_, member := channels[bc.ChannelID]
+		_, member := sets.channels[bc.ChannelID]
+		return member
+	}
+	if bc.TeamID != "" && h.checker != nil {
+		sets, ok := h.memberships[userID]
+		if !ok {
+			return false
+		}
+		_, member := sets.teams[bc.TeamID]
 		return member
 	}
 
-	// Team-targeted events (channel_created etc.) remain broadcast to all
-	// connected users.
+	// Target-less events remain broadcast to all connected users.
 	return true
 }
 
@@ -225,7 +286,7 @@ func (h *Hub) closeAll() {
 		}
 	}
 	h.clients = make(map[string][]*Client)
-	h.memberships = make(map[string]map[string]struct{})
+	h.memberships = make(map[string]memberships)
 }
 
 // Register adds a client to the hub.
@@ -241,16 +302,31 @@ func (h *Hub) Unregister(client *Client) {
 	}
 }
 
-// Broadcast sends an event to applicable clients.
+// Broadcast sends a trusted server-side event to applicable clients.
 func (h *Hub) Broadcast(event *model.WebSocketEvent) {
-	h.broadcast <- event
+	h.broadcast <- broadcastRequest{event: event}
+}
+
+// BroadcastFromUser sends a client-originated event (e.g. typing). Channel-
+// targeted events are dropped unless the sender is a member of the channel.
+func (h *Hub) BroadcastFromUser(senderID string, event *model.WebSocketEvent) {
+	h.broadcast <- broadcastRequest{event: event, senderID: senderID}
 }
 
 // NotifyMembershipChanged keeps the hub's membership cache current when users
 // join or leave channels.
 func (h *Hub) NotifyMembershipChanged(userID, channelID string, added bool) {
 	select {
-	case h.membershipChange <- membershipChange{userID: userID, channelID: channelID, added: added}:
+	case h.membershipChange <- membershipChange{userID: userID, id: channelID, added: added}:
+	case <-h.done:
+	}
+}
+
+// NotifyTeamMembershipChanged keeps the hub's membership cache current when
+// users join or leave teams.
+func (h *Hub) NotifyTeamMembershipChanged(userID, teamID string, added bool) {
+	select {
+	case h.membershipChange <- membershipChange{userID: userID, id: teamID, team: true, added: added}:
 	case <-h.done:
 	}
 }

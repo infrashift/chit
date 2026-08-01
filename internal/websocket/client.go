@@ -106,7 +106,7 @@ func (c *Client) handleMessage(msg *model.WebSocketMessage) {
 		if !ok {
 			return
 		}
-		c.hub.Broadcast(&model.WebSocketEvent{
+		c.hub.BroadcastFromUser(c.UserID, &model.WebSocketEvent{
 			Event: model.WebSocketEventTyping,
 			Data: map[string]any{
 				"user_id": c.UserID,

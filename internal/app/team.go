@@ -20,6 +20,7 @@ func (a *App) CreateTeam(ctx context.Context, team *model.Team) (*model.Team, er
 	if _, err := a.Store.Team().SaveMember(ctx, member); err != nil {
 		return nil, err
 	}
+	a.Hub.NotifyTeamMembershipChanged(saved.CreatorID, saved.ID, true)
 
 	return saved, nil
 }
@@ -55,12 +56,21 @@ func (a *App) AddTeamMember(ctx context.Context, teamID, userID string) (*model.
 		TeamID: teamID,
 		UserID: userID,
 	}
-	return a.Store.Team().SaveMember(ctx, member)
+	saved, err := a.Store.Team().SaveMember(ctx, member)
+	if err != nil {
+		return nil, err
+	}
+	a.Hub.NotifyTeamMembershipChanged(userID, teamID, true)
+	return saved, nil
 }
 
 // RemoveTeamMember removes a user from a team.
 func (a *App) RemoveTeamMember(ctx context.Context, teamID, userID string) error {
-	return a.Store.Team().RemoveMember(ctx, teamID, userID)
+	if err := a.Store.Team().RemoveMember(ctx, teamID, userID); err != nil {
+		return err
+	}
+	a.Hub.NotifyTeamMembershipChanged(userID, teamID, false)
+	return nil
 }
 
 // GetTeamMembers retrieves members of a team.

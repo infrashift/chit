@@ -312,11 +312,16 @@ func (a *App) broadcastChannelEvent(ctx context.Context, event string, channel *
 		return
 	}
 
+	// Open team channels are announced to the whole team; private, direct,
+	// and group channels only to their members.
+	broadcast := &model.WebSocketBroadcast{ChannelID: channel.ID}
+	if channel.Type == model.ChannelOpen && channel.TeamID != "" {
+		broadcast = &model.WebSocketBroadcast{TeamID: channel.TeamID}
+	}
+
 	a.publishEvent(ctx, &model.WebSocketEvent{
-		Event: event,
-		Data:  dataMap,
-		Broadcast: &model.WebSocketBroadcast{
-			TeamID: channel.TeamID,
-		},
+		Event:     event,
+		Data:      dataMap,
+		Broadcast: broadcast,
 	}, pubsub.EventEnvelope{Event: event, ChannelID: channel.ID, TeamID: channel.TeamID})
 }

@@ -253,10 +253,15 @@ func TestHub_Stop(t *testing.T) {
 
 type fakeMembershipChecker struct {
 	channels map[string][]string // userID → channel IDs
+	teams    map[string][]string // userID → team IDs
 }
 
 func (f *fakeMembershipChecker) GetChannelIDsForUser(userID string) ([]string, error) {
 	return f.channels[userID], nil
+}
+
+func (f *fakeMembershipChecker) GetTeamIDsForUser(userID string) ([]string, error) {
+	return f.teams[userID], nil
 }
 
 func channelEvent(channelID string) *model.WebSocketEvent {
@@ -321,6 +326,140 @@ func TestHub_MembershipChangeUpdatesFiltering(t *testing.T) {
 	hub.Broadcast(channelEvent("ch-1"))
 	if _, ok := recvWithTimeout(client.send, 50*time.Millisecond); ok {
 		t.Fatal("expected no delivery after leaving the channel")
+	}
+}
+
+func teamEvent(teamID string) *model.WebSocketEvent {
+	return &model.WebSocketEvent{
+		Event:     model.WebSocketEventChannelCreated,
+		Data:      map[string]any{},
+		Broadcast: &model.WebSocketBroadcast{TeamID: teamID},
+	}
+}
+
+func TestHub_TeamEventsOnlyReachTeamMembers(t *testing.T) {
+	hub := NewHub(&fakeMembershipChecker{
+		teams: map[string][]string{
+			"member":     {"team-1"},
+			"non-member": {"team-other"},
+		},
+	})
+	defer hub.Stop()
+
+	member := newStubClient(hub, "member")
+	nonMember := newStubClient(hub, "non-member")
+	hub.Register(member)
+	hub.Register(nonMember)
+	time.Sleep(50 * time.Millisecond) // allow async membership loads to apply
+
+	hub.Broadcast(teamEvent("team-1"))
+
+	if _, ok := recvWithTimeout(member.send, 100*time.Millisecond); !ok {
+		t.Fatal("expected team member to receive event")
+	}
+	if _, ok := recvWithTimeout(nonMember.send, 50*time.Millisecond); ok {
+		t.Fatal("expected non-member NOT to receive team event")
+	}
+}
+
+func TestHub_TeamMembershipChangeUpdatesFiltering(t *testing.T) {
+	hub := NewHub(&fakeMembershipChecker{
+		teams: map[string][]string{"user-1": {}},
+	})
+	defer hub.Stop()
+
+	client := newStubClient(hub, "user-1")
+	hub.Register(client)
+	time.Sleep(50 * time.Millisecond)
+
+	hub.Broadcast(teamEvent("team-1"))
+	if _, ok := recvWithTimeout(client.send, 50*time.Millisecond); ok {
+		t.Fatal("expected no delivery before joining the team")
+	}
+
+	hub.NotifyTeamMembershipChanged("user-1", "team-1", true)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.Broadcast(teamEvent("team-1"))
+	if _, ok := recvWithTimeout(client.send, 100*time.Millisecond); !ok {
+		t.Fatal("expected delivery after joining the team")
+	}
+
+	hub.NotifyTeamMembershipChanged("user-1", "team-1", false)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.Broadcast(teamEvent("team-1"))
+	if _, ok := recvWithTimeout(client.send, 50*time.Millisecond); ok {
+		t.Fatal("expected no delivery after leaving the team")
+	}
+}
+
+func TestHub_TeamEventsReachAllWithNilChecker(t *testing.T) {
+	hub := NewHub(nil)
+	defer hub.Stop()
+
+	client := newStubClient(hub, "user-1")
+	hub.Register(client)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.Broadcast(teamEvent("team-1"))
+	if _, ok := recvWithTimeout(client.send, 100*time.Millisecond); !ok {
+		t.Fatal("expected delivery on nil-checker hub")
+	}
+}
+
+func TestHub_BroadcastFromUserRequiresSenderMembership(t *testing.T) {
+	hub := NewHub(&fakeMembershipChecker{
+		channels: map[string][]string{
+			"sender":   {"ch-other"}, // NOT a member of ch-1
+			"receiver": {"ch-1"},
+		},
+	})
+	defer hub.Stop()
+
+	sender := newStubClient(hub, "sender")
+	receiver := newStubClient(hub, "receiver")
+	hub.Register(sender)
+	hub.Register(receiver)
+	time.Sleep(50 * time.Millisecond)
+
+	typing := &model.WebSocketEvent{
+		Event:     model.WebSocketEventTyping,
+		Data:      map[string]any{"user_id": "sender"},
+		Broadcast: &model.WebSocketBroadcast{ChannelID: "ch-1"},
+	}
+	hub.BroadcastFromUser("sender", typing)
+
+	if _, ok := recvWithTimeout(receiver.send, 50*time.Millisecond); ok {
+		t.Fatal("expected typing event from non-member sender to be dropped")
+	}
+
+	// After the sender joins the channel, the same event goes through.
+	hub.NotifyMembershipChanged("sender", "ch-1", true)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.BroadcastFromUser("sender", typing)
+	if _, ok := recvWithTimeout(receiver.send, 100*time.Millisecond); !ok {
+		t.Fatal("expected typing event from member sender to be delivered")
+	}
+}
+
+func TestHub_BroadcastFromUserNilCheckerPassesThrough(t *testing.T) {
+	hub := NewHub(nil)
+	defer hub.Stop()
+
+	client := newStubClient(hub, "receiver")
+	hub.Register(client)
+	time.Sleep(20 * time.Millisecond)
+
+	hub.BroadcastFromUser("sender", &model.WebSocketEvent{
+		Event:     model.WebSocketEventTyping,
+		Data:      map[string]any{},
+		Broadcast: &model.WebSocketBroadcast{ChannelID: "ch-1"},
+	})
+
+	if _, ok := recvWithTimeout(client.send, 100*time.Millisecond); !ok {
+		t.Fatal("expected delivery on nil-checker hub")
 	}
 }
 
