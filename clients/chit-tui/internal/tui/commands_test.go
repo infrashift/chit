@@ -119,6 +119,10 @@ func (m *mockClient) AddChannelMember(_ context.Context, _, _ string) error {
 	return m.err
 }
 
+func (m *mockClient) RemoveChannelMember(_ context.Context, _, _ string) error {
+	return m.err
+}
+
 // mockWSClient implements ws.WSClient for testing.
 type mockWSClient struct {
 	events chan model.WebSocketEvent

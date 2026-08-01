@@ -38,6 +38,7 @@ type ChitClient interface {
 	AddTagToPost(ctx context.Context, postID, tagID string) error
 	RemoveTagFromPost(ctx context.Context, postID, tagID string) error
 	AddChannelMember(ctx context.Context, channelID, userID string) error
+	RemoveChannelMember(ctx context.Context, channelID, userID string) error
 }
 
 type httpClient struct {
@@ -265,4 +266,10 @@ func (c *httpClient) RemoveTagFromPost(ctx context.Context, postID, tagID string
 
 func (c *httpClient) AddChannelMember(ctx context.Context, channelID, userID string) error {
 	return c.post(ctx, fmt.Sprintf("/channels/%s/members", channelID), map[string]string{"user_id": userID}, nil)
+}
+
+// RemoveChannelMember removes a user from a channel. Removing yourself is
+// leaving; removing anyone else requires system-admin rights server-side.
+func (c *httpClient) RemoveChannelMember(ctx context.Context, channelID, userID string) error {
+	return c.del(ctx, fmt.Sprintf("/channels/%s/members/%s", channelID, userID))
 }

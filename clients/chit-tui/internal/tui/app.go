@@ -514,16 +514,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case input.SlashTriggerMsg:
 		trimmed := strings.TrimSpace(msg.Input)
-		if trimmed == "/skin" {
+
+		// /skin and /logout act on this client alone; the server knows
+		// nothing about them.
+		switch trimmed {
+		case "/skin", "/theme":
 			m.skinPicker.SetSkins(theme.ListAvailable())
 			cmd := m.setFocus(FocusSkinPicker)
 			m.skinPicker.Open()
 			return m, cmd
-		}
-		if trimmed == "/logout" {
+		case "/logout":
 			return m.handleLogout()
+		case "/":
+			// A bare slash is a request to browse, not to send.
+			return m, m.openPalette("/")
 		}
-		return m, m.openPalette("/")
+
+		// Everything else goes to the server, which owns the command
+		// registry, authorization, and the "unknown command" reply. Anything
+		// that is not a command — a path like /usr/local/bin — is persisted
+		// as an ordinary message.
+		if m.activeChan == nil || m.me == nil {
+			return m, nil
+		}
+		return m, CreatePost(m.client, &model.Post{
+			ChannelID: m.activeChan.ID,
+			UserID:    m.me.ID,
+			Content:   trimmed,
+		})
 
 	case palette.ChannelChosenMsg:
 		cmds = append(cmds, m.selectChannel(msg.Channel))
@@ -531,8 +549,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case palette.CommandChosenMsg:
-		cmd := m.setFocus(FocusInput)
-		return m, cmd
+		// Insert rather than execute: most commands take arguments, and the
+		// palette has no way to collect them. The user completes the line and
+		// presses Enter, which sends it like any other message.
+		if msg.Command != nil {
+			m.input.SetValue("/" + msg.Command.Slug + " ")
+		}
+		return m, m.setFocus(FocusInput)
 
 	case palette.UserChosenMsg:
 		if m.me != nil {
@@ -1210,6 +1233,25 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 			m.setUnread(p.ChannelID, m.unread[p.ChannelID]+1)
 		}
 
+	case model.WebSocketEventCommandResponse:
+		// Ephemeral: broadcast to the invoking user only, never persisted.
+		// It is shown as a post so multi-line output such as /help stays
+		// readable, and it disappears on the next channel load.
+		text, _ := evt.Data["text"].(string)
+		channelID, _ := evt.Data["channel_id"].(string)
+		slug, _ := evt.Data["command_slug"].(string)
+
+		if text != "" && m.activeChan != nil && channelID == m.activeChan.ID {
+			m.viewport.AppendPost(&model.Post{
+				ID:        commandResponseUserID + ":" + slug,
+				ChannelID: channelID,
+				UserID:    commandResponseUserID,
+				Content:   text,
+				CreateAt:  time.Now().UnixMilli(),
+			})
+			m.registerCommandResponseAuthor(slug)
+		}
+
 	case model.WebSocketEventThreadUpdated:
 		if threadData, ok := evt.Data["thread"]; ok {
 			data, err := json.Marshal(threadData)
@@ -1576,4 +1618,24 @@ func splitLines(s string) []string {
 	}
 	lines = append(lines, s[start:])
 	return lines
+}
+
+// commandResponseUserID labels ephemeral command output. It is not a real
+// user, so it can never collide with one: user IDs are UUIDs.
+const commandResponseUserID = "chit:command-response"
+
+// registerCommandResponseAuthor names the pseudo-author after the command that
+// produced the output, so a reply reads as coming from "/help" rather than
+// from whoever happened to type it.
+func (m *Model) registerCommandResponseAuthor(slug string) {
+	name := "/" + slug
+	if slug == "" {
+		name = "command"
+	}
+	names := make(map[string]string, len(m.users)+1)
+	for id, u := range m.users {
+		names[id] = u.Username
+	}
+	names[commandResponseUserID] = name
+	m.viewport.SetUsernames(names)
 }
