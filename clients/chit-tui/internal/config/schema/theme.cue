@@ -5,7 +5,16 @@
 // three derived keys are optional — when absent they are computed from the
 // palette.
 
-#ThemeColor: =~"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"
+// A color is either a hex literal or one of the terminal's own palette
+// entries. A named color follows whatever the user's terminal theme sets it
+// to, which is how a theme can blend into an existing colour scheme.
+#ThemeNamedColor: "black" | "red" | "green" | "yellow" | "blue" | "magenta" |
+	"cyan" | "gray" | "grey" | "darkgray" | "dark_gray" | "darkgrey" |
+	"dark_grey" | "lightred" | "light_red" | "lightgreen" | "light_green" |
+	"lightyellow" | "light_yellow" | "lightblue" | "light_blue" |
+	"lightmagenta" | "light_magenta" | "lightcyan" | "light_cyan" | "white"
+
+#ThemeColor: =~"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$" | #ThemeNamedColor
 
 #Theme: {
 	name!:   string

@@ -154,7 +154,9 @@ func TestValidateThemeTOML_RejectsShorthandAndBadHex(t *testing.T) {
 		{name: "no hash", value: "7aa2f7", valid: false},
 		{name: "five digit", value: "#7aa2f", valid: false},
 		{name: "non hex", value: "#zzzzzz", valid: false},
-		{name: "named color", value: "blue", valid: false},
+		{name: "named terminal color", value: "blue", valid: true},
+		{name: "named with underscore", value: "light_blue", valid: true},
+		{name: "unknown name", value: "chartreuse", valid: false},
 	}
 
 	for _, tc := range tests {
