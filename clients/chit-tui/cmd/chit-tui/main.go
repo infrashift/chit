@@ -24,7 +24,12 @@ var termResponseRe = regexp.MustCompile(
 )
 
 func main() {
-	cfg, err := config.Load()
+	cfg, warnings, err := config.Load()
+	// Warnings describe settings that were ignored. They are printed even when
+	// the load then fails, since an ignored setting is often the reason.
+	for _, w := range warnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
 		os.Exit(1)
