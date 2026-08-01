@@ -89,7 +89,7 @@ func TestPalette_DefaultSortByActivity(t *testing.T) {
 	if iRandom == -1 || iGeneral == -1 || iIncidents == -1 {
 		t.Fatalf("expected all channels in view:\n%s", view)
 	}
-	if !(iRandom < iGeneral && iGeneral < iIncidents) {
+	if iRandom >= iGeneral || iGeneral >= iIncidents {
 		t.Errorf("expected order Random, General, Incidents; got view:\n%s", view)
 	}
 }
@@ -104,7 +104,7 @@ func TestPalette_RecencySortWithoutBadges(t *testing.T) {
 	iIncidents := strings.Index(view, "Incidents")
 	iRandom := strings.Index(view, "Random")
 	iGeneral := strings.Index(view, "General")
-	if !(iIncidents < iRandom && iRandom < iGeneral) {
+	if iIncidents >= iRandom || iRandom >= iGeneral {
 		t.Errorf("expected recency order Incidents, Random, General:\n%s", view)
 	}
 }
