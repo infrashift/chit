@@ -21,6 +21,47 @@ type httpKetoWriter struct {
 	client   *http.Client
 }
 
+// WriteSubjectSetRelation writes a tuple whose subject is another relation.
+// Keto expands a subject set when checking; a subject_id holding the same
+// "Role:admin#member" text is an opaque string and matches nobody, which is
+// why role-based command grants have to be written this way.
+func (h *httpKetoWriter) WriteSubjectSetRelation(ctx context.Context, namespace, object, relation,
+	subjectNamespace, subjectObject, subjectRelation string) error {
+	url := fmt.Sprintf("%s/admin/relation-tuples", h.writeURL)
+
+	body := map[string]any{
+		"namespace": namespace,
+		"object":    object,
+		"relation":  relation,
+		"subject_set": map[string]string{
+			"namespace": subjectNamespace,
+			"object":    subjectObject,
+			"relation":  subjectRelation,
+		},
+	}
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("marshal keto subject-set write: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(jsonBody))
+	if err != nil {
+		return fmt.Errorf("create keto request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := h.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("keto subject-set write: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("keto subject-set write returned %d", resp.StatusCode)
+	}
+	return nil
+}
+
 func (h *httpKetoWriter) WriteRelation(ctx context.Context, namespace, object, relation, subjectID string) error {
 	url := fmt.Sprintf("%s/admin/relation-tuples", h.writeURL)
 
