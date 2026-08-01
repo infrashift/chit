@@ -9,6 +9,7 @@ import (
 	bvp "github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/post"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
@@ -28,7 +29,12 @@ type Model struct {
 	threadCounts    map[string]int
 	postTags        map[string][]string // postID -> tag names
 	cursor          int
-	postLineOffsets []int // line offset of each post in the rendered content
+	postLineOffsets []int    // line offset of each post in the rendered content
+	plainLines      []string // rendered content, one entry per line, ANSI stripped
+	lineToPost      []int    // content line -> index into posts, -1 for separators
+	selAnchor       int
+	selHead         int
+	selActive       bool
 	searchTerm      string
 	focused         bool
 	styles          styles.Styles
@@ -321,7 +327,63 @@ func (m *Model) updateContent() {
 		lines = append(lines, display)
 		lineCount += strings.Count(display, "\n") + 1 + 1
 	}
-	m.viewport.SetContent(strings.Join(lines, "\n\n"))
+	content := strings.Join(lines, "\n\n")
+
+	// Build the line map and the plain-text mirror the selection works from.
+	// This is done on the joined content rather than per block so the indices
+	// match what the viewport actually scrolls over, including the blank
+	// separator lines.
+	m.indexLines(content)
+
+	if m.selActive {
+		content = m.applySelection(content)
+	}
+	m.viewport.SetContent(content)
+}
+
+// indexLines records, for every line of rendered content, the post it belongs
+// to and its text with styling removed. The reverse map is what turns a mouse
+// row into a post, which post→line offsets alone cannot do.
+func (m *Model) indexLines(content string) {
+	raw := strings.Split(content, "\n")
+
+	m.plainLines = make([]string, len(raw))
+	m.lineToPost = make([]int, len(raw))
+	for i, line := range raw {
+		m.plainLines[i] = ansi.Strip(line)
+		m.lineToPost[i] = -1
+	}
+
+	// postLineOffsets holds the first line of each post; everything up to the
+	// next post's offset belongs to it.
+	for i, start := range m.postLineOffsets {
+		end := len(raw)
+		if i+1 < len(m.postLineOffsets) {
+			end = m.postLineOffsets[i+1]
+		}
+		for line := start; line < end && line < len(m.lineToPost); line++ {
+			if line >= 0 {
+				m.lineToPost[line] = i
+			}
+		}
+	}
+}
+
+// applySelection re-renders the selected lines in the selection style. The
+// plain text is used rather than the styled original because a background
+// applied over text that already resets its own colors renders unevenly; a
+// flat highlight reads unambiguously as a selection.
+func (m Model) applySelection(content string) string {
+	lines := strings.Split(content, "\n")
+	lo, hi := m.selectionRange()
+
+	for i := lo; i <= hi && i < len(lines); i++ {
+		if i < 0 {
+			continue
+		}
+		lines[i] = m.styles.Selection.Render(m.plainLines[i])
+	}
+	return strings.Join(lines, "\n")
 }
 
 // scrollToCursor adjusts the viewport offset so the cursor post is visible.
@@ -404,4 +466,92 @@ func (m Model) highlightMatches(rendered string) string {
 		i++
 	}
 	return b.String()
+}
+
+// --- Selection -------------------------------------------------------------
+//
+// Selection is line-based rather than character-based. The rendered history is
+// markdown-formatted, wrapped, and full of ANSI escapes, so mapping a screen
+// column back to an offset in the source text is unreliable; whole lines are
+// both predictable and enough to copy a message out.
+
+// SetSelectionAnchor starts a selection at the given content line.
+func (m *Model) SetSelectionAnchor(line int) {
+	m.selAnchor = clampLine(line, len(m.plainLines))
+	m.selHead = m.selAnchor
+	m.selActive = true
+	m.updateContent()
+}
+
+// ExtendSelection moves the free end of the selection, which is what a drag
+// does. It is a no-op when no selection has been started.
+func (m *Model) ExtendSelection(line int) {
+	if !m.selActive {
+		return
+	}
+	m.selHead = clampLine(line, len(m.plainLines))
+	m.updateContent()
+}
+
+// ClearSelection removes the selection.
+func (m *Model) ClearSelection() {
+	if !m.selActive {
+		return
+	}
+	m.selActive = false
+	m.updateContent()
+}
+
+// HasSelection reports whether anything is selected.
+func (m Model) HasSelection() bool { return m.selActive }
+
+// SelectedText returns the selected lines as plain text, with styling and
+// escape sequences removed so it can go straight to a clipboard.
+func (m Model) SelectedText() string {
+	if !m.selActive || len(m.plainLines) == 0 {
+		return ""
+	}
+	lo, hi := m.selectionRange()
+	return strings.Join(m.plainLines[lo:hi+1], "\n")
+}
+
+// selectionRange returns the ordered selection bounds; dragging upwards puts
+// the head before the anchor.
+func (m Model) selectionRange() (int, int) {
+	lo, hi := m.selAnchor, m.selHead
+	if lo > hi {
+		lo, hi = hi, lo
+	}
+	return clampLine(lo, len(m.plainLines)), clampLine(hi, len(m.plainLines))
+}
+
+// LineAt converts a row within this pane's content area to a content line.
+func (m Model) LineAt(contentRow int) int {
+	return m.viewport.YOffset + contentRow
+}
+
+// SelectPostAtLine moves the cursor to the post occupying a content line and
+// reports whether one was found.
+func (m *Model) SelectPostAtLine(line int) bool {
+	if line < 0 || line >= len(m.lineToPost) {
+		return false
+	}
+	idx := m.lineToPost[line]
+	if idx < 0 || idx >= len(m.posts) {
+		return false
+	}
+	m.cursor = idx
+	m.updateContent()
+	return true
+}
+
+func clampLine(v, n int) int {
+	switch {
+	case n == 0, v < 0:
+		return 0
+	case v >= n:
+		return n - 1
+	default:
+		return v
+	}
 }

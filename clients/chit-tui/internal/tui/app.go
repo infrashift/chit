@@ -32,6 +32,10 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/ws"
 )
 
+// inputHeight is the height of the message input box, in rows. Layout and
+// mouse hit-testing both depend on it, so it lives in one place.
+const inputHeight = 5
+
 // FocusArea defines which component has focus.
 type FocusArea int
 
@@ -299,6 +303,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.focus == FocusInput {
 				return m, m.setFocus(FocusViewport)
+			}
+		}
+
+		// Copy the mouse selection, or the post under the cursor when there
+		// is none — so the key is useful without a mouse.
+		if key.Matches(msg, m.keys.Copy) && m.focus == FocusViewport {
+			text := m.viewport.SelectedText()
+			if text == "" {
+				if p := m.viewport.SelectedPost(); p != nil {
+					text = p.Content
+				}
+			}
+			if text != "" {
+				return m, copyToClipboard(text)
 			}
 		}
 
@@ -847,6 +865,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(m.setFocus(FocusInput), saveCmd)
 
+	case clipboardCopiedMsg:
+		// OSC 52 gives no delivery confirmation, and several terminals ignore
+		// it outright, so say what was sent rather than leaving the user to
+		// guess whether anything happened.
+		noun := "lines"
+		if msg.lines == 1 {
+			noun = "line"
+		}
+		m.viewport.ClearSelection()
+		return m, m.setError(fmt.Errorf("copied %d %s to the clipboard", msg.lines, noun))
+
 	case ClearErrMsg:
 		if msg.Seq == m.errSeq {
 			m.err = nil
@@ -896,7 +925,6 @@ func (m Model) View() string {
 	if m.mention.Visible() {
 		mentionView := m.mention.View()
 		mentionHeight := lipgloss.Height(mentionView)
-		inputHeight := 5
 		mentionY := m.height - inputHeight - mentionHeight - 1
 		if mentionY < 0 {
 			mentionY = 0
@@ -1212,7 +1240,6 @@ func (m *Model) cycleFocus(dir int) tea.Cmd {
 }
 
 func (m *Model) resizeComponents() {
-	inputHeight := 5
 	vpHeight := m.height - inputHeight - 1 // -1 for the action bar
 
 	m.viewport.SetSize(m.width, vpHeight)
@@ -1694,3 +1721,7 @@ func (m Model) SelectedPostID() string {
 	}
 	return ""
 }
+
+// HasSelection reports whether the history pane holds a selection. Exported
+// for tests, which cannot reach the viewport otherwise.
+func (m Model) HasSelection() bool { return m.viewport.HasSelection() }

@@ -18,20 +18,33 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case tea.MouseButtonWheelUp:
 		if m.palette.Visible() {
 			m.palette.MoveCursor(-1)
-		} else {
-			m.scrollMain(-wheelScrollLines)
+			return m, nil
 		}
+		m.scrollUnderPointer(msg.Y, -wheelScrollLines)
 		return m, nil
 	case tea.MouseButtonWheelDown:
 		if m.palette.Visible() {
 			m.palette.MoveCursor(1)
-		} else {
-			m.scrollMain(wheelScrollLines)
+			return m, nil
 		}
+		m.scrollUnderPointer(msg.Y, wheelScrollLines)
 		return m, nil
 	}
 
-	if msg.Action != tea.MouseActionRelease || msg.Button != tea.MouseButtonLeft {
+	if msg.Button != tea.MouseButtonLeft {
+		return m, nil
+	}
+
+	// Press, motion and release inside the history pane drive text selection.
+	// They are handled before the release-only paths below, which cover the
+	// action bar and overlays.
+	if !m.anyOverlayVisible() && m.mainPane == paneChannel {
+		if row, ok := m.historyContentRow(msg.Y); ok {
+			return m.handleHistoryDrag(msg, row)
+		}
+	}
+
+	if msg.Action != tea.MouseActionRelease {
 		return m, nil
 	}
 
@@ -53,6 +66,49 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// historyContentRow converts a screen row to a row inside the history pane's
+// content area, reporting false when the pointer is elsewhere. The pane is
+// drawn with a one-cell border, so the content starts one row in.
+func (m Model) historyContentRow(y int) (int, bool) {
+	const borderRows = 1
+	top := borderRows
+	// The input box and action bar occupy the bottom of the screen.
+	bottom := m.height - inputHeight - 1 - borderRows
+	if y < top || y >= bottom {
+		return 0, false
+	}
+	return y - top, true
+}
+
+// handleHistoryDrag turns press/motion/release into a line selection. A press
+// anchors it and also moves the post cursor, so a plain click behaves like
+// picking a post; motion extends it; release leaves it in place to be copied.
+func (m Model) handleHistoryDrag(msg tea.MouseMsg, contentRow int) (tea.Model, tea.Cmd) {
+	line := m.viewport.LineAt(contentRow)
+
+	switch msg.Action {
+	case tea.MouseActionPress:
+		m.viewport.SetSelectionAnchor(line)
+		m.viewport.SelectPostAtLine(line)
+		return m, m.setFocus(FocusViewport)
+	case tea.MouseActionMotion:
+		m.viewport.ExtendSelection(line)
+		return m, nil
+	case tea.MouseActionRelease:
+		return m, nil
+	}
+	return m, nil
+}
+
+// scrollUnderPointer scrolls the pane the pointer is over. Previously the
+// wheel always scrolled the main pane, so scrolling with the pointer over the
+// input box moved the history instead.
+func (m *Model) scrollUnderPointer(y, lines int) {
+	if _, overHistory := m.historyContentRow(y); overHistory {
+		m.scrollMain(lines)
+	}
 }
 
 // handlePaletteClick selects the clicked palette row, or closes the palette

@@ -66,6 +66,7 @@ var keyBindings = []binding{
 	{"enter", "history: reply in thread · input: send"},
 	{"j / k", "history: move between posts"},
 	{"t", "tag a post (history pane, or a thread's root)"},
+	{"y", "copy the selection, or the selected post"},
 	{"esc", "close overlay / leave thread / back to history"},
 	{"?", "this help (history pane)"},
 	{"ctrl+c", "quit"},
@@ -88,7 +89,8 @@ var clientCommands = []binding{
 
 var mouseBindings = []binding{
 	{"wheel", "scroll history / move palette cursor"},
-	{"click", "action-bar buttons and palette rows"},
+	{"click", "action-bar buttons, palette rows, pick a post"},
+	{"drag", "select lines in the history; y copies them"},
 }
 
 // View renders the help overlay.

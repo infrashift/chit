@@ -12,6 +12,7 @@ type KeyMap struct {
 	NewDM      key.Binding
 	NewChannel key.Binding
 	TagPicker  key.Binding
+	Copy       key.Binding
 	Help       key.Binding
 	Escape     key.Binding
 }
@@ -50,6 +51,10 @@ func DefaultKeyMap() KeyMap {
 		TagPicker: key.NewBinding(
 			key.WithKeys("t"),
 			key.WithHelp("t", "tag post"),
+		),
+		Copy: key.NewBinding(
+			key.WithKeys("y"),
+			key.WithHelp("y", "copy selection"),
 		),
 		Help: key.NewBinding(
 			key.WithKeys("?"),

@@ -1,6 +1,7 @@
 package viewport_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -536,5 +537,149 @@ func TestSetSearchTermClearing(t *testing.T) {
 
 	if m.View() != original {
 		t.Error("clearing the search term did not restore the original rendering")
+	}
+}
+
+func newSelectionModel(t *testing.T) viewport.Model {
+	t.Helper()
+	m := viewport.New(styles.New(theme.TokyoNight()))
+	m.SetSize(80, 20)
+	m.SetPosts([]*model.Post{
+		{ID: "p1", UserID: "u1", Content: "alpha", CreateAt: 1700000000000},
+		{ID: "p2", UserID: "u1", Content: "beta", CreateAt: 1700000001000},
+	})
+	return m
+}
+
+func TestSelectionLifecycle(t *testing.T) {
+	m := newSelectionModel(t)
+
+	if m.HasSelection() {
+		t.Error("a fresh viewport should have no selection")
+	}
+	if m.SelectedText() != "" {
+		t.Errorf("SelectedText = %q, want empty", m.SelectedText())
+	}
+
+	m.SetSelectionAnchor(0)
+	if !m.HasSelection() {
+		t.Fatal("HasSelection is false after anchoring")
+	}
+	if m.SelectedText() == "" {
+		t.Error("SelectedText is empty after anchoring")
+	}
+
+	m.ClearSelection()
+	if m.HasSelection() {
+		t.Error("HasSelection is true after clearing")
+	}
+}
+
+// Dragging upwards puts the head before the anchor; the range must still be
+// ordered or the slice bounds are inverted.
+func TestSelectionHandlesUpwardDrag(t *testing.T) {
+	m := newSelectionModel(t)
+
+	m.SetSelectionAnchor(3)
+	m.ExtendSelection(0)
+
+	got := m.SelectedText()
+	if got == "" {
+		t.Fatal("SelectedText is empty after an upward drag")
+	}
+	if strings.Count(got, "\n") < 1 {
+		t.Errorf("expected a multi-line selection, got %q", got)
+	}
+}
+
+// Copied text goes to a clipboard, so it must carry no escape sequences.
+func TestSelectedTextIsPlain(t *testing.T) {
+	m := newSelectionModel(t)
+	m.SetSelectionAnchor(0)
+	m.ExtendSelection(5)
+
+	got := m.SelectedText()
+	if got == "" {
+		t.Fatal("SelectedText is empty")
+	}
+	if strings.Contains(got, "\x1b") {
+		t.Errorf("selected text contains escape sequences: %q", got)
+	}
+}
+
+func TestExtendSelectionWithoutAnchorIsNoop(t *testing.T) {
+	m := newSelectionModel(t)
+
+	m.ExtendSelection(3)
+	if m.HasSelection() {
+		t.Error("ExtendSelection started a selection without an anchor")
+	}
+}
+
+// Out-of-range rows come from clicks below the last post; they must clamp
+// rather than panic.
+func TestSelectionClampsOutOfRange(t *testing.T) {
+	m := newSelectionModel(t)
+
+	m.SetSelectionAnchor(-5)
+	m.ExtendSelection(9999)
+
+	if m.SelectedText() == "" {
+		t.Error("clamped selection produced no text")
+	}
+}
+
+// The reverse line map is what makes click-to-select possible; post→line
+// offsets alone cannot answer "which post is at this row".
+func TestSelectPostAtLine(t *testing.T) {
+	m := newSelectionModel(t)
+
+	// SetPosts reverses its input (the API returns newest first), so the
+	// first rendered post is the last one passed in.
+	if !m.SelectPostAtLine(0) {
+		t.Fatal("SelectPostAtLine(0) found no post")
+	}
+	first := m.SelectedPost()
+	if first == nil {
+		t.Fatal("SelectedPost is nil after selecting line 0")
+	}
+
+	// A row inside the second rendered post must resolve to a different post.
+	if !m.SelectPostAtLine(4) {
+		t.Fatal("SelectPostAtLine(4) found no post")
+	}
+	second := m.SelectedPost()
+	if second == nil || second.ID == first.ID {
+		t.Errorf("rows 0 and 4 resolved to the same post (%v); the line map is wrong", first)
+	}
+
+	if m.SelectPostAtLine(9999) {
+		t.Error("SelectPostAtLine returned true for a row past the content")
+	}
+}
+
+func TestLineAtAccountsForScroll(t *testing.T) {
+	m := viewport.New(styles.New(theme.TokyoNight()))
+	m.SetSize(80, 10)
+
+	// Enough posts that the content actually overflows the pane; scrolling is
+	// clamped to zero otherwise and the test would prove nothing.
+	posts := make([]*model.Post, 0, 20)
+	for i := range 20 {
+		posts = append(posts, &model.Post{
+			ID: fmt.Sprintf("p%d", i), UserID: "u1",
+			Content: fmt.Sprintf("message %d", i), CreateAt: 1700000000000,
+		})
+	}
+	m.SetPosts(posts)
+
+	m.ScrollBy(-9999) // SetPosts lands at the bottom; go back to the top.
+	if got := m.LineAt(2); got != 2 {
+		t.Fatalf("LineAt(2) = %d, want 2 at the top", got)
+	}
+
+	m.ScrollBy(3)
+	if got := m.LineAt(2); got != 5 {
+		t.Errorf("LineAt(2) = %d, want 5 after scrolling 3", got)
 	}
 }
