@@ -2010,3 +2010,67 @@ func TestModel_SearchResultOutsideHistoryReportsError(t *testing.T) {
 		t.Errorf("no explanation shown:\n%s", testutil.StripANSI(m.View()))
 	}
 }
+
+// The action-bar indicator used to stay green while the socket was dead:
+// reconnect was internal to the ws client and nothing was emitted on drop.
+func TestModel_DisconnectIsVisible(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.WSConnectedMsg{})
+	m = updated.(tui.Model)
+	connected := testutil.StripANSI(m.View())
+
+	updated, _ = m.Update(tui.WSStateMsg{Connected: false})
+	m = updated.(tui.Model)
+	dropped := testutil.StripANSI(m.View())
+
+	if dropped == connected {
+		t.Error("the view is identical connected and disconnected")
+	}
+	if !strings.Contains(dropped, "connection lost") {
+		t.Errorf("no disconnect notice shown:\n%s", dropped)
+	}
+}
+
+// Events during the gap are lost for good, so coming back has to re-read the
+// channel rather than leaving a silent hole.
+func TestModel_ReconnectBackfillsPosts(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.WSStateMsg{Connected: false})
+	m = updated.(tui.Model)
+
+	updated, cmd := m.Update(tui.WSStateMsg{Connected: true})
+	m = updated.(tui.Model)
+
+	if cmd == nil {
+		t.Fatal("reconnecting produced no commands; nothing was refetched")
+	}
+	if !strings.Contains(testutil.StripANSI(m.View()), "reconnected") {
+		t.Errorf("no reconnect notice shown:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+// A state change must re-arm the listener, or the first drop is the last one
+// ever reported.
+func TestModel_StateListenerReArms(t *testing.T) {
+	m := setupModel(t)
+
+	_, cmd := m.Update(tui.WSStateMsg{Connected: false})
+	if cmd == nil {
+		t.Fatal("no command returned; the listener was not re-armed")
+	}
+}
+
+// Rejected credentials cannot be fixed by retrying, so they must send the
+// user back to the login screen instead of reconnecting forever.
+func TestModel_UnauthorizedTriggersReLogin(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.WSStateMsg{Connected: false, Unauthorized: true})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "Chit Login") {
+		t.Errorf("expected the login screen:\n%s", testutil.StripANSI(m.View()))
+	}
+}

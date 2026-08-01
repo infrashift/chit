@@ -11,11 +11,27 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 )
 
+// ConnState reports a transport-level transition. It is delivered on its own
+// channel rather than as a synthetic event so that server events and
+// connection state never have to be told apart downstream.
+type ConnState struct {
+	// Connected is the state now being entered.
+	Connected bool
+	// Err explains a disconnect, when one is known.
+	Err error
+	// Unauthorized marks a failure the client cannot recover from by
+	// retrying: the credentials were rejected, so reconnecting forever would
+	// only hide the need to sign in again.
+	Unauthorized bool
+}
+
 // WSClient defines the WebSocket interface for the TUI.
 type WSClient interface {
 	Connect() error
 	Close() error
 	Events() <-chan model.WebSocketEvent
+	// State reports connect and disconnect transitions.
+	State() <-chan ConnState
 	Send(msg model.WebSocketMessage) error
 	SetToken(token string)
 }
@@ -26,6 +42,7 @@ type wsClient struct {
 	headerName string
 	conn       *websocket.Conn
 	events     chan model.WebSocketEvent
+	state      chan ConnState
 	done       chan struct{}
 	backoff    *Backoff
 	mu         sync.Mutex
@@ -46,8 +63,11 @@ func NewWSClientWithHeader(url, token string, bufSize int, headerName string) WS
 		token:      token,
 		headerName: headerName,
 		events:     make(chan model.WebSocketEvent, bufSize),
-		done:       make(chan struct{}),
-		backoff:    NewBackoff(),
+		// Small buffer: transitions are rare and only the latest matters, so
+		// dropping one under contention is preferable to blocking the reader.
+		state:   make(chan ConnState, 8),
+		done:    make(chan struct{}),
+		backoff: NewBackoff(),
 	}
 }
 
@@ -72,8 +92,22 @@ func (c *wsClient) Connect() error {
 	c.conn = conn
 	c.mu.Unlock()
 
+	c.emitState(ConnState{Connected: true})
+
 	go c.readLoop()
 	return nil
+}
+
+// State returns the connection-state channel.
+func (c *wsClient) State() <-chan ConnState { return c.state }
+
+// emitState publishes a transition without ever blocking: the reader may be
+// busy, and a stalled read loop would stop reconnecting altogether.
+func (c *wsClient) emitState(s ConnState) {
+	select {
+	case c.state <- s:
+	default:
+	}
 }
 
 func (c *wsClient) readLoop() {
@@ -88,9 +122,11 @@ func (c *wsClient) readLoop() {
 		_, msg, err := c.conn.ReadMessage()
 		if err != nil {
 			c.closeConn()
+			c.emitState(ConnState{Connected: false, Err: err})
 			if !c.reconnect() {
 				return
 			}
+			c.emitState(ConnState{Connected: true})
 			continue
 		}
 
@@ -136,8 +172,19 @@ func (c *wsClient) reconnect() bool {
 		header := http.Header{}
 		header.Set(c.headerName, token)
 
-		conn, _, err := websocket.DefaultDialer.Dial(c.url, header)
+		conn, resp, err := websocket.DefaultDialer.Dial(c.url, header)
 		if err != nil {
+			// Retrying cannot fix rejected credentials. Report it and stop,
+			// so the UI can ask the user to sign in again instead of the
+			// loop dialing forever behind a dead session.
+			if resp != nil {
+				status := resp.StatusCode
+				_ = resp.Body.Close()
+				if status == http.StatusUnauthorized || status == http.StatusForbidden {
+					c.emitState(ConnState{Connected: false, Err: err, Unauthorized: true})
+					return false
+				}
+			}
 			continue
 		}
 

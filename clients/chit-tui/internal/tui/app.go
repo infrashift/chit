@@ -122,6 +122,14 @@ type Model struct {
 	searchTerm string
 }
 
+// Connection-state notices. They travel through the same transient status
+// line as errors because that is the only place the UI can say something
+// in passing.
+var (
+	errDisconnected = errors.New("connection lost — reconnecting")
+	errReconnected  = errors.New("reconnected — reloading messages")
+)
+
 // errSearchHitNotLoaded reports a result that is outside the loaded history.
 var errSearchHitNotLoaded = errors.New(
 	"that message is older than the loaded history; scroll back to reach it")
@@ -503,9 +511,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case WSStateMsg:
+		// Keep listening for the next transition before doing anything else,
+		// or a single drop would be the last one ever reported.
+		cmds = append(cmds, ListenWSState(m.wsClient))
+
+		if msg.Unauthorized {
+			m.wsConnected = false
+			return m.handleAuthExpired()
+		}
+
+		wasConnected := m.wsConnected
+		m.wsConnected = msg.Connected
+
+		if msg.Connected && !wasConnected {
+			// Events that arrived while the socket was down are gone for
+			// good — the stream has no replay — so re-read the channel
+			// rather than leaving a silent hole in the history.
+			if m.activeChan != nil {
+				cmds = append(cmds, FetchPosts(m.client, m.activeChan.ID, 0, 60))
+			}
+			cmds = append(cmds, m.setError(errReconnected))
+		}
+		if !msg.Connected && wasConnected {
+			cmds = append(cmds, m.setError(errDisconnected))
+		}
+		return m, tea.Batch(cmds...)
+
 	case WSConnectedMsg:
 		m.wsConnected = true
-		return m, ListenWebSocket(m.wsClient)
+		// Both listeners start here: one for events, one for transport
+		// state. Returning only the first is what left disconnects silent.
+		return m, tea.Batch(ListenWebSocket(m.wsClient), ListenWSState(m.wsClient))
 
 	case WebSocketEventMsg:
 		return m.handleWSEvent(msg)

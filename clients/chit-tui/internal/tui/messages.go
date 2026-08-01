@@ -80,6 +80,16 @@ type ChannelMembersLoadedMsg struct {
 // WSConnectedMsg signals that the WebSocket connection succeeded.
 type WSConnectedMsg struct{}
 
+// WSStateMsg reports a WebSocket connect or disconnect. It is distinct from
+// WSConnectedMsg, which only ever meant "the initial dial returned".
+type WSStateMsg struct {
+	Connected bool
+	Err       error
+	// Unauthorized marks a failure retrying cannot fix; the session is gone
+	// and the user has to sign in again.
+	Unauthorized bool
+}
+
 // DMChannelsLoadedMsg is sent when DM channels are fetched.
 type DMChannelsLoadedMsg struct {
 	Channels []*model.Channel

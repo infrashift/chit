@@ -263,3 +263,86 @@ func TestWSClient_CloseStopsReconnect(t *testing.T) {
 	// Give it time to verify no panic / hang
 	time.Sleep(200 * time.Millisecond)
 }
+
+// A drop has to be observable. Before this, reconnect was entirely internal
+// and the UI had no way to know the socket had died.
+func TestConnStateReportsConnectAndDrop(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		// Accept, then hang up, which is what a server restart looks like.
+		_ = conn.Close()
+	}))
+	defer srv.Close()
+
+	c := ws.NewWSClient("ws"+strings.TrimPrefix(srv.URL, "http"), "token", 8)
+	defer func() { _ = c.Close() }()
+
+	if err := c.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	// First transition: connected.
+	select {
+	case st := <-c.State():
+		if !st.Connected {
+			t.Fatalf("first state = %+v, want connected", st)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no connect state reported")
+	}
+
+	// Second: the drop.
+	select {
+	case st := <-c.State():
+		if st.Connected {
+			t.Errorf("second state = %+v, want disconnected", st)
+		}
+		if st.Err == nil {
+			t.Error("disconnect carried no error")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no disconnect state reported")
+	}
+}
+
+// Retrying cannot fix rejected credentials, so the client must say so rather
+// than dialing forever behind a dead session.
+func TestConnStateReportsUnauthorized(t *testing.T) {
+	var upgraded bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !upgraded {
+			upgraded = true
+			conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+			if err != nil {
+				return
+			}
+			_ = conn.Close()
+			return
+		}
+		// The reconnect attempt is rejected.
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	c := ws.NewWSClient("ws"+strings.TrimPrefix(srv.URL, "http"), "token", 8)
+	defer func() { _ = c.Close() }()
+
+	if err := c.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case st := <-c.State():
+			if st.Unauthorized {
+				return // what we are waiting for
+			}
+		case <-deadline:
+			t.Fatal("no unauthorized state reported")
+		}
+	}
+}

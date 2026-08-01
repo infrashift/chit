@@ -108,6 +108,23 @@ func ListenWebSocket(wsClient ws.WSClient) tea.Cmd {
 	}
 }
 
+// ListenWSState waits for the next connection-state transition. It runs
+// alongside ListenWebSocket: events and transport state arrive on separate
+// channels so a quiet connection is still distinguishable from a dead one.
+func ListenWSState(wsClient ws.WSClient) tea.Cmd {
+	return func() tea.Msg {
+		st, ok := <-wsClient.State()
+		if !ok {
+			return nil
+		}
+		return WSStateMsg{
+			Connected:    st.Connected,
+			Err:          st.Err,
+			Unauthorized: st.Unauthorized,
+		}
+	}
+}
+
 // FetchDMChannels returns a command that fetches the user's DM channels.
 func FetchDMChannels(client api.ChitClient) tea.Cmd {
 	return func() tea.Msg {
