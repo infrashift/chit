@@ -63,11 +63,27 @@ var keyBindings = []binding{
 	{"ctrl+d", "find people / start a DM"},
 	{"ctrl+n", "create a channel"},
 	{"tab", "switch between panes"},
-	{"enter", "history: open thread · input: send"},
-	{"t", "tag the selected post (history pane)"},
+	{"enter", "history: reply in thread · input: send"},
+	{"j / k", "history: move between posts"},
+	{"t", "tag a post (history pane, or a thread's root)"},
 	{"esc", "close overlay / leave thread / back to history"},
 	{"?", "this help (history pane)"},
 	{"ctrl+c", "quit"},
+}
+
+// Replying is the capability people most often miss: the history pane has to
+// be focused before enter opens a thread, since enter sends the message while
+// the input is focused.
+var hints = []string{
+	"To reply: press tab to focus the history pane, pick a post with j/k, then enter.",
+}
+
+// clientCommands are handled by chit-tui itself and never reach the server.
+// Everything else typed with a leading slash is sent as a message, and the
+// server decides whether it is a command.
+var clientCommands = []binding{
+	{"/theme", "choose a theme (alias: /skin)"},
+	{"/logout", "sign out and clear the stored session"},
 }
 
 var mouseBindings = []binding{
@@ -86,9 +102,21 @@ func (m Model) View() string {
 	for _, b := range keyBindings {
 		items = append(items, m.renderBinding(b))
 	}
+	items = append(items, "", m.styles.ListItemActive.Render("Commands"))
+	for _, b := range clientCommands {
+		items = append(items, m.renderBinding(b))
+	}
+	items = append(items, m.renderBinding(binding{
+		keys: "/…", desc: "anything else is sent to the server",
+	}))
+
 	items = append(items, "", m.styles.ListItemActive.Render("Mouse"))
 	for _, b := range mouseBindings {
 		items = append(items, m.renderBinding(b))
+	}
+
+	for _, h := range hints {
+		items = append(items, "", m.styles.Timestamp.Render("  "+h))
 	}
 	items = append(items, "", m.styles.Timestamp.Render("press any key to close"))
 

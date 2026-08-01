@@ -22,6 +22,7 @@ const (
 	ActionNewChannel
 	ActionHelp
 	ActionCloseThread
+	ActionReply
 )
 
 type button struct {
@@ -43,6 +44,7 @@ type Model struct {
 	channel    string
 	user       string
 	err        string
+	canReply   bool
 	threadOpen bool
 	connected  bool
 	styles     styles.Styles
@@ -69,6 +71,11 @@ func (m *Model) SetContext(team, channel, user string) {
 // SetThreadOpen toggles the thread-context button set.
 func (m *Model) SetThreadOpen(open bool) { m.threadOpen = open }
 
+// SetCanReply controls the Reply button. Replying requires a post to be
+// selected in the history pane, and that pane has to be focused first — the
+// button is the only on-screen hint that the capability exists at all.
+func (m *Model) SetCanReply(can bool) { m.canReply = can }
+
 // SetConnected sets the WebSocket connection indicator state.
 func (m *Model) SetConnected(c bool) { m.connected = c }
 
@@ -79,6 +86,9 @@ func (m Model) buttons() []button {
 	btns := make([]button, 0, 5)
 	if m.threadOpen {
 		btns = append(btns, button{label: "esc Back", action: ActionCloseThread})
+	}
+	if m.canReply {
+		btns = append(btns, button{label: "↵ Reply", action: ActionReply})
 	}
 	btns = append(btns,
 		button{label: "^K Jump", action: ActionPalette},

@@ -4,6 +4,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/actionbar"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/viewport"
 )
 
 // wheelScrollLines is how many lines one mouse-wheel notch scrolls.
@@ -100,6 +101,11 @@ func (m Model) dispatchAction(a actionbar.Action) (tea.Model, tea.Cmd) {
 	case actionbar.ActionCloseThread:
 		if m.mainPane == paneThread {
 			return m, m.closeThread()
+		}
+	case actionbar.ActionReply:
+		// Same path the enter key takes in the history pane.
+		if p := m.viewport.SelectedPost(); p != nil {
+			return m, func() tea.Msg { return viewport.PostSelectedMsg{Post: p} }
 		}
 	}
 	return m, nil

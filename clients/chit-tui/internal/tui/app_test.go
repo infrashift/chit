@@ -1901,3 +1901,74 @@ func TestModel_CommandResponseForOtherChannelIsIgnored(t *testing.T) {
 		t.Error("a response for another channel was displayed")
 	}
 }
+
+// The Reply button is the only on-screen hint that replying exists, and that
+// the history pane must be focused first. It appears only when a reply is
+// actually possible.
+func TestModel_ReplyButtonAppearsWhenHistoryFocused(t *testing.T) {
+	m := setupModel(t)
+
+	// Input is focused at startup, so there is nothing to reply to yet.
+	if strings.Contains(testutil.StripANSI(m.View()), "Reply") {
+		t.Error("Reply button shown while the input is focused")
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "Reply") {
+		t.Errorf("Reply button missing after focusing history:\n%s",
+			testutil.StripANSI(m.View()))
+	}
+}
+
+// Clicking Reply must take the same path as pressing enter.
+func TestModel_ReplyButtonOpensThread(t *testing.T) {
+	m := setupModel(t)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(tui.Model)
+
+	view := testutil.StripANSI(m.View())
+	col := strings.Index(view[strings.LastIndex(view, "\n")+1:], "Reply")
+	if col < 0 {
+		t.Fatalf("Reply button not found on the action bar:\n%s", view)
+	}
+
+	_, cmd := m.Update(tea.MouseMsg{
+		X: col, Y: 39, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft,
+	})
+	if cmd == nil {
+		t.Error("clicking Reply produced no command")
+	}
+}
+
+// Tagging worked only in the history pane, so a post's tags were unreachable
+// once it was open as a thread.
+func TestModel_TagPickerOpensFromThread(t *testing.T) {
+	m := setupModel(t)
+
+	// Open the thread, then focus its pane — enter opens the thread but
+	// leaves focus on the input so a reply can be typed straight away.
+	updated, _ := m.Update(viewport.PostSelectedMsg{
+		Post: &model.Post{ID: "p1", UserID: "u1", Content: "root"},
+	})
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(tui.ThreadLoadedMsg{
+		Posts: &model.PostList{Order: []*model.Post{
+			{ID: "p1", UserID: "u1", Content: "root", CreateAt: 1700000000000},
+		}},
+	})
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "Filter tags") {
+		t.Errorf("tag picker did not open from the thread pane:\n%s",
+			testutil.StripANSI(m.View()))
+	}
+}

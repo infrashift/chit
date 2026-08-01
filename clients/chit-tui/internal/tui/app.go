@@ -295,8 +295,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		if key.Matches(msg, m.keys.TagPicker) && m.focus == FocusViewport {
-			sel := m.viewport.SelectedPost()
+		if key.Matches(msg, m.keys.TagPicker) {
+			// In the history pane the subject is the post under the cursor;
+			// in a thread there is no cursor, so it is the root post.
+			var sel *model.Post
+			switch m.focus {
+			case FocusViewport:
+				sel = m.viewport.SelectedPost()
+			case FocusThread:
+				sel = m.thread.RootPost()
+			}
 			if sel != nil {
 				cmd := m.setFocus(FocusTagPicker)
 				m.tagPicker.Open(sel.ID, m.allTags, m.postTags[sel.ID])
@@ -751,6 +759,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			names = append(names, t.Name)
 		}
 		m.viewport.SetPostTags(msg.PostID, names)
+		// The thread pane renders the same posts, so it needs the tags too;
+		// otherwise a post shows its tags in the channel and loses them the
+		// moment it is opened as a thread.
+		m.thread.SetPostTags(m.postTags)
 		return m, nil
 
 	case tagpicker.TagToggledMsg:
@@ -1006,6 +1018,12 @@ func (m *Model) syncActionBar() {
 	m.actionBar.SetError(errStr)
 	m.actionBar.SetConnected(m.wsConnected)
 	m.actionBar.SetThreadOpen(m.mainPane == paneThread)
+
+	// Replying needs a focused history pane with a post under the cursor;
+	// the button appears only then, which is also the hint that the pane has
+	// to be focused first.
+	m.actionBar.SetCanReply(m.mainPane == paneChannel &&
+		m.focus == FocusViewport && m.viewport.SelectedPost() != nil)
 }
 
 func (m *Model) setFocus(area FocusArea) tea.Cmd {

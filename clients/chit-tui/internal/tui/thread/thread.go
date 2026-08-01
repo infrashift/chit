@@ -20,6 +20,7 @@ type Model struct {
 	rootPost        *model.Post
 	replies         []*model.Post
 	usernames       map[string]string
+	postTags        map[string][]*model.Tag
 	currentUsername string
 	focused         bool
 	styles          styles.Styles
@@ -183,6 +184,27 @@ func (m *Model) updateContent() {
 	m.viewport.SetContent(strings.Join(lines, "\n\n"))
 }
 
+// SetPostTags supplies tags per post ID. Without them the thread pane renders
+// posts untagged, so a post's tags appear in the channel and then vanish when
+// the same post is opened as a thread.
+func (m *Model) SetPostTags(tags map[string][]*model.Tag) {
+	m.postTags = tags
+	m.cache = make(map[string]string)
+}
+
+// tagNames returns the tag names for a post, or nil when it has none.
+func (m *Model) tagNames(postID string) []string {
+	tags := m.postTags[postID]
+	if len(tags) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(tags))
+	for _, t := range tags {
+		names = append(names, t.Name)
+	}
+	return names
+}
+
 func (m *Model) renderPost(p *model.Post, width int) string {
 	if cached, ok := m.cache[p.ID]; ok {
 		return cached
@@ -191,7 +213,7 @@ func (m *Model) renderPost(p *model.Post, width int) string {
 	if username == "" {
 		username = p.UserID[:min(8, len(p.UserID))]
 	}
-	pb := post.New(p, username, m.styles, width, m.renderer, m.currentUsername, 0, nil)
+	pb := post.New(p, username, m.styles, width, m.renderer, m.currentUsername, 0, m.tagNames(p.ID))
 	rendered := pb.View()
 	m.cache[p.ID] = rendered
 	return rendered
