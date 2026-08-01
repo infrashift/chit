@@ -1,7 +1,8 @@
 # Build stage
 FROM docker.io/library/golang:1.25-alpine AS builder
 
-RUN apk add --no-cache git ca-certificates
+# No apk install needed: the base image already ships ca-certificates, and
+# module fetching goes through the Go module proxy rather than git.
 
 WORKDIR /src
 COPY go.mod go.sum ./
