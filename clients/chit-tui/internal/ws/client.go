@@ -23,6 +23,11 @@ type ConnState struct {
 	// retrying: the credentials were rejected, so reconnecting forever would
 	// only hide the need to sign in again.
 	Unauthorized bool
+	// Desynced reports that events were discarded because the reader fell
+	// behind. The socket is still up, so nothing else would reveal it — the
+	// view would simply stop matching the server. Callers should resync the
+	// same way they do after a reconnect.
+	Desynced bool
 }
 
 // WSClient defines the WebSocket interface for the TUI.
@@ -141,7 +146,10 @@ func (c *wsClient) readLoop() {
 			c.closeConn()
 			return
 		default:
-			// Drop event if buffer is full.
+			// The buffer is full, so this event is lost. Dropping it quietly
+			// leaves the view stale with the socket still up and nothing to
+			// hint at it, so report the gap and let the reader resync.
+			c.emitState(ConnState{Connected: true, Desynced: true})
 		}
 	}
 }

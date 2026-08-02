@@ -103,21 +103,25 @@ type Model struct {
 	pendingPostTags       []string
 	pendingPrivateChannel *model.Channel
 	pendingMembers        []string
-	appState              AppState
-	tokenStore            *auth.TokenStore
-	kratosClient          *auth.KratosClient
-	sessionStore          *auth.SessionStore
-	focus                 FocusArea
-	mainPane              mainPane
-	channelAutoSelected   bool
-	wsConnected           bool
-	lastWSSeq             int64
-	keys                  KeyMap
-	styles                styles.Styles
-	width                 int
-	height                int
-	err                   error
-	errSeq                uint64
+	// pendingGroupChannel marks the member picker as serving /group rather
+	// than private-channel creation. The two share the picker but not what
+	// happens to the result.
+	pendingGroupChannel bool
+	appState            AppState
+	tokenStore          *auth.TokenStore
+	kratosClient        *auth.KratosClient
+	sessionStore        *auth.SessionStore
+	focus               FocusArea
+	mainPane            mainPane
+	channelAutoSelected bool
+	wsConnected         bool
+	lastWSSeq           int64
+	keys                KeyMap
+	styles              styles.Styles
+	width               int
+	height              int
+	err                 error
+	errSeq              uint64
 	// History paging. historyPage is the newest page already loaded;
 	// loadingOlder guards against firing repeatedly while a fetch is in
 	// flight, and historyExhausted stops asking once the server runs out.
@@ -141,7 +145,15 @@ type Model struct {
 var (
 	errDisconnected = errors.New("connection lost — reconnecting")
 	errReconnected  = errors.New("reconnected — reloading messages")
+	errDesynced     = errors.New("fell behind the server — reloading messages")
 )
+
+// minGroupChannelMembers matches the server's lower bound. Below it the
+// conversation is a DM, which has its own flow.
+const minGroupChannelMembers = 3
+
+var errGroupTooSmall = errors.New(
+	"a group needs at least three people — pick two others, or start a DM with @")
 
 // errSearchHitNotLoaded reports a result that is outside the loaded history.
 var errSearchHitNotLoaded = errors.New(
@@ -189,12 +201,46 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 		keys:           DefaultKeyMap(),
 		styles:         s,
 	}
+	// Seed the client-local commands rather than waiting for the server
+	// registry, which never contains them and may never arrive at all.
+	m.palette.SetCommands(clientCommands())
+
 	// The palette shares the root's badge and DM-name maps by reference, so
 	// root-side updates are visible without further plumbing.
 	m.palette.SetCounts(m.unread, m.mentions)
 	m.palette.SetDMDisplayNames(m.dmDisplayNames)
 	_ = m.input.Focus()
 	return m
+}
+
+// clientCommands are handled entirely by this client and never reach the
+// server, so the server's registry does not list them. Typing one directly has
+// always worked; browsing for one had not, because a bare "/" opens the
+// palette on the server's list alone and these were absent from it.
+func clientCommands() []*model.Command {
+	return []*model.Command{
+		{Slug: "theme", Description: "choose a theme (alias: /skin)"},
+		{Slug: "group", Description: "start a group conversation with three or more people"},
+		{Slug: "leave", Description: "leave the current channel"},
+		{Slug: "logout", Description: "sign out and clear the stored session"},
+	}
+}
+
+// mergeCommands appends the server's commands to the client's, dropping any
+// the client already handles: a server entry of the same name would be routed
+// to a handler that never runs.
+func mergeCommands(local, remote []*model.Command) []*model.Command {
+	seen := make(map[string]bool, len(local))
+	for _, c := range local {
+		seen[c.Slug] = true
+	}
+	merged := append([]*model.Command(nil), local...)
+	for _, c := range remote {
+		if c != nil && !seen[c.Slug] {
+			merged = append(merged, c)
+		}
+	}
+	return merged
 }
 
 // setError sets the error and returns a command to auto-clear it after 10 seconds.
@@ -526,7 +572,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			return m, m.setError(msg.Err)
 		}
-		m.palette.SetCommands(msg.Commands)
+		m.palette.SetCommands(mergeCommands(clientCommands(), msg.Commands))
 		return m, nil
 
 	case UsersLoadedMsg:
@@ -573,6 +619,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		wasConnected := m.wsConnected
 		m.wsConnected = msg.Connected
+
+		// Events were dropped while the socket stayed up, so the view is
+		// stale with nothing else to reveal it. Same remedy as a reconnect:
+		// re-read the channel. Handled before the transition checks, which
+		// would otherwise see no change and do nothing.
+		if msg.Desynced {
+			if m.activeChan != nil {
+				cmds = append(cmds, FetchPosts(m.client, m.activeChan.ID, 0, historyPageSize))
+			}
+			cmds = append(cmds, m.setError(errDesynced))
+			return m, tea.Batch(cmds...)
+		}
 
 		if msg.Connected && !wasConnected {
 			// Events that arrived while the socket was down are gone for
@@ -652,6 +710,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		case "/logout":
 			return m.handleLogout()
+		case "/group":
+			// Client-local for the same reason as /leave: the server has no
+			// group command, only the REST endpoint the picker's result calls.
+			m.pendingGroupChannel = true
+			m.pendingPrivateChannel = nil
+			cmd := m.setFocus(FocusDMPicker)
+			m.dmPicker.OpenForMembers()
+			return m, cmd
 		case "/leave":
 			// Handled here rather than server-side: there is no leave command
 			// in the registry, and the REST endpoint already permits a member
@@ -843,6 +909,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case dmpicker.CancelledMsg:
+		// A group channel is nothing but its members, so an abandoned pick
+		// leaves nothing to create — unlike a private channel, which was
+		// already named and submitted before the picker opened.
+		m.pendingGroupChannel = false
 		// Dismissing the member picker skips member selection but still
 		// creates the already-submitted private channel.
 		if m.pendingPrivateChannel != nil {
@@ -855,6 +925,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case dmpicker.MembersPickedMsg:
 		m.dmPicker.Close()
+
+		if m.pendingGroupChannel {
+			m.pendingGroupChannel = false
+			if m.me == nil {
+				return m, tea.Batch(cmds...)
+			}
+			// The server counts the creator among the members and rejects a
+			// group that excludes them, so send the full membership rather
+			// than just who was picked.
+			ids := make([]string, 0, len(msg.Users)+1)
+			ids = append(ids, m.me.ID)
+			for _, u := range msg.Users {
+				if u.ID != m.me.ID {
+					ids = append(ids, u.ID)
+				}
+			}
+			if len(ids) < minGroupChannelMembers {
+				cmds = append(cmds, m.setError(errGroupTooSmall))
+				return m, tea.Batch(cmds...)
+			}
+			cmds = append(cmds, CreateGroupChannel(m.client, ids))
+			return m, tea.Batch(cmds...)
+		}
+
 		if m.pendingPrivateChannel != nil {
 			for _, u := range msg.Users {
 				m.pendingMembers = append(m.pendingMembers, u.ID)

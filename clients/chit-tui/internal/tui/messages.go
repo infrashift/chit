@@ -88,6 +88,9 @@ type WSStateMsg struct {
 	// Unauthorized marks a failure retrying cannot fix; the session is gone
 	// and the user has to sign in again.
 	Unauthorized bool
+	// Desynced reports that events were dropped while the socket stayed up,
+	// so the view is stale with nothing else to give it away.
+	Desynced bool
 }
 
 // DMChannelsLoadedMsg is sent when DM channels are fetched.

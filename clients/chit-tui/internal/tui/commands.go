@@ -129,6 +129,7 @@ func ListenWSState(wsClient ws.WSClient) tea.Cmd {
 			Connected:    st.Connected,
 			Err:          st.Err,
 			Unauthorized: st.Unauthorized,
+			Desynced:     st.Desynced,
 		}
 	}
 }
@@ -161,6 +162,15 @@ func SearchUsersCmd(client api.ChitClient, term string) tea.Cmd {
 func CreateDMChannel(client api.ChitClient, userID1, userID2 string) tea.Cmd {
 	return func() tea.Msg {
 		ch, err := client.CreateDirectChannel(context.Background(), userID1, userID2)
+		return DMCreatedMsg{Channel: ch, Err: err}
+	}
+}
+
+// CreateGroupChannel returns a command that creates a group channel among the
+// given users. userIDs must include the caller.
+func CreateGroupChannel(client api.ChitClient, userIDs []string) tea.Cmd {
+	return func() tea.Msg {
+		ch, err := client.CreateGroupChannel(context.Background(), userIDs)
 		return DMCreatedMsg{Channel: ch, Err: err}
 	}
 }

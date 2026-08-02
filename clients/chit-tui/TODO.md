@@ -699,3 +699,21 @@
 - [x] UAT tutorial: scenarios 1/2/3/4/6/7/8/9/11/12/14/17/19/20 updated; scenario 13 replaced (private-channel member picker incl. Esc behavior); scenario 22 added (mouse/action bar/help)
 - [x] custom-themes.md badge descriptions; monorepo docs no longer call chit-tui an external project
 - [x] CHANGELOG.md Fixed/Removed entries
+
+# Audit Backlog: Dropped Events and Group Channels
+
+## Dropped WebSocket events
+- [x] `ws` reports `ConnState.Desynced` when the event buffer overflows; the drop itself is unavoidable, going unheard was not
+- [x] App resyncs the active channel on a desync, the same remedy as a reconnect, and says so in the status bar
+- [x] Tests on both halves, each confirmed to fail against the silent version
+
+## Group channels
+- [x] `/group` opens the member picker and creates a group channel — `api.CreateGroupChannel` had been kept "for API completeness" with no caller, so group channels could not be made from the TUI at all
+- [x] Caller is added to the membership exactly once (the server rejects a group that excludes its creator)
+- [x] Fewer than three people is refused locally with an explanation, rather than earning a server rejection the user cannot act on
+- [x] Client-local commands (`/theme`, `/group`, `/leave`, `/logout`) now appear in the palette; they were typeable but absent from the browse list, which shows the server registry alone
+
+## Member picker, found by driving the live TUI
+- [x] Enter searches again when the term is new, instead of confirming the moment anyone is selected — picking more than one person was impossible unless they shared a search term, which no group of three can rely on
+- [x] The search box clears after a pick; it used to keep the term, so "bob" then "chad" searched for "bobchad"
+- [x] Hints track what Enter will actually do

@@ -346,3 +346,47 @@ func TestConnStateReportsUnauthorized(t *testing.T) {
 		}
 	}
 }
+
+// A full event buffer used to discard events in silence. The socket stays up,
+// so no disconnect is reported and the caller has no way to learn its view has
+// stopped matching the server. The drop itself is unavoidable — going unheard
+// is not.
+func TestWSClient_ReportsDesyncWhenTheBufferOverflows(t *testing.T) {
+	const buffered = 2
+
+	srv := newTestWSServer(t, func(conn *websocket.Conn) {
+		// Comfortably more than the buffer holds, so the reader — which never
+		// drains here — must overflow.
+		for i := range buffered * 10 {
+			data, _ := json.Marshal(model.WebSocketEvent{
+				Event:    model.WebSocketEventPosted,
+				Sequence: int64(i),
+			})
+			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+				return
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	})
+
+	client := ws.NewWSClient(wsURL(srv), "test-token", buffered)
+	if err := client.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = client.Close() }()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case st := <-client.State():
+			if st.Desynced {
+				if !st.Connected {
+					t.Error("desync reported as a disconnect; the socket is still up")
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("events were dropped without reporting a desync")
+		}
+	}
+}

@@ -417,9 +417,15 @@ func TestDMPicker_ViewShowsGroupHint(t *testing.T) {
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 
+	// With people selected and nothing new typed, Enter confirms — and the
+	// hint has to say so, along with how to keep searching, which is the part
+	// that was impossible before.
 	view := m.View()
-	if !strings.Contains(view, "add members") {
-		t.Errorf("expected add-members hint in view:\n%s", view)
+	if !strings.Contains(view, "Enter to confirm") {
+		t.Errorf("expected a confirm hint in view:\n%s", view)
+	}
+	if !strings.Contains(view, "keep searching") {
+		t.Errorf("hint does not mention searching again:\n%s", view)
 	}
 }
 
@@ -495,8 +501,8 @@ func TestDMPicker_MemberPickerHintText(t *testing.T) {
 	// Select one user
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	view := m.View()
-	if !strings.Contains(view, "add members") {
-		t.Errorf("expected 'add members' hint in view:\n%s", view)
+	if !strings.Contains(view, "Tab to pick") {
+		t.Errorf("expected a pick hint in view:\n%s", view)
 	}
 }
 
@@ -524,5 +530,132 @@ func TestDMPicker_SingleSelectedEnterPicksMember(t *testing.T) {
 	}
 	if len(picked.Users) != 1 || picked.Users[0].ID != "u1" {
 		t.Errorf("unexpected users: %+v", picked.Users)
+	}
+}
+
+// enterKey and tabKey drive the picker the way a user does.
+func enterKey() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyEnter} }
+func tabKey() tea.KeyMsg   { return tea.KeyMsg{Type: tea.KeyTab} }
+
+func typeTerm(m dmpicker.Model, term string) dmpicker.Model {
+	for _, r := range term {
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	return m
+}
+
+// Enter used to confirm as soon as anyone was selected, so a second search was
+// impossible and a pick could never exceed what one query happened to return.
+// A group needs three people, who rarely share a search term.
+func TestPicker_SearchesAgainAfterASelection(t *testing.T) {
+	m := dmpicker.New(styles.New(theme.TokyoNight()))
+	m.OpenForMembers()
+	m.SetSize(80, 24)
+
+	m = typeTerm(m, "bob")
+	m, _ = m.Update(enterKey()) // search
+	m.SetResults([]*model.User{{ID: "u2", Username: "bob"}})
+	m, _ = m.Update(tabKey()) // select bob
+
+	m = typeTerm(m, "chad")
+	m, cmd := m.Update(enterKey())
+	if cmd == nil {
+		t.Fatal("Enter on a new term produced nothing")
+	}
+	switch msg := cmd().(type) {
+	case dmpicker.SearchTriggeredMsg:
+		if msg.Term != "bobchad" { // the box still holds both; only the term matters
+			t.Logf("searched %q", msg.Term)
+		}
+	case dmpicker.MembersPickedMsg:
+		t.Fatalf("Enter confirmed with %d member(s) instead of searching; "+
+			"a second person can never be added", len(msg.Users))
+	default:
+		t.Fatalf("unexpected %T", msg)
+	}
+}
+
+// Once the term has been searched, Enter means "done" — otherwise there is no
+// way to finish picking at all.
+func TestPicker_ConfirmsOnceTheTermIsSearched(t *testing.T) {
+	m := dmpicker.New(styles.New(theme.TokyoNight()))
+	m.OpenForMembers()
+	m.SetSize(80, 24)
+
+	m = typeTerm(m, "bob")
+	m, _ = m.Update(enterKey()) // search
+	m.SetResults([]*model.User{{ID: "u2", Username: "bob"}})
+	m, _ = m.Update(tabKey()) // select
+
+	_, cmd := m.Update(enterKey()) // same term: confirm
+	if cmd == nil {
+		t.Fatal("Enter on an already-searched term produced nothing")
+	}
+	picked, ok := cmd().(dmpicker.MembersPickedMsg)
+	if !ok {
+		t.Fatalf("expected the pick to be confirmed, got %T", cmd())
+	}
+	if len(picked.Users) != 1 || picked.Users[0].ID != "u2" {
+		t.Errorf("confirmed %v, want just u2", picked.Users)
+	}
+}
+
+// The search box used to keep the term after a pick, so the next name typed
+// landed on the end of it — "bob" then "chad" searched for "bobchad" and
+// matched nobody. Found by driving the live TUI, not by these tests.
+func TestPicker_ClearsTheBoxAfterAPick(t *testing.T) {
+	m := dmpicker.New(styles.New(theme.TokyoNight()))
+	m.OpenForMembers()
+	m.SetSize(80, 24)
+
+	m = typeTerm(m, "bob")
+	m, _ = m.Update(enterKey())
+	m.SetResults([]*model.User{{ID: "u2", Username: "bob"}})
+	m, _ = m.Update(tabKey())
+
+	m = typeTerm(m, "chad")
+	_, cmd := m.Update(enterKey())
+	if cmd == nil {
+		t.Fatal("Enter produced nothing")
+	}
+	search, ok := cmd().(dmpicker.SearchTriggeredMsg)
+	if !ok {
+		t.Fatalf("expected a search, got %T", cmd())
+	}
+	if search.Term != "chad" {
+		t.Errorf("searched for %q; the previous term was never cleared", search.Term)
+	}
+}
+
+// Deselecting must not wipe the box — the term is still what the visible
+// results came from, and clearing it would strand them.
+func TestPicker_KeepsTheBoxWhenDeselecting(t *testing.T) {
+	m := dmpicker.New(styles.New(theme.TokyoNight()))
+	m.OpenForMembers()
+	m.SetSize(80, 24)
+
+	m = typeTerm(m, "bob")
+	m, _ = m.Update(enterKey())
+	m.SetResults([]*model.User{{ID: "u2", Username: "bob"}})
+
+	m, _ = m.Update(tabKey()) // select — box clears
+	m, _ = m.Update(tabKey()) // deselect
+
+	if got := m.View(); !strings.Contains(got, "@bob") {
+		t.Logf("view:\n%s", got)
+	}
+	// Selecting again must still be possible, which is what a wiped result
+	// list would prevent.
+	m, _ = m.Update(tabKey())
+	_, cmd := m.Update(enterKey())
+	if cmd == nil {
+		t.Fatal("Enter produced nothing after reselecting")
+	}
+	picked, ok := cmd().(dmpicker.MembersPickedMsg)
+	if !ok {
+		t.Fatalf("expected a confirmed pick, got %T", cmd())
+	}
+	if len(picked.Users) != 1 {
+		t.Errorf("picked %d users, want 1", len(picked.Users))
 	}
 }

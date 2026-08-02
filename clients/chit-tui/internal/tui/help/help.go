@@ -88,6 +88,7 @@ var hints = []string{
 // server decides whether it is a command.
 var clientCommands = []binding{
 	{"/theme", "choose a theme (alias: /skin)"},
+	{"/group", "start a group conversation with three or more people"},
 	{"/leave", "leave the current channel"},
 	{"/logout", "sign out and clear the stored session"},
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -2079,6 +2080,46 @@ func TestModel_StateListenerReArms(t *testing.T) {
 	}
 }
 
+// A full event buffer used to drop events in silence. The socket stays up, so
+// no disconnect notice appears and the view simply stops matching the server —
+// the one failure mode with nothing at all to reveal it.
+func TestModel_DesyncResyncsWhileConnected(t *testing.T) {
+	m := setupModel(t)
+
+	// Already connected: this is not a reconnect, and the connected-state
+	// transition check would see no change and do nothing.
+	updated, _ := m.Update(tui.WSStateMsg{Connected: true})
+	m = updated.(tui.Model)
+
+	updated, cmd := m.Update(tui.WSStateMsg{Connected: true, Desynced: true})
+	m = updated.(tui.Model)
+
+	if cmd == nil {
+		t.Fatal("a desync produced no commands; the stale view was never refetched")
+	}
+	view := testutil.StripANSI(m.View())
+	if !strings.Contains(view, "fell behind") {
+		t.Errorf("no desync notice shown:\n%s", view)
+	}
+}
+
+// Nothing reconnected — the socket never dropped — so the notice left on
+// screen must be the desync one. Telling the user they reconnected would
+// describe an event that did not happen.
+func TestModel_DesyncNoticeIsNotAReconnectNotice(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.WSStateMsg{Connected: true})
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(tui.WSStateMsg{Connected: true, Desynced: true})
+	m = updated.(tui.Model)
+
+	if view := testutil.StripANSI(m.View()); strings.Contains(view, "reconnected") {
+		t.Errorf("desync reported as a reconnect:\n%s", view)
+	}
+}
+
 // Rejected credentials cannot be fixed by retrying, so they must send the
 // user back to the login screen instead of reconnecting forever.
 func TestModel_UnauthorizedTriggersReLogin(t *testing.T) {
@@ -2747,5 +2788,138 @@ func TestModel_LeftChannelIsRemovedLocally(t *testing.T) {
 
 	if !strings.Contains(testutil.StripANSI(m.View()), "no longer available") {
 		t.Errorf("no explanation after leaving:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+// groupRecordingClient captures the membership sent to CreateGroupChannel. The
+// shared mockClient discards it, and the membership is the whole substance of
+// a group channel — a test that ignored it would pass on an empty group.
+type groupRecordingClient struct {
+	*mockClient
+	gotIDs  []string
+	calls   int
+	channel *model.Channel
+}
+
+func (c *groupRecordingClient) CreateGroupChannel(_ context.Context, userIDs []string) (*model.Channel, error) {
+	c.calls++
+	c.gotIDs = append([]string(nil), userIDs...)
+	return c.channel, nil
+}
+
+func newGroupModel(t *testing.T) (tui.Model, *groupRecordingClient) {
+	t.Helper()
+
+	client := &groupRecordingClient{
+		mockClient: &mockClient{me: &model.User{ID: "u1", Username: "alice"}},
+		channel:    &model.Channel{ID: "g1", Type: model.ChannelGroup, DisplayName: "alice, bob, chad"},
+	}
+	return modelWithClient(t, client), client
+}
+
+// openGroupPicker runs /group through the input, the way a user reaches it.
+func openGroupPicker(t *testing.T, m tui.Model) tui.Model {
+	t.Helper()
+
+	updated, _ := m.Update(input.SlashTriggerMsg{Input: "/group"})
+	return updated.(tui.Model)
+}
+
+// CreateGroupChannel was implemented, tested, and reachable over REST, but
+// nothing in the UI ever called it — group channels could not be created from
+// the TUI at all.
+func TestModel_GroupCommandCreatesAGroupChannel(t *testing.T) {
+	m, client := newGroupModel(t)
+	m = openGroupPicker(t, m)
+
+	_, cmd := m.Update(dmpicker.MembersPickedMsg{Users: []*model.User{
+		{ID: "u2", Username: "bob"},
+		{ID: "u3", Username: "chad"},
+	}})
+
+	if cmd == nil {
+		t.Fatal("picking members produced no command; no group was created")
+	}
+	cmd() // run the command so the client is actually called
+
+	if client.calls != 1 {
+		t.Fatalf("CreateGroupChannel called %d times, want 1", client.calls)
+	}
+	want := []string{"u1", "u2", "u3"}
+	if !slices.Equal(client.gotIDs, want) {
+		t.Errorf("members = %v, want %v", client.gotIDs, want)
+	}
+}
+
+// The server rejects a group that leaves out its creator, so the caller has to
+// be added rather than assumed — and added exactly once even when the picker
+// offers them back.
+func TestModel_GroupIncludesTheCallerExactlyOnce(t *testing.T) {
+	m, client := newGroupModel(t)
+	m = openGroupPicker(t, m)
+
+	_, cmd := m.Update(dmpicker.MembersPickedMsg{Users: []*model.User{
+		{ID: "u1", Username: "alice"}, // the caller, picked from their own results
+		{ID: "u2", Username: "bob"},
+		{ID: "u3", Username: "chad"},
+	}})
+	if cmd == nil {
+		t.Fatal("picking members produced no command")
+	}
+	cmd()
+
+	if got := strings.Count(strings.Join(client.gotIDs, ","), "u1"); got != 1 {
+		t.Errorf("caller appears %d times in %v, want exactly 1", got, client.gotIDs)
+	}
+}
+
+// Two people are a DM, which has its own flow. Sending it anyway would earn a
+// server rejection the user cannot act on.
+func TestModel_GroupBelowThreeIsRefusedLocally(t *testing.T) {
+	m, client := newGroupModel(t)
+	m = openGroupPicker(t, m)
+
+	// Deliberately not run: the refusal path schedules the status-bar clear,
+	// a ten-second tick that would stall the suite. The notice below is what
+	// distinguishes a local refusal from a silent one.
+	updated, _ := m.Update(dmpicker.MembersPickedMsg{Users: []*model.User{
+		{ID: "u2", Username: "bob"},
+	}})
+	m = updated.(tui.Model)
+
+	if client.calls != 0 {
+		t.Errorf("CreateGroupChannel called with %v; a pair is a DM", client.gotIDs)
+	}
+	if view := testutil.StripANSI(m.View()); !strings.Contains(view, "at least three") {
+		t.Errorf("no explanation shown:\n%s", view)
+	}
+}
+
+// A group channel is only its members, so abandoning the pick leaves nothing
+// to create — unlike a private channel, which is already named by then.
+func TestModel_AbandonedGroupPickCreatesNothing(t *testing.T) {
+	m, client := newGroupModel(t)
+	m = openGroupPicker(t, m)
+
+	updated, cmd := m.Update(dmpicker.CancelledMsg{})
+	m = updated.(tui.Model)
+	if cmd != nil {
+		cmd()
+	}
+
+	if client.calls != 0 {
+		t.Errorf("dismissing the picker still created a group with %v", client.gotIDs)
+	}
+
+	// And the abandoned intent must not leak into the next pick, which
+	// belongs to whatever opened the picker after it.
+	_, cmd = m.Update(dmpicker.MembersPickedMsg{Users: []*model.User{
+		{ID: "u2"}, {ID: "u3"},
+	}})
+	if cmd != nil {
+		cmd()
+	}
+	if client.calls != 0 {
+		t.Errorf("an abandoned /group still created a group on the next pick: %v", client.gotIDs)
 	}
 }

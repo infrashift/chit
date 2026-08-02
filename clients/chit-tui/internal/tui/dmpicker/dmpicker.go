@@ -35,12 +35,15 @@ type Model struct {
 	input    textinput.Model
 	results  []*model.User
 	selected []*model.User
-	cursor   int
-	visible  bool
-	focused  bool
-	styles   styles.Styles
-	width    int
-	height   int
+	// lastSearched is the term the current results came from, so Enter can
+	// tell "search this" apart from "I am done picking".
+	lastSearched string
+	cursor       int
+	visible      bool
+	focused      bool
+	styles       styles.Styles
+	width        int
+	height       int
 }
 
 // New creates a new member picker model.
@@ -63,6 +66,7 @@ func (m *Model) OpenForMembers() {
 	m.cursor = 0
 	m.results = nil
 	m.selected = nil
+	m.lastSearched = ""
 }
 
 // Close hides the member picker overlay.
@@ -115,17 +119,20 @@ func (m Model) isSelected(userID string) bool {
 	return false
 }
 
-// toggleSelected adds or removes a user from the selected list.
-func (m *Model) toggleSelected(user *model.User) {
+// toggleSelected adds or removes a user from the selected list, reporting
+// whether the user ended up selected.
+func (m *Model) toggleSelected(user *model.User) bool {
 	for i, u := range m.selected {
 		if u.ID == user.ID {
 			m.selected = append(m.selected[:i], m.selected[i+1:]...)
-			return
+			return false
 		}
 	}
 	if len(m.selected) < maxGroupSelection {
 		m.selected = append(m.selected, user)
+		return true
 	}
+	return false
 }
 
 // Update handles messages.
@@ -142,10 +149,27 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, func() tea.Msg { return CancelledMsg{} }
 		case tea.KeyTab:
 			if len(m.results) > 0 && m.cursor < len(m.results) {
-				m.toggleSelected(m.results[m.cursor])
+				if m.toggleSelected(m.results[m.cursor]) {
+					// The picked name is a chip now, so the box belongs to
+					// the next one. Leaving it filled makes the following
+					// term concatenate onto it and match nobody.
+					//
+					// The results stay: several people often come back from
+					// one search, and Tab down the list must keep working.
+					m.input.Reset()
+					m.lastSearched = ""
+				}
 			}
 			return m, nil
 		case tea.KeyEnter:
+			// A fresh term searches, even with people already selected.
+			// Confirming instead would make a second search impossible and
+			// cap every pick at whatever one query happened to return —
+			// which no group of three can rely on.
+			if term := m.input.Value(); term != "" && term != m.lastSearched {
+				m.lastSearched = term
+				return m, func() tea.Msg { return SearchTriggeredMsg{Term: term} }
+			}
 			if len(m.selected) > 0 {
 				users := make([]*model.User, len(m.selected))
 				copy(users, m.selected)
@@ -157,10 +181,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				users := []*model.User{user}
 				m.Close()
 				return m, func() tea.Msg { return MembersPickedMsg{Users: users} }
-			}
-			term := m.input.Value()
-			if term != "" {
-				return m, func() tea.Msg { return SearchTriggeredMsg{Term: term} }
 			}
 			return m, nil
 		case tea.KeyBackspace:
@@ -206,10 +226,16 @@ func (m Model) View() string {
 	items = append(items, m.input.View())
 	items = append(items, "")
 
-	if len(m.selected) > 0 {
-		items = append(items, m.styles.Timestamp.Render("  Press Enter to add members"))
-	} else if len(m.results) == 0 && m.input.Value() != "" {
-		items = append(items, m.styles.Timestamp.Render("  Press Enter to search"))
+	// The hint has to track what Enter will actually do, which now depends on
+	// whether the box holds a term that has not been searched yet.
+	switch term := m.input.Value(); {
+	case term != "" && term != m.lastSearched:
+		items = append(items, m.styles.Timestamp.Render("  Enter to search"))
+	case len(m.selected) > 0:
+		items = append(items, m.styles.Timestamp.Render(
+			"  Tab to pick · Enter to confirm · type another name to keep searching"))
+	case len(m.results) > 0:
+		items = append(items, m.styles.Timestamp.Render("  Tab to pick · Enter to choose"))
 	}
 
 	maxItems := min(len(m.results), max((m.height/2)-4, 5))
