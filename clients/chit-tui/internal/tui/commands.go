@@ -133,6 +133,14 @@ func ListenWSState(wsClient ws.WSClient) tea.Cmd {
 	}
 }
 
+// SearchPostsEverywhere searches every channel the user belongs to.
+func SearchPostsEverywhere(client api.ChitClient, term string, tagIDs []string) tea.Cmd {
+	return func() tea.Msg {
+		pl, err := client.SearchPostsEverywhere(context.Background(), term, tagIDs)
+		return SearchResultsMsg{Posts: pl, Err: err}
+	}
+}
+
 // FetchDMChannels returns a command that fetches the user's DM channels.
 func FetchDMChannels(client api.ChitClient) tea.Cmd {
 	return func() tea.Msg {

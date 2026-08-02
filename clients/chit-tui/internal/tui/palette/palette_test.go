@@ -546,3 +546,63 @@ func TestPalette_UpdateIgnoredWhenHidden(t *testing.T) {
 		t.Error("expected no command while hidden")
 	}
 }
+
+// A message you half-remember is often in a channel you cannot name, so "?"
+// searches here and "??" searches everywhere.
+func TestSearchScope(t *testing.T) {
+	tests := []struct {
+		name           string
+		typed          string
+		wantTerm       string
+		wantEverywhere bool
+	}{
+		{name: "single question mark is this channel", typed: "?hello",
+			wantTerm: "hello", wantEverywhere: false},
+		{name: "double widens the scope", typed: "??hello",
+			wantTerm: "hello", wantEverywhere: true},
+		{name: "double with spacing", typed: "?? hello",
+			wantTerm: "hello", wantEverywhere: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := palette.New(styles.New(theme.TokyoNight()))
+			m.SetSize(120, 40)
+			m.SetActiveChannel("General")
+			m.Open(tc.typed)
+
+			_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			if cmd == nil {
+				t.Fatal("Enter produced no command")
+			}
+			msg, ok := cmd().(palette.SearchSubmitMsg)
+			if !ok {
+				t.Fatalf("expected SearchSubmitMsg, got %T", cmd())
+			}
+			if msg.Term != tc.wantTerm {
+				t.Errorf("Term = %q, want %q", msg.Term, tc.wantTerm)
+			}
+			if msg.Everywhere != tc.wantEverywhere {
+				t.Errorf("Everywhere = %v, want %v", msg.Everywhere, tc.wantEverywhere)
+			}
+		})
+	}
+}
+
+// The hint has to say which scope is about to be used, since the difference
+// is one easily-missed character.
+func TestSearchScopeIsVisible(t *testing.T) {
+	m := palette.New(styles.New(theme.TokyoNight()))
+	m.SetSize(120, 40)
+	m.SetActiveChannel("General")
+
+	m.Open("?hello")
+	if !strings.Contains(testutil.StripANSI(m.View()), "General") {
+		t.Errorf("channel scope not shown:\n%s", testutil.StripANSI(m.View()))
+	}
+
+	m.Open("??hello")
+	if !strings.Contains(testutil.StripANSI(m.View()), "all channels") {
+		t.Errorf("global scope not shown:\n%s", testutil.StripANSI(m.View()))
+	}
+}

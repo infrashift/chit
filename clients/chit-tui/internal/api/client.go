@@ -30,6 +30,8 @@ type ChitClient interface {
 	ViewChannel(ctx context.Context, channelID string) error
 	GetUsersByIDs(ctx context.Context, ids []string) ([]*model.User, error)
 	SearchPosts(ctx context.Context, channelID, term string, tagIDs []string) (*model.PostList, error)
+	// SearchPostsEverywhere searches every channel the user belongs to.
+	SearchPostsEverywhere(ctx context.Context, term string, tagIDs []string) (*model.PostList, error)
 	GetChannelMembers(ctx context.Context, channelID string) ([]*model.ChannelMember, error)
 	CreateDirectChannel(ctx context.Context, userID1, userID2 string) (*model.Channel, error)
 	GetMyDirectChannels(ctx context.Context) ([]*model.Channel, error)
@@ -221,6 +223,13 @@ func (c *httpClient) SearchPosts(ctx context.Context, channelID, term string, ta
 		body["tag_ids"] = tagIDs
 	}
 	err := c.post(ctx, fmt.Sprintf("/channels/%s/posts/search", channelID), body, &pl)
+	return &pl, err
+}
+
+func (c *httpClient) SearchPostsEverywhere(ctx context.Context, term string, tagIDs []string) (*model.PostList, error) {
+	var pl model.PostList
+	body := map[string]any{"terms": term, "tag_ids": tagIDs}
+	err := c.post(ctx, "/posts/search", body, &pl)
 	return &pl, err
 }
 

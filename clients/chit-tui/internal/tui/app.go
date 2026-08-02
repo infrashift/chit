@@ -127,6 +127,9 @@ type Model struct {
 	// editingPostID is set while a post is being edited; sending replaces
 	// that post instead of creating a new one.
 	editingPostID string
+	// searchWasGlobal records whether the last search spanned every channel,
+	// so choosing a result knows it may have to switch channel first.
+	searchWasGlobal bool
 	// searchTerm is the last submitted search, kept so a chosen result can
 	// be highlighted in the history.
 	searchTerm string
@@ -697,18 +700,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case palette.SearchSubmitMsg:
-		if m.activeChan != nil {
-			term, tagNames := tagpicker.StripHashtags(msg.Term)
-			var tagIDs []string
-			for _, name := range tagNames {
-				for _, t := range m.allTags {
-					if strings.EqualFold(t.Name, name) {
-						tagIDs = append(tagIDs, t.ID)
-						break
-					}
+		term, tagNames := tagpicker.StripHashtags(msg.Term)
+		var tagIDs []string
+		for _, name := range tagNames {
+			for _, t := range m.allTags {
+				if strings.EqualFold(t.Name, name) {
+					tagIDs = append(tagIDs, t.ID)
+					break
 				}
 			}
-			m.searchTerm = term
+		}
+		m.searchTerm = term
+		m.searchWasGlobal = msg.Everywhere
+
+		switch {
+		case msg.Everywhere:
+			cmds = append(cmds, SearchPostsEverywhere(m.client, term, tagIDs))
+		case m.activeChan != nil:
 			cmds = append(cmds, SearchPosts(m.client, m.activeChan.ID, term, tagIDs))
 		}
 		return m, tea.Batch(cmds...)
@@ -728,6 +736,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// moved focus and left the reader wherever they already were.
 		cmd := m.setFocus(FocusViewport)
 		if msg.Post != nil {
+			// A result from another channel needs that channel opened first;
+			// the post is not in the loaded history until it is.
+			if msg.Post.ChannelID != "" &&
+				(m.activeChan == nil || msg.Post.ChannelID != m.activeChan.ID) {
+				if ch := m.channelByID(msg.Post.ChannelID); ch != nil {
+					return m, tea.Batch(cmd, m.selectChannel(ch), m.setError(errSearchHitElsewhere))
+				}
+			}
 			m.viewport.SetSearchTerm(m.searchTerm)
 			if !m.viewport.ScrollToPost(msg.Post.ID) {
 				// The hit is older than the posts held in memory. Say so
@@ -2072,6 +2088,9 @@ func (m *Model) removeChannel(channelID string) []tea.Cmd {
 	return cmds
 }
 
+// errSearchHitElsewhere explains why the view changed channel.
+var errSearchHitElsewhere = errors.New("opened the channel containing that message")
+
 // errLoadingOlder is a notice, not a failure: fetching a page of older
 // history can take a moment and the view does not otherwise change.
 var errLoadingOlder = errors.New("loading older messages…")
@@ -2137,3 +2156,26 @@ func (m Model) SelectedPostID() string {
 // HasSelection reports whether the history pane holds a selection. Exported
 // for tests, which cannot reach the viewport otherwise.
 func (m Model) HasSelection() bool { return m.viewport.HasSelection() }
+
+// channelByID finds a channel across the team lists and DMs. A search that
+// spans every channel can return a hit from any of them.
+func (m Model) channelByID(id string) *model.Channel {
+	for _, ch := range m.channels {
+		if ch.ID == id {
+			return ch
+		}
+	}
+	for _, ch := range m.dmChannels {
+		if ch.ID == id {
+			return ch
+		}
+	}
+	for _, list := range m.channelsByTeam {
+		for _, ch := range list {
+			if ch.ID == id {
+				return ch
+			}
+		}
+	}
+	return nil
+}

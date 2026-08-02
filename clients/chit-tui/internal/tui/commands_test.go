@@ -138,6 +138,13 @@ func (m *mockClient) UpdatePost(_ context.Context, postID, content string) (*mod
 
 func (m *mockClient) DeletePost(_ context.Context, _ string) error { return m.err }
 
+func (m *mockClient) SearchPostsEverywhere(_ context.Context, _ string, _ []string) (*model.PostList, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &model.PostList{}, nil
+}
+
 func (m *mockClient) AddChannelMember(_ context.Context, _, _ string) error {
 	return m.err
 }

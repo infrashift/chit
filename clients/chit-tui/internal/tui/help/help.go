@@ -59,6 +59,7 @@ type binding struct {
 var keyBindings = []binding{
 	{"ctrl+k", "open palette: jump to channels and DMs"},
 	{"  @ / ?", "palette modes: people, commands, message search"},
+	{"  ??", "search every channel, not just this one"},
 	{"ctrl+s", "search messages in the active channel"},
 	{"ctrl+d", "find people / start a DM"},
 	{"ctrl+n", "create a channel"},

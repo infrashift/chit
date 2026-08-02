@@ -2670,3 +2670,55 @@ func TestModel_PinEventUsesPostIDPayload(t *testing.T) {
 		t.Errorf("pin badge still shown after unpin:\n%s", testutil.StripANSI(m.View()))
 	}
 }
+
+// A global result usually lives in another channel, so choosing it has to
+// open that channel first — the post is not in the loaded history until then.
+func TestModel_GlobalSearchResultSwitchesChannel(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.ChannelsLoadedMsg{
+		TeamID: "t1",
+		Channels: []*model.Channel{
+			{ID: "c1", DisplayName: "General"},
+			{ID: "c2", DisplayName: "Elsewhere"},
+		},
+	})
+	m = updated.(tui.Model)
+
+	updated, cmd := m.Update(palette.PostChosenMsg{
+		Post: &model.Post{ID: "far", ChannelID: "c2"},
+	})
+	m = updated.(tui.Model)
+
+	if cmd == nil {
+		t.Fatal("choosing a result in another channel did nothing")
+	}
+	if !strings.Contains(testutil.StripANSI(m.View()), "opened the channel") {
+		t.Errorf("no explanation for the channel switch:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+func TestModel_SearchEverywhereUsesTheGlobalEndpoint(t *testing.T) {
+	m := setupModel(t)
+
+	_, cmd := m.Update(palette.SearchSubmitMsg{Term: "needle", Everywhere: true})
+	if cmd == nil {
+		t.Fatal("no search issued")
+	}
+	if _, ok := cmd().(tui.SearchResultsMsg); !ok {
+		t.Errorf("expected SearchResultsMsg, got %T", cmd())
+	}
+}
+
+// Searching everywhere must work even with no channel open, which is exactly
+// when you cannot name the channel you want.
+func TestModel_SearchEverywhereWithoutActiveChannel(t *testing.T) {
+	m := testModel()
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = updated.(tui.Model)
+
+	_, cmd := m.Update(palette.SearchSubmitMsg{Term: "needle", Everywhere: true})
+	if cmd == nil {
+		t.Error("global search requires an active channel, which defeats the point")
+	}
+}

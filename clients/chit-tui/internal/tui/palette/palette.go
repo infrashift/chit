@@ -43,7 +43,13 @@ type UserChosenMsg struct{ User *model.User }
 type UserQueryMsg struct{ Term string }
 
 // SearchSubmitMsg asks the app to run a message search for the term.
-type SearchSubmitMsg struct{ Term string }
+type SearchSubmitMsg struct {
+	Term string
+	// Everywhere widens the search past the active channel. A message you
+	// half-remember is often in a channel you cannot name, so "?" searches
+	// here and "??" searches everywhere.
+	Everywhere bool
+}
 
 // PostChosenMsg is sent when a search result is selected.
 type PostChosenMsg struct{ Post *model.Post }
@@ -317,7 +323,14 @@ func (m *Model) choose(idx int) (Model, tea.Cmd) {
 			if term == "" {
 				return *m, nil
 			}
-			return *m, func() tea.Msg { return SearchSubmitMsg{Term: term} }
+			everywhere := strings.HasPrefix(term, "?")
+			term = strings.TrimSpace(strings.TrimPrefix(term, "?"))
+			if term == "" {
+				return *m, nil
+			}
+			return *m, func() tea.Msg {
+				return SearchSubmitMsg{Term: term, Everywhere: everywhere}
+			}
 		}
 	case ModeUsers:
 		// No results yet: Enter searches immediately, skipping the debounce.
@@ -516,13 +529,19 @@ func (m Model) windowStart() int {
 func (m Model) contextLine() string {
 	switch m.mode {
 	case ModeSearch:
-		if m.activeChanName == "" {
-			return m.styles.ErrorText.Render("No active channel to search")
+		if m.activeChanName == "" && !strings.HasPrefix(m.query(), "?") {
+			return m.styles.ErrorText.Render(
+				"No active channel to search — use ?? to search everywhere")
+		}
+		scope := m.activeChanName
+		if strings.HasPrefix(m.query(), "?") {
+			scope = "all channels"
 		}
 		if len(m.posts) == 0 {
-			return m.styles.Timestamp.Render("Search in " + m.activeChanName + " — press Enter")
+			return m.styles.Timestamp.Render(
+				"Search in " + scope + " — press Enter, or ?? to search everywhere")
 		}
-		return m.styles.Timestamp.Render("Results in " + m.activeChanName)
+		return m.styles.Timestamp.Render("Results in " + scope)
 	case ModeUsers:
 		if len(m.users) == 0 {
 			return m.styles.Timestamp.Render("Type a name — Enter to search")
