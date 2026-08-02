@@ -18,11 +18,14 @@ func (a *App) searchByContent(ctx context.Context, channelID, query string, page
 }
 
 // zincSearch tries ZincSearch; on failure it falls back to SQL ILIKE.
-func (a *App) zincSearch(ctx context.Context, channelID, query string, page, perPage int) ([]string, bool, error) {
+// zincSearch queries the index. It deliberately does not take a channel: the
+// index has no field filtering wired up, so scoping is applied to the results
+// instead — see the channel check in SearchPostsFrom.
+func (a *App) zincSearch(ctx context.Context, query string, page, perPage int) (ids []string, ok bool, err error) {
 	if a.Config.ZincSearchURL == "" {
 		return nil, false, nil
 	}
-	ids, err := a.searchClient().Search(ctx, query, page*perPage, perPage)
+	ids, err = a.searchClient().Search(ctx, query, page*perPage, perPage)
 	if err != nil {
 		log.Printf("ZincSearch unavailable, falling back to SQL: %v", err)
 		return nil, false, nil
@@ -68,25 +71,36 @@ func (a *App) SearchPostsFrom(ctx context.Context, channelID, userID, query, fro
 		}
 
 	case hasQuery && !hasTags:
-		zincIDs, ok, err := a.zincSearch(ctx, channelID, query, page, perPage)
+		zincIDs, ok, err := a.zincSearch(ctx, query, page, perPage)
 		if err != nil {
 			return nil, err
 		}
 		if !ok || len(zincIDs) == 0 {
-			return a.searchByContent(ctx, channelID, query, page, perPage)
+			// The SQL fallback returns posts directly rather than IDs, so it
+			// skips the filtering below. Collect its IDs instead so scoping
+			// is applied identically whichever backend answered.
+			list, err := a.searchByContent(ctx, channelID, query, page, perPage)
+			if err != nil {
+				return nil, err
+			}
+			ids = make([]string, 0, len(list.Order))
+			for _, p := range list.Order {
+				ids = append(ids, p.ID)
+			}
+			break
 		}
 		ids = zincIDs
 
 	case hasQuery && hasTags:
-		zincIDs, ok, err := a.zincSearch(ctx, channelID, query, page, perPage*3)
+		zincIDs, ok, err := a.zincSearch(ctx, query, page, perPage*3)
 		if err != nil {
 			return nil, err
 		}
 		if !ok || len(zincIDs) == 0 {
 			// SQL fallback: search by content, then filter by tags
-			posts, err := a.Store.Post().SearchByContent(ctx, channelID, query, page, perPage*3)
-			if err != nil {
-				return nil, err
+			posts, sqlErr := a.Store.Post().SearchByContent(ctx, channelID, query, page, perPage*3)
+			if sqlErr != nil {
+				return nil, sqlErr
 			}
 			if len(posts) > 0 {
 				candidateIDs := make([]string, len(posts))
@@ -144,6 +158,13 @@ func (a *App) SearchPostsFrom(ctx context.Context, channelID, userID, query, fro
 			allowed[post.ChannelID] = ok
 		}
 		if !ok {
+			continue
+		}
+		// Scope to the requested channel. The index is queried without a
+		// channel filter, and membership alone is not scope: a search "in
+		// this channel" was returning hits from every other channel the
+		// caller belongs to.
+		if channelID != "" && post.ChannelID != channelID {
 			continue
 		}
 		if fromUserID != "" && post.UserID != fromUserID {

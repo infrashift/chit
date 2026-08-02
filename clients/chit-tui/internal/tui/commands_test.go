@@ -30,12 +30,57 @@ type mockClient struct {
 	postTags        []*model.Tag
 	lastCreatedPost *model.Post
 	channelsFetched []string // team IDs passed to GetMyChannels
-	err             error
+	threads         []*model.ThreadResponse
+	// followCalls records (rootID, following) so tests can tell an unfollow
+	// that reached the server from one that only left the list.
+	followCalls []followCall
+	readThreads []string
+	err         error
+}
+
+type followCall struct {
+	RootID    string
+	Following bool
 }
 
 func (m *mockClient) GetMe(_ context.Context) (*model.User, error) {
 	return m.me, m.err
 }
+
+// UpdateMe applies the patch to the stored user the way the server does —
+// empty fields mean "leave alone". A mock that returned a fixed user would
+// pass whatever the caller sent, including nothing.
+func (m *mockClient) UpdateMe(_ context.Context, patch *model.User) (*model.User, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	updated := *m.me
+	if patch.DisplayName != "" {
+		updated.DisplayName = patch.DisplayName
+	}
+	if patch.Username != "" {
+		updated.Username = patch.Username
+	}
+	m.me = &updated
+	return m.me, nil
+}
+func (m *mockClient) GetMyThreads(_ context.Context, _ string, _, _ int) (*model.UserThreadList, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &model.UserThreadList{Threads: m.threads, Total: int64(len(m.threads))}, nil
+}
+
+func (m *mockClient) MarkThreadRead(_ context.Context, _, threadID string) error {
+	m.readThreads = append(m.readThreads, threadID)
+	return m.err
+}
+
+func (m *mockClient) SetThreadFollowing(_ context.Context, _, threadID string, following bool) error {
+	m.followCalls = append(m.followCalls, followCall{RootID: threadID, Following: following})
+	return m.err
+}
+
 func (m *mockClient) GetMyTeams(_ context.Context) ([]*model.Team, error) {
 	return m.teams, m.err
 }
@@ -137,6 +182,13 @@ func (m *mockClient) UpdatePost(_ context.Context, postID, content string) (*mod
 }
 
 func (m *mockClient) DeletePost(_ context.Context, _ string) error { return m.err }
+
+func (m *mockClient) SearchPostsEverywhere(_ context.Context, _ string, _ []string) (*model.PostList, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &model.PostList{}, nil
+}
 
 func (m *mockClient) AddChannelMember(_ context.Context, _, _ string) error {
 	return m.err

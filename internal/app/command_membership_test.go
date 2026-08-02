@@ -17,6 +17,13 @@ type membershipChannelStore struct {
 	channel *model.Channel
 }
 
+// Update returns what it was given. The shared mock answers (nil, nil),
+// which no real store does and which the broadcast path dereferences.
+func (s *membershipChannelStore) Update(_ context.Context, c *model.Channel) (*model.Channel, error) {
+	s.channel = c
+	return c, nil
+}
+
 func (s *membershipChannelStore) Get(_ context.Context, id string) (*model.Channel, error) {
 	if s.channel == nil {
 		return nil, errNotFound
@@ -33,7 +40,7 @@ func membershipTestApp(t *testing.T) *App {
 
 	a := newCommandTestApp(t, true)
 	ms := a.Store.(*cmdMockStore)
-	ms.user.mentionMockUserStore.users = map[string]*model.User{
+	ms.user.users = map[string]*model.User{
 		"alice": {ID: "u-alice", Username: "alice"},
 		"bob":   {ID: "u-bob", Username: "bob"},
 	}
@@ -249,4 +256,44 @@ func TestRemoveChannelMemberRequiresAdminForOthers(t *testing.T) {
 			}
 		})
 	}
+}
+
+// /topic was declared in the registry with no handler, so setting a channel
+// topic was impossible.
+func TestHandleTopic(t *testing.T) {
+	a := membershipTestApp(t)
+	ctx := context.Background()
+
+	t.Run("with no argument reports the current topic", func(t *testing.T) {
+		res, err := a.HandleTopic(ctx, "u-alice", "c1", "")
+		if err != nil {
+			t.Fatalf("HandleTopic: %v", err)
+		}
+		if res.ResponseText == "" {
+			t.Error("no response text")
+		}
+	})
+
+	t.Run("sets the topic", func(t *testing.T) {
+		res, err := a.HandleTopic(ctx, "u-alice", "c1", "  release planning  ")
+		if err != nil {
+			t.Fatalf("HandleTopic: %v", err)
+		}
+		if !strings.Contains(res.ResponseText, "release planning") {
+			t.Errorf("ResponseText = %q, want it to confirm the topic", res.ResponseText)
+		}
+	})
+
+	// A failure is reported as text, like the other membership commands, so
+	// the user sees why rather than a generic execution error.
+	t.Run("unknown channel is reported as text", func(t *testing.T) {
+		empty := newCommandTestApp(t, true)
+		res, err := empty.HandleTopic(ctx, "u-alice", "missing", "x")
+		if err != nil {
+			t.Fatalf("expected a text response, got an error: %v", err)
+		}
+		if res.ResponseText == "" {
+			t.Error("no explanation given")
+		}
+	})
 }

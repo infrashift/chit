@@ -27,6 +27,7 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/skinpicker"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/tagpicker"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/thread"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/threadinbox"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/viewport"
@@ -49,6 +50,7 @@ const (
 	FocusSkinPicker
 	FocusChCreator
 	FocusTagPicker
+	FocusThreadInbox
 )
 
 // mainPane selects what fills the top content pane.
@@ -82,6 +84,7 @@ type Model struct {
 	mention               mention.Model
 	dmPicker              dmpicker.Model
 	skinPicker            skinpicker.Model
+	threadInbox           threadinbox.Model
 	chCreator             chcreator.Model
 	tagPicker             tagpicker.Model
 	loginModel            login.Model
@@ -103,21 +106,25 @@ type Model struct {
 	pendingPostTags       []string
 	pendingPrivateChannel *model.Channel
 	pendingMembers        []string
-	appState              AppState
-	tokenStore            *auth.TokenStore
-	kratosClient          *auth.KratosClient
-	sessionStore          *auth.SessionStore
-	focus                 FocusArea
-	mainPane              mainPane
-	channelAutoSelected   bool
-	wsConnected           bool
-	lastWSSeq             int64
-	keys                  KeyMap
-	styles                styles.Styles
-	width                 int
-	height                int
-	err                   error
-	errSeq                uint64
+	// pendingGroupChannel marks the member picker as serving /group rather
+	// than private-channel creation. The two share the picker but not what
+	// happens to the result.
+	pendingGroupChannel bool
+	appState            AppState
+	tokenStore          *auth.TokenStore
+	kratosClient        *auth.KratosClient
+	sessionStore        *auth.SessionStore
+	focus               FocusArea
+	mainPane            mainPane
+	channelAutoSelected bool
+	wsConnected         bool
+	lastWSSeq           int64
+	keys                KeyMap
+	styles              styles.Styles
+	width               int
+	height              int
+	err                 error
+	errSeq              uint64
 	// History paging. historyPage is the newest page already loaded;
 	// loadingOlder guards against firing repeatedly while a fetch is in
 	// flight, and historyExhausted stops asking once the server runs out.
@@ -127,6 +134,9 @@ type Model struct {
 	// editingPostID is set while a post is being edited; sending replaces
 	// that post instead of creating a new one.
 	editingPostID string
+	// searchWasGlobal records whether the last search spanned every channel,
+	// so choosing a result knows it may have to switch channel first.
+	searchWasGlobal bool
 	// searchTerm is the last submitted search, kept so a chosen result can
 	// be highlighted in the history.
 	searchTerm string
@@ -138,6 +148,27 @@ type Model struct {
 var (
 	errDisconnected = errors.New("connection lost — reconnecting")
 	errReconnected  = errors.New("reconnected — reloading messages")
+	errDesynced     = errors.New("fell behind the server — reloading messages")
+)
+
+// threadInboxPageSize bounds the inbox at one screenful's worth. Following
+// more threads than this is possible; paging through them is not yet.
+const threadInboxPageSize = 50
+
+// minGroupChannelMembers matches the server's lower bound. Below it the
+// conversation is a DM, which has its own flow.
+const minGroupChannelMembers = 3
+
+var errGroupTooSmall = errors.New(
+	"a group needs at least three people — pick two others, or start a DM with @")
+
+var (
+	errNickUsage      = errors.New("usage: /nick <display name>")
+	errUsernameUsage  = errors.New("usage: /username <handle>")
+	errUsernameSpaces = errors.New("a username cannot contain spaces — try /nick for a display name")
+	// Not a failure: setError is the only status-bar channel there is.
+	errProfileSaved = errors.New("profile updated")
+	errNoTeam       = errors.New("no team is active yet")
 )
 
 // errSearchHitNotLoaded reports a result that is outside the loaded history.
@@ -163,6 +194,7 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 		actionBar:      actionbar.New(s),
 		thread:         thread.New(s),
 		palette:        palette.New(s),
+		threadInbox:    threadinbox.New(s),
 		help:           help.New(s),
 		mention:        mention.New(s),
 		dmPicker:       dmpicker.New(s),
@@ -186,12 +218,49 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 		keys:           DefaultKeyMap(),
 		styles:         s,
 	}
+	// Seed the client-local commands rather than waiting for the server
+	// registry, which never contains them and may never arrive at all.
+	m.palette.SetCommands(clientCommands())
+
 	// The palette shares the root's badge and DM-name maps by reference, so
 	// root-side updates are visible without further plumbing.
 	m.palette.SetCounts(m.unread, m.mentions)
 	m.palette.SetDMDisplayNames(m.dmDisplayNames)
 	_ = m.input.Focus()
 	return m
+}
+
+// clientCommands are handled entirely by this client and never reach the
+// server, so the server's registry does not list them. Typing one directly has
+// always worked; browsing for one had not, because a bare "/" opens the
+// palette on the server's list alone and these were absent from it.
+func clientCommands() []*model.Command {
+	return []*model.Command{
+		{Slug: "theme", Description: "choose a theme (alias: /skin)"},
+		{Slug: "group", Description: "start a group conversation with three or more people"},
+		{Slug: "nick", Description: "change your display name"},
+		{Slug: "username", Description: "change your username (breaks existing @mentions)"},
+		{Slug: "threads", Description: "threads you follow in this team"},
+		{Slug: "leave", Description: "leave the current channel"},
+		{Slug: "logout", Description: "sign out and clear the stored session"},
+	}
+}
+
+// mergeCommands appends the server's commands to the client's, dropping any
+// the client already handles: a server entry of the same name would be routed
+// to a handler that never runs.
+func mergeCommands(local, remote []*model.Command) []*model.Command {
+	seen := make(map[string]bool, len(local))
+	for _, c := range local {
+		seen[c.Slug] = true
+	}
+	merged := append([]*model.Command(nil), local...)
+	for _, c := range remote {
+		if c != nil && !seen[c.Slug] {
+			merged = append(merged, c)
+		}
+	}
+	return merged
 }
 
 // setError sets the error and returns a command to auto-clear it after 10 seconds.
@@ -523,7 +592,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			return m, m.setError(msg.Err)
 		}
-		m.palette.SetCommands(msg.Commands)
+		m.palette.SetCommands(mergeCommands(clientCommands(), msg.Commands))
 		return m, nil
 
 	case UsersLoadedMsg:
@@ -570,6 +639,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		wasConnected := m.wsConnected
 		m.wsConnected = msg.Connected
+
+		// Events were dropped while the socket stayed up, so the view is
+		// stale with nothing else to reveal it. Same remedy as a reconnect:
+		// re-read the channel. Handled before the transition checks, which
+		// would otherwise see no change and do nothing.
+		if msg.Desynced {
+			if m.activeChan != nil {
+				cmds = append(cmds, FetchPosts(m.client, m.activeChan.ID, 0, historyPageSize))
+			}
+			cmds = append(cmds, m.setError(errDesynced))
+			return m, tea.Batch(cmds...)
+		}
 
 		if msg.Connected && !wasConnected {
 			// Events that arrived while the socket was down are gone for
@@ -639,9 +720,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case input.SlashTriggerMsg:
 		trimmed := strings.TrimSpace(msg.Input)
 
-		// /skin and /logout act on this client alone; the server knows
-		// nothing about them.
-		switch trimmed {
+		// Split off the verb so commands that take arguments are matched the
+		// same way as the ones that do not. "/leave now" is still /leave.
+		verb, args, _ := strings.Cut(trimmed, " ")
+		args = strings.TrimSpace(args)
+
+		// These act on this client alone; the server knows nothing about them.
+		switch verb {
 		case "/skin", "/theme":
 			m.skinPicker.SetSkins(theme.ListAvailable())
 			cmd := m.setFocus(FocusSkinPicker)
@@ -649,6 +734,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		case "/logout":
 			return m.handleLogout()
+		case "/group":
+			// Client-local for the same reason as /leave: the server has no
+			// group command, only the REST endpoint the picker's result calls.
+			m.pendingGroupChannel = true
+			m.pendingPrivateChannel = nil
+			cmd := m.setFocus(FocusDMPicker)
+			m.dmPicker.OpenForMembers()
+			return m, cmd
+		case "/threads":
+			if m.activeTeam == nil {
+				return m, m.setError(errNoTeam)
+			}
+			cmd := m.setFocus(FocusThreadInbox)
+			m.threadInbox.SetChannelNames(m.channelDisplayNames())
+			m.threadInbox.Open()
+			return m, tea.Batch(cmd, FetchMyThreads(m.client, m.activeTeam.ID))
+		case "/leave":
+			// Handled here rather than server-side: there is no leave command
+			// in the registry, and the REST endpoint already permits a member
+			// to remove themselves.
+			if m.activeChan == nil || m.me == nil {
+				return m, nil
+			}
+			return m, LeaveChannel(m.client, m.activeChan.ID, m.me.ID)
+		case "/nick":
+			// Display name only. The handle is /username, kept separate
+			// because renaming it breaks every @mention already written.
+			if args == "" {
+				return m, m.setError(errNickUsage)
+			}
+			return m, UpdateProfile(m.client, &model.User{DisplayName: args})
+		case "/username":
+			if args == "" {
+				return m, m.setError(errUsernameUsage)
+			}
+			if strings.ContainsAny(args, " \t") {
+				return m, m.setError(errUsernameSpaces)
+			}
+			return m, UpdateProfile(m.client, &model.User{Username: args})
 		case "/":
 			// A bare slash is a request to browse, not to send.
 			return m, m.openPalette("/")
@@ -697,18 +821,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case palette.SearchSubmitMsg:
-		if m.activeChan != nil {
-			term, tagNames := tagpicker.StripHashtags(msg.Term)
-			var tagIDs []string
-			for _, name := range tagNames {
-				for _, t := range m.allTags {
-					if strings.EqualFold(t.Name, name) {
-						tagIDs = append(tagIDs, t.ID)
-						break
-					}
+		term, tagNames := tagpicker.StripHashtags(msg.Term)
+		var tagIDs []string
+		for _, name := range tagNames {
+			for _, t := range m.allTags {
+				if strings.EqualFold(t.Name, name) {
+					tagIDs = append(tagIDs, t.ID)
+					break
 				}
 			}
-			m.searchTerm = term
+		}
+		m.searchTerm = term
+		m.searchWasGlobal = msg.Everywhere
+
+		switch {
+		case msg.Everywhere:
+			cmds = append(cmds, SearchPostsEverywhere(m.client, term, tagIDs))
+		case m.activeChan != nil:
 			cmds = append(cmds, SearchPosts(m.client, m.activeChan.ID, term, tagIDs))
 		}
 		return m, tea.Batch(cmds...)
@@ -728,6 +857,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// moved focus and left the reader wherever they already were.
 		cmd := m.setFocus(FocusViewport)
 		if msg.Post != nil {
+			// A result from another channel needs that channel opened first;
+			// the post is not in the loaded history until it is.
+			if msg.Post.ChannelID != "" &&
+				(m.activeChan == nil || msg.Post.ChannelID != m.activeChan.ID) {
+				if ch := m.channelByID(msg.Post.ChannelID); ch != nil {
+					return m, tea.Batch(cmd, m.selectChannel(ch), m.setError(errSearchHitElsewhere))
+				}
+			}
 			m.viewport.SetSearchTerm(m.searchTerm)
 			if !m.viewport.ScrollToPost(msg.Post.ID) {
 				// The hit is older than the posts held in memory. Say so
@@ -796,6 +933,63 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dmPicker.SetResults(filtered)
 		return m, nil
 
+	case ThreadsLoadedMsg:
+		if msg.Err != nil {
+			m.threadInbox.SetThreads(nil)
+			return m, m.setError(msg.Err)
+		}
+		m.threadInbox.SetThreads(msg.Threads)
+		return m, nil
+
+	case ThreadFollowChangedMsg:
+		if msg.Err != nil {
+			return m, m.setError(msg.Err)
+		}
+		return m, nil
+
+	case threadinbox.ThreadChosenMsg:
+		// Opening a thread means switching to its channel first: the thread
+		// pane renders against the active channel, and the thread may well be
+		// in one the user is not currently looking at.
+		if ch := m.channelByID(msg.ChannelID); ch != nil && (m.activeChan == nil || m.activeChan.ID != ch.ID) {
+			cmds = append(cmds, m.selectChannel(ch))
+		}
+		cmds = append(cmds, FetchThread(m.client, msg.RootID))
+		m.mainPane = paneThread
+		cmds = append(cmds, m.setFocus(FocusThread))
+		m.resizeComponents()
+		if m.activeTeam != nil {
+			cmds = append(cmds, MarkThreadRead(m.client, m.activeTeam.ID, msg.RootID))
+		}
+		return m, tea.Batch(cmds...)
+
+	case threadinbox.FollowToggledMsg:
+		if m.activeTeam == nil {
+			return m, nil
+		}
+		return m, SetThreadFollowing(m.client, m.activeTeam.ID, msg.RootID, msg.Following)
+
+	case threadinbox.ClosedMsg:
+		return m, m.setFocus(FocusInput)
+
+	case ProfileUpdatedMsg:
+		if msg.Err != nil {
+			return m, m.setError(msg.Err)
+		}
+		if msg.User != nil {
+			// The same fields UserLoadedMsg sets. A username change decides
+			// which @mentions highlight, and the cached copy in m.users is
+			// what every post's author line is rendered from — leaving either
+			// stale shows the old name until the next sign-in.
+			m.me = msg.User
+			m.users[msg.User.ID] = msg.User
+			m.viewport.SetCurrentUsername(msg.User.Username)
+			m.thread.SetCurrentUsername(msg.User.Username)
+			m.resolveDMDisplayNames()
+			cmds = append(cmds, m.setError(errProfileSaved))
+		}
+		return m, tea.Batch(cmds...)
+
 	case DMCreatedMsg:
 		if msg.Err != nil {
 			return m, m.setError(msg.Err)
@@ -819,6 +1013,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case dmpicker.CancelledMsg:
+		// A group channel is nothing but its members, so an abandoned pick
+		// leaves nothing to create — unlike a private channel, which was
+		// already named and submitted before the picker opened.
+		m.pendingGroupChannel = false
 		// Dismissing the member picker skips member selection but still
 		// creates the already-submitted private channel.
 		if m.pendingPrivateChannel != nil {
@@ -831,6 +1029,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case dmpicker.MembersPickedMsg:
 		m.dmPicker.Close()
+
+		if m.pendingGroupChannel {
+			m.pendingGroupChannel = false
+			if m.me == nil {
+				return m, tea.Batch(cmds...)
+			}
+			// The server counts the creator among the members and rejects a
+			// group that excludes them, so send the full membership rather
+			// than just who was picked.
+			ids := make([]string, 0, len(msg.Users)+1)
+			ids = append(ids, m.me.ID)
+			for _, u := range msg.Users {
+				if u.ID != m.me.ID {
+					ids = append(ids, u.ID)
+				}
+			}
+			if len(ids) < minGroupChannelMembers {
+				cmds = append(cmds, m.setError(errGroupTooSmall))
+				return m, tea.Batch(cmds...)
+			}
+			cmds = append(cmds, CreateGroupChannel(m.client, ids))
+			return m, tea.Batch(cmds...)
+		}
+
 		if m.pendingPrivateChannel != nil {
 			for _, u := range msg.Users {
 				m.pendingMembers = append(m.pendingMembers, u.ID)
@@ -998,6 +1220,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 
+	case ChannelLeftMsg:
+		if msg.Err != nil {
+			return m, m.setError(msg.Err)
+		}
+		// The server also broadcasts user_removed, but that arrives only if
+		// the socket is up; removing it here keeps leaving reliable.
+		cmds = append(cmds, m.removeChannel(msg.ChannelID)...)
+		return m, tea.Batch(cmds...)
+
 	case PostPinnedMsg:
 		if msg.Err != nil {
 			return m, m.setError(msg.Err)
@@ -1142,6 +1373,19 @@ func (m *Model) overlays() []overlayRef {
 			closeFocus: FocusInput,
 		},
 		{
+			visible: func() bool { return m.threadInbox.Visible() },
+			update: func(msg tea.KeyMsg) tea.Cmd {
+				var cmd tea.Cmd
+				m.threadInbox, cmd = m.threadInbox.Update(msg)
+				return cmd
+			},
+			view:       func() string { return m.threadInbox.View() },
+			blur:       m.threadInbox.Blur,
+			setSize:    m.threadInbox.SetSize,
+			setStyles:  m.threadInbox.SetStyles,
+			closeFocus: FocusInput,
+		},
+		{
 			visible: func() bool { return m.skinPicker.Visible() },
 			update: func(msg tea.KeyMsg) tea.Cmd {
 				var cmd tea.Cmd
@@ -1262,6 +1506,8 @@ func (m *Model) setFocus(area FocusArea) tea.Cmd {
 		m.chCreator.Focus()
 	case FocusTagPicker:
 		m.tagPicker.Focus()
+	case FocusThreadInbox:
+		m.threadInbox.Focus()
 	}
 	return nil
 }
@@ -2072,6 +2318,9 @@ func (m *Model) removeChannel(channelID string) []tea.Cmd {
 	return cmds
 }
 
+// errSearchHitElsewhere explains why the view changed channel.
+var errSearchHitElsewhere = errors.New("opened the channel containing that message")
+
 // errLoadingOlder is a notice, not a failure: fetching a page of older
 // history can take a moment and the view does not otherwise change.
 var errLoadingOlder = errors.New("loading older messages…")
@@ -2137,3 +2386,43 @@ func (m Model) SelectedPostID() string {
 // HasSelection reports whether the history pane holds a selection. Exported
 // for tests, which cannot reach the viewport otherwise.
 func (m Model) HasSelection() bool { return m.viewport.HasSelection() }
+
+// channelByID finds a channel across the team lists and DMs. A search that
+// spans every channel can return a hit from any of them.
+func (m Model) channelByID(id string) *model.Channel {
+	for _, ch := range m.channels {
+		if ch.ID == id {
+			return ch
+		}
+	}
+	for _, ch := range m.dmChannels {
+		if ch.ID == id {
+			return ch
+		}
+	}
+	for _, list := range m.channelsByTeam {
+		for _, ch := range list {
+			if ch.ID == id {
+				return ch
+			}
+		}
+	}
+	return nil
+}
+
+// channelDisplayNames maps channel IDs to the names shown in the UI, so the
+// thread inbox can say where each thread lives.
+func (m Model) channelDisplayNames() map[string]string {
+	names := make(map[string]string, len(m.channels)+len(m.dmChannels))
+	for _, ch := range m.channels {
+		names[ch.ID] = ch.DisplayName
+	}
+	for _, ch := range m.dmChannels {
+		if name, ok := m.dmDisplayNames[ch.ID]; ok && name != "" {
+			names[ch.ID] = name
+			continue
+		}
+		names[ch.ID] = ch.DisplayName
+	}
+	return names
+}

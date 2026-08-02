@@ -16,6 +16,7 @@ import (
 // ChitClient defines the API surface the TUI uses.
 type ChitClient interface {
 	GetMe(ctx context.Context) (*model.User, error)
+	UpdateMe(ctx context.Context, patch *model.User) (*model.User, error)
 	GetMyTeams(ctx context.Context) ([]*model.Team, error)
 	GetMyChannels(ctx context.Context, teamID string) ([]*model.Channel, error)
 	GetChannelPosts(ctx context.Context, channelID string, page, perPage int) (*model.PostList, error)
@@ -26,10 +27,16 @@ type ChitClient interface {
 	PinPost(ctx context.Context, postID string) error
 	UnpinPost(ctx context.Context, postID string) error
 	GetThread(ctx context.Context, postID string) (*model.PostList, error)
+	// GetMyThreads lists the threads the caller follows in a team.
+	GetMyThreads(ctx context.Context, teamID string, page, perPage int) (*model.UserThreadList, error)
+	MarkThreadRead(ctx context.Context, teamID, threadID string) error
+	SetThreadFollowing(ctx context.Context, teamID, threadID string, following bool) error
 	GetCommands(ctx context.Context) ([]*model.Command, error)
 	ViewChannel(ctx context.Context, channelID string) error
 	GetUsersByIDs(ctx context.Context, ids []string) ([]*model.User, error)
 	SearchPosts(ctx context.Context, channelID, term string, tagIDs []string) (*model.PostList, error)
+	// SearchPostsEverywhere searches every channel the user belongs to.
+	SearchPostsEverywhere(ctx context.Context, term string, tagIDs []string) (*model.PostList, error)
 	GetChannelMembers(ctx context.Context, channelID string) ([]*model.ChannelMember, error)
 	CreateDirectChannel(ctx context.Context, userID1, userID2 string) (*model.Channel, error)
 	GetMyDirectChannels(ctx context.Context) ([]*model.Channel, error)
@@ -154,6 +161,42 @@ func (c *httpClient) GetMe(ctx context.Context) (*model.User, error) {
 	return &u, err
 }
 
+// UpdateMe applies a partial update to the signed-in user.
+//
+// The body carries only the fields being changed. Marshaling the whole user
+// would send username:"" on a display-name change, and the schema's username
+// pattern does not match the empty string — the request is rejected outright,
+// not quietly ignored.
+func (c *httpClient) UpdateMe(ctx context.Context, patch *model.User) (*model.User, error) {
+	body := map[string]string{}
+	if patch.DisplayName != "" {
+		body["display_name"] = patch.DisplayName
+	}
+	if patch.Username != "" {
+		body["username"] = patch.Username
+	}
+
+	var u model.User
+	err := c.put(ctx, "/users/me", body, &u)
+	return &u, err
+}
+
+func (c *httpClient) GetMyThreads(ctx context.Context, teamID string, page, perPage int) (*model.UserThreadList, error) {
+	var list model.UserThreadList
+	err := c.get(ctx, fmt.Sprintf("/users/me/teams/%s/threads?page=%d&per_page=%d",
+		teamID, page, perPage), &list)
+	return &list, err
+}
+
+func (c *httpClient) MarkThreadRead(ctx context.Context, teamID, threadID string) error {
+	return c.put(ctx, fmt.Sprintf("/users/me/teams/%s/threads/%s/read", teamID, threadID), nil, nil)
+}
+
+func (c *httpClient) SetThreadFollowing(ctx context.Context, teamID, threadID string, following bool) error {
+	return c.put(ctx, fmt.Sprintf("/users/me/teams/%s/threads/%s/following", teamID, threadID),
+		map[string]bool{"following": following}, nil)
+}
+
 func (c *httpClient) GetMyTeams(ctx context.Context) ([]*model.Team, error) {
 	var teams []*model.Team
 	err := c.get(ctx, "/users/me/teams", &teams)
@@ -221,6 +264,13 @@ func (c *httpClient) SearchPosts(ctx context.Context, channelID, term string, ta
 		body["tag_ids"] = tagIDs
 	}
 	err := c.post(ctx, fmt.Sprintf("/channels/%s/posts/search", channelID), body, &pl)
+	return &pl, err
+}
+
+func (c *httpClient) SearchPostsEverywhere(ctx context.Context, term string, tagIDs []string) (*model.PostList, error) {
+	var pl model.PostList
+	body := map[string]any{"terms": term, "tag_ids": tagIDs}
+	err := c.post(ctx, "/posts/search", body, &pl)
 	return &pl, err
 }
 
@@ -305,7 +355,7 @@ func (c *httpClient) GetTagsForPosts(ctx context.Context, postIDs []string) (map
 	if len(postIDs) == 0 {
 		return tags, nil
 	}
-	err := c.post(ctx, "/posts/tags", map[string][]string{"post_ids": postIDs}, &tags)
+	err := c.post(ctx, "/tags/posts", map[string][]string{"post_ids": postIDs}, &tags)
 	return tags, err
 }
 

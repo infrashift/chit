@@ -140,10 +140,18 @@ func (s *SqlThreadStore) UpdateMembership(ctx context.Context, membership *model
 }
 
 func (s *SqlThreadStore) GetThreadsForUser(ctx context.Context, userID, teamID string, page, perPage int) (*model.UserThreadList, error) {
-	query := `SELECT t.post_id, t.channel_id, t.reply_count, t.last_reply_at, t.participants
+	// The root post and the caller's read state come back with the list. The
+	// endpoint is documented to report unread status, and a client that had to
+	// fetch each root separately would issue one request per thread.
+	query := `SELECT t.post_id, t.channel_id, t.reply_count, t.last_reply_at, t.participants,
+			tm.last_viewed_at, tm.unread_mention_count,
+			p.id, p.channel_id, p.user_id, COALESCE(p.root_id::text, ''), p.content,
+			p.type, p.props, p.hashtags, p.is_pinned, p.edit_at,
+			p.create_at, p.update_at, p.delete_at
 		FROM threads t
 		INNER JOIN thread_memberships tm ON t.post_id = tm.post_id
 		INNER JOIN channels c ON t.channel_id = c.id
+		INNER JOIN posts p ON p.id = t.post_id
 		WHERE tm.user_id = $1 AND tm.following = TRUE AND c.team_id = $2
 		ORDER BY t.last_reply_at DESC
 		LIMIT $3 OFFSET $4`
@@ -157,10 +165,19 @@ func (s *SqlThreadStore) GetThreadsForUser(ctx context.Context, userID, teamID s
 	var threads []*model.ThreadResponse
 	for rows.Next() {
 		t := &model.Thread{}
-		if err := rows.Scan(&t.PostID, &t.ChannelID, &t.ReplyCount, &t.LastReplyAt, &t.Participants); err != nil {
+		root := &model.Post{}
+		tr := &model.ThreadResponse{Thread: t}
+		if err := rows.Scan(
+			&t.PostID, &t.ChannelID, &t.ReplyCount, &t.LastReplyAt, &t.Participants,
+			&tr.LastViewedAt, &tr.UnreadMentions,
+			&root.ID, &root.ChannelID, &root.UserID, &root.RootID, &root.Content,
+			&root.Type, &root.Props, &root.Hashtags, &root.IsPinned, &root.EditAt,
+			&root.CreateAt, &root.UpdateAt, &root.DeleteAt,
+		); err != nil {
 			return nil, fmt.Errorf("scan thread: %w", err)
 		}
-		threads = append(threads, &model.ThreadResponse{Thread: t})
+		tr.Posts = []*model.Post{root}
+		threads = append(threads, tr)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

@@ -88,6 +88,27 @@ type WSStateMsg struct {
 	// Unauthorized marks a failure retrying cannot fix; the session is gone
 	// and the user has to sign in again.
 	Unauthorized bool
+	// Desynced reports that events were dropped while the socket stayed up,
+	// so the view is stale with nothing else to give it away.
+	Desynced bool
+}
+
+// ProfileUpdatedMsg is sent when the signed-in user's profile is saved.
+type ProfileUpdatedMsg struct {
+	User *model.User
+	Err  error
+}
+
+// ThreadsLoadedMsg is sent when the followed-thread list is fetched.
+type ThreadsLoadedMsg struct {
+	Threads []*model.ThreadResponse
+	Err     error
+}
+
+// ThreadFollowChangedMsg is sent when a thread's follow state is saved.
+type ThreadFollowChangedMsg struct {
+	RootID string
+	Err    error
 }
 
 // DMChannelsLoadedMsg is sent when DM channels are fetched.
@@ -206,6 +227,9 @@ type PostPinnedMsg struct {
 // requestError reports the failure this message carries, so session
 // expiry can be handled in one place rather than per message type.
 func (m UserLoadedMsg) requestError() error           { return m.Err }
+func (m ProfileUpdatedMsg) requestError() error       { return m.Err }
+func (m ThreadsLoadedMsg) requestError() error        { return m.Err }
+func (m ThreadFollowChangedMsg) requestError() error  { return m.Err }
 func (m TeamsLoadedMsg) requestError() error          { return m.Err }
 func (m ChannelsLoadedMsg) requestError() error       { return m.Err }
 func (m PostsLoadedMsg) requestError() error          { return m.Err }
@@ -233,3 +257,11 @@ func (m PostEditedMsg) requestError() error           { return m.Err }
 func (m PostDeletedMsg) requestError() error          { return m.Err }
 func (m OlderPostsLoadedMsg) requestError() error     { return m.Err }
 func (m PostPinnedMsg) requestError() error           { return m.Err }
+
+// ChannelLeftMsg reports the result of leaving a channel.
+type ChannelLeftMsg struct {
+	ChannelID string
+	Err       error
+}
+
+func (m ChannelLeftMsg) requestError() error { return m.Err }

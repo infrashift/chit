@@ -1184,6 +1184,47 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  # Deliberately under /tags rather than /posts/tags: the latter collides with
+  # the /posts/{id} routes, where the router binds id="tags" and answers 405.
+  /tags/posts:
+    post:
+      operationId: get_tags_for_posts
+      summary: Get tags for many posts at once
+      description: >
+        Returns tags keyed by post ID, for every requested post the caller can
+        read. Posts in channels they are not a member of are omitted rather
+        than refused, so one inaccessible ID does not fail the batch. Replaces
+        one request per post when opening a channel.
+      tags: [Tags]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [post_ids]
+              properties:
+                post_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        "200":
+          description: Tags keyed by post ID
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/Tag"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /posts/{id}/tags:
     post:
       operationId: add_tag_to_post
@@ -1917,7 +1958,11 @@ components:
 
     ThreadResponse:
       type: object
-      description: A thread with its metadata and all posts (root + replies)
+      description: |
+        A thread with its metadata and posts. `GET /posts/{id}/thread` returns
+        the root and every reply; a user's thread list returns the root alone,
+        which is enough to show what the thread is about without a request per
+        thread.
       properties:
         thread:
           $ref: "#/components/schemas/Thread"
@@ -1925,6 +1970,18 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Post"
+        last_viewed_at:
+          type: integer
+          format: int64
+          description: >
+            When the caller last read this thread. The thread is unread when
+            `thread.last_reply_at` is later. Zero means never read. Set only
+            in a user's thread list.
+        unread_mentions:
+          type: integer
+          description: >
+            Mentions of the caller since they last read the thread. Set only
+            in a user's thread list.
 
     UserThreadList:
       type: object

@@ -129,7 +129,16 @@ func ListenWSState(wsClient ws.WSClient) tea.Cmd {
 			Connected:    st.Connected,
 			Err:          st.Err,
 			Unauthorized: st.Unauthorized,
+			Desynced:     st.Desynced,
 		}
+	}
+}
+
+// SearchPostsEverywhere searches every channel the user belongs to.
+func SearchPostsEverywhere(client api.ChitClient, term string, tagIDs []string) tea.Cmd {
+	return func() tea.Msg {
+		pl, err := client.SearchPostsEverywhere(context.Background(), term, tagIDs)
+		return SearchResultsMsg{Posts: pl, Err: err}
 	}
 }
 
@@ -153,6 +162,54 @@ func SearchUsersCmd(client api.ChitClient, term string) tea.Cmd {
 func CreateDMChannel(client api.ChitClient, userID1, userID2 string) tea.Cmd {
 	return func() tea.Msg {
 		ch, err := client.CreateDirectChannel(context.Background(), userID1, userID2)
+		return DMCreatedMsg{Channel: ch, Err: err}
+	}
+}
+
+// FetchMyThreads returns a command that loads the threads the caller follows
+// in a team.
+func FetchMyThreads(client api.ChitClient, teamID string) tea.Cmd {
+	return func() tea.Msg {
+		list, err := client.GetMyThreads(context.Background(), teamID, 0, threadInboxPageSize)
+		if err != nil {
+			return ThreadsLoadedMsg{Err: err}
+		}
+		return ThreadsLoadedMsg{Threads: list.Threads}
+	}
+}
+
+// SetThreadFollowing returns a command that follows or unfollows a thread.
+func SetThreadFollowing(client api.ChitClient, teamID, rootID string, following bool) tea.Cmd {
+	return func() tea.Msg {
+		err := client.SetThreadFollowing(context.Background(), teamID, rootID, following)
+		return ThreadFollowChangedMsg{RootID: rootID, Err: err}
+	}
+}
+
+// MarkThreadRead returns a command that clears a thread's unread state. The
+// result is deliberately dropped: the read marker is a convenience, and a
+// failure to record it should not interrupt reading the thread.
+func MarkThreadRead(client api.ChitClient, teamID, rootID string) tea.Cmd {
+	return func() tea.Msg {
+		_ = client.MarkThreadRead(context.Background(), teamID, rootID)
+		return nil
+	}
+}
+
+// UpdateProfile returns a command that saves a partial profile change. Empty
+// fields are left alone by the server, so only what is changing is sent.
+func UpdateProfile(client api.ChitClient, patch *model.User) tea.Cmd {
+	return func() tea.Msg {
+		u, err := client.UpdateMe(context.Background(), patch)
+		return ProfileUpdatedMsg{User: u, Err: err}
+	}
+}
+
+// CreateGroupChannel returns a command that creates a group channel among the
+// given users. userIDs must include the caller.
+func CreateGroupChannel(client api.ChitClient, userIDs []string) tea.Cmd {
+	return func() tea.Msg {
+		ch, err := client.CreateGroupChannel(context.Background(), userIDs)
 		return DMCreatedMsg{Channel: ch, Err: err}
 	}
 }
@@ -202,6 +259,15 @@ func DeletePost(client api.ChitClient, postID string) tea.Cmd {
 	return func() tea.Msg {
 		err := client.DeletePost(context.Background(), postID)
 		return PostDeletedMsg{PostID: postID, Err: err}
+	}
+}
+
+// LeaveChannel removes the current user from a channel. The server allows
+// self-removal for any member — it is leaving, not kicking.
+func LeaveChannel(client api.ChitClient, channelID, userID string) tea.Cmd {
+	return func() tea.Msg {
+		err := client.RemoveChannelMember(context.Background(), channelID, userID)
+		return ChannelLeftMsg{ChannelID: channelID, Err: err}
 	}
 }
 

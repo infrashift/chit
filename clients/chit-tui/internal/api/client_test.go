@@ -551,3 +551,45 @@ func TestSearchUsers_EscapesTerm(t *testing.T) {
 		t.Errorf("term = %q, want %q (raw query: %s)", got, "ann & bob", gotQuery)
 	}
 }
+
+// The server treats absent fields as "leave alone", so the client must send
+// only what changed. Marshaling the whole user would rename the handle every
+// time someone edited their display name.
+func TestUpdateMe_SendsOnlyTheChangedField(t *testing.T) {
+	var body map[string]any
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("PUT /api/v1/users/me", func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeError(w, 400, "bad body")
+			return
+		}
+		writeJSON(w, model.User{ID: "u1", Username: "alice", DisplayName: "Alice Anderson"})
+	})
+	client, _ := setupTestClient(t, mux)
+
+	u, err := client.UpdateMe(context.Background(), &model.User{DisplayName: "Alice Anderson"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.DisplayName != "Alice Anderson" {
+		t.Errorf("display name = %q", u.DisplayName)
+	}
+	// Absent, not empty: the schema's username pattern does not match "",
+	// so sending the key at all is a 400 rather than a no-op.
+	if got, ok := body["username"]; ok {
+		t.Errorf("sent username %q on a display-name change; the schema rejects it", got)
+	}
+}
+
+func TestUpdateMe_ErrorResponse(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("PUT /api/v1/users/me", func(w http.ResponseWriter, _ *http.Request) {
+		writeError(w, 409, "username already taken")
+	})
+	client, _ := setupTestClient(t, mux)
+
+	if _, err := client.UpdateMe(context.Background(), &model.User{Username: "bob"}); err == nil {
+		t.Fatal("expected an error for a taken username")
+	}
+}

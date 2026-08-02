@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/mention"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/palette"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/skinpicker"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/threadinbox"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/viewport"
@@ -2079,6 +2081,46 @@ func TestModel_StateListenerReArms(t *testing.T) {
 	}
 }
 
+// A full event buffer used to drop events in silence. The socket stays up, so
+// no disconnect notice appears and the view simply stops matching the server —
+// the one failure mode with nothing at all to reveal it.
+func TestModel_DesyncResyncsWhileConnected(t *testing.T) {
+	m := setupModel(t)
+
+	// Already connected: this is not a reconnect, and the connected-state
+	// transition check would see no change and do nothing.
+	updated, _ := m.Update(tui.WSStateMsg{Connected: true})
+	m = updated.(tui.Model)
+
+	updated, cmd := m.Update(tui.WSStateMsg{Connected: true, Desynced: true})
+	m = updated.(tui.Model)
+
+	if cmd == nil {
+		t.Fatal("a desync produced no commands; the stale view was never refetched")
+	}
+	view := testutil.StripANSI(m.View())
+	if !strings.Contains(view, "fell behind") {
+		t.Errorf("no desync notice shown:\n%s", view)
+	}
+}
+
+// Nothing reconnected — the socket never dropped — so the notice left on
+// screen must be the desync one. Telling the user they reconnected would
+// describe an event that did not happen.
+func TestModel_DesyncNoticeIsNotAReconnectNotice(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.WSStateMsg{Connected: true})
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(tui.WSStateMsg{Connected: true, Desynced: true})
+	m = updated.(tui.Model)
+
+	if view := testutil.StripANSI(m.View()); strings.Contains(view, "reconnected") {
+		t.Errorf("desync reported as a reconnect:\n%s", view)
+	}
+}
+
 // Rejected credentials cannot be fixed by retrying, so they must send the
 // user back to the login screen instead of reconnecting forever.
 func TestModel_UnauthorizedTriggersReLogin(t *testing.T) {
@@ -2668,5 +2710,427 @@ func TestModel_PinEventUsesPostIDPayload(t *testing.T) {
 
 	if strings.Contains(testutil.StripANSI(m.View()), "[pinned]") {
 		t.Errorf("pin badge still shown after unpin:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+// A global result usually lives in another channel, so choosing it has to
+// open that channel first — the post is not in the loaded history until then.
+func TestModel_GlobalSearchResultSwitchesChannel(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.ChannelsLoadedMsg{
+		TeamID: "t1",
+		Channels: []*model.Channel{
+			{ID: "c1", DisplayName: "General"},
+			{ID: "c2", DisplayName: "Elsewhere"},
+		},
+	})
+	m = updated.(tui.Model)
+
+	updated, cmd := m.Update(palette.PostChosenMsg{
+		Post: &model.Post{ID: "far", ChannelID: "c2"},
+	})
+	m = updated.(tui.Model)
+
+	if cmd == nil {
+		t.Fatal("choosing a result in another channel did nothing")
+	}
+	if !strings.Contains(testutil.StripANSI(m.View()), "opened the channel") {
+		t.Errorf("no explanation for the channel switch:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+func TestModel_SearchEverywhereUsesTheGlobalEndpoint(t *testing.T) {
+	m := setupModel(t)
+
+	_, cmd := m.Update(palette.SearchSubmitMsg{Term: "needle", Everywhere: true})
+	if cmd == nil {
+		t.Fatal("no search issued")
+	}
+	if _, ok := cmd().(tui.SearchResultsMsg); !ok {
+		t.Errorf("expected SearchResultsMsg, got %T", cmd())
+	}
+}
+
+// Searching everywhere must work even with no channel open, which is exactly
+// when you cannot name the channel you want.
+func TestModel_SearchEverywhereWithoutActiveChannel(t *testing.T) {
+	m := testModel()
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = updated.(tui.Model)
+
+	_, cmd := m.Update(palette.SearchSubmitMsg{Term: "needle", Everywhere: true})
+	if cmd == nil {
+		t.Error("global search requires an active channel, which defeats the point")
+	}
+}
+
+// Leaving a channel had no client path at all, despite the endpoint existing.
+func TestModel_LeaveChannel(t *testing.T) {
+	m := setupModel(t)
+
+	_, cmd := m.Update(input.SlashTriggerMsg{Input: "/leave"})
+
+	if cmd == nil {
+		t.Fatal("/leave issued no request")
+	}
+	if _, ok := cmd().(tui.ChannelLeftMsg); !ok {
+		t.Errorf("expected ChannelLeftMsg, got %T", cmd())
+	}
+}
+
+// Leaving must drop the channel locally rather than waiting on the
+// user_removed broadcast, which only arrives if the socket is up.
+func TestModel_LeftChannelIsRemovedLocally(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.ChannelLeftMsg{ChannelID: "c1"})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "no longer available") {
+		t.Errorf("no explanation after leaving:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+// groupRecordingClient captures the membership sent to CreateGroupChannel. The
+// shared mockClient discards it, and the membership is the whole substance of
+// a group channel — a test that ignored it would pass on an empty group.
+type groupRecordingClient struct {
+	*mockClient
+	gotIDs  []string
+	calls   int
+	channel *model.Channel
+}
+
+func (c *groupRecordingClient) CreateGroupChannel(_ context.Context, userIDs []string) (*model.Channel, error) {
+	c.calls++
+	c.gotIDs = append([]string(nil), userIDs...)
+	return c.channel, nil
+}
+
+func newGroupModel(t *testing.T) (tui.Model, *groupRecordingClient) {
+	t.Helper()
+
+	client := &groupRecordingClient{
+		mockClient: &mockClient{me: &model.User{ID: "u1", Username: "alice"}},
+		channel:    &model.Channel{ID: "g1", Type: model.ChannelGroup, DisplayName: "alice, bob, chad"},
+	}
+	return modelWithClient(t, client), client
+}
+
+// openGroupPicker runs /group through the input, the way a user reaches it.
+func openGroupPicker(t *testing.T, m tui.Model) tui.Model {
+	t.Helper()
+
+	updated, _ := m.Update(input.SlashTriggerMsg{Input: "/group"})
+	return updated.(tui.Model)
+}
+
+// CreateGroupChannel was implemented, tested, and reachable over REST, but
+// nothing in the UI ever called it — group channels could not be created from
+// the TUI at all.
+func TestModel_GroupCommandCreatesAGroupChannel(t *testing.T) {
+	m, client := newGroupModel(t)
+	m = openGroupPicker(t, m)
+
+	_, cmd := m.Update(dmpicker.MembersPickedMsg{Users: []*model.User{
+		{ID: "u2", Username: "bob"},
+		{ID: "u3", Username: "chad"},
+	}})
+
+	if cmd == nil {
+		t.Fatal("picking members produced no command; no group was created")
+	}
+	cmd() // run the command so the client is actually called
+
+	if client.calls != 1 {
+		t.Fatalf("CreateGroupChannel called %d times, want 1", client.calls)
+	}
+	want := []string{"u1", "u2", "u3"}
+	if !slices.Equal(client.gotIDs, want) {
+		t.Errorf("members = %v, want %v", client.gotIDs, want)
+	}
+}
+
+// The server rejects a group that leaves out its creator, so the caller has to
+// be added rather than assumed — and added exactly once even when the picker
+// offers them back.
+func TestModel_GroupIncludesTheCallerExactlyOnce(t *testing.T) {
+	m, client := newGroupModel(t)
+	m = openGroupPicker(t, m)
+
+	_, cmd := m.Update(dmpicker.MembersPickedMsg{Users: []*model.User{
+		{ID: "u1", Username: "alice"}, // the caller, picked from their own results
+		{ID: "u2", Username: "bob"},
+		{ID: "u3", Username: "chad"},
+	}})
+	if cmd == nil {
+		t.Fatal("picking members produced no command")
+	}
+	cmd()
+
+	if got := strings.Count(strings.Join(client.gotIDs, ","), "u1"); got != 1 {
+		t.Errorf("caller appears %d times in %v, want exactly 1", got, client.gotIDs)
+	}
+}
+
+// Two people are a DM, which has its own flow. Sending it anyway would earn a
+// server rejection the user cannot act on.
+func TestModel_GroupBelowThreeIsRefusedLocally(t *testing.T) {
+	m, client := newGroupModel(t)
+	m = openGroupPicker(t, m)
+
+	// Deliberately not run: the refusal path schedules the status-bar clear,
+	// a ten-second tick that would stall the suite. The notice below is what
+	// distinguishes a local refusal from a silent one.
+	updated, _ := m.Update(dmpicker.MembersPickedMsg{Users: []*model.User{
+		{ID: "u2", Username: "bob"},
+	}})
+	m = updated.(tui.Model)
+
+	if client.calls != 0 {
+		t.Errorf("CreateGroupChannel called with %v; a pair is a DM", client.gotIDs)
+	}
+	if view := testutil.StripANSI(m.View()); !strings.Contains(view, "at least three") {
+		t.Errorf("no explanation shown:\n%s", view)
+	}
+}
+
+// A group channel is only its members, so abandoning the pick leaves nothing
+// to create — unlike a private channel, which is already named by then.
+func TestModel_AbandonedGroupPickCreatesNothing(t *testing.T) {
+	m, client := newGroupModel(t)
+	m = openGroupPicker(t, m)
+
+	updated, cmd := m.Update(dmpicker.CancelledMsg{})
+	m = updated.(tui.Model)
+	if cmd != nil {
+		cmd()
+	}
+
+	if client.calls != 0 {
+		t.Errorf("dismissing the picker still created a group with %v", client.gotIDs)
+	}
+
+	// And the abandoned intent must not leak into the next pick, which
+	// belongs to whatever opened the picker after it.
+	_, cmd = m.Update(dmpicker.MembersPickedMsg{Users: []*model.User{
+		{ID: "u2"}, {ID: "u3"},
+	}})
+	if cmd != nil {
+		cmd()
+	}
+	if client.calls != 0 {
+		t.Errorf("an abandoned /group still created a group on the next pick: %v", client.gotIDs)
+	}
+}
+
+// PUT /users/me existed server-side with no client counterpart, so a display
+// name could not be changed from the TUI at all.
+func TestModel_NickChangesTheDisplayName(t *testing.T) {
+	client := &mockClient{me: &model.User{ID: "u1", Username: "alice", DisplayName: "Alice"}}
+	m := modelWithClient(t, client)
+
+	_, cmd := m.Update(input.SlashTriggerMsg{Input: "/nick Alice Anderson"})
+	if cmd == nil {
+		t.Fatal("/nick produced no command")
+	}
+	msg, ok := cmd().(tui.ProfileUpdatedMsg)
+	if !ok {
+		t.Fatalf("expected a profile update, got %T", cmd())
+	}
+	if msg.Err != nil {
+		t.Fatalf("update failed: %v", msg.Err)
+	}
+	// The whole name, not just the first word — display names have spaces.
+	if msg.User.DisplayName != "Alice Anderson" {
+		t.Errorf("display name = %q, want %q", msg.User.DisplayName, "Alice Anderson")
+	}
+	if msg.User.Username != "alice" {
+		t.Errorf("/nick changed the username to %q; it must only touch the display name",
+			msg.User.Username)
+	}
+}
+
+func TestModel_UsernameChangesTheHandle(t *testing.T) {
+	client := &mockClient{me: &model.User{ID: "u1", Username: "alice", DisplayName: "Alice"}}
+	m := modelWithClient(t, client)
+
+	_, cmd := m.Update(input.SlashTriggerMsg{Input: "/username alicea"})
+	if cmd == nil {
+		t.Fatal("/username produced no command")
+	}
+	msg, ok := cmd().(tui.ProfileUpdatedMsg)
+	if !ok {
+		t.Fatalf("expected a profile update, got %T", cmd())
+	}
+	if msg.User.Username != "alicea" {
+		t.Errorf("username = %q, want %q", msg.User.Username, "alicea")
+	}
+	if msg.User.DisplayName != "Alice" {
+		t.Errorf("/username cleared the display name to %q", msg.User.DisplayName)
+	}
+}
+
+// A saved profile has to reach the parts of the view rendered from it, or the
+// old name shows until the next sign-in.
+func TestModel_ProfileUpdateRefreshesTheView(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.ProfileUpdatedMsg{
+		User: &model.User{ID: "u1", Username: "alicea", DisplayName: "Alice Anderson"},
+	})
+	m = updated.(tui.Model)
+
+	view := testutil.StripANSI(m.View())
+	if !strings.Contains(view, "alicea") {
+		t.Errorf("the new username is not shown anywhere:\n%s", view)
+	}
+	if strings.Contains(view, "profile updated") == false {
+		t.Errorf("no confirmation shown:\n%s", view)
+	}
+}
+
+// An empty argument is a mistake, not a request to blank the field — and the
+// server would silently ignore it, leaving nothing to explain the no-op.
+func TestModel_ProfileCommandsRefuseEmptyArguments(t *testing.T) {
+	for _, cmdText := range []string{"/nick", "/username", "/nick   "} {
+		m := setupModel(t)
+		updated, _ := m.Update(input.SlashTriggerMsg{Input: cmdText})
+		m = updated.(tui.Model)
+
+		if view := testutil.StripANSI(m.View()); !strings.Contains(view, "usage:") {
+			t.Errorf("%q gave no usage hint:\n%s", cmdText, view)
+		}
+	}
+}
+
+// A username with a space is never valid, and the mistake is almost always a
+// display name typed into the wrong command.
+func TestModel_UsernameRejectsSpaces(t *testing.T) {
+	client := &mockClient{me: &model.User{ID: "u1", Username: "alice"}}
+	m := modelWithClient(t, client)
+
+	updated, _ := m.Update(input.SlashTriggerMsg{Input: "/username Alice Anderson"})
+	m = updated.(tui.Model)
+
+	view := testutil.StripANSI(m.View())
+	if !strings.Contains(view, "cannot contain spaces") {
+		t.Errorf("no explanation shown:\n%s", view)
+	}
+	if !strings.Contains(view, "/nick") {
+		t.Errorf("does not point at the command they meant:\n%s", view)
+	}
+}
+
+func inboxThread(rootID, channelID, content string, lastReply, lastViewed int64) *model.ThreadResponse {
+	return &model.ThreadResponse{
+		Thread: &model.Thread{
+			PostID: rootID, ChannelID: channelID, ReplyCount: 2, LastReplyAt: lastReply,
+		},
+		Posts:        []*model.Post{{ID: rootID, ChannelID: channelID, Content: content}},
+		LastViewedAt: lastViewed,
+	}
+}
+
+// The server has served a followed-thread list since the beginning; nothing in
+// the client ever asked for it.
+func TestModel_ThreadsCommandOpensTheInbox(t *testing.T) {
+	m := setupModel(t)
+
+	updated, cmd := m.Update(input.SlashTriggerMsg{Input: "/threads"})
+	m = updated.(tui.Model)
+	if cmd == nil {
+		t.Fatal("/threads produced no command; the list was never fetched")
+	}
+	if view := testutil.StripANSI(m.View()); !strings.Contains(view, "Threads you follow") {
+		t.Errorf("the inbox did not open:\n%s", view)
+	}
+
+	updated, _ = m.Update(tui.ThreadsLoadedMsg{
+		Threads: []*model.ThreadResponse{inboxThread("p9", "c1", "the deploy is stuck", 300, 100)},
+	})
+	m = updated.(tui.Model)
+
+	view := testutil.StripANSI(m.View())
+	if !strings.Contains(view, "the deploy is stuck") {
+		t.Errorf("the loaded thread is not listed:\n%s", view)
+	}
+	if !strings.Contains(view, "#General") {
+		t.Errorf("the row does not say which channel it is in:\n%s", view)
+	}
+}
+
+// Opening a thread from the inbox has to switch to its channel: the thread
+// pane renders against the active channel, and the thread is often somewhere
+// the user is not currently looking.
+func TestModel_OpeningAnInboxThreadSwitchesChannel(t *testing.T) {
+	client := &mockClient{
+		me:       &model.User{ID: "u1", Username: "alice"},
+		posts:    &model.PostList{},
+		thread:   &model.PostList{},
+		channels: []*model.Channel{{ID: "c1", DisplayName: "General"}, {ID: "c2", DisplayName: "Design"}},
+	}
+	m := modelWithClient(t, client)
+
+	updated, _ := m.Update(tui.TeamsLoadedMsg{Teams: []*model.Team{{ID: "t1", DisplayName: "Eng"}}})
+	m = updated.(tui.Model)
+	updated, _ = m.Update(tui.ChannelsLoadedMsg{TeamID: "t1", Channels: client.channels})
+	m = updated.(tui.Model)
+
+	updated, cmd := m.Update(threadinbox.ThreadChosenMsg{RootID: "p9", ChannelID: "c2"})
+	m = updated.(tui.Model)
+	if cmd == nil {
+		t.Fatal("choosing a thread produced no command")
+	}
+	drain(cmd)
+
+	if !slices.Contains(client.readThreads, "p9") {
+		t.Errorf("opening the thread did not mark it read; readThreads = %v", client.readThreads)
+	}
+	if view := testutil.StripANSI(m.View()); !strings.Contains(view, "Design") {
+		t.Errorf("did not switch to the thread's channel:\n%s", view)
+	}
+}
+
+// Unfollowing has to reach the server. Removing the row alone would put the
+// thread back on the next fetch.
+func TestModel_UnfollowFromTheInboxReachesTheServer(t *testing.T) {
+	client := &mockClient{me: &model.User{ID: "u1", Username: "alice"}}
+	m := modelWithClient(t, client)
+
+	updated, _ := m.Update(tui.TeamsLoadedMsg{Teams: []*model.Team{{ID: "t1", DisplayName: "Eng"}}})
+	m = updated.(tui.Model)
+
+	_, cmd := m.Update(threadinbox.FollowToggledMsg{RootID: "p9", Following: false})
+	if cmd == nil {
+		t.Fatal("unfollowing produced no command")
+	}
+	drain(cmd)
+
+	if len(client.followCalls) != 1 {
+		t.Fatalf("follow calls = %v, want one", client.followCalls)
+	}
+	if client.followCalls[0].RootID != "p9" || client.followCalls[0].Following {
+		t.Errorf("sent %+v, want p9 with following=false", client.followCalls[0])
+	}
+}
+
+// A failed fetch must leave the loading state, or the overlay says "Loading…"
+// forever with the reason hidden.
+func TestModel_ThreadFetchFailureIsReported(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(input.SlashTriggerMsg{Input: "/threads"})
+	m = updated.(tui.Model)
+	updated, _ = m.Update(tui.ThreadsLoadedMsg{Err: errors.New("boom")})
+	m = updated.(tui.Model)
+
+	view := testutil.StripANSI(m.View())
+	if strings.Contains(view, "Loading") {
+		t.Errorf("still loading after the fetch failed:\n%s", view)
+	}
+	if !strings.Contains(view, "boom") {
+		t.Errorf("the failure is not reported:\n%s", view)
 	}
 }

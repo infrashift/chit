@@ -184,7 +184,7 @@ func main() {
 	fmt.Println("  # Post a message (as Alice)")
 	fmt.Printf("  curl -X POST -H 'X-User-Id: %s' \\\n", users[0].KratosID)
 	fmt.Printf("    -H 'Content-Type: application/json' \\\n")
-	fmt.Printf("    -d '{\"channel_id\":\"%s\",\"message\":\"Hello from UAT!\"}' \\\n", channel.ID)
+	fmt.Printf("    -d '{\"channel_id\":\"%s\",\"content\":\"Hello from UAT!\"}' \\\n", channel.ID)
 	fmt.Printf("    http://localhost:8065/api/v1/posts\n")
 	fmt.Println()
 	fmt.Println("  # Read channel posts")
