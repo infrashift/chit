@@ -124,7 +124,10 @@ func New(a *app.App) http.Handler {
 			r.Post("/posts/{id}/tags", addTagToPost(a))
 			r.Delete("/posts/{id}/tags/{tag_id}", removeTagFromPost(a))
 			r.Get("/posts/{id}/tags", getTagsForPost(a))
-			r.Post("/posts/tags", getTagsForPosts(a))
+			// Registered under /tags, not /posts: "/posts/tags" collides with
+			// the "/posts/{id}" routes, so chi binds id="tags" and answers
+			// 405 for a method those routes do not define.
+			r.Post("/tags/posts", getTagsForPosts(a))
 
 			// Commands
 			r.Get("/commands", listCommands(a))

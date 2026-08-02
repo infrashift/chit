@@ -67,7 +67,7 @@ func (s searchMockTagStore) GetTagsForPosts(_ context.Context, _ []string) (map[
 func (s searchMockTagStore) GetPostIDsByTags(_ context.Context, _ []string, _, _ int) ([]string, error) {
 	return s.postIDsByTags, nil
 }
-func (s searchMockTagStore) FilterPostIDsByTags(_ context.Context, _ []string, _ []string) ([]string, error) {
+func (s searchMockTagStore) FilterPostIDsByTags(_ context.Context, _, _ []string) ([]string, error) {
 	return s.filterPostIDsRes, nil
 }
 

@@ -1184,6 +1184,47 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  # Deliberately under /tags rather than /posts/tags: the latter collides with
+  # the /posts/{id} routes, where the router binds id="tags" and answers 405.
+  /tags/posts:
+    post:
+      operationId: get_tags_for_posts
+      summary: Get tags for many posts at once
+      description: >
+        Returns tags keyed by post ID, for every requested post the caller can
+        read. Posts in channels they are not a member of are omitted rather
+        than refused, so one inaccessible ID does not fail the batch. Replaces
+        one request per post when opening a channel.
+      tags: [Tags]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [post_ids]
+              properties:
+                post_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        "200":
+          description: Tags keyed by post ID
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/Tag"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /posts/{id}/tags:
     post:
       operationId: add_tag_to_post

@@ -172,6 +172,10 @@ func (s *Server) initCommands() {
 		return s.app.HandleKick(ctx, actorID, channelID, args)
 	})
 
+	handlers["topic"] = command.HandlerFunc(func(ctx context.Context, actorID, channelID, args string) (*command.CommandResult, error) {
+		return s.app.HandleTopic(ctx, actorID, channelID, args)
+	})
+
 	s.app.CommandHandlers = handlers
 
 	// Audit logger.

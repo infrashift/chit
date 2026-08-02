@@ -652,6 +652,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		case "/logout":
 			return m.handleLogout()
+		case "/leave":
+			// Handled here rather than server-side: there is no leave command
+			// in the registry, and the REST endpoint already permits a member
+			// to remove themselves.
+			if m.activeChan == nil || m.me == nil {
+				return m, nil
+			}
+			return m, LeaveChannel(m.client, m.activeChan.ID, m.me.ID)
 		case "/":
 			// A bare slash is a request to browse, not to send.
 			return m, m.openPalette("/")
@@ -1012,6 +1020,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if fetchCmd := m.fetchMissingUsers(); fetchCmd != nil {
 			cmds = append(cmds, fetchCmd)
 		}
+		return m, tea.Batch(cmds...)
+
+	case ChannelLeftMsg:
+		if msg.Err != nil {
+			return m, m.setError(msg.Err)
+		}
+		// The server also broadcasts user_removed, but that arrives only if
+		// the socket is up; removing it here keeps leaving reliable.
+		cmds = append(cmds, m.removeChannel(msg.ChannelID)...)
 		return m, tea.Batch(cmds...)
 
 	case PostPinnedMsg:

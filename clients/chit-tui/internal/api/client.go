@@ -314,7 +314,7 @@ func (c *httpClient) GetTagsForPosts(ctx context.Context, postIDs []string) (map
 	if len(postIDs) == 0 {
 		return tags, nil
 	}
-	err := c.post(ctx, "/posts/tags", map[string][]string{"post_ids": postIDs}, &tags)
+	err := c.post(ctx, "/tags/posts", map[string][]string{"post_ids": postIDs}, &tags)
 	return tags, err
 }
 

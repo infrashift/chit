@@ -213,6 +213,15 @@ func DeletePost(client api.ChitClient, postID string) tea.Cmd {
 	}
 }
 
+// LeaveChannel removes the current user from a channel. The server allows
+// self-removal for any member — it is leaving, not kicking.
+func LeaveChannel(client api.ChitClient, channelID, userID string) tea.Cmd {
+	return func() tea.Msg {
+		err := client.RemoveChannelMember(context.Background(), channelID, userID)
+		return ChannelLeftMsg{ChannelID: channelID, Err: err}
+	}
+}
+
 // SetPostPinned pins or unpins a post. Pinning is a channel-level act, so
 // any member may do it to any post — unlike editing.
 func SetPostPinned(client api.ChitClient, postID string, pinned bool) tea.Cmd {

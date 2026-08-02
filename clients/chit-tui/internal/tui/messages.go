@@ -233,3 +233,11 @@ func (m PostEditedMsg) requestError() error           { return m.Err }
 func (m PostDeletedMsg) requestError() error          { return m.Err }
 func (m OlderPostsLoadedMsg) requestError() error     { return m.Err }
 func (m PostPinnedMsg) requestError() error           { return m.Err }
+
+// ChannelLeftMsg reports the result of leaving a channel.
+type ChannelLeftMsg struct {
+	ChannelID string
+	Err       error
+}
+
+func (m ChannelLeftMsg) requestError() error { return m.Err }

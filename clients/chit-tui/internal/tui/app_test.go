@@ -2722,3 +2722,30 @@ func TestModel_SearchEverywhereWithoutActiveChannel(t *testing.T) {
 		t.Error("global search requires an active channel, which defeats the point")
 	}
 }
+
+// Leaving a channel had no client path at all, despite the endpoint existing.
+func TestModel_LeaveChannel(t *testing.T) {
+	m := setupModel(t)
+
+	_, cmd := m.Update(input.SlashTriggerMsg{Input: "/leave"})
+
+	if cmd == nil {
+		t.Fatal("/leave issued no request")
+	}
+	if _, ok := cmd().(tui.ChannelLeftMsg); !ok {
+		t.Errorf("expected ChannelLeftMsg, got %T", cmd())
+	}
+}
+
+// Leaving must drop the channel locally rather than waiting on the
+// user_removed broadcast, which only arrives if the socket is up.
+func TestModel_LeftChannelIsRemovedLocally(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.ChannelLeftMsg{ChannelID: "c1"})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "no longer available") {
+		t.Errorf("no explanation after leaving:\n%s", testutil.StripANSI(m.View()))
+	}
+}
