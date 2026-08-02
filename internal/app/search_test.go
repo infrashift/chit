@@ -252,3 +252,52 @@ func TestSearchPosts_HybridFallsBackToSQLWhenZincEmpty(t *testing.T) {
 		t.Errorf("expected 1 post from SQL+tag fallback, got %d", len(result.Order))
 	}
 }
+
+// Membership is not scope. A search "in this channel" was returning hits from
+// every other channel the caller belonged to, because the index is queried
+// without a channel filter and only membership was checked afterwards.
+func TestSearchPosts_ScopesToTheRequestedChannel(t *testing.T) {
+	posts := []*model.Post{
+		{ID: "here", ChannelID: "ch1", Content: "needle in this channel"},
+		{ID: "elsewhere", ChannelID: "ch2", Content: "needle in another channel"},
+	}
+	a := newSearchTestApp(t, posts, "")
+
+	result, err := a.SearchPosts(context.Background(), "ch1", searcherID, "needle", nil, 0, 60)
+	if err != nil {
+		t.Fatalf("SearchPosts: %v", err)
+	}
+
+	for _, p := range result.Order {
+		if p.ChannelID != "ch1" {
+			t.Errorf("post %s from channel %s leaked into a search scoped to ch1",
+				p.ID, p.ChannelID)
+		}
+	}
+	if len(result.Order) != 1 {
+		t.Errorf("got %d results, want just the one in ch1", len(result.Order))
+	}
+}
+
+// An unscoped search spans every channel the caller can read — and only
+// those. The fixture makes the searcher a member of ch1 only, so ch2 is
+// excluded by membership rather than by scope.
+func TestSearchPosts_UnscopedIsStillLimitedByMembership(t *testing.T) {
+	posts := []*model.Post{
+		{ID: "here", ChannelID: "ch1", Content: "needle one"},
+		{ID: "elsewhere", ChannelID: "ch2", Content: "needle two"},
+	}
+	a := newSearchTestApp(t, posts, "")
+
+	result, err := a.SearchPosts(context.Background(), "", searcherID, "needle", nil, 0, 60)
+	if err != nil {
+		t.Fatalf("SearchPosts: %v", err)
+	}
+	if len(result.Order) != 1 {
+		t.Fatalf("got %d results, want only the readable one", len(result.Order))
+	}
+	if result.Order[0].ChannelID != "ch1" {
+		t.Errorf("returned a post from %s, which the searcher cannot read",
+			result.Order[0].ChannelID)
+	}
+}
