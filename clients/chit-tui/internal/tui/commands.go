@@ -166,6 +166,15 @@ func CreateDMChannel(client api.ChitClient, userID1, userID2 string) tea.Cmd {
 	}
 }
 
+// UpdateProfile returns a command that saves a partial profile change. Empty
+// fields are left alone by the server, so only what is changing is sent.
+func UpdateProfile(client api.ChitClient, patch *model.User) tea.Cmd {
+	return func() tea.Msg {
+		u, err := client.UpdateMe(context.Background(), patch)
+		return ProfileUpdatedMsg{User: u, Err: err}
+	}
+}
+
 // CreateGroupChannel returns a command that creates a group channel among the
 // given users. userIDs must include the caller.
 func CreateGroupChannel(client api.ChitClient, userIDs []string) tea.Cmd {

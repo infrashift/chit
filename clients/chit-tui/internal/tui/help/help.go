@@ -89,6 +89,8 @@ var hints = []string{
 var clientCommands = []binding{
 	{"/theme", "choose a theme (alias: /skin)"},
 	{"/group", "start a group conversation with three or more people"},
+	{"/nick", "change your display name"},
+	{"/username", "change your username (breaks existing @mentions)"},
 	{"/leave", "leave the current channel"},
 	{"/logout", "sign out and clear the stored session"},
 }

@@ -155,6 +155,14 @@ const minGroupChannelMembers = 3
 var errGroupTooSmall = errors.New(
 	"a group needs at least three people — pick two others, or start a DM with @")
 
+var (
+	errNickUsage      = errors.New("usage: /nick <display name>")
+	errUsernameUsage  = errors.New("usage: /username <handle>")
+	errUsernameSpaces = errors.New("a username cannot contain spaces — try /nick for a display name")
+	// Not a failure: setError is the only status-bar channel there is.
+	errProfileSaved = errors.New("profile updated")
+)
+
 // errSearchHitNotLoaded reports a result that is outside the loaded history.
 var errSearchHitNotLoaded = errors.New(
 	"that message is older than the loaded history; scroll back to reach it")
@@ -221,6 +229,8 @@ func clientCommands() []*model.Command {
 	return []*model.Command{
 		{Slug: "theme", Description: "choose a theme (alias: /skin)"},
 		{Slug: "group", Description: "start a group conversation with three or more people"},
+		{Slug: "nick", Description: "change your display name"},
+		{Slug: "username", Description: "change your username (breaks existing @mentions)"},
 		{Slug: "leave", Description: "leave the current channel"},
 		{Slug: "logout", Description: "sign out and clear the stored session"},
 	}
@@ -700,9 +710,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case input.SlashTriggerMsg:
 		trimmed := strings.TrimSpace(msg.Input)
 
-		// /skin and /logout act on this client alone; the server knows
-		// nothing about them.
-		switch trimmed {
+		// Split off the verb so commands that take arguments are matched the
+		// same way as the ones that do not. "/leave now" is still /leave.
+		verb, args, _ := strings.Cut(trimmed, " ")
+		args = strings.TrimSpace(args)
+
+		// These act on this client alone; the server knows nothing about them.
+		switch verb {
 		case "/skin", "/theme":
 			m.skinPicker.SetSkins(theme.ListAvailable())
 			cmd := m.setFocus(FocusSkinPicker)
@@ -726,6 +740,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, LeaveChannel(m.client, m.activeChan.ID, m.me.ID)
+		case "/nick":
+			// Display name only. The handle is /username, kept separate
+			// because renaming it breaks every @mention already written.
+			if args == "" {
+				return m, m.setError(errNickUsage)
+			}
+			return m, UpdateProfile(m.client, &model.User{DisplayName: args})
+		case "/username":
+			if args == "" {
+				return m, m.setError(errUsernameUsage)
+			}
+			if strings.ContainsAny(args, " \t") {
+				return m, m.setError(errUsernameSpaces)
+			}
+			return m, UpdateProfile(m.client, &model.User{Username: args})
 		case "/":
 			// A bare slash is a request to browse, not to send.
 			return m, m.openPalette("/")
@@ -885,6 +914,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.dmPicker.SetResults(filtered)
 		return m, nil
+
+	case ProfileUpdatedMsg:
+		if msg.Err != nil {
+			return m, m.setError(msg.Err)
+		}
+		if msg.User != nil {
+			// The same fields UserLoadedMsg sets. A username change decides
+			// which @mentions highlight, and the cached copy in m.users is
+			// what every post's author line is rendered from — leaving either
+			// stale shows the old name until the next sign-in.
+			m.me = msg.User
+			m.users[msg.User.ID] = msg.User
+			m.viewport.SetCurrentUsername(msg.User.Username)
+			m.thread.SetCurrentUsername(msg.User.Username)
+			m.resolveDMDisplayNames()
+			cmds = append(cmds, m.setError(errProfileSaved))
+		}
+		return m, tea.Batch(cmds...)
 
 	case DMCreatedMsg:
 		if msg.Err != nil {

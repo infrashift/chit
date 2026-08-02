@@ -93,6 +93,12 @@ type WSStateMsg struct {
 	Desynced bool
 }
 
+// ProfileUpdatedMsg is sent when the signed-in user's profile is saved.
+type ProfileUpdatedMsg struct {
+	User *model.User
+	Err  error
+}
+
 // DMChannelsLoadedMsg is sent when DM channels are fetched.
 type DMChannelsLoadedMsg struct {
 	Channels []*model.Channel
@@ -209,6 +215,7 @@ type PostPinnedMsg struct {
 // requestError reports the failure this message carries, so session
 // expiry can be handled in one place rather than per message type.
 func (m UserLoadedMsg) requestError() error           { return m.Err }
+func (m ProfileUpdatedMsg) requestError() error       { return m.Err }
 func (m TeamsLoadedMsg) requestError() error          { return m.Err }
 func (m ChannelsLoadedMsg) requestError() error       { return m.Err }
 func (m PostsLoadedMsg) requestError() error          { return m.Err }

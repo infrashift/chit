@@ -717,3 +717,10 @@
 - [x] Enter searches again when the term is new, instead of confirming the moment anyone is selected — picking more than one person was impossible unless they shared a search term, which no group of three can rely on
 - [x] The search box clears after a pick; it used to keep the term, so "bob" then "chad" searched for "bobchad"
 - [x] Hints track what Enter will actually do
+
+## Profile editing
+- [x] `api.UpdateMe` (PUT /users/me) — the endpoint existed server-side with no client counterpart
+- [x] `/nick <display name>` and `/username <handle>`, kept separate because renaming the handle breaks every @mention already written
+- [x] Body carries only the changed field: sending the whole user puts `username:""` on the wire, and the schema's username pattern does not match the empty string, so the request is rejected rather than ignored — a 400 the unit test had allowed for and only the live run caught
+- [x] Empty arguments and usernames containing spaces are refused locally with the command they probably meant
+- [x] A saved profile refreshes `m.me`, the user cache, and mention highlighting, so the new name shows without signing in again

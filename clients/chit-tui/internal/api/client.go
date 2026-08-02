@@ -16,6 +16,7 @@ import (
 // ChitClient defines the API surface the TUI uses.
 type ChitClient interface {
 	GetMe(ctx context.Context) (*model.User, error)
+	UpdateMe(ctx context.Context, patch *model.User) (*model.User, error)
 	GetMyTeams(ctx context.Context) ([]*model.Team, error)
 	GetMyChannels(ctx context.Context, teamID string) ([]*model.Channel, error)
 	GetChannelPosts(ctx context.Context, channelID string, page, perPage int) (*model.PostList, error)
@@ -153,6 +154,26 @@ func (c *httpClient) do(req *http.Request, out any) error {
 func (c *httpClient) GetMe(ctx context.Context) (*model.User, error) {
 	var u model.User
 	err := c.get(ctx, "/users/me", &u)
+	return &u, err
+}
+
+// UpdateMe applies a partial update to the signed-in user.
+//
+// The body carries only the fields being changed. Marshaling the whole user
+// would send username:"" on a display-name change, and the schema's username
+// pattern does not match the empty string — the request is rejected outright,
+// not quietly ignored.
+func (c *httpClient) UpdateMe(ctx context.Context, patch *model.User) (*model.User, error) {
+	body := map[string]string{}
+	if patch.DisplayName != "" {
+		body["display_name"] = patch.DisplayName
+	}
+	if patch.Username != "" {
+		body["username"] = patch.Username
+	}
+
+	var u model.User
+	err := c.put(ctx, "/users/me", body, &u)
 	return &u, err
 }
 

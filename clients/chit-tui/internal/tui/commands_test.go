@@ -36,6 +36,24 @@ type mockClient struct {
 func (m *mockClient) GetMe(_ context.Context) (*model.User, error) {
 	return m.me, m.err
 }
+
+// UpdateMe applies the patch to the stored user the way the server does —
+// empty fields mean "leave alone". A mock that returned a fixed user would
+// pass whatever the caller sent, including nothing.
+func (m *mockClient) UpdateMe(_ context.Context, patch *model.User) (*model.User, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	updated := *m.me
+	if patch.DisplayName != "" {
+		updated.DisplayName = patch.DisplayName
+	}
+	if patch.Username != "" {
+		updated.Username = patch.Username
+	}
+	m.me = &updated
+	return m.me, nil
+}
 func (m *mockClient) GetMyTeams(_ context.Context) ([]*model.Team, error) {
 	return m.teams, m.err
 }

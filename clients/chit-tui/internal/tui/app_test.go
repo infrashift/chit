@@ -2923,3 +2923,101 @@ func TestModel_AbandonedGroupPickCreatesNothing(t *testing.T) {
 		t.Errorf("an abandoned /group still created a group on the next pick: %v", client.gotIDs)
 	}
 }
+
+// PUT /users/me existed server-side with no client counterpart, so a display
+// name could not be changed from the TUI at all.
+func TestModel_NickChangesTheDisplayName(t *testing.T) {
+	client := &mockClient{me: &model.User{ID: "u1", Username: "alice", DisplayName: "Alice"}}
+	m := modelWithClient(t, client)
+
+	_, cmd := m.Update(input.SlashTriggerMsg{Input: "/nick Alice Anderson"})
+	if cmd == nil {
+		t.Fatal("/nick produced no command")
+	}
+	msg, ok := cmd().(tui.ProfileUpdatedMsg)
+	if !ok {
+		t.Fatalf("expected a profile update, got %T", cmd())
+	}
+	if msg.Err != nil {
+		t.Fatalf("update failed: %v", msg.Err)
+	}
+	// The whole name, not just the first word — display names have spaces.
+	if msg.User.DisplayName != "Alice Anderson" {
+		t.Errorf("display name = %q, want %q", msg.User.DisplayName, "Alice Anderson")
+	}
+	if msg.User.Username != "alice" {
+		t.Errorf("/nick changed the username to %q; it must only touch the display name",
+			msg.User.Username)
+	}
+}
+
+func TestModel_UsernameChangesTheHandle(t *testing.T) {
+	client := &mockClient{me: &model.User{ID: "u1", Username: "alice", DisplayName: "Alice"}}
+	m := modelWithClient(t, client)
+
+	_, cmd := m.Update(input.SlashTriggerMsg{Input: "/username alicea"})
+	if cmd == nil {
+		t.Fatal("/username produced no command")
+	}
+	msg, ok := cmd().(tui.ProfileUpdatedMsg)
+	if !ok {
+		t.Fatalf("expected a profile update, got %T", cmd())
+	}
+	if msg.User.Username != "alicea" {
+		t.Errorf("username = %q, want %q", msg.User.Username, "alicea")
+	}
+	if msg.User.DisplayName != "Alice" {
+		t.Errorf("/username cleared the display name to %q", msg.User.DisplayName)
+	}
+}
+
+// A saved profile has to reach the parts of the view rendered from it, or the
+// old name shows until the next sign-in.
+func TestModel_ProfileUpdateRefreshesTheView(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.ProfileUpdatedMsg{
+		User: &model.User{ID: "u1", Username: "alicea", DisplayName: "Alice Anderson"},
+	})
+	m = updated.(tui.Model)
+
+	view := testutil.StripANSI(m.View())
+	if !strings.Contains(view, "alicea") {
+		t.Errorf("the new username is not shown anywhere:\n%s", view)
+	}
+	if strings.Contains(view, "profile updated") == false {
+		t.Errorf("no confirmation shown:\n%s", view)
+	}
+}
+
+// An empty argument is a mistake, not a request to blank the field — and the
+// server would silently ignore it, leaving nothing to explain the no-op.
+func TestModel_ProfileCommandsRefuseEmptyArguments(t *testing.T) {
+	for _, cmdText := range []string{"/nick", "/username", "/nick   "} {
+		m := setupModel(t)
+		updated, _ := m.Update(input.SlashTriggerMsg{Input: cmdText})
+		m = updated.(tui.Model)
+
+		if view := testutil.StripANSI(m.View()); !strings.Contains(view, "usage:") {
+			t.Errorf("%q gave no usage hint:\n%s", cmdText, view)
+		}
+	}
+}
+
+// A username with a space is never valid, and the mistake is almost always a
+// display name typed into the wrong command.
+func TestModel_UsernameRejectsSpaces(t *testing.T) {
+	client := &mockClient{me: &model.User{ID: "u1", Username: "alice"}}
+	m := modelWithClient(t, client)
+
+	updated, _ := m.Update(input.SlashTriggerMsg{Input: "/username Alice Anderson"})
+	m = updated.(tui.Model)
+
+	view := testutil.StripANSI(m.View())
+	if !strings.Contains(view, "cannot contain spaces") {
+		t.Errorf("no explanation shown:\n%s", view)
+	}
+	if !strings.Contains(view, "/nick") {
+		t.Errorf("does not point at the command they meant:\n%s", view)
+	}
+}
