@@ -69,6 +69,7 @@ var keyBindings = []binding{
 	{"y", "copy the selection, or the selected post"},
 	{"e", "edit your own post (history pane)"},
 	{"d", "delete your own post (history pane)"},
+	{"p", "pin or unpin a post (history pane)"},
 	{"esc", "close overlay / leave thread / back to history"},
 	{"?", "this help (history pane)"},
 	{"ctrl+c", "quit"},

@@ -205,6 +205,20 @@ func DeletePost(client api.ChitClient, postID string) tea.Cmd {
 	}
 }
 
+// SetPostPinned pins or unpins a post. Pinning is a channel-level act, so
+// any member may do it to any post — unlike editing.
+func SetPostPinned(client api.ChitClient, postID string, pinned bool) tea.Cmd {
+	return func() tea.Msg {
+		var err error
+		if pinned {
+			err = client.PinPost(context.Background(), postID)
+		} else {
+			err = client.UnpinPost(context.Background(), postID)
+		}
+		return PostPinnedMsg{PostID: postID, Pinned: pinned, Err: err}
+	}
+}
+
 // AddTagToPostCmd returns a command that adds a tag to a post.
 func AddTagToPostCmd(client api.ChitClient, postID, tagID string) tea.Cmd {
 	return func() tea.Msg {

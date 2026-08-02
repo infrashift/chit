@@ -2,6 +2,7 @@ package tui_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -2455,10 +2456,24 @@ func TestModel_ScrollingToTopLoadsOlderPosts(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("reaching the top issued no fetch; older history is unreachable")
 	}
-	if msg, ok := cmd().(tui.OlderPostsLoadedMsg); !ok {
-		t.Errorf("expected OlderPostsLoadedMsg, got %T", cmd())
-	} else if msg.Page != 1 {
-		t.Errorf("requested page %d, want 1", msg.Page)
+	// The fetch is batched with a "loading older" notice whose auto-clear is
+	// a ten-second tick, so the batch is inspected rather than run.
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("expected a batch, got %T", cmd())
+	}
+	var loaded *tui.OlderPostsLoadedMsg
+	for _, c := range batch {
+		if msg, ok := c().(tui.OlderPostsLoadedMsg); ok {
+			loaded = &msg
+			break
+		}
+	}
+	if loaded == nil {
+		t.Fatal("no OlderPostsLoadedMsg produced")
+	}
+	if loaded.Page != 1 {
+		t.Errorf("requested page %d, want 1", loaded.Page)
 	}
 }
 
@@ -2524,5 +2539,134 @@ func TestModel_OlderPostsForAnotherChannelIgnored(t *testing.T) {
 
 	if strings.Contains(testutil.StripANSI(m.View()), "elsewhere message") {
 		t.Error("a page for another channel was spliced in")
+	}
+}
+
+// Failing to mark a channel read leaves its badge disagreeing with what the
+// reader just did; it used to say nothing at all.
+func TestModel_ChannelViewedErrorIsReported(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.ChannelViewedMsg{
+		ChannelID: "c1", Err: errors.New("boom"),
+	})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "mark the channel read") {
+		t.Errorf("no explanation shown:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+// Tags that silently never load look like a post that has none.
+func TestModel_TagLoadErrorIsReported(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.PostTagsLoadedMsg{
+		PostID: "p1", Err: errors.New("boom"),
+	})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "load tags") {
+		t.Errorf("no explanation shown:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+// A payload the client cannot read must not look like a message that never
+// arrived; it is dropped, but not silently.
+func TestModel_UndecodablePostedEventDoesNotCrash(t *testing.T) {
+	m := setupModel(t)
+
+	_, cmd := m.Update(tui.WebSocketEventMsg{Event: model.WebSocketEvent{
+		Event: model.WebSocketEventPosted,
+		Data:  map[string]any{"id": 12345}, // wrong type for a string field
+	}})
+
+	if cmd == nil {
+		t.Error("the listener was not re-armed after an undecodable event")
+	}
+}
+
+// Session expiry used to be checked on only five message types, so any other
+// request noticing it showed a transient toast and left the user in a client
+// that could no longer reach the server.
+func TestModel_SessionExpiryFromAnyRequest(t *testing.T) {
+	expired := &api.APIError{StatusCode: 401}
+
+	tests := []struct {
+		name string
+		msg  tea.Msg
+	}{
+		{name: "thread load", msg: tui.ThreadLoadedMsg{Err: expired}},
+		{name: "search", msg: tui.SearchResultsMsg{Err: expired}},
+		{name: "tag load", msg: tui.PostTagsLoadedMsg{Err: expired}},
+		{name: "channel members", msg: tui.ChannelMembersLoadedMsg{Err: expired}},
+		{name: "mark read", msg: tui.ChannelViewedMsg{Err: expired}},
+		{name: "delete", msg: tui.PostDeletedMsg{Err: expired}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := setupModel(t)
+
+			updated, _ := m.Update(tc.msg)
+			m = updated.(tui.Model)
+
+			if !strings.Contains(testutil.StripANSI(m.View()), "Chit Login") {
+				t.Errorf("expiry noticed by %s did not prompt re-login:\n%s",
+					tc.name, testutil.StripANSI(m.View()))
+			}
+		})
+	}
+}
+
+// Pinning is a channel-level act, so unlike editing it works on anyone's post.
+func TestModel_PinWorksOnAnyPost(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.PostsLoadedMsg{
+		ChannelID: "c1",
+		Posts: &model.PostList{Order: []*model.Post{
+			{ID: "p9", UserID: "someone-else", Content: "not mine", CreateAt: 1700000000000},
+		}},
+	})
+	m = updated.(tui.Model)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(tui.Model)
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	if cmd == nil {
+		t.Fatal("pin issued no command for another user's post")
+	}
+	if msg, ok := cmd().(tui.PostPinnedMsg); !ok {
+		t.Errorf("expected PostPinnedMsg, got %T", cmd())
+	} else if !msg.Pinned {
+		t.Error("pinning an unpinned post should pin it")
+	}
+}
+
+// The pin events carry only {post_id, channel_id}, not the whole post — a
+// different shape from post_edited. Testing with the wrong shape hid this.
+func TestModel_PinEventUsesPostIDPayload(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(tui.WebSocketEventMsg{Event: model.WebSocketEvent{
+		Event: model.WebSocketEventPostPinned,
+		Data:  map[string]any{"post_id": "p1", "channel_id": "c1"},
+	}})
+	m = updated.(tui.Model)
+
+	if !strings.Contains(testutil.StripANSI(m.View()), "[pinned]") {
+		t.Errorf("pin badge not shown:\n%s", testutil.StripANSI(m.View()))
+	}
+
+	updated, _ = m.Update(tui.WebSocketEventMsg{Event: model.WebSocketEvent{
+		Event: model.WebSocketEventPostUnpinned,
+		Data:  map[string]any{"post_id": "p1", "channel_id": "c1"},
+	}})
+	m = updated.(tui.Model)
+
+	if strings.Contains(testutil.StripANSI(m.View()), "[pinned]") {
+		t.Errorf("pin badge still shown after unpin:\n%s", testutil.StripANSI(m.View()))
 	}
 }

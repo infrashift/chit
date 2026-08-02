@@ -15,6 +15,7 @@ type KeyMap struct {
 	Copy       key.Binding
 	Edit       key.Binding
 	Delete     key.Binding
+	Pin        key.Binding
 	Help       key.Binding
 	Escape     key.Binding
 }
@@ -65,6 +66,10 @@ func DefaultKeyMap() KeyMap {
 		Delete: key.NewBinding(
 			key.WithKeys("d"),
 			key.WithHelp("d", "delete your post"),
+		),
+		Pin: key.NewBinding(
+			key.WithKeys("p"),
+			key.WithHelp("p", "pin or unpin a post"),
 		),
 		Help: key.NewBinding(
 			key.WithKeys("?"),
