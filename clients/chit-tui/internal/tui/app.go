@@ -27,6 +27,7 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/skinpicker"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/tagpicker"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/thread"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/threadinbox"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/viewport"
@@ -49,6 +50,7 @@ const (
 	FocusSkinPicker
 	FocusChCreator
 	FocusTagPicker
+	FocusThreadInbox
 )
 
 // mainPane selects what fills the top content pane.
@@ -82,6 +84,7 @@ type Model struct {
 	mention               mention.Model
 	dmPicker              dmpicker.Model
 	skinPicker            skinpicker.Model
+	threadInbox           threadinbox.Model
 	chCreator             chcreator.Model
 	tagPicker             tagpicker.Model
 	loginModel            login.Model
@@ -148,6 +151,10 @@ var (
 	errDesynced     = errors.New("fell behind the server — reloading messages")
 )
 
+// threadInboxPageSize bounds the inbox at one screenful's worth. Following
+// more threads than this is possible; paging through them is not yet.
+const threadInboxPageSize = 50
+
 // minGroupChannelMembers matches the server's lower bound. Below it the
 // conversation is a DM, which has its own flow.
 const minGroupChannelMembers = 3
@@ -161,6 +168,7 @@ var (
 	errUsernameSpaces = errors.New("a username cannot contain spaces — try /nick for a display name")
 	// Not a failure: setError is the only status-bar channel there is.
 	errProfileSaved = errors.New("profile updated")
+	errNoTeam       = errors.New("no team is active yet")
 )
 
 // errSearchHitNotLoaded reports a result that is outside the loaded history.
@@ -186,6 +194,7 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 		actionBar:      actionbar.New(s),
 		thread:         thread.New(s),
 		palette:        palette.New(s),
+		threadInbox:    threadinbox.New(s),
 		help:           help.New(s),
 		mention:        mention.New(s),
 		dmPicker:       dmpicker.New(s),
@@ -231,6 +240,7 @@ func clientCommands() []*model.Command {
 		{Slug: "group", Description: "start a group conversation with three or more people"},
 		{Slug: "nick", Description: "change your display name"},
 		{Slug: "username", Description: "change your username (breaks existing @mentions)"},
+		{Slug: "threads", Description: "threads you follow in this team"},
 		{Slug: "leave", Description: "leave the current channel"},
 		{Slug: "logout", Description: "sign out and clear the stored session"},
 	}
@@ -732,6 +742,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd := m.setFocus(FocusDMPicker)
 			m.dmPicker.OpenForMembers()
 			return m, cmd
+		case "/threads":
+			if m.activeTeam == nil {
+				return m, m.setError(errNoTeam)
+			}
+			cmd := m.setFocus(FocusThreadInbox)
+			m.threadInbox.SetChannelNames(m.channelDisplayNames())
+			m.threadInbox.Open()
+			return m, tea.Batch(cmd, FetchMyThreads(m.client, m.activeTeam.ID))
 		case "/leave":
 			// Handled here rather than server-side: there is no leave command
 			// in the registry, and the REST endpoint already permits a member
@@ -914,6 +932,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.dmPicker.SetResults(filtered)
 		return m, nil
+
+	case ThreadsLoadedMsg:
+		if msg.Err != nil {
+			m.threadInbox.SetThreads(nil)
+			return m, m.setError(msg.Err)
+		}
+		m.threadInbox.SetThreads(msg.Threads)
+		return m, nil
+
+	case ThreadFollowChangedMsg:
+		if msg.Err != nil {
+			return m, m.setError(msg.Err)
+		}
+		return m, nil
+
+	case threadinbox.ThreadChosenMsg:
+		// Opening a thread means switching to its channel first: the thread
+		// pane renders against the active channel, and the thread may well be
+		// in one the user is not currently looking at.
+		if ch := m.channelByID(msg.ChannelID); ch != nil && (m.activeChan == nil || m.activeChan.ID != ch.ID) {
+			cmds = append(cmds, m.selectChannel(ch))
+		}
+		cmds = append(cmds, FetchThread(m.client, msg.RootID))
+		m.mainPane = paneThread
+		cmds = append(cmds, m.setFocus(FocusThread))
+		m.resizeComponents()
+		if m.activeTeam != nil {
+			cmds = append(cmds, MarkThreadRead(m.client, m.activeTeam.ID, msg.RootID))
+		}
+		return m, tea.Batch(cmds...)
+
+	case threadinbox.FollowToggledMsg:
+		if m.activeTeam == nil {
+			return m, nil
+		}
+		return m, SetThreadFollowing(m.client, m.activeTeam.ID, msg.RootID, msg.Following)
+
+	case threadinbox.ClosedMsg:
+		return m, m.setFocus(FocusInput)
 
 	case ProfileUpdatedMsg:
 		if msg.Err != nil {
@@ -1316,6 +1373,19 @@ func (m *Model) overlays() []overlayRef {
 			closeFocus: FocusInput,
 		},
 		{
+			visible: func() bool { return m.threadInbox.Visible() },
+			update: func(msg tea.KeyMsg) tea.Cmd {
+				var cmd tea.Cmd
+				m.threadInbox, cmd = m.threadInbox.Update(msg)
+				return cmd
+			},
+			view:       func() string { return m.threadInbox.View() },
+			blur:       m.threadInbox.Blur,
+			setSize:    m.threadInbox.SetSize,
+			setStyles:  m.threadInbox.SetStyles,
+			closeFocus: FocusInput,
+		},
+		{
 			visible: func() bool { return m.skinPicker.Visible() },
 			update: func(msg tea.KeyMsg) tea.Cmd {
 				var cmd tea.Cmd
@@ -1436,6 +1506,8 @@ func (m *Model) setFocus(area FocusArea) tea.Cmd {
 		m.chCreator.Focus()
 	case FocusTagPicker:
 		m.tagPicker.Focus()
+	case FocusThreadInbox:
+		m.threadInbox.Focus()
 	}
 	return nil
 }
@@ -2336,4 +2408,21 @@ func (m Model) channelByID(id string) *model.Channel {
 		}
 	}
 	return nil
+}
+
+// channelDisplayNames maps channel IDs to the names shown in the UI, so the
+// thread inbox can say where each thread lives.
+func (m Model) channelDisplayNames() map[string]string {
+	names := make(map[string]string, len(m.channels)+len(m.dmChannels))
+	for _, ch := range m.channels {
+		names[ch.ID] = ch.DisplayName
+	}
+	for _, ch := range m.dmChannels {
+		if name, ok := m.dmDisplayNames[ch.ID]; ok && name != "" {
+			names[ch.ID] = name
+			continue
+		}
+		names[ch.ID] = ch.DisplayName
+	}
+	return names
 }

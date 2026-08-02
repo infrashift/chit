@@ -1958,7 +1958,11 @@ components:
 
     ThreadResponse:
       type: object
-      description: A thread with its metadata and all posts (root + replies)
+      description: |
+        A thread with its metadata and posts. `GET /posts/{id}/thread` returns
+        the root and every reply; a user's thread list returns the root alone,
+        which is enough to show what the thread is about without a request per
+        thread.
       properties:
         thread:
           $ref: "#/components/schemas/Thread"
@@ -1966,6 +1970,18 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Post"
+        last_viewed_at:
+          type: integer
+          format: int64
+          description: >
+            When the caller last read this thread. The thread is unread when
+            `thread.last_reply_at` is later. Zero means never read. Set only
+            in a user's thread list.
+        unread_mentions:
+          type: integer
+          description: >
+            Mentions of the caller since they last read the thread. Set only
+            in a user's thread list.
 
     UserThreadList:
       type: object

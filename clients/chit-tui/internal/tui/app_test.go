@@ -20,6 +20,7 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/mention"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/palette"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/skinpicker"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/threadinbox"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/viewport"
@@ -3019,5 +3020,117 @@ func TestModel_UsernameRejectsSpaces(t *testing.T) {
 	}
 	if !strings.Contains(view, "/nick") {
 		t.Errorf("does not point at the command they meant:\n%s", view)
+	}
+}
+
+func inboxThread(rootID, channelID, content string, lastReply, lastViewed int64) *model.ThreadResponse {
+	return &model.ThreadResponse{
+		Thread: &model.Thread{
+			PostID: rootID, ChannelID: channelID, ReplyCount: 2, LastReplyAt: lastReply,
+		},
+		Posts:        []*model.Post{{ID: rootID, ChannelID: channelID, Content: content}},
+		LastViewedAt: lastViewed,
+	}
+}
+
+// The server has served a followed-thread list since the beginning; nothing in
+// the client ever asked for it.
+func TestModel_ThreadsCommandOpensTheInbox(t *testing.T) {
+	m := setupModel(t)
+
+	updated, cmd := m.Update(input.SlashTriggerMsg{Input: "/threads"})
+	m = updated.(tui.Model)
+	if cmd == nil {
+		t.Fatal("/threads produced no command; the list was never fetched")
+	}
+	if view := testutil.StripANSI(m.View()); !strings.Contains(view, "Threads you follow") {
+		t.Errorf("the inbox did not open:\n%s", view)
+	}
+
+	updated, _ = m.Update(tui.ThreadsLoadedMsg{
+		Threads: []*model.ThreadResponse{inboxThread("p9", "c1", "the deploy is stuck", 300, 100)},
+	})
+	m = updated.(tui.Model)
+
+	view := testutil.StripANSI(m.View())
+	if !strings.Contains(view, "the deploy is stuck") {
+		t.Errorf("the loaded thread is not listed:\n%s", view)
+	}
+	if !strings.Contains(view, "#General") {
+		t.Errorf("the row does not say which channel it is in:\n%s", view)
+	}
+}
+
+// Opening a thread from the inbox has to switch to its channel: the thread
+// pane renders against the active channel, and the thread is often somewhere
+// the user is not currently looking.
+func TestModel_OpeningAnInboxThreadSwitchesChannel(t *testing.T) {
+	client := &mockClient{
+		me:       &model.User{ID: "u1", Username: "alice"},
+		posts:    &model.PostList{},
+		thread:   &model.PostList{},
+		channels: []*model.Channel{{ID: "c1", DisplayName: "General"}, {ID: "c2", DisplayName: "Design"}},
+	}
+	m := modelWithClient(t, client)
+
+	updated, _ := m.Update(tui.TeamsLoadedMsg{Teams: []*model.Team{{ID: "t1", DisplayName: "Eng"}}})
+	m = updated.(tui.Model)
+	updated, _ = m.Update(tui.ChannelsLoadedMsg{TeamID: "t1", Channels: client.channels})
+	m = updated.(tui.Model)
+
+	updated, cmd := m.Update(threadinbox.ThreadChosenMsg{RootID: "p9", ChannelID: "c2"})
+	m = updated.(tui.Model)
+	if cmd == nil {
+		t.Fatal("choosing a thread produced no command")
+	}
+	drain(cmd)
+
+	if !slices.Contains(client.readThreads, "p9") {
+		t.Errorf("opening the thread did not mark it read; readThreads = %v", client.readThreads)
+	}
+	if view := testutil.StripANSI(m.View()); !strings.Contains(view, "Design") {
+		t.Errorf("did not switch to the thread's channel:\n%s", view)
+	}
+}
+
+// Unfollowing has to reach the server. Removing the row alone would put the
+// thread back on the next fetch.
+func TestModel_UnfollowFromTheInboxReachesTheServer(t *testing.T) {
+	client := &mockClient{me: &model.User{ID: "u1", Username: "alice"}}
+	m := modelWithClient(t, client)
+
+	updated, _ := m.Update(tui.TeamsLoadedMsg{Teams: []*model.Team{{ID: "t1", DisplayName: "Eng"}}})
+	m = updated.(tui.Model)
+
+	_, cmd := m.Update(threadinbox.FollowToggledMsg{RootID: "p9", Following: false})
+	if cmd == nil {
+		t.Fatal("unfollowing produced no command")
+	}
+	drain(cmd)
+
+	if len(client.followCalls) != 1 {
+		t.Fatalf("follow calls = %v, want one", client.followCalls)
+	}
+	if client.followCalls[0].RootID != "p9" || client.followCalls[0].Following {
+		t.Errorf("sent %+v, want p9 with following=false", client.followCalls[0])
+	}
+}
+
+// A failed fetch must leave the loading state, or the overlay says "Loading…"
+// forever with the reason hidden.
+func TestModel_ThreadFetchFailureIsReported(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(input.SlashTriggerMsg{Input: "/threads"})
+	m = updated.(tui.Model)
+	updated, _ = m.Update(tui.ThreadsLoadedMsg{Err: errors.New("boom")})
+	m = updated.(tui.Model)
+
+	view := testutil.StripANSI(m.View())
+	if strings.Contains(view, "Loading") {
+		t.Errorf("still loading after the fetch failed:\n%s", view)
+	}
+	if !strings.Contains(view, "boom") {
+		t.Errorf("the failure is not reported:\n%s", view)
 	}
 }

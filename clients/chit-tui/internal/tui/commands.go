@@ -166,6 +166,36 @@ func CreateDMChannel(client api.ChitClient, userID1, userID2 string) tea.Cmd {
 	}
 }
 
+// FetchMyThreads returns a command that loads the threads the caller follows
+// in a team.
+func FetchMyThreads(client api.ChitClient, teamID string) tea.Cmd {
+	return func() tea.Msg {
+		list, err := client.GetMyThreads(context.Background(), teamID, 0, threadInboxPageSize)
+		if err != nil {
+			return ThreadsLoadedMsg{Err: err}
+		}
+		return ThreadsLoadedMsg{Threads: list.Threads}
+	}
+}
+
+// SetThreadFollowing returns a command that follows or unfollows a thread.
+func SetThreadFollowing(client api.ChitClient, teamID, rootID string, following bool) tea.Cmd {
+	return func() tea.Msg {
+		err := client.SetThreadFollowing(context.Background(), teamID, rootID, following)
+		return ThreadFollowChangedMsg{RootID: rootID, Err: err}
+	}
+}
+
+// MarkThreadRead returns a command that clears a thread's unread state. The
+// result is deliberately dropped: the read marker is a convenience, and a
+// failure to record it should not interrupt reading the thread.
+func MarkThreadRead(client api.ChitClient, teamID, rootID string) tea.Cmd {
+	return func() tea.Msg {
+		_ = client.MarkThreadRead(context.Background(), teamID, rootID)
+		return nil
+	}
+}
+
 // UpdateProfile returns a command that saves a partial profile change. Empty
 // fields are left alone by the server, so only what is changing is sent.
 func UpdateProfile(client api.ChitClient, patch *model.User) tea.Cmd {

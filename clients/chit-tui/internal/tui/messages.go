@@ -99,6 +99,18 @@ type ProfileUpdatedMsg struct {
 	Err  error
 }
 
+// ThreadsLoadedMsg is sent when the followed-thread list is fetched.
+type ThreadsLoadedMsg struct {
+	Threads []*model.ThreadResponse
+	Err     error
+}
+
+// ThreadFollowChangedMsg is sent when a thread's follow state is saved.
+type ThreadFollowChangedMsg struct {
+	RootID string
+	Err    error
+}
+
 // DMChannelsLoadedMsg is sent when DM channels are fetched.
 type DMChannelsLoadedMsg struct {
 	Channels []*model.Channel
@@ -216,6 +228,8 @@ type PostPinnedMsg struct {
 // expiry can be handled in one place rather than per message type.
 func (m UserLoadedMsg) requestError() error           { return m.Err }
 func (m ProfileUpdatedMsg) requestError() error       { return m.Err }
+func (m ThreadsLoadedMsg) requestError() error        { return m.Err }
+func (m ThreadFollowChangedMsg) requestError() error  { return m.Err }
 func (m TeamsLoadedMsg) requestError() error          { return m.Err }
 func (m ChannelsLoadedMsg) requestError() error       { return m.Err }
 func (m PostsLoadedMsg) requestError() error          { return m.Err }

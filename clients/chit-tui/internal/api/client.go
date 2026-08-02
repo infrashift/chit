@@ -27,6 +27,10 @@ type ChitClient interface {
 	PinPost(ctx context.Context, postID string) error
 	UnpinPost(ctx context.Context, postID string) error
 	GetThread(ctx context.Context, postID string) (*model.PostList, error)
+	// GetMyThreads lists the threads the caller follows in a team.
+	GetMyThreads(ctx context.Context, teamID string, page, perPage int) (*model.UserThreadList, error)
+	MarkThreadRead(ctx context.Context, teamID, threadID string) error
+	SetThreadFollowing(ctx context.Context, teamID, threadID string, following bool) error
 	GetCommands(ctx context.Context) ([]*model.Command, error)
 	ViewChannel(ctx context.Context, channelID string) error
 	GetUsersByIDs(ctx context.Context, ids []string) ([]*model.User, error)
@@ -175,6 +179,22 @@ func (c *httpClient) UpdateMe(ctx context.Context, patch *model.User) (*model.Us
 	var u model.User
 	err := c.put(ctx, "/users/me", body, &u)
 	return &u, err
+}
+
+func (c *httpClient) GetMyThreads(ctx context.Context, teamID string, page, perPage int) (*model.UserThreadList, error) {
+	var list model.UserThreadList
+	err := c.get(ctx, fmt.Sprintf("/users/me/teams/%s/threads?page=%d&per_page=%d",
+		teamID, page, perPage), &list)
+	return &list, err
+}
+
+func (c *httpClient) MarkThreadRead(ctx context.Context, teamID, threadID string) error {
+	return c.put(ctx, fmt.Sprintf("/users/me/teams/%s/threads/%s/read", teamID, threadID), nil, nil)
+}
+
+func (c *httpClient) SetThreadFollowing(ctx context.Context, teamID, threadID string, following bool) error {
+	return c.put(ctx, fmt.Sprintf("/users/me/teams/%s/threads/%s/following", teamID, threadID),
+		map[string]bool{"following": following}, nil)
 }
 
 func (c *httpClient) GetMyTeams(ctx context.Context) ([]*model.Team, error) {

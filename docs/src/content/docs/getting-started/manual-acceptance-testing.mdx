@@ -315,7 +315,7 @@ Replace `CHANNEL_ID` with the Town Square channel ID from the seed output.
 
 ```bash
 curl -X POST -H "$ALICE" -H 'Content-Type: application/json' \
-  -d '{"channel_id":"CHANNEL_ID","message":"Hello from UAT!"}' \
+  -d '{"channel_id":"CHANNEL_ID","content":"Hello from UAT!"}' \
   http://localhost:8065/api/v1/posts
 ```
 
@@ -331,9 +331,27 @@ Use the `root_id` field with the ID of the post you're replying to:
 
 ```bash
 curl -X POST -H "$BOB" -H 'Content-Type: application/json' \
-  -d '{"channel_id":"CHANNEL_ID","root_id":"POST_ID","message":"Threaded reply!"}' \
+  -d '{"channel_id":"CHANNEL_ID","root_id":"POST_ID","content":"Threaded reply!"}' \
   http://localhost:8065/api/v1/posts
 ```
+
+### The thread inbox
+
+Replying to a thread starts following it. The author of the root post is
+**not** followed automatically, so use the replier's header here — Bob's, if
+he sent the reply above:
+
+```bash
+curl -H "$BOB" "http://localhost:8065/api/v1/users/me/teams/TEAM_ID/threads"
+```
+
+Each entry carries the root post, `last_viewed_at`, and `unread_mentions`. A
+thread is unread when `thread.last_reply_at` is greater than `last_viewed_at`;
+a never-read thread has `last_viewed_at` of `0`.
+
+In chit-tui the same list is `/threads`: `enter` opens a thread (switching
+channels if it lives elsewhere, and marking it read), `u` unfollows it, `esc`
+closes the overlay.
 
 ### Search users
 

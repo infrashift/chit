@@ -724,3 +724,16 @@
 - [x] Body carries only the changed field: sending the whole user puts `username:""` on the wire, and the schema's username pattern does not match the empty string, so the request is rejected rather than ignored — a 400 the unit test had allowed for and only the live run caught
 - [x] Empty arguments and usernames containing spaces are refused locally with the command they probably meant
 - [x] A saved profile refreshes `m.me`, the user cache, and mention highlighting, so the new name shows without signing in again
+
+## Thread inbox
+- [x] `/threads` overlay listing the threads you follow in the active team, with unread markers, channel, root summary, and reply count
+- [x] `enter` opens a thread — switching channels first when it lives elsewhere, since the thread pane renders against the active channel — and marks it read
+- [x] `u` unfollows and drops the row; `esc` closes
+- [x] Client API: `GetMyThreads`, `MarkThreadRead`, `SetThreadFollowing`
+- [x] Loading and empty states, the latter saying how to start following a thread
+- [x] Server: the thread list now returns the root post and the caller's read state. It returned neither, though the endpoint is documented to report unread status — an inbox with no unread marker and no message text is a list of IDs, and fetching each root separately would be one request per thread
+- [x] UAT guide documents the endpoint and the `/threads` keys; its post examples said `message` where the API takes `content`, so they had never worked
+
+Noted, not changed: replying follows a thread, but posting the root does not,
+so you are not told about replies to your own message. That is a product
+decision about follow semantics rather than a defect in this work.

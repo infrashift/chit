@@ -30,7 +30,17 @@ type mockClient struct {
 	postTags        []*model.Tag
 	lastCreatedPost *model.Post
 	channelsFetched []string // team IDs passed to GetMyChannels
-	err             error
+	threads         []*model.ThreadResponse
+	// followCalls records (rootID, following) so tests can tell an unfollow
+	// that reached the server from one that only left the list.
+	followCalls []followCall
+	readThreads []string
+	err         error
+}
+
+type followCall struct {
+	RootID    string
+	Following bool
 }
 
 func (m *mockClient) GetMe(_ context.Context) (*model.User, error) {
@@ -54,6 +64,23 @@ func (m *mockClient) UpdateMe(_ context.Context, patch *model.User) (*model.User
 	m.me = &updated
 	return m.me, nil
 }
+func (m *mockClient) GetMyThreads(_ context.Context, _ string, _, _ int) (*model.UserThreadList, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &model.UserThreadList{Threads: m.threads, Total: int64(len(m.threads))}, nil
+}
+
+func (m *mockClient) MarkThreadRead(_ context.Context, _, threadID string) error {
+	m.readThreads = append(m.readThreads, threadID)
+	return m.err
+}
+
+func (m *mockClient) SetThreadFollowing(_ context.Context, _, threadID string, following bool) error {
+	m.followCalls = append(m.followCalls, followCall{RootID: threadID, Following: following})
+	return m.err
+}
+
 func (m *mockClient) GetMyTeams(_ context.Context) ([]*model.Team, error) {
 	return m.teams, m.err
 }
