@@ -249,6 +249,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateLogin(msg)
 	}
 
+	// A rejected session is the same problem whichever request noticed it, so
+	// it is caught once here. Previously only five message types checked,
+	// and every other request showed a transient toast on expiry and left
+	// the user in a client that could no longer talk to the server.
+	if err := msgError(msg); err != nil && api.IsUnauthorized(err) {
+		return m.handleAuthExpired()
+	}
+
 	switch msg := msg.(type) {
 	case login.LoginSuccessMsg:
 		return m.handleLoginSuccess(msg)
@@ -354,6 +362,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Pinning is a channel-level act, so unlike edit and delete it works
+		// on anyone's post.
+		if key.Matches(msg, m.keys.Pin) && m.focus == FocusViewport {
+			if p := m.viewport.SelectedPost(); p != nil {
+				return m, SetPostPinned(m.client, p.ID, !p.IsPinned)
+			}
+		}
+
 		if key.Matches(msg, m.keys.TagPicker) {
 			// In the history pane the subject is the post under the cursor;
 			// in a thread there is no cursor, so it is the root post.
@@ -383,9 +399,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case UserLoadedMsg:
 		if msg.Err != nil {
-			if api.IsUnauthorized(msg.Err) {
-				return m.handleAuthExpired()
-			}
 			return m, m.setError(msg.Err)
 		}
 		m.me = msg.User
@@ -397,9 +410,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case TeamsLoadedMsg:
 		if msg.Err != nil {
-			if api.IsUnauthorized(msg.Err) {
-				return m.handleAuthExpired()
-			}
 			return m, m.setError(msg.Err)
 		}
 		m.teams = msg.Teams
@@ -414,9 +424,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ChannelsLoadedMsg:
 		if msg.Err != nil {
-			if api.IsUnauthorized(msg.Err) {
-				return m.handleAuthExpired()
-			}
 			return m, m.setError(msg.Err)
 		}
 		m.channelsByTeam[msg.TeamID] = msg.Channels
@@ -437,9 +444,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case PostsLoadedMsg:
 		m.viewport.SetLoading(false)
 		if msg.Err != nil {
-			if api.IsUnauthorized(msg.Err) {
-				return m.handleAuthExpired()
-			}
 			return m, m.setError(msg.Err)
 		}
 		m.viewport.SetLoading(false)
@@ -460,9 +464,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case PostCreatedMsg:
 		if msg.Err != nil {
-			if api.IsUnauthorized(msg.Err) {
-				return m.handleAuthExpired()
-			}
 			cmd := m.setError(msg.Err)
 			m.pendingPostTags = nil
 			return m, cmd
@@ -997,6 +998,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 
+	case PostPinnedMsg:
+		if msg.Err != nil {
+			return m, m.setError(msg.Err)
+		}
+		// The server broadcasts post_pinned with the full post, which
+		// updates the badge; nothing more is needed here.
+		return m, nil
+
 	case PostEditedMsg:
 		if msg.Err != nil {
 			return m, m.setError(msg.Err)
@@ -1478,15 +1487,22 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 			m.setUnread(p.ChannelID, m.unread[p.ChannelID]+1)
 		}
 
-	case model.WebSocketEventPostEdited,
-		model.WebSocketEventPostPinned,
-		model.WebSocketEventPostUnpinned:
-		// All three carry the full post, so one path updates in place.
+	case model.WebSocketEventPostEdited:
+		// An edit carries the whole post, so it replaces what is displayed.
 		if p := decodePost(evt.Data); p != nil {
 			m.viewport.UpdatePost(p)
 			if m.mainPane == paneThread {
 				m.thread.UpdatePost(p)
 			}
+		} else {
+			slog.Warn("could not decode a post_edited event")
+		}
+
+	case model.WebSocketEventPostPinned, model.WebSocketEventPostUnpinned:
+		// Unlike an edit, these carry only an ID, so the flag is flipped on
+		// the post already held rather than replacing it.
+		if postID, _ := evt.Data["post_id"].(string); postID != "" {
+			m.viewport.SetPinned(postID, evt.Event == model.WebSocketEventPostPinned)
 		}
 
 	case model.WebSocketEventPostDeleted:
@@ -1942,6 +1958,17 @@ func (m *Model) registerCommandResponseAuthor(slug string) {
 	}
 	names[commandResponseUserID] = name
 	m.viewport.SetUsernames(names)
+}
+
+// errorCarrier is implemented by every message that reports a failed request.
+type errorCarrier interface{ requestError() error }
+
+// msgError extracts the error a message carries, if any.
+func msgError(msg tea.Msg) error {
+	if c, ok := msg.(errorCarrier); ok {
+		return c.requestError()
+	}
+	return nil
 }
 
 // reDecode round-trips a decoded event field back through JSON into a typed

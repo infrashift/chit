@@ -110,6 +110,22 @@ func (m *Model) UpdatePost(p *model.Post) bool {
 	return false
 }
 
+// SetPinned flips a post's pinned flag in place and reports whether it was
+// present. The pin events carry only an ID, not the post, so there is nothing
+// to replace it with.
+func (m *Model) SetPinned(id string, pinned bool) bool {
+	for _, p := range m.posts {
+		if p.ID != id {
+			continue
+		}
+		p.IsPinned = pinned
+		delete(m.cache, id)
+		m.updateContent()
+		return true
+	}
+	return false
+}
+
 // RemovePost drops a post from the history and reports whether it was present.
 func (m *Model) RemovePost(id string) bool {
 	for i, p := range m.posts {
