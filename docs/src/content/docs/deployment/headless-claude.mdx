@@ -57,11 +57,63 @@ because most hand-rolled scripts get it wrong.
 The UAT seeder already creates a `chit-agent` user with `actor_type=agent`,
 membership in the UAT team and channel, and Kratos ID
 `a9e47000-0000-4000-a000-000000000006`. For other environments create an
-equivalent user and **add it to every channel the bridge should serve** —
-channel authorization is enforced server-side, and the hub only delivers
-events for channels the agent belongs to.
+equivalent user (see [the recipe below](#provision-the-agent-users)) and **add
+it to every channel the bridge should serve** — channel authorization is
+enforced server-side, and the hub only delivers events for channels the agent
+belongs to.
 
-### 2. Authenticate the claude CLI
+### 2. Give the agent an OAuth2 client
+
+Agents authenticate to Chit with an Ory Hydra access token obtained through the
+`client_credentials` grant, presented to Oathkeeper, which introspects it and
+enforces the token's audience and scope before forwarding anything to chitd.
+
+Create the client, then bind it to the agent user:
+
+```bash
+HYDRA_ADMIN=http://localhost:4445
+
+# 1. Hydra generates the client_id and secret. Note both — the secret is
+#    shown once.
+curl -sS -X POST "$HYDRA_ADMIN/admin/clients" \
+  -H 'Content-Type: application/json' -d '{
+    "client_name":                "claude-architect",
+    "grant_types":                ["client_credentials"],
+    "token_endpoint_auth_method": "client_secret_post",
+    "scope":                      "chit:read chit:write",
+    "audience":                   ["chit"]
+  }'
+```
+
+Either `client_secret_post` or `client_secret_basic` works — Hydra enforces
+whichever the client registered and rejects the other with `invalid_client`,
+so the bridge auto-detects rather than pinning one.
+
+```bash
+
+# 2. Bind that client_id to the Chit agent user (see the provisioning recipe
+#    below; add "oauth_client_id": "<client_id>" to the POST /users body).
+```
+
+:::caution[The binding is the identity]
+For the `client_credentials` grant Hydra sets the token's `sub` to the
+generated `client_id`, and does **not** expose client metadata through token
+introspection. Chit therefore resolves the client against
+`users.oauth_client_id`. A client with no binding is rejected outright — unlike
+an unknown Kratos ID, it is never provisioned into a new user.
+:::
+
+**Scopes.** `chit:read` covers every `GET` (including the WebSocket upgrade);
+`chit:write` covers `POST`/`PUT`/`DELETE`. The bridge needs both: it listens
+over the WebSocket and posts replies. Note that Chit's search and batch-tag
+endpoints are `POST`s despite only reading, so they fall under `chit:write`
+too — a strictly read-only token can list and fetch but cannot search.
+
+**Audience.** `chit` is what isolates applications sharing the gateway: a token
+minted for another audience is rejected by Oathkeeper's rules even though it is
+a perfectly valid Hydra token.
+
+### 3. Authenticate the claude CLI
 
 On a machine with a browser, generate a long-lived OAuth token and set it in
 the bridge's environment:
@@ -76,42 +128,243 @@ If `ANTHROPIC_API_KEY` is present in the bridge's environment, Claude Code
 bills per-token against the API instead of your subscription. Keep it unset.
 :::
 
-### 3. Configure and run the bridge
+### 4. Configure and run the bridge
 
 ```bash
-export CHIT_CLAUDE_AGENT_KRATOS_ID=a9e47000-0000-4000-a000-000000000006
+# Point at Oathkeeper, not chitd — the token is only meaningful to the proxy
+# that introspects it.
+export CHIT_CLAUDE_SERVER_URL=http://localhost:4455
+export CHIT_CLAUDE_OAUTH_TOKEN_URL=http://localhost:4444/oauth2/token
+export CHIT_CLAUDE_OAUTH_CLIENT_ID=<hydra client id>
+export CHIT_CLAUDE_OAUTH_CLIENT_SECRET=<hydra client secret>
+export CHIT_CLAUDE_OAUTH_SCOPES="chit:read chit:write"
+export CHIT_CLAUDE_OAUTH_AUDIENCE=chit
+
 export CHIT_CLAUDE_CHANNELS=<channel-id>[,<channel-id>...]
 export CHIT_CLAUDE_WORKDIR=/path/to/project    # where claude runs
 # optional hardening / behavior:
+export CHIT_CLAUDE_MODEL=claude-fable-5        # empty → the claude CLI default
 export CHIT_CLAUDE_PERMISSION_MODE=dontAsk     # blocks tools not allowlisted
 export CHIT_CLAUDE_ALLOWED_TOOLS="Read,Grep,Glob,Bash(go test *)"
 export CHIT_CLAUDE_REQUIRE_MENTION=false       # true → only @chit-agent posts trigger runs
 export CHIT_CLAUDE_RUN_TIMEOUT=30m
-export CHIT_CLAUDE_PROXY_SECRET=...            # match chitd's CHIT_TRUSTED_PROXY_SECRET
 
 make build-claude
 ./bin/chit-claude
 ```
 
-The full variable list is in `.env.example` (`CHIT_CLAUDE_*` block).
+The full variable list is in `.env.example` (`CHIT_CLAUDE_*` block). The bridge
+refuses to start unless exactly one authentication mode is configured, rather
+than silently falling back to the weaker one.
 
-The bridge connects **directly to chitd** (default `http://localhost:8065`),
-authenticating with the agent's Kratos ID via the trusted-proxy header — the
-same trust position Oathkeeper holds. Do not expose chitd beyond the hosts
-that need this. Because replies go through chitd's API, they broadcast to
-connected WebSocket clients in real time like any other message.
+Tokens are cached and renewed automatically — the bridge fetches a new one only
+when the current token expires (Hydra issues 1-hour tokens by default). If the
+token endpoint is unreachable the request fails; it is never sent
+unauthenticated, and the WebSocket reconnect loop backs off and retries.
+
+:::note[Trusted-proxy mode]
+`CHIT_CLAUDE_AGENT_KRATOS_ID` + `CHIT_CLAUDE_PROXY_SECRET` still work, pointing
+the bridge straight at chitd on `:8065` and bypassing Oathkeeper. That path
+asserts an identity rather than proving one, and its shared secret is the same
+for every agent, so it cannot express per-agent or per-application privilege.
+Keep it for local development; use OAuth2 anywhere else.
+:::
+
+## Multiple personas in one channel
+
+**One bridge process serves exactly one agent user.** `CHIT_CLAUDE_AGENT_KRATOS_ID`
+is a single identity, resolved once at startup. To run several personas — say a
+`claude-architect` on Fable 5 and a `claude-docs-writer` on Sonnet — run one
+`chit-claude` process per persona, each with its own agent user, model, and
+working directory. They can all serve the same channel.
+
+### Provision the agent users
+
+Per persona, against chitd (authenticated as an **existing** user via the
+trusted-proxy headers):
+
+```bash
+CHITD=http://localhost:8065
+AUTH=(-H "X-User-Id: $EXISTING_USER_KRATOS_ID" -H "X-Proxy-Secret: $CHIT_TRUSTED_PROXY_SECRET")
+
+curl -sS "${AUTH[@]}" -H 'Content-Type: application/json' \
+  -X POST "$CHITD/api/v1/users" -d '{
+    "kratos_id":       "'"$(uuidgen)"'",
+    "username":        "claude-architect",
+    "display_name":    "Claude Architect",
+    "email":           "claude-architect@example.com",
+    "roles":           "system_user",
+    "actor_type":      "agent",
+    "oauth_client_id": "<client_id from the Hydra step above>"
+  }'
+
+# then add it to the team and the channel it should serve
+curl -sS "${AUTH[@]}" -X POST "$CHITD/api/v1/teams/$TEAM_ID/members" \
+  -H 'Content-Type: application/json' -d '{"user_id":"<new user id>"}'
+curl -sS "${AUTH[@]}" -X POST "$CHITD/api/v1/channels/$CHANNEL_ID/members" \
+  -H 'Content-Type: application/json' -d '{"user_id":"<new user id>"}'
+```
+
+:::caution[Two ways to end up with a mis-typed agent]
+- **`actor_type` must be explicit in the body.** Omit it and the server
+  defaults the user to `actor_type=user`.
+- **Authenticate as a user that already exists.** Calling with a brand-new
+  Kratos ID makes chitd just-in-time provision *the caller* first — as
+  `actor_type=user`, which is exactly the mis-typing you are trying to avoid,
+  now on a phantom user.
+
+This matters beyond bookkeeping: the loop guard below works by resolving each
+post author's `actor_type`. **An agent user mis-typed as `user` is treated as a
+human by every other agent in the channel**, which defeats the guard for all of
+them. The bridge logs a warning at startup when its own user is not
+`actor_type=agent` — do not ignore it.
+:::
+
+### Loop prevention
+
+The bridge's only built-in filter used to be "is this my own post", so two
+bridges in one channel would answer each other indefinitely. Two settings now
+govern this:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `CHIT_CLAUDE_REPLY_TO_AGENTS` | `false` | Drop every post authored by an `agent` or `bot` actor. |
+| `CHIT_CLAUDE_MAX_AGENT_HOPS` | `2` | Max consecutive agent→agent turns. Only read when `REPLY_TO_AGENTS=true`. |
+
+With the default, agents never answer agents — safe, but they can only be
+driven by humans. Set `REPLY_TO_AGENTS=true` to let personas hand work to each
+other. An agent-authored post is then answered only when **all** of:
+
+1. the content names this agent literally (`@claude-docs-writer`);
+2. `@all` / `@channel` **does not count** — a broadcast is not an instruction
+   to a specific agent, and counting it would let one `@all` restart an
+   exchange;
+3. the thread's hop count is below `MAX_AGENT_HOPS`.
+
+Every agent reply carries a `claude_agent_hops` prop equal to its author's
+count plus one, and a post from a human carries no such prop — so **every human
+turn resets the chain, and an A→B→A exchange stops after `MAX_AGENT_HOPS`
+agent turns** regardless of what the models write.
+
+:::caution
+`claude_agent_hops` is a post prop, so any client can write it. This is a
+cooperation mechanism between trusted bridge processes, not a security
+boundary.
+:::
+
+Note that `CHIT_CLAUDE_REQUIRE_MENTION` is a separate, coarser gate that
+applies to *all* authors including humans. The agent rules above are always
+enforced on top of it.
+
+### Per-persona configuration
+
+Give each persona its own env file — `~/.config/chit-claude/architect.env`:
+
+```bash
+CHIT_CLAUDE_SERVER_URL=http://localhost:4455
+CHIT_CLAUDE_OAUTH_TOKEN_URL=http://localhost:4444/oauth2/token
+CHIT_CLAUDE_OAUTH_CLIENT_ID=<architect hydra client id>
+CHIT_CLAUDE_OAUTH_CLIENT_SECRET=<architect hydra client secret>
+CHIT_CLAUDE_OAUTH_SCOPES=chit:read chit:write
+CHIT_CLAUDE_OAUTH_AUDIENCE=chit
+CHIT_CLAUDE_CHANNELS=<shared channel id>
+CHIT_CLAUDE_WORKDIR=/srv/worktrees/architect
+CHIT_CLAUDE_MODEL=claude-fable-5
+CHIT_CLAUDE_REQUIRE_MENTION=true
+CHIT_CLAUDE_REPLY_TO_AGENTS=true
+CHIT_CLAUDE_MAX_AGENT_HOPS=2
+CLAUDE_CODE_OAUTH_TOKEN=...
+```
+
+`docs-writer.env` is the same with its **own** Hydra client, its own workdir,
+and `CHIT_CLAUDE_MODEL=claude-sonnet-5`. One client per persona means tokens
+are per-agent: revoking one agent's client stops that agent alone, and the
+audit trail distinguishes them.
+
+Two unrelated things here are both called an OAuth token:
+`CHIT_CLAUDE_OAUTH_*` authenticates the bridge to Chit;
+`CLAUDE_CODE_OAUTH_TOKEN` authenticates the `claude` CLI to Anthropic. Keep the
+secret file mode `0600` — it holds both.
+
+If the Anthropic subscription cannot serve the requested model, the `claude`
+CLI exits non-zero and the bridge posts `⚠️ Claude run failed: …` into the
+thread. That is the bridge reporting faithfully, not a bug in it.
+
+### Supervising the processes
+
+A systemd **user template** unit runs one instance per persona from one file —
+`~/.config/systemd/user/chit-claude@.service`:
+
+```ini
+[Unit]
+Description=chit-claude bridge (%i)
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/chit-claude/%i.env
+ExecStart=%h/bin/chit-claude
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user enable --now chit-claude@architect chit-claude@docs-writer
+```
 
 ## Security notes
 
-- **Access control is channel membership.** Anyone who can post in a
+- **Access control is the channel allowlist.** Anyone who can post in a
   configured channel can drive Claude in your `WORKDIR`. Use a private
-  channel.
+  channel: for open channels any *team* member may add themselves
+  (`AddChannelMember` only checks team membership of the actor), so "member of
+  the channel" is trivially obtainable.
+- **`CHIT_CLAUDE_CHANNELS` is the boundary, not membership.** Channel
+  membership is not under your control — any team member can add the agent to
+  an open channel, creating an open channel auto-adds every team member
+  including the agent, and any user can open a DM or group channel with it.
+  Those posts are dropped because the channel is not on the allowlist, and the
+  bridge logs a warning **once per channel** when it sees one:
+
+  ```
+  WARN ignoring post from a channel outside CHIT_CLAUDE_CHANNELS;
+       this agent is a member of a channel it does not serve channel_id=...
+  ```
+
+  Treat that line as a signal that someone pulled your agent somewhere you did
+  not intend. Alert on it.
+- **Consider leaving the agent out of the team entirely.** Everything the
+  bridge does — reading a thread, posting a reply, resolving a user — is
+  authorized on *channel* membership, never team membership. Adding the agent
+  only to its private channel removes the open-channel auto-add path, so its
+  membership stays exactly what you set. The trade-off is that team-scoped
+  endpoints such as `GET /teams/{id}/channels` will 403 for it; the bridge does
+  not use them, but `chit-mcp`'s `list_channels` does.
+- **Watch who joins the channel.** Any existing member may invite anyone,
+  including users outside your team — the invitee is never validated against
+  the team — while removing somebody else requires `system_admin`. The member
+  list is easier to grow than to shrink, and it is your real trust boundary.
 - **Prompts are argv, never shell.** Message content is passed to the claude
   binary as a process argument; there is no shell interpolation to inject
   into.
+- **The gateway now enforces, and it is no longer optional.** The API access
+  rules previously listed `noop` as a fallback authenticator, so an
+  unauthenticated request passed Oathkeeper and was rejected only by chitd.
+  That fallback is gone: a request to `/api/v1/**` must present either a
+  Kratos session token or a Hydra access token with audience `chit` and the
+  scope its method requires. Keep `CHIT_TRUSTED_PROXY_SECRET` set so the
+  backend still refuses anything that did not come through the proxy.
 - **Constrain the tools.** `PERMISSION_MODE=dontAsk` plus a tight
   `ALLOWED_TOOLS` list is the safe default for unattended runs; widen it
   deliberately per project.
+- **One workdir per persona once write tools are allowed.** With the default
+  read-only `ALLOWED_TOOLS` a shared `WORKDIR` is harmless, but as soon as
+  `Edit`/`Write`/`Bash` is enabled, two personas in one checkout will clobber
+  each other mid-run. A `git worktree` per persona is the cheap fix and gives
+  each one its own branch.
 
 ## The footer
 

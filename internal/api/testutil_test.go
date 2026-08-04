@@ -130,6 +130,18 @@ func (s *mockUserStore) GetByEmail(_ context.Context, _ string) (*model.User, er
 	return nil, fmt.Errorf("not found")
 }
 
+func (s *mockUserStore) GetByOAuthClientID(_ context.Context, clientID string) (*model.User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, u := range s.byID {
+		if u.OAuthClientID != "" && u.OAuthClientID == clientID {
+			cp := *u
+			return &cp, nil
+		}
+	}
+	return nil, fmt.Errorf("oauth client %s not found", clientID)
+}
+
 func (s *mockUserStore) Update(_ context.Context, u *model.User) (*model.User, error) {
 	return s.Save(context.Background(), u)
 }

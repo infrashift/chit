@@ -32,6 +32,23 @@ func AuthExtract(a *app.App) func(http.Handler) http.Handler {
 				}
 			}
 
+			// A machine actor authenticated by client-credentials wins over
+			// the Kratos header. Oathkeeper sets exactly one of these per
+			// request and blanks the other, so honouring the client header
+			// first means a forged X-User-Id cannot ride along with a
+			// legitimately introspected token.
+			if clientID := r.Header.Get(a.Config.TrustedClientHeader); clientID != "" {
+				user, err := a.ResolveOAuthClient(r.Context(), clientID)
+				if err != nil {
+					slog.Warn("auth: unknown oauth client", "client_id", clientID, "error", err)
+					WriteError(w, model.NewUnauthorizedError("AuthExtract", "unknown oauth client"))
+					return
+				}
+				r = ContextSetUser(r, user)
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			kratosID := r.Header.Get(a.Config.TrustedProxyHeader)
 			if kratosID == "" {
 				WriteError(w, model.NewUnauthorizedError("AuthExtract", "missing authentication header"))

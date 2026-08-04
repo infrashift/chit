@@ -20,6 +20,12 @@ type Config struct {
 	NatsURL       string `koanf:"nats_url"`
 
 	TrustedProxyHeader string `koanf:"trusted_proxy_header"`
+	// TrustedClientHeader carries the OAuth2 client_id of a machine actor
+	// authenticated by Oathkeeper's introspection of a Hydra
+	// client-credentials token. When present it takes precedence over
+	// TrustedProxyHeader, and is resolved against users.oauth_client_id with
+	// no just-in-time provisioning.
+	TrustedClientHeader string `koanf:"trusted_client_header"`
 	// TrustedProxySecret, when set, must be presented by the auth proxy in the
 	// X-Proxy-Secret header before the trusted proxy header is honored.
 	TrustedProxySecret string `koanf:"trusted_proxy_secret"`
@@ -65,6 +71,7 @@ func Defaults() *Config {
 		PubSubBackend:           "pgnotify",
 		NatsURL:                 "nats://localhost:4222",
 		TrustedProxyHeader:      "X-User-Id",
+		TrustedClientHeader:     "X-Client-Id",
 		AllowedOrigins:          []string{"*"},
 		KratosAdminURL:          "http://localhost:4434",
 		KetoReadURL:             "http://localhost:4466",

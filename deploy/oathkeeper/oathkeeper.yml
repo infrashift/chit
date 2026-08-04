@@ -10,6 +10,8 @@ access_rules:
     - file:///etc/oathkeeper/access-rules.yml
 
 authenticators:
+  # Humans: Kratos session token in X-Session-Token. Subject is the Kratos
+  # identity ID, which is what chitd's X-User-Id path expects.
   bearer_token:
     enabled: true
     config:
@@ -22,6 +24,23 @@ authenticators:
         header: X-Session-Token
       forward_http_headers:
         - X-Session-Token
+
+  # Machine actors: Hydra client_credentials access token in the standard
+  # Authorization: Bearer header. For that grant Hydra sets `sub` to the
+  # generated client_id, and does NOT expose client metadata on the
+  # introspection response — so the client_id is the identifier chitd
+  # resolves, via users.oauth_client_id.
+  #
+  # This authenticator takes neither subject_from nor extra_from (Oathkeeper
+  # rejects them at startup): .Subject is always the introspected `sub`, and
+  # .Extra is always the response's `ext` object, which is empty for
+  # client_credentials since that grant has no consent session.
+  oauth2_introspection:
+    enabled: true
+    config:
+      introspection_url: http://localhost:4445/admin/oauth2/introspect
+      scope_strategy: exact
+
   noop:
     enabled: true
 
@@ -34,10 +53,18 @@ mutators:
     enabled: true
     config:
       headers:
-        X-User-Id: "{{ print .Subject }}"
-        # In production, set CHIT_TRUSTED_PROXY_SECRET on chitd and inject the
-        # same value here so a directly-reachable backend cannot be
-        # impersonated with a forged X-User-Id header:
+        # Exactly one of these carries an identity and the other is blanked,
+        # per request. Blanking matters: it clobbers any value a client tried
+        # to smuggle in, so the backend can never see an unvetted header.
+        #
+        # The two paths are told apart by .Extra.identity, which only the
+        # Kratos authenticator sets (its extra_from "@this" puts the whole
+        # /sessions/whoami body in .Extra). Introspected tokens carry `ext`,
+        # which is empty for client_credentials — so no identity key.
+        X-User-Id: '{{ if .Extra.identity }}{{ print .Subject }}{{ end }}'
+        X-Client-Id: '{{ if .Extra.identity }}{{ else }}{{ print .Subject }}{{ end }}'
+        # Set this to the same value as chitd's CHIT_TRUSTED_PROXY_SECRET so a
+        # directly-reachable backend cannot be driven with forged headers.
         # X-Proxy-Secret: "<same value as CHIT_TRUSTED_PROXY_SECRET>"
   noop:
     enabled: true

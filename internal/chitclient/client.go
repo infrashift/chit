@@ -1,9 +1,14 @@
 // Package chitclient is an HTTP/WebSocket client for chitd's REST API,
 // shared by the headless binaries (chit-claude, chit-mcp) that act as agent
-// users. It authenticates with the agent's Kratos ID via the trusted proxy
-// header, connecting to chitd directly (not through Oathkeeper) — the same
-// trust position Oathkeeper itself holds. Set proxySecret when chitd
-// requires X-Proxy-Secret.
+// users. It supports two authentication modes:
+//
+//   - OAuth2 client credentials (NewOAuth): the agent obtains a short-lived
+//     access token from Ory Hydra and presents it to Oathkeeper, which
+//     introspects it, enforces the audience and scope, and forwards the
+//     client ID to chitd. This is the supported mode for agents.
+//   - Trusted proxy header (New): the agent asserts a Kratos ID directly to
+//     chitd, bypassing Oathkeeper. Retained for local development and tests;
+//     it carries no per-agent credential, only a shared secret.
 package chitclient
 
 import (
@@ -20,19 +25,37 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/clientcredentials"
 
 	"github.com/infrashift/chit/internal/model"
 )
+
+// OAuthConfig describes the client-credentials grant an agent uses to obtain
+// access tokens from Hydra.
+type OAuthConfig struct {
+	TokenURL     string
+	ClientID     string
+	ClientSecret string
+	// Scopes must cover what the agent does: chit:read to listen and fetch,
+	// chit:write to post. Oathkeeper rejects a token missing the scope its
+	// rule requires.
+	Scopes []string
+	// Audience names the application the token is for. Oathkeeper's rules
+	// require it, so a token minted for another app cannot be replayed here.
+	Audience string
+}
 
 // Client talks to chitd over its HTTP API and WebSocket.
 type Client struct {
 	baseURL     string
 	kratosID    string
 	proxySecret string
+	tokens      oauth2.TokenSource
 	http        *http.Client
 }
 
-// New creates a client for the given chitd base URL.
+// New creates a client that authenticates with the trusted proxy header.
 func New(baseURL, kratosID, proxySecret string) *Client {
 	return &Client{
 		baseURL:     strings.TrimRight(baseURL, "/"),
@@ -42,13 +65,52 @@ func New(baseURL, kratosID, proxySecret string) *Client {
 	}
 }
 
-func (c *Client) authHeaders() http.Header {
+// NewOAuth creates a client that authenticates with Hydra-issued access
+// tokens. baseURL should point at Oathkeeper, not chitd: the token is only
+// meaningful to the proxy that introspects it.
+//
+// The returned token source caches the token and fetches a new one when it
+// expires, so callers never deal with refresh.
+func NewOAuth(baseURL string, cfg OAuthConfig) *Client {
+	ccfg := &clientcredentials.Config{
+		ClientID:     cfg.ClientID,
+		ClientSecret: cfg.ClientSecret,
+		TokenURL:     cfg.TokenURL,
+		Scopes:       cfg.Scopes,
+		// Hydra enforces the client's registered token_endpoint_auth_method
+		// and rejects the other outright, so do not pin one here: auto-detect
+		// probes and caches whichever the client was registered with
+		// (client_secret_basic or client_secret_post).
+		AuthStyle: oauth2.AuthStyleAutoDetect,
+	}
+	if cfg.Audience != "" {
+		ccfg.EndpointParams = url.Values{"audience": {cfg.Audience}}
+	}
+	return &Client{
+		baseURL: strings.TrimRight(baseURL, "/"),
+		tokens:  ccfg.TokenSource(context.Background()),
+		http:    &http.Client{Timeout: 15 * time.Second},
+	}
+}
+
+// authHeaders returns the credentials for one request. In OAuth2 mode this
+// may fetch a fresh token, so it can fail — a request must not be sent
+// unauthenticated when it does.
+func (c *Client) authHeaders() (http.Header, error) {
 	h := http.Header{}
+	if c.tokens != nil {
+		token, err := c.tokens.Token()
+		if err != nil {
+			return nil, fmt.Errorf("obtain access token: %w", err)
+		}
+		h.Set("Authorization", token.Type()+" "+token.AccessToken)
+		return h, nil
+	}
 	h.Set("X-User-Id", c.kratosID)
 	if c.proxySecret != "" {
 		h.Set("X-Proxy-Secret", c.proxySecret)
 	}
-	return h
+	return h, nil
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
@@ -65,7 +127,11 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
-	for k, vs := range c.authHeaders() {
+	headers, err := c.authHeaders()
+	if err != nil {
+		return err
+	}
+	for k, vs := range headers {
 		for _, v := range vs {
 			req.Header.Set(k, v)
 		}
@@ -320,7 +386,23 @@ func (c *Client) Listen(ctx context.Context, handle func(*model.WebSocketEvent))
 			return
 		}
 
-		conn, resp, err := websocket.DefaultDialer.DialContext(ctx, wsURL, c.authHeaders())
+		headers, err := c.authHeaders()
+		if err != nil {
+			// A token fetch failure is usually transient (Hydra restarting,
+			// clock skew); back off and retry rather than exiting the loop.
+			slog.Info("websocket auth failed, retrying", "error", err, "backoff", backoff)
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return
+			}
+			if backoff < 30*time.Second {
+				backoff *= 2
+			}
+			continue
+		}
+
+		conn, resp, err := websocket.DefaultDialer.DialContext(ctx, wsURL, headers)
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()
 		}

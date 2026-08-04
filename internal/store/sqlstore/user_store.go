@@ -19,11 +19,13 @@ func (s *SqlUserStore) Save(ctx context.Context, user *model.User) (*model.User,
 		return nil, err
 	}
 
-	query := `INSERT INTO users (id, kratos_id, username, display_name, email, roles, actor_type, create_at, update_at, delete_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+	// NULLIF keeps oauth_client_id NULL for humans: the column is UNIQUE, and
+	// Postgres allows many NULLs but only one ''.
+	query := `INSERT INTO users (id, kratos_id, username, display_name, email, roles, actor_type, oauth_client_id, create_at, update_at, delete_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''), $9, $10, $11)`
 	_, err := s.sqlStore.pool.Exec(ctx, query,
 		user.ID, user.KratosID, user.Username, user.DisplayName, user.Email,
-		user.Roles, user.ActorType, user.CreateAt, user.UpdateAt, user.DeleteAt,
+		user.Roles, user.ActorType, user.OAuthClientID, user.CreateAt, user.UpdateAt, user.DeleteAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("save user: %w", err)
@@ -48,15 +50,27 @@ func (s *SqlUserStore) GetByEmail(ctx context.Context, email string) (*model.Use
 	return s.getBy(ctx, "email", email)
 }
 
+// GetByOAuthClientID resolves the machine actor bound to an OAuth2 client.
+// Unlike GetByKratosID there is no just-in-time provisioning fallback: an
+// unrecognised client must fail authentication rather than mint a user.
+func (s *SqlUserStore) GetByOAuthClientID(ctx context.Context, clientID string) (*model.User, error) {
+	if clientID == "" {
+		return nil, model.NewNotFoundError("SqlUserStore.GetByOAuthClientID", clientID)
+	}
+	return s.getBy(ctx, "oauth_client_id", clientID)
+}
+
 func (s *SqlUserStore) getBy(ctx context.Context, column, value string) (*model.User, error) {
 	query := fmt.Sprintf(
-		`SELECT id, kratos_id, username, display_name, email, roles, actor_type, create_at, update_at, delete_at
+		`SELECT id, kratos_id, username, display_name, email, roles, actor_type,
+			COALESCE(oauth_client_id, ''), create_at, update_at, delete_at
 		FROM users WHERE %s = $1 AND delete_at = 0`, column,
 	)
 	user := &model.User{}
 	err := s.sqlStore.pool.QueryRow(ctx, query, value).Scan(
 		&user.ID, &user.KratosID, &user.Username, &user.DisplayName, &user.Email,
-		&user.Roles, &user.ActorType, &user.CreateAt, &user.UpdateAt, &user.DeleteAt,
+		&user.Roles, &user.ActorType, &user.OAuthClientID,
+		&user.CreateAt, &user.UpdateAt, &user.DeleteAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {

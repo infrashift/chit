@@ -104,6 +104,9 @@ func (s *mentionMockUserStore) GetByKratosID(_ context.Context, _ string) (*mode
 func (s *mentionMockUserStore) GetByEmail(_ context.Context, _ string) (*model.User, error) {
 	return nil, errNotFound
 }
+func (s *mentionMockUserStore) GetByOAuthClientID(_ context.Context, _ string) (*model.User, error) {
+	return nil, errNotFound
+}
 func (s *mentionMockUserStore) Update(_ context.Context, u *model.User) (*model.User, error) {
 	return u, nil
 }

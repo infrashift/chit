@@ -4,6 +4,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/infrashift/chit/internal/model"
+)
+
+const (
+	agentUserID       = "019421a0-0000-7000-8000-000000000004"
+	testOAuthClientID = "8f2b1c4e-hydra-generated-client"
 )
 
 func TestAuthExtract_Success(t *testing.T) {
@@ -34,6 +41,100 @@ func TestAuthExtract_Success(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
+	}
+}
+
+// An agent authenticated by Hydra client-credentials arrives as a client ID,
+// which chitd resolves against users.oauth_client_id.
+func TestAuthExtract_OAuthClientResolvesToUser(t *testing.T) {
+	a, ms, cleanup := setupTestApp(t)
+	defer cleanup()
+
+	ms.user.seed(&model.User{
+		ID:            agentUserID,
+		KratosID:      "kratos-agent-001",
+		Username:      "claude-architect",
+		DisplayName:   "Claude Architect",
+		Email:         "architect@example.com",
+		Roles:         "system_user",
+		ActorType:     model.ActorTypeAgent,
+		OAuthClientID: testOAuthClientID,
+		CreateAt:      1000,
+		UpdateAt:      1000,
+	})
+
+	var got *model.User
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = ContextGetUser(r)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("X-Client-Id", testOAuthClientID)
+	w := httptest.NewRecorder()
+	AuthExtract(a)(next).ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if got == nil || got.ID != agentUserID {
+		t.Fatalf("expected the agent user in context, got %+v", got)
+	}
+}
+
+// An unrecognised client must be rejected, never provisioned into a user the
+// way an unknown Kratos ID is.
+func TestAuthExtract_UnknownOAuthClientRejected(t *testing.T) {
+	a, _, cleanup := setupTestApp(t)
+	defer cleanup()
+
+	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("next handler should not be called for an unknown client")
+	})
+
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("X-Client-Id", "client-that-was-never-bound")
+	w := httptest.NewRecorder()
+	AuthExtract(a)(next).ServeHTTP(w, r)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
+	}
+}
+
+// The client header wins, so a forged X-User-Id cannot ride along with a
+// legitimately introspected token.
+func TestAuthExtract_ClientHeaderBeatsForgedUserHeader(t *testing.T) {
+	a, ms, cleanup := setupTestApp(t)
+	defer cleanup()
+
+	ms.user.seed(&model.User{
+		ID:            agentUserID,
+		KratosID:      "kratos-agent-001",
+		Username:      "claude-architect",
+		DisplayName:   "Claude Architect",
+		Email:         "architect@example.com",
+		Roles:         "system_user",
+		ActorType:     model.ActorTypeAgent,
+		OAuthClientID: testOAuthClientID,
+		CreateAt:      1000,
+		UpdateAt:      1000,
+	})
+
+	var got *model.User
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = ContextGetUser(r)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("X-Client-Id", testOAuthClientID)
+	r.Header.Set("X-User-Id", testKratosID) // would be a different, human user
+	w := httptest.NewRecorder()
+	AuthExtract(a)(next).ServeHTTP(w, r)
+
+	if got == nil || got.ID != agentUserID {
+		t.Fatalf("client header must win; got %+v", got)
 	}
 }
 

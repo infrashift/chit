@@ -1,9 +1,11 @@
 package bridge
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,12 +19,14 @@ import (
 )
 
 const (
-	testAgentID    = "agent-user-1"
-	testKratosID   = "kratos-agent-1"
-	testChannelID  = "chan-1"
-	testOtherUser  = "human-user-1"
-	fakeSessionID  = "11111111-2222-3333-4444-555555555555"
-	fakeSessionID2 = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	testAgentID       = "agent-user-1"
+	testAgentUsername = "chit-agent"
+	testKratosID      = "kratos-agent-1"
+	testChannelID     = "chan-1"
+	testOtherUser     = "human-user-1"
+	testAgentID2      = "agent-user-2"
+	fakeSessionID     = "11111111-2222-3333-4444-555555555555"
+	fakeSessionID2    = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 )
 
 // writeFakeClaude creates an executable script that records its argv (one per
@@ -59,13 +63,15 @@ func fakeResultJSON(sessionID string) string {
 	}`, sessionID)
 }
 
-// fakeChitd is a minimal chitd stand-in: /users/me, POST /posts (recorded),
-// and GET /posts/{id}/thread.
+// fakeChitd is a minimal chitd stand-in: /users/me, GET /users/{id},
+// POST /posts (recorded), and GET /posts/{id}/thread.
 type fakeChitd struct {
-	mu       sync.Mutex
-	posts    []*model.Post
-	thread   []*model.Post
-	lastAuth string
+	mu           sync.Mutex
+	posts        []*model.Post
+	thread       []*model.Post
+	users        map[string]*model.User // user ID → user; absent → 404
+	lastAuth     string
+	getUserCalls int
 }
 
 func (f *fakeChitd) server(t *testing.T) *httptest.Server {
@@ -78,9 +84,20 @@ func (f *fakeChitd) server(t *testing.T) *httptest.Server {
 		_ = json.NewEncoder(w).Encode(&model.User{
 			ID:        testAgentID,
 			KratosID:  testKratosID,
-			Username:  "chit-agent",
+			Username:  testAgentUsername,
 			ActorType: model.ActorTypeAgent,
 		})
+	})
+	mux.HandleFunc("GET /api/v1/users/{id}", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		f.getUserCalls++
+		user, ok := f.users[r.PathValue("id")]
+		f.mu.Unlock()
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(user)
 	})
 	mux.HandleFunc("POST /api/v1/posts", func(w http.ResponseWriter, r *http.Request) {
 		var post model.Post
@@ -112,6 +129,19 @@ func (f *fakeChitd) createdPosts() []*model.Post {
 	out := make([]*model.Post, len(f.posts))
 	copy(out, f.posts)
 	return out
+}
+
+func (f *fakeChitd) userLookups() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.getUserCalls
+}
+
+// humanUsers is the default user table: one ordinary human author.
+func humanUsers() map[string]*model.User {
+	return map[string]*model.User{
+		testOtherUser: {ID: testOtherUser, Username: "alice", ActorType: model.ActorTypeUser},
+	}
 }
 
 func testConfig(t *testing.T, serverURL, claudeBin string) *Config {
@@ -193,6 +223,40 @@ func TestClaudeRunner_NewSessionAndResumeArgv(t *testing.T) {
 	}
 }
 
+func TestClaudeRunner_ModelFlag(t *testing.T) {
+	dir := t.TempDir()
+	argvFile := filepath.Join(dir, "argv")
+	bin := writeFakeClaude(t, dir, argvFile, fakeResultJSON(fakeSessionID), 0)
+
+	// Configured model is passed through as --model <id>.
+	cfg := testConfig(t, "http://unused", bin)
+	cfg.Model = "claude-fable-5"
+	if _, err := NewClaudeRunner(cfg).Run(context.Background(), "hi", ""); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	argv, _ := os.ReadFile(argvFile)
+	lines := strings.Split(strings.TrimSpace(string(argv)), "\n")
+	found := false
+	for i, l := range lines {
+		if l == "--model" && i+1 < len(lines) && lines[i+1] == "claude-fable-5" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected --model claude-fable-5 in argv:\n%s", argv)
+	}
+
+	// Unset model omits the flag entirely, leaving the CLI default in place.
+	cfg.Model = ""
+	if _, err := NewClaudeRunner(cfg).Run(context.Background(), "hi", ""); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	argv, _ = os.ReadFile(argvFile)
+	if strings.Contains(string(argv), "--model") {
+		t.Errorf("empty model must not pass --model; argv:\n%s", argv)
+	}
+}
+
 func TestClaudeRunner_FailureIncludesStderr(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "claude")
@@ -231,7 +295,7 @@ func TestClaudeRunner_Footer(t *testing.T) {
 
 // ─── Event filtering ─────────────────────────────────────────────
 
-func TestShouldHandle(t *testing.T) {
+func TestShouldEnqueue(t *testing.T) {
 	cfg := testConfig(t, "http://unused", "claude")
 	b := New(cfg)
 	b.agentUserID = testAgentID
@@ -248,8 +312,8 @@ func TestShouldHandle(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := b.shouldHandle(tc.post); got != tc.want {
-				t.Errorf("shouldHandle = %v, want %v", got, tc.want)
+			if got := b.shouldEnqueue(tc.post); got != tc.want {
+				t.Errorf("shouldEnqueue = %v, want %v", got, tc.want)
 			}
 		})
 	}
@@ -261,21 +325,187 @@ func TestShouldHandle(t *testing.T) {
 		b.agentUserID = testAgentID
 
 		without := &model.Post{ChannelID: testChannelID, UserID: testOtherUser}
-		if b.shouldHandle(without) {
+		if b.shouldEnqueue(without) {
 			t.Error("post without mention should be ignored when RequireMention")
 		}
 		with := &model.Post{ChannelID: testChannelID, UserID: testOtherUser,
 			Props: map[string]any{"mentions": []any{testAgentID}}}
-		if !b.shouldHandle(with) {
+		if !b.shouldEnqueue(with) {
 			t.Error("post mentioning the agent should be handled")
 		}
 	})
 }
 
+// syncBuffer is a concurrency-safe io.Writer for capturing slog output.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
+}
+
+// Membership in a channel the bridge does not serve is not under the
+// operator's control (open-channel auto-add, DMs, any teammate inviting the
+// agent), so those posts are dropped — but reported once per channel so the
+// operator can see the agent was pulled somewhere unexpected.
+func TestBridge_WarnsOncePerOffAllowlistChannel(t *testing.T) {
+	var logs syncBuffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	b := New(testConfig(t, "http://unused", "claude"))
+	b.agentUserID = testAgentID
+
+	// Repeated posts from one unserved channel warn exactly once.
+	stray := &model.Post{ChannelID: "stray-chan", UserID: testOtherUser}
+	for range 3 {
+		if b.shouldEnqueue(stray) {
+			t.Fatal("post from an unserved channel must be dropped")
+		}
+	}
+	// A second unserved channel gets its own warning.
+	b.shouldEnqueue(&model.Post{ChannelID: "dm-chan", UserID: testOtherUser})
+	// The configured channel never warns.
+	if !b.shouldEnqueue(&model.Post{ChannelID: testChannelID, UserID: testOtherUser}) {
+		t.Fatal("post in the configured channel must be handled")
+	}
+
+	out := logs.String()
+	if n := strings.Count(out, "stray-chan"); n != 1 {
+		t.Errorf("want exactly 1 warning for stray-chan, got %d:\n%s", n, out)
+	}
+	if n := strings.Count(out, "dm-chan"); n != 1 {
+		t.Errorf("want exactly 1 warning for dm-chan, got %d:\n%s", n, out)
+	}
+	if strings.Contains(out, testChannelID) {
+		t.Errorf("configured channel must not warn:\n%s", out)
+	}
+}
+
+// ─── Multi-agent gating ──────────────────────────────────────────
+
+func TestShouldRun(t *testing.T) {
+	tests := []struct {
+		name          string
+		authorID      string
+		replyToAgents bool
+		maxHops       int
+		content       string
+		props         map[string]any
+		want          bool
+	}{
+		{name: "human author always runs", authorID: testOtherUser, want: true},
+		{name: "agent author dropped by default", authorID: testAgentID2, want: false},
+		{name: "bot author dropped by default", authorID: "bot-user-1", want: false},
+		{name: "agent author without mention", authorID: testAgentID2,
+			replyToAgents: true, maxHops: 2, content: "done, shipping it", want: false},
+		{name: "agent @all is not a direct mention", authorID: testAgentID2,
+			replyToAgents: true, maxHops: 2, content: "@all ship it", want: false},
+		{name: "agent naming this agent runs", authorID: testAgentID2,
+			replyToAgents: true, maxHops: 2, content: "@chit-agent thoughts?", want: true},
+		{name: "hop cap reached", authorID: testAgentID2,
+			replyToAgents: true, maxHops: 2, content: "@chit-agent again?",
+			props: map[string]any{hopsProp: float64(2)}, want: false},
+		{name: "under hop cap", authorID: testAgentID2,
+			replyToAgents: true, maxHops: 2, content: "@chit-agent again?",
+			props: map[string]any{hopsProp: float64(1)}, want: true},
+		{name: "unresolvable author treated as human", authorID: "ghost-user",
+			content: "hello", want: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			chitd := &fakeChitd{users: map[string]*model.User{
+				testOtherUser: {ID: testOtherUser, Username: "alice", ActorType: model.ActorTypeUser},
+				testAgentID2:  {ID: testAgentID2, Username: "other-agent", ActorType: model.ActorTypeAgent},
+				"bot-user-1":  {ID: "bot-user-1", Username: "helper-bot", ActorType: model.ActorTypeBot},
+			}}
+			srv := chitd.server(t)
+
+			cfg := testConfig(t, srv.URL, "claude")
+			cfg.ReplyToAgents = tc.replyToAgents
+			cfg.MaxAgentHops = tc.maxHops
+			b := New(cfg)
+			b.agentUserID = testAgentID
+			b.agentUsername = testAgentUsername
+
+			post := &model.Post{ID: "p-1", ChannelID: testChannelID,
+				UserID: tc.authorID, Content: tc.content, Props: tc.props}
+			got, _ := b.shouldRun(context.Background(), post)
+			if got != tc.want {
+				t.Errorf("shouldRun = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestActorTypeCacheIsSingleFetch(t *testing.T) {
+	chitd := &fakeChitd{users: humanUsers()}
+	srv := chitd.server(t)
+
+	b := New(testConfig(t, srv.URL, "claude"))
+	b.agentUserID = testAgentID
+	b.agentUsername = testAgentUsername
+
+	ctx := context.Background()
+	for range 3 {
+		if got := b.actorType(ctx, testOtherUser); got != model.ActorTypeUser {
+			t.Fatalf("actorType = %q, want %q", got, model.ActorTypeUser)
+		}
+	}
+	if n := chitd.userLookups(); n != 1 {
+		t.Errorf("resolved author should be fetched once, got %d lookups", n)
+	}
+
+	// Failures are cached too, so an unknown author is not re-fetched forever.
+	for range 3 {
+		if got := b.actorType(ctx, "ghost-user"); got != "" {
+			t.Fatalf("failed lookup should yield %q, got %q", "", got)
+		}
+	}
+	if n := chitd.userLookups(); n != 2 {
+		t.Errorf("failed lookup should be negative-cached; got %d total lookups, want 2", n)
+	}
+}
+
+func TestMentionsUsernameDirectly(t *testing.T) {
+	tests := []struct {
+		content string
+		want    bool
+	}{
+		{"@chit-agent please review", true},
+		{"hey @chit-agent, thoughts?", true},
+		{"@CHIT-AGENT shouting", true},
+		{"@all ship it", false},
+		{"@channel heads up", false},
+		{"@chit-agent-two is someone else", false},
+		{"no mention at all", false},
+		{"email chit-agent@example.com is not a mention", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.content, func(t *testing.T) {
+			if got := mentionsUsernameDirectly(tc.content, testAgentUsername); got != tc.want {
+				t.Errorf("mentionsUsernameDirectly(%q) = %v, want %v", tc.content, got, tc.want)
+			}
+		})
+	}
+}
+
 // ─── End-to-end through handleEvent ──────────────────────────────
 
 func TestBridge_PostTriggersRunAndThreadedReply(t *testing.T) {
-	chitd := &fakeChitd{}
+	chitd := &fakeChitd{users: humanUsers()}
 	srv := chitd.server(t)
 
 	dir := t.TempDir()
@@ -348,8 +578,82 @@ func TestBridge_SessionRecoveryFromThreadProps(t *testing.T) {
 	}
 }
 
+func TestBridge_ReplyCarriesHopCount(t *testing.T) {
+	users := humanUsers()
+	users[testAgentID2] = &model.User{ID: testAgentID2, Username: "other-agent", ActorType: model.ActorTypeAgent}
+	chitd := &fakeChitd{users: users}
+	srv := chitd.server(t)
+
+	dir := t.TempDir()
+	argvFile := filepath.Join(dir, "argv")
+	bin := writeFakeClaude(t, dir, argvFile, fakeResultJSON(fakeSessionID), 0)
+
+	cfg := testConfig(t, srv.URL, bin)
+	cfg.ReplyToAgents = true
+	b := New(cfg)
+	b.agentUserID = testAgentID
+	b.agentUsername = testAgentUsername
+
+	ctx := context.Background()
+
+	// A human turn resets the chain: the reply starts at hop 0.
+	b.handleEvent(ctx, postedEvent(&model.Post{ID: "root-1", ChannelID: testChannelID,
+		UserID: testOtherUser, Content: "plan service X"}))
+	posts := waitForPosts(t, chitd, 1)
+	// Props round-trip through JSON, so read via agentHops rather than
+	// comparing the any-typed float64 the decoder produces.
+	if got := agentHops(posts[0]); got != 0 {
+		t.Errorf("reply to a human: hops = %d, want 0", got)
+	}
+
+	// An agent naming this one extends the chain to hop 1.
+	b.handleEvent(ctx, postedEvent(&model.Post{ID: "root-2", ChannelID: testChannelID,
+		UserID: testAgentID2, Content: "@chit-agent can you review?"}))
+	posts = waitForPosts(t, chitd, 2)
+	if got := agentHops(posts[1]); got != 1 {
+		t.Errorf("reply to an agent: hops = %d, want 1", got)
+	}
+
+	// At the cap the chain stops: no third post is ever created.
+	b.handleEvent(ctx, postedEvent(&model.Post{ID: "root-3", ChannelID: testChannelID,
+		UserID: testAgentID2, Content: "@chit-agent one more?",
+		Props: map[string]any{hopsProp: float64(2)}}))
+	time.Sleep(200 * time.Millisecond)
+	if n := len(chitd.createdPosts()); n != 2 {
+		t.Errorf("hop cap should suppress the reply; got %d posts, want 2", n)
+	}
+}
+
+// Two bridges serving one thread must each resume their own claude session.
+func TestBridge_TwoAgentsIndependentSessions(t *testing.T) {
+	chitd := &fakeChitd{
+		users: humanUsers(),
+		thread: []*model.Post{
+			{ID: "root-1", ChannelID: testChannelID, UserID: testOtherUser, Content: "task"},
+			{ID: "reply-a", ChannelID: testChannelID, UserID: testAgentID, RootID: "root-1",
+				Props: map[string]any{sessionProp: fakeSessionID}},
+			{ID: "reply-b", ChannelID: testChannelID, UserID: testAgentID2, RootID: "root-1",
+				Props: map[string]any{sessionProp: fakeSessionID2}},
+		},
+	}
+	srv := chitd.server(t)
+
+	agentA := New(testConfig(t, srv.URL, "claude"))
+	agentA.agentUserID = testAgentID
+	agentB := New(testConfig(t, srv.URL, "claude"))
+	agentB.agentUserID = testAgentID2
+
+	ctx := context.Background()
+	if got := agentA.lookupSession(ctx, "root-1"); got != fakeSessionID {
+		t.Errorf("agent A session: got %q, want %q", got, fakeSessionID)
+	}
+	if got := agentB.lookupSession(ctx, "root-1"); got != fakeSessionID2 {
+		t.Errorf("agent B session: got %q, want %q", got, fakeSessionID2)
+	}
+}
+
 func TestBridge_RunFailurePostsErrorReply(t *testing.T) {
-	chitd := &fakeChitd{}
+	chitd := &fakeChitd{users: humanUsers()}
 	srv := chitd.server(t)
 
 	dir := t.TempDir()

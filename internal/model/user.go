@@ -24,9 +24,13 @@ type User struct {
 	Email       string `json:"email"`
 	Roles       string `json:"roles"`
 	ActorType   string `json:"actor_type"`
-	CreateAt    int64  `json:"create_at"`
-	UpdateAt    int64  `json:"update_at"`
-	DeleteAt    int64  `json:"delete_at"`
+	// OAuthClientID links a machine actor to its Ory Hydra OAuth2 client.
+	// Empty for humans; stored as NULL rather than "" so the unique index
+	// admits any number of users without a client.
+	OAuthClientID string `json:"oauth_client_id,omitempty"`
+	CreateAt      int64  `json:"create_at"`
+	UpdateAt      int64  `json:"update_at"`
+	DeleteAt      int64  `json:"delete_at"`
 }
 
 func (u *User) IsValid() *AppError {
@@ -94,4 +98,8 @@ func (u *User) IsSystemAdmin() bool {
 
 func (u *User) Sanitize() {
 	u.Email = ""
+	// The OAuth2 client binding is a credential identifier and is of no use to
+	// API consumers; only the provisioning path (which returns the unsanitized
+	// saved user) needs to see it.
+	u.OAuthClientID = ""
 }

@@ -7,6 +7,7 @@ data:
   init-databases.sql: |
     CREATE DATABASE kratos;
     CREATE DATABASE keto;
+    CREATE DATABASE hydra;
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -131,6 +132,7 @@ data:
         - file:///etc/oathkeeper/access-rules.yml
 
     authenticators:
+      # Humans: Kratos session token in X-Session-Token.
       bearer_token:
         enabled: true
         config:
@@ -143,6 +145,17 @@ data:
             header: X-Session-Token
           forward_http_headers:
             - X-Session-Token
+
+      # Machine actors: Hydra client_credentials token in Authorization.
+      # Takes neither subject_from nor extra_from (Oathkeeper rejects them):
+      # .Subject is the introspected `sub` — the client_id for this grant —
+      # and .Extra is the response's `ext`, empty for client_credentials.
+      oauth2_introspection:
+        enabled: true
+        config:
+          introspection_url: http://localhost:4445/admin/oauth2/introspect
+          scope_strategy: exact
+
       noop:
         enabled: true
 
@@ -155,7 +168,12 @@ data:
         enabled: true
         config:
           headers:
-            X-User-Id: "{{ print .Subject }}"
+            # Exactly one carries an identity; the other is blanked so a
+            # smuggled header can never reach the backend. .Extra.identity is
+            # set only by the Kratos authenticator (extra_from "@this"),
+            # which is what distinguishes the two paths.
+            X-User-Id: '{{ if .Extra.identity }}{{ print .Subject }}{{ end }}'
+            X-Client-Id: '{{ if .Extra.identity }}{{ else }}{{ print .Subject }}{{ end }}'
       noop:
         enabled: true
 
@@ -164,19 +182,50 @@ data:
       format: json
 
   access-rules.yml: |
-    - id: "chit-api"
+    # RULES MUST BE MUTUALLY EXCLUSIVE — Oathkeeper fails a request matching
+    # two rules with 500 "Expected exactly one rule but found multiple rules".
+    # Hence the method split over one URL glob rather than per-endpoint rules.
+    #
+    # Note: search and batch-tag endpoints are POSTs despite only reading, so
+    # they require chit:write. Grant both scopes to an agent that searches.
+    - id: "chit-api-read"
+      upstream:
+        url: "http://localhost:8065"
+      match:
+        # Includes GET /api/v1/websocket, which is read-only in effect.
+        url: "http://localhost:4455/api/v1/<**>"
+        methods:
+          - GET
+      authenticators:
+        - handler: oauth2_introspection
+          config:
+            required_scope:
+              - "chit:read"
+            target_audience:
+              - "chit"
+        - handler: bearer_token
+      authorizer:
+        handler: allow
+      mutators:
+        - handler: header
+
+    - id: "chit-api-write"
       upstream:
         url: "http://localhost:8065"
       match:
         url: "http://localhost:4455/api/v1/<**>"
         methods:
-          - GET
           - POST
           - PUT
           - DELETE
       authenticators:
+        - handler: oauth2_introspection
+          config:
+            required_scope:
+              - "chit:write"
+            target_audience:
+              - "chit"
         - handler: bearer_token
-        - handler: noop
       authorizer:
         handler: allow
       mutators:
@@ -199,6 +248,49 @@ data:
         handler: allow
       mutators:
         - handler: noop
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chit-hydra-config
+data:
+  hydra.yml: |
+    version: v2.2.0
+
+    serve:
+      public:
+        port: 4444
+      admin:
+        port: 4445
+      cookies:
+        same_site_mode: Lax
+
+    urls:
+      self:
+        issuer: http://localhost:4444/
+
+    oidc:
+      subject_identifiers:
+        supported_types:
+          - public
+
+    strategies:
+      access_token: opaque
+
+    ttl:
+      # Short-lived: agents refresh transparently, so a leaked token expires
+      # quickly.
+      access_token: 1h
+
+    secrets:
+      # CHANGE FOR PRODUCTION.
+      system:
+        - hydra-system-secret-change-me
+
+    log:
+      level: info
+      format: json
+      leak_sensitive_values: false
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -285,6 +377,30 @@ spec:
           done
           echo "PostgreSQL is ready."
 
+    # The chit-postgres-init ConfigMap only runs on a *fresh* data directory,
+    # so adding a database to it does nothing on an existing chit-pgdata
+    # volume. Create any missing ones idempotently here instead, or upgrading
+    # an existing deployment fails with 'database "hydra" does not exist'.
+    - name: ensure-databases
+      image: docker.io/library/postgres:17-alpine
+      env:
+        - name: PGPASSWORD
+          value: chit
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          for db in kratos keto hydra; do
+            if psql -h localhost -U chit -d postgres -tAc \
+                 "SELECT 1 FROM pg_database WHERE datname='$db'" | grep -q 1; then
+              echo "database $db already exists"
+            else
+              echo "creating database $db"
+              createdb -h localhost -U chit "$db"
+            fi
+          done
+
     - name: migrate-kratos
       image: docker.io/oryd/kratos:v1.3
       command:
@@ -307,6 +423,18 @@ spec:
       volumeMounts:
         - name: keto-config
           mountPath: /home/ory
+
+    - name: migrate-hydra
+      image: docker.io/oryd/hydra:v2.2
+      command:
+        - hydra
+        - migrate
+        - sql
+        - --yes
+        - --read-from-env
+      env:
+        - name: DSN
+          value: postgres://chit:chit@localhost:5432/hydra?sslmode=disable
 
     - name: migrate-chit
       image: docker.io/migrate/migrate:v4.15.0
@@ -349,6 +477,22 @@ spec:
       volumeMounts:
         - name: keto-config
           mountPath: /etc/keto
+
+    - name: hydra
+      image: docker.io/oryd/hydra:v2.2
+      args:
+        - serve
+        - all
+        - --config
+        - /etc/hydra/hydra.yml
+        # Dev only: serves the public and admin APIs over plain HTTP.
+        - --dev
+      env:
+        - name: DSN
+          value: postgres://chit:chit@localhost:5432/hydra?sslmode=disable
+      volumeMounts:
+        - name: hydra-config
+          mountPath: /etc/hydra
 
     - name: oathkeeper
       image: docker.io/oryd/oathkeeper:v0.40
@@ -401,6 +545,9 @@ spec:
     - name: keto-config
       configMap:
         name: chit-keto-config
+    - name: hydra-config
+      configMap:
+        name: chit-hydra-config
     - name: zincdata
       persistentVolumeClaim:
         claimName: chit-zincdata

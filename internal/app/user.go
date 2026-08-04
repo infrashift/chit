@@ -51,17 +51,64 @@ func (a *App) ProvisionUser(ctx context.Context, kratosID string) (*model.User, 
 	return saved, nil
 }
 
+// oauthCacheKey namespaces OAuth2 client IDs away from Kratos IDs, which
+// share the one user cache.
+func oauthCacheKey(clientID string) string {
+	return "oauth:" + clientID
+}
+
 func (a *App) cacheUser(user *model.User) {
-	if a.userCache != nil && user.KratosID != "" {
+	if a.userCache == nil {
+		return
+	}
+	if user.KratosID != "" {
 		a.userCache.Set(user.KratosID, user)
+	}
+	if user.OAuthClientID != "" {
+		a.userCache.Set(oauthCacheKey(user.OAuthClientID), user)
 	}
 }
 
-// invalidateUserCache drops a user's cached auth entry after profile changes.
-func (a *App) invalidateUserCache(kratosID string) {
-	if a.userCache != nil && kratosID != "" {
-		a.userCache.Remove(kratosID)
+// invalidateUserCache drops a user's cached auth entries after profile
+// changes. A machine actor is cached under both its Kratos ID and its OAuth2
+// client ID, so both must go or the client-credentials path serves stale data
+// until the TTL expires.
+func (a *App) invalidateUserCache(user *model.User) {
+	if a.userCache == nil || user == nil {
+		return
 	}
+	if user.KratosID != "" {
+		a.userCache.Remove(user.KratosID)
+	}
+	if user.OAuthClientID != "" {
+		a.userCache.Remove(oauthCacheKey(user.OAuthClientID))
+	}
+}
+
+// ResolveOAuthClient returns the machine actor bound to an OAuth2 client ID.
+//
+// Unlike ProvisionUser there is deliberately no just-in-time creation: a
+// Kratos identity that reaches chitd has already authenticated against Kratos,
+// whereas an unrecognised OAuth2 client must be rejected. Binding a client to
+// a user is an explicit provisioning step.
+func (a *App) ResolveOAuthClient(ctx context.Context, clientID string) (*model.User, error) {
+	if clientID == "" {
+		return nil, model.NewUnauthorizedError("App.ResolveOAuthClient", "empty client id")
+	}
+	if a.userCache != nil {
+		if user, ok := a.userCache.Get(oauthCacheKey(clientID)); ok {
+			return user, nil
+		}
+	}
+
+	user, err := a.Store.User().GetByOAuthClientID(ctx, clientID)
+	if err != nil {
+		return nil, model.NewUnauthorizedError("App.ResolveOAuthClient",
+			"oauth client is not bound to a user")
+	}
+
+	a.cacheUser(user)
+	return user, nil
 }
 
 // GetUser retrieves a user by ID.
@@ -80,7 +127,7 @@ func (a *App) UpdateUser(ctx context.Context, user *model.User) (*model.User, er
 	if err != nil {
 		return nil, err
 	}
-	a.invalidateUserCache(updated.KratosID)
+	a.invalidateUserCache(updated)
 	return updated, nil
 }
 

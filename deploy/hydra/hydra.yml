@@ -1,0 +1,52 @@
+version: v2.2.0
+
+# Ory Hydra issues the OAuth2 access tokens that machine actors (AI agents,
+# bots) present to Oathkeeper. Humans continue to authenticate with Kratos
+# session tokens; the two paths meet at Oathkeeper, which introspects one or
+# validates the other and forwards a single identity header to chitd.
+
+serve:
+  public:
+    port: 4444
+  admin:
+    port: 4445
+  cookies:
+    same_site_mode: Lax
+
+urls:
+  self:
+    issuer: http://localhost:4444/
+  # No consent/login UI is wired up: the client_credentials grant does not use
+  # them. Add them only if you later enable interactive OAuth2 flows.
+
+oidc:
+  subject_identifiers:
+    supported_types:
+      - public
+
+strategies:
+  access_token: opaque
+
+oauth2:
+  # Refuse tokens whose scope was never granted to the client, rather than
+  # silently narrowing them.
+  exclude_not_before_claim: false
+  grant:
+    jwt:
+      max_ttl: 720h
+
+ttl:
+  # Short-lived access tokens: agents refresh transparently through the
+  # client_credentials token source, so a leaked token expires quickly.
+  access_token: 1h
+
+secrets:
+  # CHANGE FOR PRODUCTION. Rotating the first entry re-encrypts at rest;
+  # keep prior values in the list so existing tokens stay decryptable.
+  system:
+    - hydra-system-secret-change-me
+
+log:
+  level: info
+  format: json
+  leak_sensitive_values: false

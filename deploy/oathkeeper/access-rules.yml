@@ -1,21 +1,66 @@
-- id: "chit-api"
+# Per-application privilege lives here. A machine actor's token must carry
+# audience "chit" plus the scope matching the kind of request, so a token
+# minted for another application cannot be replayed against chit even though
+# both sit behind the same gateway.
+#
+# RULES MUST BE MUTUALLY EXCLUSIVE. If a request matches two rules, Oathkeeper
+# fails it with 500 "Expected exactly one rule but found multiple rules" — it
+# has no rule priority or first-match semantics, and the clash only surfaces at
+# request time, never at startup. That is why the split below is by HTTP method
+# over one URL glob, rather than per-endpoint rules layered over a catch-all.
+#
+# Consequence worth knowing: chit's search and batch-tag endpoints are POSTs
+# (POST /posts/search, /teams/{id}/posts/search, /channels/{id}/posts/search,
+# /tags/posts) even though they only read. They therefore fall under
+# chit:write. A strictly read-only token can list and fetch but cannot search;
+# grant both scopes to an agent that needs search.
+
+- id: "chit-api-read"
   upstream:
     url: "http://localhost:8065"
   match:
+    # Also covers GET /api/v1/websocket: the upgrade is read-only in effect,
+    # since the hub delivers events and never accepts them.
     url: "http://localhost:4455/api/v1/<**>"
     methods:
       - GET
-      - POST
-      - PUT
-      - DELETE
   authenticators:
+    - handler: oauth2_introspection
+      config:
+        required_scope:
+          - "chit:read"
+        target_audience:
+          - "chit"
     - handler: bearer_token
-    - handler: noop
   authorizer:
     handler: allow
   mutators:
     - handler: header
 
+- id: "chit-api-write"
+  upstream:
+    url: "http://localhost:8065"
+  match:
+    url: "http://localhost:4455/api/v1/<**>"
+    methods:
+      - POST
+      - PUT
+      - DELETE
+  authenticators:
+    - handler: oauth2_introspection
+      config:
+        required_scope:
+          - "chit:write"
+        target_audience:
+          - "chit"
+    - handler: bearer_token
+  authorizer:
+    handler: allow
+  mutators:
+    - handler: header
+
+# Kratos self-service (login, registration, settings) must stay anonymous —
+# this is where a human obtains the session token used above.
 - id: "kratos-public"
   upstream:
     url: "http://localhost:4433"

@@ -50,6 +50,9 @@ func (r *ClaudeRunner) Run(ctx context.Context, prompt, sessionID string) (*Clau
 		"--output-format", "json",
 		"--permission-mode", r.cfg.PermissionMode,
 	}
+	if r.cfg.Model != "" {
+		args = append(args, "--model", r.cfg.Model)
+	}
 	if r.cfg.AllowedTools != "" {
 		args = append(args, "--allowedTools", r.cfg.AllowedTools)
 	}

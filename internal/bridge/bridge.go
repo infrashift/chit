@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
+	"strings"
 	"sync"
 
 	"github.com/infrashift/chit/internal/chitclient"
@@ -13,9 +15,23 @@ import (
 
 const sessionProp = "claude_session_id"
 
+// hopsProp counts consecutive agent→agent turns in a thread. A post by a human
+// carries no such prop (hops 0), so every human turn resets the chain; each
+// agent reply to an agent increments it. Capped by Config.MaxAgentHops, this
+// guarantees an agent↔agent exchange terminates. It is a cooperation
+// mechanism between trusted bridges, not a security boundary — any client can
+// write the prop.
+const hopsProp = "claude_agent_hops"
+
 // perThreadQueueSize bounds how many pending messages a single thread can
 // accumulate while a claude run is in progress.
 const perThreadQueueSize = 16
+
+// mentionRe matches @username patterns at word boundaries. Copied verbatim
+// from internal/app/mention.go, which is the source of truth — the bridge
+// cannot import internal/app without pulling the store (and pgx) in and
+// failing `make check-deps`.
+var mentionRe = regexp.MustCompile(`(?i)(?:^|[^a-zA-Z0-9])@([a-z0-9][a-z0-9._-]{0,62}[a-z0-9])`)
 
 // Bridge wires Chit posts to headless Claude Code runs.
 type Bridge struct {
@@ -23,13 +39,16 @@ type Bridge struct {
 	client *chitclient.Client
 	runner *ClaudeRunner
 
-	agentUserID string
-	channels    map[string]struct{}
+	agentUserID   string
+	agentUsername string
+	channels      map[string]struct{}
 
-	mu       sync.Mutex
-	sessions map[string]string           // thread root ID → claude session ID
-	queues   map[string]chan *model.Post // thread root ID → pending posts
-	wg       sync.WaitGroup
+	mu         sync.Mutex
+	sessions   map[string]string           // thread root ID → claude session ID
+	queues     map[string]chan *model.Post // thread root ID → pending posts
+	actorTypes map[string]string           // author user ID → actor_type ("" = lookup failed)
+	offlist    map[string]struct{}         // channels already warned about
+	wg         sync.WaitGroup
 }
 
 // New creates a Bridge from configuration.
@@ -38,13 +57,19 @@ func New(cfg *Config) *Bridge {
 	for _, id := range cfg.Channels {
 		channels[id] = struct{}{}
 	}
+	client := chitclient.New(cfg.ServerURL, cfg.AgentKratosID, cfg.ProxySecret)
+	if cfg.UseOAuth() {
+		client = chitclient.NewOAuth(cfg.ServerURL, cfg.OAuth())
+	}
 	return &Bridge{
-		cfg:      cfg,
-		client:   chitclient.New(cfg.ServerURL, cfg.AgentKratosID, cfg.ProxySecret),
-		runner:   NewClaudeRunner(cfg),
-		channels: channels,
-		sessions: make(map[string]string),
-		queues:   make(map[string]chan *model.Post),
+		cfg:        cfg,
+		client:     client,
+		runner:     NewClaudeRunner(cfg),
+		channels:   channels,
+		sessions:   make(map[string]string),
+		queues:     make(map[string]chan *model.Post),
+		actorTypes: make(map[string]string),
+		offlist:    make(map[string]struct{}),
 	}
 }
 
@@ -56,14 +81,22 @@ func (b *Bridge) Run(ctx context.Context) error {
 		return fmt.Errorf("resolve agent identity: %w", err)
 	}
 	b.agentUserID = me.ID
+	b.agentUsername = me.Username
+	b.mu.Lock()
+	b.actorTypes[me.ID] = model.ActorTypeAgent
+	b.mu.Unlock()
 	if me.ActorType != model.ActorTypeAgent {
-		slog.Warn("agent user is not marked actor_type=agent",
+		// Not fatal, but worth shouting about: other bridges sharing this
+		// channel resolve actor_type to decide whether to answer, so a
+		// mis-typed agent user defeats the loop guard for all of them.
+		slog.Warn("agent user is not marked actor_type=agent; other agents will treat its posts as human",
 			"user_id", me.ID, "actor_type", me.ActorType)
 	}
 	slog.Info("bridge started",
 		"agent", me.Username, "agent_user_id", me.ID,
 		"channels", b.cfg.Channels, "workdir", b.cfg.WorkDir,
-		"require_mention", b.cfg.RequireMention)
+		"model", b.cfg.Model, "require_mention", b.cfg.RequireMention,
+		"reply_to_agents", b.cfg.ReplyToAgents, "max_agent_hops", b.cfg.MaxAgentHops)
 
 	b.client.Listen(ctx, func(event *model.WebSocketEvent) {
 		b.handleEvent(ctx, event)
@@ -82,7 +115,7 @@ func (b *Bridge) handleEvent(ctx context.Context, event *model.WebSocketEvent) {
 	if post == nil {
 		return
 	}
-	if !b.shouldHandle(post) {
+	if !b.shouldEnqueue(post) {
 		return
 	}
 
@@ -108,11 +141,14 @@ func (b *Bridge) handleEvent(ctx context.Context, event *model.WebSocketEvent) {
 	}
 }
 
-// shouldHandle applies the event filters: configured channel, not authored by
-// the agent itself, not an ephemeral command response, and (optionally) the
-// agent must be mentioned.
-func (b *Bridge) shouldHandle(post *model.Post) bool {
+// shouldEnqueue applies the cheap event filters: configured channel, not
+// authored by the agent itself, not an ephemeral command response, and
+// (optionally) the agent must be mentioned. It runs inline on the WebSocket
+// read loop, so it must never make a network call — anything needing a lookup
+// belongs in shouldRun.
+func (b *Bridge) shouldEnqueue(post *model.Post) bool {
 	if _, ok := b.channels[post.ChannelID]; !ok {
+		b.warnOffAllowlist(post.ChannelID)
 		return false
 	}
 	if post.UserID == b.agentUserID {
@@ -125,6 +161,123 @@ func (b *Bridge) shouldHandle(post *model.Post) bool {
 		return false
 	}
 	return true
+}
+
+// warnOffAllowlist reports, once per channel, that the agent is receiving
+// posts from a channel outside CHIT_CLAUDE_CHANNELS.
+//
+// The event was already dropped — the allowlist is the bridge's access-control
+// boundary and it held. The warning exists because reaching this point means
+// the agent user was made a member of a channel it does not serve, and that is
+// not under the operator's control: any team member can add the agent to an
+// open channel, creating an open channel auto-adds every team member, and
+// anyone can open a DM or group channel with it. Silently dropping those posts
+// would hide the fact that the agent was pulled somewhere unexpected.
+func (b *Bridge) warnOffAllowlist(channelID string) {
+	b.mu.Lock()
+	_, seen := b.offlist[channelID]
+	if !seen {
+		b.offlist[channelID] = struct{}{}
+	}
+	b.mu.Unlock()
+	if seen {
+		return
+	}
+	slog.Warn("ignoring post from a channel outside CHIT_CLAUDE_CHANNELS; this agent is a member of a channel it does not serve",
+		"channel_id", channelID, "agent_user_id", b.agentUserID)
+}
+
+// shouldRun decides whether a queued post actually warrants a claude run, and
+// returns the author's actor_type alongside the verdict. It may call the REST
+// API, so it runs on the per-thread worker rather than the WebSocket read
+// loop. Posts by humans (and by authors whose type could not be resolved) are
+// always run; posts by other agents or bots are dropped unless ReplyToAgents
+// is on, this agent is named directly, and the thread is under the hop cap.
+func (b *Bridge) shouldRun(ctx context.Context, post *model.Post) (bool, string) {
+	actor := b.actorType(ctx, post.UserID)
+	if actor != model.ActorTypeAgent && actor != model.ActorTypeBot {
+		return true, actor
+	}
+	if !b.cfg.ReplyToAgents {
+		return false, actor
+	}
+	if hops := agentHops(post); hops >= b.cfg.MaxAgentHops {
+		slog.Info("agent hop limit reached, not replying",
+			"post_id", post.ID, "hops", hops, "max", b.cfg.MaxAgentHops)
+		return false, actor
+	}
+	// Deliberately not post.Props["mentions"]: the server merges @all/@channel
+	// expansion into that list (internal/app/mention.go), so it cannot tell a
+	// broadcast from a direct mention. Agent-to-agent requires being named.
+	if !mentionsUsernameDirectly(post.Content, b.agentUsername) {
+		return false, actor
+	}
+	return true, actor
+}
+
+// actorType returns the author's actor_type, caching every lookup for the
+// process lifetime. Failures are cached as "" so an unreachable or deleted
+// user is not re-fetched on every post; "" is treated as "not an agent",
+// failing open toward humans — silently ignoring a person is worse than one
+// extra agent turn, which the hop cap bounds anyway.
+func (b *Bridge) actorType(ctx context.Context, userID string) string {
+	b.mu.Lock()
+	actor, ok := b.actorTypes[userID]
+	b.mu.Unlock()
+	if ok {
+		return actor
+	}
+
+	user, err := b.client.GetUser(ctx, userID)
+	if err != nil {
+		slog.Warn("failed to resolve author actor_type; treating as human",
+			"user_id", userID, "error", err)
+		actor = ""
+	} else {
+		actor = user.ActorType
+	}
+
+	b.mu.Lock()
+	b.actorTypes[userID] = actor
+	b.mu.Unlock()
+	return actor
+}
+
+// mentionsUsernameDirectly reports whether content names username with an
+// @mention. @all and @channel never count: a broadcast is not an instruction
+// to a specific agent, and treating it as one would let one @all restart an
+// agent-to-agent exchange.
+func mentionsUsernameDirectly(content, username string) bool {
+	if username == "" {
+		return false
+	}
+	want := strings.ToLower(username)
+	if want == "all" || want == "channel" {
+		return false
+	}
+	for _, m := range mentionRe.FindAllStringSubmatch(content, -1) {
+		if strings.ToLower(m[1]) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// agentHops reads the agent→agent hop count carried in a post's props. Props
+// arriving over the wire are JSON, so the value is a float64; the int case
+// covers props this process built in memory.
+func agentHops(post *model.Post) int {
+	if post.Props == nil {
+		return 0
+	}
+	switch v := post.Props[hopsProp].(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	default:
+		return 0
+	}
 }
 
 // threadWorker serializes claude runs for one thread: one process per session
@@ -142,6 +295,21 @@ func (b *Bridge) threadWorker(ctx context.Context, root string, queue chan *mode
 }
 
 func (b *Bridge) processPost(ctx context.Context, root string, post *model.Post) {
+	run, authorActor := b.shouldRun(ctx, post)
+	if !run {
+		slog.Debug("post filtered out before running claude",
+			"post_id", post.ID, "author_actor_type", authorActor)
+		return
+	}
+
+	// Replying to a human resets the chain; replying to an agent extends it.
+	// Error replies carry the count too — they echo a stderr tail, which can
+	// contain an @mention that would otherwise restart an exchange at hop 0.
+	hops := 0
+	if authorActor == model.ActorTypeAgent || authorActor == model.ActorTypeBot {
+		hops = agentHops(post) + 1
+	}
+
 	sessionID := b.lookupSession(ctx, root)
 
 	slog.Info("running claude", "root_id", root, "post_id", post.ID,
@@ -151,7 +319,8 @@ func (b *Bridge) processPost(ctx context.Context, root string, post *model.Post)
 	if err != nil {
 		slog.Error("claude run failed", "root_id", root, "error", err)
 		b.reply(ctx, post.ChannelID, root,
-			fmt.Sprintf("⚠️ Claude run failed: %v", err), nil)
+			fmt.Sprintf("⚠️ Claude run failed: %v", err),
+			map[string]any{hopsProp: hops})
 		return
 	}
 
@@ -165,6 +334,7 @@ func (b *Bridge) processPost(ctx context.Context, root string, post *model.Post)
 	}
 	props := map[string]any{
 		sessionProp: result.SessionID,
+		hopsProp:    hops,
 		"claude_usage": map[string]any{
 			"input_tokens":            result.Usage.InputTokens,
 			"output_tokens":           result.Usage.OutputTokens,

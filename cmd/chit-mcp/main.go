@@ -8,7 +8,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/infrashift/chit/internal/chitclient"
 	"github.com/infrashift/chit/internal/mcp"
 	"github.com/infrashift/chit/internal/model"
 )
@@ -34,7 +33,7 @@ func run() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	client := chitclient.New(cfg.ServerURL, cfg.AgentKratosID, cfg.ProxySecret)
+	client := cfg.NewClient()
 
 	// Resolve the agent's identity through chitd (provisioning it on first
 	// contact); warn when it is not marked as an agent actor so audit logs
