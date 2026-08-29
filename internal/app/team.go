@@ -50,8 +50,18 @@ func (a *App) GetTeamsForUser(ctx context.Context, userID string) ([]*model.Team
 	return a.Store.Team().GetTeamsForUser(ctx, userID)
 }
 
-// AddTeamMember adds a user to a team.
-func (a *App) AddTeamMember(ctx context.Context, teamID, userID string) (*model.TeamMember, error) {
+// AddTeamMember adds userID to a team on actorID's behalf.
+//
+// The actor must already be a member, mirroring AddChannelMember. Until this
+// check existed the handler took no actor at all, so ANY authenticated caller
+// could add ANYONE to ANY team — and team membership is what
+// AddChannelMember consults to authorize joining an open channel, so this was
+// also the way into every open channel on that team.
+func (a *App) AddTeamMember(ctx context.Context, teamID, userID, actorID string) (*model.TeamMember, error) {
+	if err := a.requireTeamMember(ctx, teamID, actorID); err != nil {
+		return nil, err
+	}
+
 	member := &model.TeamMember{
 		TeamID: teamID,
 		UserID: userID,
@@ -64,8 +74,21 @@ func (a *App) AddTeamMember(ctx context.Context, teamID, userID string) (*model.
 	return saved, nil
 }
 
-// RemoveTeamMember removes a user from a team.
-func (a *App) RemoveTeamMember(ctx context.Context, teamID, userID string) error {
+// RemoveTeamMember removes a user from a team on actorID's behalf.
+//
+// Leaving is always allowed; removing SOMEBODY ELSE requires system_admin. The
+// same split RemoveChannelMember makes, and for the same reason: a member who
+// can evict their peers is an admin in everything but name.
+func (a *App) RemoveTeamMember(ctx context.Context, teamID, userID, actorID string) error {
+	if err := a.requireTeamMember(ctx, teamID, actorID); err != nil {
+		return err
+	}
+	if userID != actorID {
+		if err := a.requireSystemAdmin(ctx, actorID, "App.RemoveTeamMember"); err != nil {
+			return err
+		}
+	}
+
 	if err := a.Store.Team().RemoveMember(ctx, teamID, userID); err != nil {
 		return err
 	}

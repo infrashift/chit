@@ -168,6 +168,10 @@ func TestCreateUser(t *testing.T) {
 	body := `{"id":"` + model.NewID() + `","kratos_id":"new-kratos","username":"newuser","display_name":"New","email":"new@test.com","roles":"system_user","create_at":1000,"update_at":1000}`
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/users", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
+	// Provisioning a user is an ADMIN action. This test used to send the
+	// request unauthenticated and assert 201, which made a passing suite out of
+	// the escalation path TestAuthz_CreateUser* now covers.
+	r = authedRequest(r, adminUser())
 
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, r)
@@ -183,6 +187,9 @@ func TestCreateUser_InvalidBody(t *testing.T) {
 
 	handler := createUser(a)
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/users", strings.NewReader("{invalid"))
+	// Authenticated as an admin so this still exercises the 400 body-parse
+	// path rather than stopping at the 403 that now guards the endpoint.
+	r = authedRequest(r, adminUser())
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, r)

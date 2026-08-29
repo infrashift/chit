@@ -172,6 +172,8 @@ func TestAddTeamMember(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/teams/"+testTeamID+"/members", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	r = withChiParam(r, "id", testTeamID)
+	// testUser is a member of testTeamID, which is what AddTeamMember requires.
+	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, r)
@@ -188,6 +190,8 @@ func TestRemoveTeamMember(t *testing.T) {
 	handler := removeTeamMember(a)
 	r := httptest.NewRequest(http.MethodDelete, "/", nil)
 	r = withChiParams(r, map[string]string{"id": testTeamID, "user_id": extraUserID})
+	// Removing SOMEBODY ELSE requires system_admin, so the actor is dana.
+	r = authedRequest(r, adminUser())
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, r)

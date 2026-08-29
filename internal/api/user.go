@@ -12,15 +12,21 @@ import (
 
 func createUser(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		actor := ContextGetUser(r)
+		if actor == nil {
+			WriteError(w, model.NewUnauthorizedError("createUser", "not authenticated"))
+			return
+		}
+
 		var user model.User
 		if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
 			WriteError(w, model.NewBadRequestError("createUser", "invalid request body"))
 			return
 		}
 
-		saved, err := a.Store.User().Save(r.Context(), &user)
+		saved, err := a.CreateUser(r.Context(), &user, actor.ID)
 		if err != nil {
-			WriteError(w, model.NewInternalError("createUser", err))
+			WriteAppError(w, "createUser", err)
 			return
 		}
 

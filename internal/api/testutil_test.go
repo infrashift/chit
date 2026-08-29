@@ -28,6 +28,7 @@ const (
 	testTagID     = "019421a0-0000-7000-8000-000000000040"
 	extraUserID   = "019421a0-0000-7000-8000-000000000002"
 	thirdUserID   = "019421a0-0000-7000-8000-000000000003"
+	adminUserID   = "019421a0-0000-7000-8000-000000000004"
 )
 
 // ─── noopPubSub ──────────────────────────────────────────────────
@@ -850,6 +851,19 @@ func setupTestApp(t *testing.T) (*app.App, *mockStore, func()) {
 		CreateAt:    1000,
 		UpdateAt:    1000,
 	})
+	// The only seeded system_admin. Roles are a space-separated string, and
+	// IsSystemAdmin splits on it, so "system_user system_admin" is what a real
+	// admin row looks like rather than the bare role on its own.
+	ms.user.seed(&model.User{
+		ID:          adminUserID,
+		KratosID:    "kratos-004",
+		Username:    "dana",
+		DisplayName: "Dana Admin",
+		Email:       "dana@example.com",
+		Roles:       "system_user system_admin",
+		CreateAt:    1000,
+		UpdateAt:    1000,
+	})
 
 	ms.team.seed(&model.Team{
 		ID:          testTeamID,
@@ -867,6 +881,10 @@ func setupTestApp(t *testing.T) (*app.App, *mockStore, func()) {
 	ms.team.seedMember(&model.TeamMember{
 		TeamID: testTeamID,
 		UserID: extraUserID,
+	})
+	ms.team.seedMember(&model.TeamMember{
+		TeamID: testTeamID,
+		UserID: adminUserID,
 	})
 
 	ms.channel.seed(&model.Channel{

@@ -51,6 +51,38 @@ func (a *App) ProvisionUser(ctx context.Context, kratosID string) (*model.User, 
 	return saved, nil
 }
 
+// CreateUser provisions a user on an administrator's behalf.
+//
+// ADMIN ONLY, and it did not used to be anything at all: the handler decoded a
+// model.User straight off the wire and saved it with no check of any kind. Since
+// the body carries `roles` and `oauth_client_id`, any authenticated caller —
+// including an identity auto-provisioned on its own first request — could mint a
+// system_admin and bind an OAuth2 client to it. That is a self-service path to
+// cluster admin, and it sat on the endpoint the docs point at for provisioning
+// agents.
+//
+// The fields stay settable BY AN ADMIN, deliberately. Binding oauth_client_id is
+// how a machine actor is created (users.oauth_client_id is what
+// ResolveOAuthClient matches), so stripping it would break the documented agent
+// flow while closing nothing that requireSystemAdmin has not already closed.
+//
+// The first admin is seeded out of band by scripts/seed-uat, so requiring one
+// here cannot lock an empty deployment out of itself.
+func (a *App) CreateUser(ctx context.Context, user *model.User, actorID string) (*model.User, error) {
+	if err := a.requireSystemAdmin(ctx, actorID, "App.CreateUser"); err != nil {
+		return nil, err
+	}
+
+	user.PreSave()
+
+	saved, err := a.Store.User().Save(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+	a.cacheUser(saved)
+	return saved, nil
+}
+
 // oauthCacheKey namespaces OAuth2 client IDs away from Kratos IDs, which
 // share the one user cache.
 func oauthCacheKey(clientID string) string {

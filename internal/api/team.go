@@ -120,6 +120,11 @@ func getMyTeams(a *app.App) http.HandlerFunc {
 
 func addTeamMember(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		actor := ContextGetUser(r)
+		if actor == nil {
+			WriteError(w, model.NewUnauthorizedError("addTeamMember", "not authenticated"))
+			return
+		}
 		teamID := chi.URLParam(r, "id")
 		var body struct {
 			UserID string `json:"user_id"`
@@ -129,9 +134,9 @@ func addTeamMember(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		member, err := a.AddTeamMember(r.Context(), teamID, body.UserID)
+		member, err := a.AddTeamMember(r.Context(), teamID, body.UserID, actor.ID)
 		if err != nil {
-			WriteError(w, model.NewInternalError("addTeamMember", err))
+			WriteAppError(w, "addTeamMember", err)
 			return
 		}
 
@@ -141,11 +146,16 @@ func addTeamMember(a *app.App) http.HandlerFunc {
 
 func removeTeamMember(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		actor := ContextGetUser(r)
+		if actor == nil {
+			WriteError(w, model.NewUnauthorizedError("removeTeamMember", "not authenticated"))
+			return
+		}
 		teamID := chi.URLParam(r, "id")
 		userID := chi.URLParam(r, "user_id")
 
-		if err := a.RemoveTeamMember(r.Context(), teamID, userID); err != nil {
-			WriteError(w, model.NewInternalError("removeTeamMember", err))
+		if err := a.RemoveTeamMember(r.Context(), teamID, userID, actor.ID); err != nil {
+			WriteAppError(w, "removeTeamMember", err)
 			return
 		}
 

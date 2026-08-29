@@ -195,18 +195,40 @@ func (a *App) FetchKratosIdentity(ctx context.Context, kratosID string) (usernam
 		return "", "", "", fmt.Errorf("kratos identity fetch failed: status %d, body: %s", resp.StatusCode, string(bodyBytes))
 	}
 
+	// TWO SCHEMAS, ONE READER. chit's own deploy/kratos/identity.schema.json
+	// calls the human-readable name `display_name`; the shared cluster schema
+	// this deployment authenticates against
+	// (terraform/live/ory-identity/config/kratos/identity.schema.json.tftpl)
+	// calls it `name` and additionally carries `role` and `kind`.
+	//
+	// Both are decoded and display_name wins, so neither deployment needs a
+	// build flag. Getting this wrong is not a visible error: an identity that
+	// authenticates perfectly would be provisioned with an EMPTY display name,
+	// and the first thing anyone would notice is a blank author on a post.
 	var identity struct {
 		Traits struct {
 			Username    string `json:"username"`
 			DisplayName string `json:"display_name"`
+			Name        string `json:"name"`
 			Email       string `json:"email"`
+			Kind        string `json:"kind"`
 		} `json:"traits"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&identity); err != nil {
 		return "", "", "", fmt.Errorf("decode kratos identity: %w", err)
 	}
 
+	displayName = identity.Traits.DisplayName
+	if displayName == "" {
+		displayName = identity.Traits.Name
+	}
+	if displayName == "" {
+		// Never provision a nameless user: the username is always present and
+		// is a far better fallback than a blank byline.
+		displayName = identity.Traits.Username
+	}
+
 	slog.Info("fetched kratos identity", "kratos_id", kratosID, "username", identity.Traits.Username)
 
-	return identity.Traits.Username, identity.Traits.DisplayName, identity.Traits.Email, nil
+	return identity.Traits.Username, displayName, identity.Traits.Email, nil
 }

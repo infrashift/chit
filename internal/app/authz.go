@@ -44,6 +44,20 @@ func (a *App) requireTeamMember(ctx context.Context, teamID, userID string) erro
 	return err
 }
 
+// requireSystemAdmin returns a 403 error unless the actor holds system_admin.
+//
+// A failed user lookup is a DENIAL, not an error, matching requirePostOwner
+// above: an actor who cannot be resolved is not an admin, and surfacing that as
+// a 500 would turn a permission decision into something an operator reads as an
+// outage.
+func (a *App) requireSystemAdmin(ctx context.Context, actorID, op string) error {
+	user, err := a.Store.User().Get(ctx, actorID)
+	if err != nil || !user.IsSystemAdmin() {
+		return model.NewForbiddenError(op, "requires system_admin")
+	}
+	return nil
+}
+
 // requirePostOwner returns a 403 error unless userID authored the post or is a
 // system admin.
 func (a *App) requirePostOwner(ctx context.Context, post *model.Post, userID string) error {
