@@ -22,7 +22,9 @@ func (s *chMockChannelStore) Save(_ context.Context, c *model.Channel) (*model.C
 	s.saved = append(s.saved, c)
 	return c, nil
 }
-func (s *chMockChannelStore) Get(_ context.Context, _ string) (*model.Channel, error) { return nil, errNotFound }
+func (s *chMockChannelStore) Get(_ context.Context, _ string) (*model.Channel, error) {
+	return nil, errNotFound
+}
 func (s *chMockChannelStore) Update(_ context.Context, c *model.Channel) (*model.Channel, error) {
 	return c, nil
 }
@@ -37,8 +39,10 @@ func (s *chMockChannelStore) SaveMember(_ context.Context, m *model.ChannelMembe
 	s.members = append(s.members, m)
 	return m, nil
 }
-func (s *chMockChannelStore) RemoveMember(_ context.Context, _, _ string) error                { return nil }
-func (s *chMockChannelStore) UpdateLastViewedAt(_ context.Context, _, _ string, _ int64) error { return nil }
+func (s *chMockChannelStore) RemoveMember(_ context.Context, _, _ string) error { return nil }
+func (s *chMockChannelStore) UpdateLastViewedAt(_ context.Context, _, _ string, _ int64) error {
+	return nil
+}
 func (s *chMockChannelStore) GetByName(_ context.Context, _, _ string) (*model.Channel, error) {
 	return nil, errNotFound
 }
@@ -51,26 +55,36 @@ func (s *chMockChannelStore) SaveDirectChannel(_ context.Context, c *model.Chann
 func (s *chMockChannelStore) GetDirectChannelsForUser(_ context.Context, _ string) ([]*model.Channel, error) {
 	return nil, nil
 }
-func (s *chMockChannelStore) IncrementMsgCount(_ context.Context, _ string, _ int64) error { return nil }
+func (s *chMockChannelStore) IncrementMsgCount(_ context.Context, _ string, _ int64) error {
+	return nil
+}
 func (s *chMockChannelStore) GetMembers(_ context.Context, _ string, _, _ int) ([]*model.ChannelMember, error) {
 	return nil, nil
 }
 func (s *chMockChannelStore) GetMember(_ context.Context, _, _ string) (*model.ChannelMember, error) {
 	return nil, errNotFound
 }
-func (s *chMockChannelStore) IncrementMentionCount(_ context.Context, _, _ string) error         { return nil }
-func (s *chMockChannelStore) GetChannelIDsForUser(_ context.Context, _ string) ([]string, error) { return nil, nil }
+func (s *chMockChannelStore) IncrementMentionCount(_ context.Context, _, _ string) error { return nil }
+func (s *chMockChannelStore) GetChannelIDsForUser(_ context.Context, _ string) ([]string, error) {
+	return nil, nil
+}
 
 type chMockTeamStore struct {
 	members []*model.TeamMember
 }
 
-func (s *chMockTeamStore) Save(_ context.Context, _ *model.Team) (*model.Team, error)   { return nil, nil }
-func (s *chMockTeamStore) Get(_ context.Context, _ string) (*model.Team, error)         { return nil, nil }
-func (s *chMockTeamStore) GetByName(_ context.Context, _ string) (*model.Team, error)   { return nil, nil }
-func (s *chMockTeamStore) Update(_ context.Context, _ *model.Team) (*model.Team, error) { return nil, nil }
-func (s *chMockTeamStore) Delete(_ context.Context, _ string, _ int64) error            { return nil }
-func (s *chMockTeamStore) GetAll(_ context.Context, _, _ int) ([]*model.Team, error)    { return nil, nil }
+func (s *chMockTeamStore) Save(_ context.Context, _ *model.Team) (*model.Team, error) {
+	return nil, nil
+}
+func (s *chMockTeamStore) Get(_ context.Context, _ string) (*model.Team, error) { return nil, nil }
+func (s *chMockTeamStore) GetByName(_ context.Context, _ string) (*model.Team, error) {
+	return nil, nil
+}
+func (s *chMockTeamStore) Update(_ context.Context, _ *model.Team) (*model.Team, error) {
+	return nil, nil
+}
+func (s *chMockTeamStore) Delete(_ context.Context, _ string, _ int64) error         { return nil }
+func (s *chMockTeamStore) GetAll(_ context.Context, _, _ int) ([]*model.Team, error) { return nil, nil }
 func (s *chMockTeamStore) GetTeamsForUser(_ context.Context, _ string) ([]*model.Team, error) {
 	return nil, nil
 }

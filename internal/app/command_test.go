@@ -45,9 +45,13 @@ func (s *cmdMockPostStore) Save(_ context.Context, p *model.Post) (*model.Post, 
 	s.saved = append(s.saved, p)
 	return p, nil
 }
-func (s *cmdMockPostStore) Get(_ context.Context, _ string) (*model.Post, error)         { return nil, errNotFound }
-func (s *cmdMockPostStore) Update(_ context.Context, p *model.Post) (*model.Post, error) { return p, nil }
-func (s *cmdMockPostStore) Delete(_ context.Context, _ string, _ int64) error            { return nil }
+func (s *cmdMockPostStore) Get(_ context.Context, _ string) (*model.Post, error) {
+	return nil, errNotFound
+}
+func (s *cmdMockPostStore) Update(_ context.Context, p *model.Post) (*model.Post, error) {
+	return p, nil
+}
+func (s *cmdMockPostStore) Delete(_ context.Context, _ string, _ int64) error { return nil }
 func (s *cmdMockPostStore) GetPostsForChannel(_ context.Context, _ string, _ model.GetPostsOptions) (*model.PostList, error) {
 	return &model.PostList{}, nil
 }

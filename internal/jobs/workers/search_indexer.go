@@ -172,9 +172,9 @@ func (si *SearchIndexer) Search(ctx context.Context, query string, from, size in
 		"query": map[string]any{
 			"term": query,
 		},
-		"from": from,
+		"from":        from,
 		"max_results": size,
-		"_source": []string{"_id"},
+		"_source":     []string{"_id"},
 	}
 
 	body, err := json.Marshal(searchReq)
