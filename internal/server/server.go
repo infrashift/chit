@@ -52,6 +52,15 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 
 	s.initApp()
+
+	// After initApp, because it needs the App and its store; before initHTTP,
+	// because a request that arrives first would be refused as an unknown
+	// client and the caller would see a 401 that later becomes a 200 for no
+	// reason it can observe.
+	if err := s.ensureMachineActors(); err != nil {
+		return nil, fmt.Errorf("ensure machine actors: %w", err)
+	}
+
 	s.initCommands()
 	s.initJobs()
 	s.initHTTP()
@@ -232,6 +241,25 @@ func (s *Server) initHTTP() {
 }
 
 // Start begins serving and blocks until a shutdown signal is received.
+// ensureMachineActors reconciles the declared non-human callers at boot.
+//
+// FATAL ON FAILURE, deliberately. These rows are the difference between a
+// machine actor being authorized and being a 401, and a server that starts
+// without them looks entirely healthy while refusing every client_credentials
+// token — which is a much longer debugging session than a refusal to start.
+func (s *Server) ensureMachineActors() error {
+	actors, err := app.ParseMachineActors(s.config.MachineActors)
+	if err != nil {
+		return err
+	}
+	if len(actors) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return s.app.EnsureMachineActors(ctx, actors)
+}
+
 func (s *Server) Start() error {
 	s.scheduler.Start()
 

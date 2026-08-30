@@ -19,10 +19,13 @@ func (s *SqlUserStore) Save(ctx context.Context, user *model.User) (*model.User,
 		return nil, err
 	}
 
-	// NULLIF keeps oauth_client_id NULL for humans: the column is UNIQUE, and
-	// Postgres allows many NULLs but only one ''.
+	// NULLIF on all three of the OPTIONAL identity columns: each is UNIQUE, and
+	// Postgres allows many NULLs but only one ''. oauth_client_id is NULL for a
+	// person; kratos_id and email are NULL for a machine. Writing '' instead
+	// would let exactly one machine exist and refuse the second with a unique
+	// violation naming a column nobody set.
 	query := `INSERT INTO users (id, kratos_id, username, display_name, email, roles, actor_type, oauth_client_id, create_at, update_at, delete_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''), $9, $10, $11)`
+		VALUES ($1, NULLIF($2, ''), $3, $4, NULLIF($5, ''), $6, $7, NULLIF($8, ''), $9, $10, $11)`
 	_, err := s.sqlStore.pool.Exec(ctx, query,
 		user.ID, user.KratosID, user.Username, user.DisplayName, user.Email,
 		user.Roles, user.ActorType, user.OAuthClientID, user.CreateAt, user.UpdateAt, user.DeleteAt,
@@ -62,7 +65,7 @@ func (s *SqlUserStore) GetByOAuthClientID(ctx context.Context, clientID string) 
 
 func (s *SqlUserStore) getBy(ctx context.Context, column, value string) (*model.User, error) {
 	query := fmt.Sprintf(
-		`SELECT id, kratos_id, username, display_name, email, roles, actor_type,
+		`SELECT id, COALESCE(kratos_id, ''), username, display_name, COALESCE(email, ''), roles, actor_type,
 			COALESCE(oauth_client_id, ''), create_at, update_at, delete_at
 		FROM users WHERE %s = $1 AND delete_at = 0`, column,
 	)
@@ -85,7 +88,7 @@ func (s *SqlUserStore) getBy(ctx context.Context, column, value string) (*model.
 func (s *SqlUserStore) Update(ctx context.Context, user *model.User) (*model.User, error) {
 	user.PreUpdate()
 
-	query := `UPDATE users SET username = $1, display_name = $2, email = $3, roles = $4, actor_type = $5, update_at = $6
+	query := `UPDATE users SET username = $1, display_name = $2, email = NULLIF($3, ''), roles = $4, actor_type = $5, update_at = $6
 		WHERE id = $7 AND delete_at = 0`
 	tag, err := s.sqlStore.pool.Exec(ctx, query,
 		user.Username, user.DisplayName, user.Email, user.Roles, user.ActorType, user.UpdateAt, user.ID,
@@ -101,7 +104,7 @@ func (s *SqlUserStore) Update(ctx context.Context, user *model.User) (*model.Use
 }
 
 func (s *SqlUserStore) Search(ctx context.Context, term string, page, perPage int) ([]*model.User, error) {
-	query := `SELECT id, kratos_id, username, display_name, email, roles, actor_type, create_at, update_at, delete_at
+	query := `SELECT id, COALESCE(kratos_id, ''), username, display_name, COALESCE(email, ''), roles, actor_type, create_at, update_at, delete_at
 		FROM users
 		WHERE delete_at = 0 AND (username ILIKE $1 OR display_name ILIKE $1 OR email ILIKE $1)
 		ORDER BY username
@@ -118,7 +121,7 @@ func (s *SqlUserStore) Search(ctx context.Context, term string, page, perPage in
 }
 
 func (s *SqlUserStore) GetByIDs(ctx context.Context, ids []string) ([]*model.User, error) {
-	query := `SELECT id, kratos_id, username, display_name, email, roles, actor_type, create_at, update_at, delete_at
+	query := `SELECT id, COALESCE(kratos_id, ''), username, display_name, COALESCE(email, ''), roles, actor_type, create_at, update_at, delete_at
 		FROM users WHERE id = ANY($1) AND delete_at = 0`
 
 	rows, err := s.sqlStore.pool.Query(ctx, query, ids)

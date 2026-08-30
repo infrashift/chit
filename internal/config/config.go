@@ -29,6 +29,12 @@ type Config struct {
 	// TrustedProxySecret, when set, must be presented by the auth proxy in the
 	// X-Proxy-Secret header before the trusted proxy header is honored.
 	TrustedProxySecret string `koanf:"trusted_proxy_secret"`
+
+	// MachineActors declares the non-human callers, as a JSON array. A machine
+	// authenticates with client_credentials and holds no Kratos identity, so
+	// nothing can vouch for it the way ProvisionUser does for a person — an
+	// undeclared client is authenticated and nobody. See app.MachineActor.
+	MachineActors string `koanf:"machine_actors"`
 	// AllowedOrigins is the CORS / WebSocket origin allowlist
 	// (comma-separated in CHIT_ALLOWED_ORIGINS). "*" allows any origin.
 	AllowedOrigins []string `koanf:"allowed_origins"`
