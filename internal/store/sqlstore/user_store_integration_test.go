@@ -181,3 +181,62 @@ func TestUserStoreIntegration_ActorTypeRoundTrip(t *testing.T) {
 		t.Errorf("default ActorType: got %q, want %q", got.ActorType, model.ActorTypeUser)
 	}
 }
+
+// TWO machine actors, because one proves nothing about the constraint that
+// matters. kratos_id and email are UNIQUE and were NOT NULL until 000006; a
+// store that wrote ” instead of NULL would save the first machine and fail
+// the second with a unique violation naming a column the caller never set.
+//
+// It also pins the CAST. NULLIF($2, ”) makes Postgres infer text, and
+// assigning text to a uuid column fails with "column kratos_id is of type uuid
+// but expression is of type text" — which the mock-backed unit tests cannot
+// see, and which crash-looped chitd on first deploy.
+func TestUserStoreIntegration_MachineActorsHaveNoIdentity(t *testing.T) {
+	ss := testStore(t)
+	store := ss.User()
+
+	machine := func(username, clientID string) *model.User {
+		u := &model.User{
+			Username:      username,
+			DisplayName:   "Machine " + username,
+			ActorType:     model.ActorTypeBot,
+			Roles:         "system_user",
+			OAuthClientID: clientID,
+		}
+		u.PreSave()
+		return u
+	}
+
+	for _, m := range []*model.User{
+		machine("notifier", "chit-notifier"),
+		machine("tui", "chit-tui"),
+	} {
+		if _, err := store.Save(t.Context(), m); err != nil {
+			t.Fatalf("save %s: %v", m.Username, err)
+		}
+	}
+
+	got, err := store.GetByOAuthClientID(t.Context(), "chit-notifier")
+	if err != nil {
+		t.Fatalf("GetByOAuthClientID: %v", err)
+	}
+	if got.KratosID != "" || got.Email != "" {
+		t.Fatalf("kratos_id=%q email=%q — a machine has neither, and NULL must read back as empty", got.KratosID, got.Email)
+	}
+	if got.OAuthClientID != "chit-notifier" || got.ActorType != model.ActorTypeBot {
+		t.Fatalf("round trip lost the machine's identity: %+v", got)
+	}
+
+	// And a person still round-trips with both columns populated.
+	p := newTestUser("alice")
+	if _, err := store.Save(t.Context(), p); err != nil {
+		t.Fatalf("save person: %v", err)
+	}
+	back, err := store.GetByKratosID(t.Context(), p.KratosID)
+	if err != nil {
+		t.Fatalf("GetByKratosID: %v", err)
+	}
+	if back.KratosID != p.KratosID || back.Email != p.Email {
+		t.Fatalf("person round trip: got kratos_id=%q email=%q", back.KratosID, back.Email)
+	}
+}
