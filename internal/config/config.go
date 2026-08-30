@@ -1,7 +1,7 @@
 package config
 
 import (
-	"log"
+	"errors"
 	"strings"
 	"time"
 
@@ -93,8 +93,36 @@ func Defaults() *Config {
 	}
 }
 
-// Load reads configuration from environment variables prefixed with CHIT_.
+// Load reads configuration for a process that SERVES chit, and requires
+// everything such a process needs — including the database.
+//
+// Use LoadWithoutDatabase for a tool that does not open one. The distinction is
+// not cosmetic: chit-reconcile writes to Keto over HTTP and reads CUE from
+// disk, touching no database at all, and requiring a URL of it means handing a
+// batch job a Postgres credential it cannot use in order to satisfy a check for
+// a field it never reads.
 func Load() (*Config, error) {
+	cfg, err := load()
+	if err != nil {
+		return nil, err
+	}
+	if cfg.DatabaseURL == "" {
+		// An ERROR, not log.Fatal. A library that exits the process denies its
+		// caller the chance to say which binary failed and why, and this
+		// function already returns an error for every other failure.
+		return nil, errors.New("CHIT_DATABASE_URL is required")
+	}
+	return cfg, nil
+}
+
+// LoadWithoutDatabase reads the same configuration for a tool that never opens
+// the database. Everything else is validated identically.
+func LoadWithoutDatabase() (*Config, error) {
+	return load()
+}
+
+// load reads configuration from environment variables prefixed with CHIT_.
+func load() (*Config, error) {
 	k := koanf.New(".")
 	cfg := Defaults()
 
@@ -118,10 +146,6 @@ func Load() (*Config, error) {
 
 	if err := k.Unmarshal("", cfg); err != nil {
 		return nil, err
-	}
-
-	if cfg.DatabaseURL == "" {
-		log.Fatal("CHIT_DATABASE_URL is required")
 	}
 
 	return cfg, nil

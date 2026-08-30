@@ -120,7 +120,12 @@ func main() {
 		Level: slog.LevelInfo,
 	})))
 
-	cfg, err := config.Load()
+	// LoadWithoutDatabase, because this tool has no database. It reads CUE from
+	// disk and writes tuples to Keto over HTTP; cfg.DatabaseURL is never read.
+	// Load() would refuse to start without CHIT_DATABASE_URL, which is what made
+	// the chit-server seed job fail after successfully registering every OAuth2
+	// client — a batch job asked for a credential it would not have used.
+	cfg, err := config.LoadWithoutDatabase()
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
