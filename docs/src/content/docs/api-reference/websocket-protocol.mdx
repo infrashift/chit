@@ -79,9 +79,10 @@ the request must pass through Oathkeeper with a valid session.
 | `channel_deleted` | `channel.id`, `team_id` | A channel was deleted |
 | `user_added` | `user_id`, `channel_id` | A user joined a channel |
 | `user_removed` | `user_id`, `channel_id` | A user left a channel |
-| `thread_updated` | `thread`, `post` | A thread received a new reply |
+| `thread_updated` | `thread` | A thread's counters changed (a reply was added); the reply itself arrives as `posted` |
+| `post_tags_updated` | `post_id`, `channel_id`, `tags` | A tag was added to or removed from a post; `tags` is the post's whole list |
 | `status_change` | `user_id`, `status` | A user's status changed |
-| `mentioned` | `post`, `channel_id` | The connected user was @mentioned |
+| `mentioned` | `post_id`, `channel_id`, `user_id` | The connected user was @mentioned (`user_id` is the author) |
 
 ## Client → Server Actions
 

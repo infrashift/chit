@@ -1437,7 +1437,8 @@ paths:
         streaming. Events include: posted, post_edited, post_deleted,
         post_pinned, post_unpinned, typing, channel_created,
         channel_updated, channel_deleted, user_added, user_removed,
-        thread_updated, status_change.
+        thread_updated, post_tags_updated, mentioned, command_response,
+        status_change.
 
         Clients can send `typing` actions via the WebSocket.
         The server sends periodic ping frames for keepalive.
@@ -2096,6 +2097,9 @@ components:
             - user_added
             - user_removed
             - thread_updated
+            - post_tags_updated
+            - mentioned
+            - command_response
             - status_change
         data:
           type: object
