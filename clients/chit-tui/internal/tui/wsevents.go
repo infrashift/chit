@@ -161,31 +161,34 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case model.WebSocketEventUserAdded:
-		if m.me != nil {
-			if uid, ok := evt.Data["user_id"]; ok {
-				if userID, ok := uid.(string); ok && userID == m.me.ID {
-					if m.activeTeam != nil {
-						cmds = append(cmds, FetchChannels(m.client, m.activeTeam.ID))
-					}
-				}
+		userID, _ := evt.Data["user_id"].(string)
+		channelID, _ := evt.Data["channel_id"].(string)
+		switch {
+		case m.me != nil && userID == m.me.ID:
+			// The event names the channel but not its team, so every team
+			// is re-read, and the DMs in case it is a group.
+			for _, t := range m.teams {
+				cmds = append(cmds, FetchChannels(m.client, t.ID))
+			}
+			cmds = append(cmds, FetchDMChannels(m.client))
+		case channelID != "":
+			// Someone else joined: the @-mention list for it is stale.
+			delete(m.channelMembers, channelID)
+			if m.activeChan != nil && m.activeChan.ID == channelID {
+				cmds = append(cmds, FetchChannelMembers(m.client, channelID))
 			}
 		}
 
 	case model.WebSocketEventChannelCreated:
-		if typeVal, ok := evt.Data["type"]; ok {
-			if t, ok := typeVal.(string); ok {
-				switch t {
-				case model.ChannelDirect, model.ChannelGroup:
-					cmds = append(cmds, FetchDMChannels(m.client))
-				case model.ChannelOpen, model.ChannelPrivate:
-					if m.activeTeam != nil {
-						if teamID, ok := evt.Data["team_id"]; ok {
-							if tid, ok := teamID.(string); ok && tid == m.activeTeam.ID {
-								cmds = append(cmds, FetchChannels(m.client, m.activeTeam.ID))
-							}
-						}
-					}
-				}
+		kind, _ := evt.Data["type"].(string)
+		teamID, _ := evt.Data["team_id"].(string)
+		switch kind {
+		case model.ChannelDirect, model.ChannelGroup:
+			cmds = append(cmds, FetchDMChannels(m.client))
+		case model.ChannelOpen, model.ChannelPrivate:
+			// Any of the user's teams, not only the one in view.
+			if m.teamByID(teamID) != nil {
+				cmds = append(cmds, FetchChannels(m.client, teamID))
 			}
 		}
 	}

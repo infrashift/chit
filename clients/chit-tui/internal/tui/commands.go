@@ -108,6 +108,9 @@ func FetchChannelMembers(client api.ChitClient, channelID string) tea.Cmd {
 
 // ListenWebSocket returns a command that waits for the next WS event.
 func ListenWebSocket(wsClient ws.WSClient) tea.Cmd {
+	if wsClient == nil {
+		return nil
+	}
 	return func() tea.Msg {
 		evt, ok := <-wsClient.Events()
 		if !ok {
@@ -121,6 +124,9 @@ func ListenWebSocket(wsClient ws.WSClient) tea.Cmd {
 // alongside ListenWebSocket: events and transport state arrive on separate
 // channels so a quiet connection is still distinguishable from a dead one.
 func ListenWSState(wsClient ws.WSClient) tea.Cmd {
+	if wsClient == nil {
+		return nil
+	}
 	return func() tea.Msg {
 		st, ok := <-wsClient.State()
 		if !ok {

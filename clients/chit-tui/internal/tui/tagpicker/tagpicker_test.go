@@ -154,19 +154,6 @@ func TestTagPicker_NotVisibleReturnsEmpty(t *testing.T) {
 	}
 }
 
-func TestTagPicker_FocusBlur(t *testing.T) {
-	m := tagpicker.New(testStyles())
-	m.Focus()
-	m.Blur()
-	// No panic = success, these are simple state setters
-}
-
-func TestTagPicker_SetStyles(t *testing.T) {
-	m := tagpicker.New(testStyles())
-	m.SetStyles(testStyles())
-	// No panic = success
-}
-
 func TestTagPicker_UpdateWhenNotVisible(t *testing.T) {
 	m := tagpicker.New(testStyles())
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})

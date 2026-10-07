@@ -92,10 +92,10 @@ func TestModel_EscClosingMemberPickerCreatesPendingChannel(t *testing.T) {
 		t.Fatal("expected commands from Esc on the member picker")
 	}
 	created := false
-	for _, msg := range runCmds(cmd) {
+	for _, msg := range messagesOf(cmd) {
 		updated, next := m.Update(msg)
 		m = updated.(tui.Model)
-		for _, result := range runCmds(next) {
+		for _, result := range messagesOf(next) {
 			if _, ok := result.(tui.ChannelCreatedMsg); ok {
 				created = true
 			}
@@ -119,14 +119,14 @@ func TestModel_EscClosingMemberPickerClearsPendingState(t *testing.T) {
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
 	m = updated.(tui.Model)
 	// Process the cancel message so the pending channel is consumed.
-	for _, msg := range runCmds(cmd) {
+	for _, msg := range messagesOf(cmd) {
 		updated, _ = m.Update(msg)
 		m = updated.(tui.Model)
 	}
 
 	// A repeated cancel (nothing pending) must not create anything.
 	_, cmd = m.Update(dmpicker.CancelledMsg{})
-	for _, msg := range runCmds(cmd) {
+	for _, msg := range messagesOf(cmd) {
 		if _, ok := msg.(tui.ChannelCreatedMsg); ok {
 			t.Error("pending channel state leaked: repeated cancel created a channel")
 		}

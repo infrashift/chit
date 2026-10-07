@@ -175,32 +175,6 @@ func TestViewport_UpdateNotFocused(t *testing.T) {
 	}
 }
 
-func TestViewport_UpdateNonKeyMsg(t *testing.T) {
-	m := viewport.New(testStyles())
-	m.SetSize(80, 24)
-	m.SetPosts([]*model.Post{
-		{ID: "p1", UserID: "u1", Content: "Hello", CreateAt: 1700000000000},
-	})
-	m.Focus()
-
-	// Non-key message when focused — delegates to inner viewport
-	updated, _ := m.Update(tea.MouseMsg{})
-	_ = updated
-}
-
-func TestViewport_UpdateDefaultKey(t *testing.T) {
-	m := viewport.New(testStyles())
-	m.SetSize(80, 24)
-	m.SetPosts([]*model.Post{
-		{ID: "p1", UserID: "u1", Content: "Hello", CreateAt: 1700000000000},
-	})
-	m.Focus()
-
-	// Non-enter key when focused — delegates to inner viewport
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
-	_ = updated
-}
-
 func TestViewport_ViewFocused(t *testing.T) {
 	m := viewport.New(testStyles())
 	m.SetSize(80, 24)
