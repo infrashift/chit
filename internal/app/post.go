@@ -234,7 +234,28 @@ func (a *App) handleThreadReply(ctx context.Context, post *model.Post) error {
 		UserID:    post.UserID,
 		Following: true,
 	}
-	return a.Store.Thread().SaveMembership(ctx, membership)
+	if err := a.Store.Thread().SaveMembership(ctx, membership); err != nil {
+		return err
+	}
+
+	a.broadcastThreadUpdated(ctx, post.RootID)
+	return nil
+}
+
+// broadcastThreadUpdated sends the thread's current counters to its channel.
+// The event carries only the thread: the reply itself already went out as
+// "posted", and clients that append a reply on both would show it twice.
+func (a *App) broadcastThreadUpdated(ctx context.Context, rootID string) {
+	thread, err := a.Store.Thread().Get(ctx, rootID)
+	if err != nil {
+		slog.Warn("thread_updated: could not read thread", "root_id", rootID, "error", err)
+		return
+	}
+	a.Hub.Broadcast(&model.WebSocketEvent{
+		Event:     model.WebSocketEventThreadUpdated,
+		Data:      map[string]any{"thread": thread},
+		Broadcast: &model.WebSocketBroadcast{ChannelID: thread.ChannelID},
+	})
 }
 
 func (a *App) broadcastPostEvent(ctx context.Context, event string, post *model.Post) {
