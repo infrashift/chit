@@ -108,3 +108,71 @@ func (m *Model) applyMe(u *model.User) {
 	m.thread.SetUsernames(m.usernameMap())
 	m.resolveDMDisplayNames()
 }
+
+// handleUserSearchResults hands user search results to whichever overlay
+// asked, if they answer the latest query.
+func (m Model) handleUserSearchResults(msg UserSearchResultsMsg) (tea.Model, tea.Cmd) {
+	if msg.Term != m.userQuery {
+		return m, nil // superseded by a later keystroke
+	}
+	if msg.Err != nil {
+		return m, m.setError(msg.Err)
+	}
+	filtered := msg.Users
+	if m.me != nil {
+		filtered = make([]*model.User, 0, len(msg.Users))
+		for _, u := range msg.Users {
+			if u.ID != m.me.ID {
+				filtered = append(filtered, u)
+			}
+		}
+	}
+	// Both the palette ("@" mode) and the DM picker (member selection)
+	// consume user searches; route to whichever is open.
+	switch {
+	case m.palette.Visible():
+		m.palette.SetUsers(filtered)
+	case m.dmPicker.Visible():
+		m.dmPicker.SetResults(filtered)
+	}
+	return m, nil
+}
+
+// handleUsersLoaded records looked-up users and renames everything drawn
+// with them.
+func (m Model) handleUsersLoaded(msg UsersLoadedMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		// Worth asking again next time, unlike IDs the server answered.
+		for _, id := range msg.Requested {
+			delete(m.usersRequested, id)
+		}
+		return m, m.setError(msg.Err)
+	}
+	for _, u := range msg.Users {
+		m.users[u.ID] = u
+	}
+	m.viewport.SetUsernames(m.usernameMap())
+	m.thread.SetUsernames(m.usernameMap())
+	m.resolveDMDisplayNames()
+	return m, nil
+}
+
+// handleUserLoaded records the signed-in user.
+func (m Model) handleUserLoaded(msg UserLoadedMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		return m, m.setError(msg.Err)
+	}
+	if m.expiredUserID != "" {
+		return m.resumeAfterReLogin(msg.User)
+	}
+	firstLoad := m.me == nil
+	m.applyMe(msg.User)
+	// Member rows that arrived before the user did could not be
+	// matched to them; work their badges out now.
+	if firstLoad {
+		for channelID, members := range m.channelMembers {
+			m.applyMembers(channelID, members)
+		}
+	}
+	return m, m.fetchMissingUsers()
+}

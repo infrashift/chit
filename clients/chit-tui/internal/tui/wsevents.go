@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/ws"
 )
 
 // Connection-state notices. They travel through the same transient status
@@ -264,6 +265,31 @@ func (m Model) handleWSState(msg WSStateMsg) (tea.Model, tea.Cmd) {
 	}
 	if !msg.Connected && wasConnected {
 		cmds = append(cmds, m.setError(errDisconnected))
+	}
+	return m, tea.Batch(cmds...)
+}
+
+// handleWSConnected starts the listeners after the first dial, and reports
+// a failed one.
+func (m Model) handleWSConnected(msg WSConnectedMsg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+	if errors.Is(msg.Err, ws.ErrUnauthorized) {
+		return m.handleAuthExpired()
+	}
+	m.wsConnected = msg.Err == nil
+	// Both listeners start here: one for events, one for transport
+	// state. Returning only the first is what left disconnects silent.
+	// The client's channels outlive a sign-out, so the listeners from
+	// the first session keep serving every later one; starting another
+	// pair on each sign-in would leave several reading the same stream.
+	if !m.wsListening {
+		m.wsListening = true
+		cmds = append(cmds, ListenWebSocket(m.wsClient), ListenWSState(m.wsClient))
+	}
+	if msg.Err != nil {
+		// The client keeps redialing, and WSStateMsg reports when it
+		// gets through.
+		cmds = append(cmds, m.setError(fmt.Errorf("real-time updates are offline, retrying: %w", msg.Err)))
 	}
 	return m, tea.Batch(cmds...)
 }

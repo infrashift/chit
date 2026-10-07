@@ -5,6 +5,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/input"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/palette"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/tagpicker"
 )
 
 // threadInboxPageSize bounds the inbox at one screenful's worth. Following
@@ -128,4 +131,195 @@ func (m *Model) afterPostsLoaded(posts []*model.Post) tea.Cmd {
 		cmds = append(cmds, fetchCmd)
 	}
 	return tea.Batch(cmds...)
+}
+
+// handleSend posts what was typed: a reply in an open thread, an edit in
+// progress, or a new message with its #tags.
+func (m Model) handleSend(msg input.SendMsg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+	if m.activeChan == nil || m.me == nil {
+		// The input has already cleared; put the text back so it is
+		// not lost, and say why it went nowhere.
+		m.input.SetValue(msg.Content)
+		return m, m.setError(errNotSent)
+	}
+	// In the thread pane the input composes a reply to the thread root.
+	// The root's ID is known from the moment the thread opens, so a
+	// reply typed while it loads is still a reply.
+	if m.mainPane == paneThread && m.threadRootID != "" {
+		channelID := m.activeChan.ID
+		if root := m.thread.RootPost(); root != nil && root.ChannelID != "" {
+			channelID = root.ChannelID
+		}
+		reply := &model.Post{
+			ChannelID: channelID,
+			UserID:    m.me.ID,
+			RootID:    m.threadRootID,
+			Content:   msg.Content,
+		}
+		cmds = append(cmds, CreatePost(m.reqCtx(), m.client, reply))
+		return m, tea.Batch(cmds...)
+	}
+	content, tagNames := tagpicker.StripHashtags(msg.Content)
+	if content == "" && len(tagNames) > 0 {
+		content = msg.Content
+	}
+	if m.editingPostID != "" {
+		id := m.editingPostID
+		m.editingPostID = ""
+		cmds = append(cmds, EditPost(m.reqCtx(), m.client, id, content))
+		cmds = append(cmds, m.tagPost(id, tagNames)...)
+		return m, tea.Batch(cmds...)
+	}
+
+	post := &model.Post{
+		ChannelID: m.activeChan.ID,
+		UserID:    m.me.ID,
+		Content:   content,
+	}
+	// The tags travel with the request, since only its response knows
+	// the new post's ID.
+	cmds = append(cmds, CreatePost(m.reqCtx(), m.client, post, tagNames...))
+	return m, tea.Batch(cmds...)
+}
+
+// handlePostsLoaded shows a channel's first page of history, if it is for
+// the channel still open.
+func (m Model) handlePostsLoaded(msg PostsLoadedMsg) (tea.Model, tea.Cmd) {
+	if m.activeChan == nil || msg.ChannelID != m.activeChan.ID {
+		// The reader moved on while this was in flight; applying it
+		// would show one channel's history under another's name.
+		return m, nil
+	}
+	m.viewport.SetLoading(false)
+	if msg.Err != nil {
+		return m, m.setError(msg.Err)
+	}
+	var page []*model.Post
+	if msg.Posts != nil {
+		page = msg.Posts.Order
+	}
+	m.viewport.SetPosts(page)
+	m.historyPage = 0
+	m.loadingOlder = false
+	// A short first page means there is nothing older to ask for.
+	m.historyExhausted = len(page) < historyPageSize
+	m.postTags = make(map[string][]*model.Tag)
+	load := m.afterPostsLoaded(page)
+	if id := m.pendingJumpID; id != "" {
+		m.pendingJumpID = ""
+		m.viewport.SetSearchTerm(m.searchTerm)
+		if !m.viewport.ScrollToPost(id) {
+			return m, tea.Batch(load, m.setError(errSearchHitNotLoaded))
+		}
+	}
+	return m, load
+}
+
+// handleOlderPosts puts an older page above the history, if it is the page
+// that was asked for.
+func (m Model) handleOlderPosts(msg OlderPostsLoadedMsg) (tea.Model, tea.Cmd) {
+	if m.activeChan == nil || msg.ChannelID != m.activeChan.ID || msg.Page != m.historyPage+1 {
+		// The reader moved on, or the history was reloaded, while this
+		// was in flight.
+		return m, nil
+	}
+	m.loadingOlder = false
+	if msg.Err != nil {
+		return m, m.setError(msg.Err)
+	}
+	var older []*model.Post
+	if msg.Posts != nil {
+		older = msg.Posts.Order
+	}
+	if len(older) < historyPageSize {
+		m.historyExhausted = true
+	}
+	if len(older) == 0 {
+		return m, nil
+	}
+	m.historyPage = msg.Page
+	m.viewport.PrependPosts(older)
+	return m, m.afterPostsLoaded(older)
+}
+
+// handlePostCreated shows a sent post at once, rather than waiting for the
+// WebSocket echo, and applies the tags it was sent with.
+func (m Model) handlePostCreated(msg PostCreatedMsg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+	if msg.Err != nil {
+		return m, m.setError(msg.Err)
+	}
+	// Show the message immediately rather than waiting for the WebSocket
+	// echo. With the socket down the echo never arrives, so the input
+	// cleared and the message simply vanished.
+	if msg.Post != nil && msg.Post.Type != postTypeCommandResponse &&
+		m.activeChan != nil && msg.Post.ChannelID == m.activeChan.ID &&
+		!m.viewport.HasPost(msg.Post.ID) {
+		m.viewport.AppendPost(msg.Post)
+		m.resolvePostUsers([]*model.Post{msg.Post})
+		if fetchCmd := m.fetchMissingUsers(); fetchCmd != nil {
+			cmds = append(cmds, fetchCmd)
+		}
+	}
+
+	// Likewise a reply in the open thread: the echo is not guaranteed.
+	if msg.Post != nil && msg.Post.RootID != "" && m.mainPane == paneThread &&
+		msg.Post.RootID == m.threadRootID {
+		m.thread.AppendReply(msg.Post)
+	}
+	if msg.Post != nil {
+		cmds = append(cmds, m.tagPost(msg.Post.ID, msg.Tags)...)
+	}
+	return m, tea.Batch(cmds...)
+}
+
+// handleSearchHit jumps to a chosen search result, opening its channel
+// first if need be.
+func (m Model) handleSearchHit(msg palette.PostChosenMsg) (tea.Model, tea.Cmd) {
+	// Jumping to the hit is the point of searching; previously this only
+	// moved focus and left the reader wherever they already were.
+	cmd := m.setFocus(FocusViewport)
+	if msg.Post != nil {
+		// A result from another channel needs that channel opened first;
+		// the post is not in the loaded history until it is.
+		if msg.Post.ChannelID != "" &&
+			(m.activeChan == nil || msg.Post.ChannelID != m.activeChan.ID) {
+			if ch := m.channelByID(msg.Post.ChannelID); ch != nil {
+				open := m.selectChannel(ch)
+				// The hit is selected once the channel's history arrives.
+				m.pendingJumpID = msg.Post.ID
+				return m, tea.Batch(cmd, open, m.setError(errSearchHitElsewhere))
+			}
+		}
+		m.viewport.SetSearchTerm(m.searchTerm)
+		if !m.viewport.ScrollToPost(msg.Post.ID) {
+			// The hit is older than the posts held in memory. Say so
+			// rather than silently doing nothing.
+			return m, tea.Batch(cmd, m.setError(errSearchHitNotLoaded))
+		}
+	}
+	return m, cmd
+}
+
+// handleSearchSubmit runs a message search, in this channel or everywhere.
+func (m Model) handleSearchSubmit(msg palette.SearchSubmitMsg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+	term, tagNames := tagpicker.StripHashtags(msg.Term)
+	var tagIDs []string
+	for _, name := range tagNames {
+		if t := m.tagByName(name); t != nil {
+			tagIDs = append(tagIDs, t.ID)
+		}
+	}
+	m.searchTerm = term
+	m.searchWasGlobal = msg.Everywhere
+
+	switch {
+	case msg.Everywhere:
+		cmds = append(cmds, SearchPostsEverywhere(m.reqCtx(), m.client, term, tagIDs))
+	case m.activeChan != nil:
+		cmds = append(cmds, SearchPosts(m.reqCtx(), m.client, m.activeChan.ID, term, tagIDs))
+	}
+	return m, tea.Batch(cmds...)
 }

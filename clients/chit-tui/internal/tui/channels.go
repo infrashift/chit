@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/dmpicker"
 )
 
 // minGroupChannelMembers matches the server's lower bound. Below it the
@@ -262,4 +263,134 @@ func (m Model) channelDisplayNames() map[string]string {
 		names[ch.ID] = ch.DisplayName
 	}
 	return names
+}
+
+// handleMembersPicked creates the private channel or group the member
+// picker was choosing people for.
+func (m Model) handleMembersPicked(msg dmpicker.MembersPickedMsg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+	m.dmPicker.Close()
+
+	if m.pendingGroupChannel {
+		m.pendingGroupChannel = false
+		if m.me == nil {
+			return m, tea.Batch(cmds...)
+		}
+		// The server counts the creator among the members and rejects a
+		// group that excludes them, so send the full membership rather
+		// than just who was picked.
+		ids := make([]string, 0, len(msg.Users)+1)
+		ids = append(ids, m.me.ID)
+		for _, u := range msg.Users {
+			if u.ID != m.me.ID {
+				ids = append(ids, u.ID)
+			}
+		}
+		if len(ids) < minGroupChannelMembers {
+			cmds = append(cmds, m.setError(errGroupTooSmall))
+			return m, tea.Batch(cmds...)
+		}
+		cmds = append(cmds, CreateGroupChannel(m.reqCtx(), m.client, ids))
+		return m, tea.Batch(cmds...)
+	}
+
+	if m.pendingPrivateChannel != nil {
+		for _, u := range msg.Users {
+			m.pendingMembers = append(m.pendingMembers, u.ID)
+		}
+		cmds = append(cmds, CreateChannel(m.reqCtx(), m.client, m.pendingPrivateChannel))
+		m.pendingPrivateChannel = nil
+	}
+	return m, tea.Batch(cmds...)
+}
+
+// handleMemberPickCancelled creates a pending private channel without extra
+// members, or drops a pending group.
+func (m Model) handleMemberPickCancelled(msg dmpicker.CancelledMsg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+	// A group channel is nothing but its members, so an abandoned pick
+	// leaves nothing to create — unlike a private channel, which was
+	// already named and submitted before the picker opened.
+	m.pendingGroupChannel = false
+	// Dismissing the member picker skips member selection but still
+	// creates the already-submitted private channel.
+	if m.pendingPrivateChannel != nil {
+		ch := m.pendingPrivateChannel
+		m.pendingPrivateChannel = nil
+		m.pendingMembers = nil
+		cmds = append(cmds, CreateChannel(m.reqCtx(), m.client, ch))
+	}
+	return m, tea.Batch(cmds...)
+}
+
+// handleDMChannelsLoaded records the DM and group channels and fetches
+// member rows for ones not seen before.
+func (m Model) handleDMChannelsLoaded(msg DMChannelsLoadedMsg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+	if msg.Err != nil {
+		return m, m.setError(msg.Err)
+	}
+	m.dmChannels = msg.Channels
+	m.palette.SetDMChannels(msg.Channels)
+	m.resolveDMDisplayNames()
+	// DM channels need their members for unread counts. This is still one
+	// request each, but the DM list is small and bounded by conversations
+	// the user actually has, unlike the channel list.
+	// Every DM event reloads this list, so only conversations not seen
+	// before are fetched.
+	for _, ch := range msg.Channels {
+		if _, have := m.channelMembers[ch.ID]; !have {
+			cmds = append(cmds, FetchChannelMembers(m.reqCtx(), m.client, ch.ID))
+		}
+	}
+	if fetchCmd := m.fetchMissingUsers(); fetchCmd != nil {
+		cmds = append(cmds, fetchCmd)
+	}
+	return m, tea.Batch(cmds...)
+}
+
+// handleChannelCreated adds a channel the user just created and opens it.
+func (m Model) handleChannelCreated(msg ChannelCreatedMsg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+	if msg.Err != nil {
+		cmd := m.setError(msg.Err)
+		m.pendingMembers = nil
+		return m, cmd
+	}
+	if msg.Channel != nil {
+		teamID := msg.Channel.TeamID
+		m.channelsByTeam[teamID] = append([]*model.Channel{msg.Channel}, m.channelsByTeam[teamID]...)
+		m.channels = m.flattenChannels()
+		m.palette.SetChannels(m.channels)
+		cmds = append(cmds, m.selectChannel(msg.Channel))
+		cmds = append(cmds, FetchChannelMembers(m.reqCtx(), m.client, msg.Channel.ID))
+		if len(m.pendingMembers) > 0 {
+			members := m.pendingMembers
+			m.pendingMembers = nil
+			cmds = append(cmds, AddChannelMembersCmd(m.reqCtx(), m.client, msg.Channel.ID, members))
+		}
+	}
+	return m, tea.Batch(cmds...)
+}
+
+// handleChannelsLoaded records a team's channels, loads their badges, and
+// opens the first one on the first load.
+func (m Model) handleChannelsLoaded(msg ChannelsLoadedMsg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+	if msg.Err != nil {
+		return m, m.setError(msg.Err)
+	}
+	m.channelsByTeam[msg.TeamID] = msg.Channels
+	m.channels = m.flattenChannels()
+	m.palette.SetChannels(m.channels)
+	// Every channel's badges, in one request for the team.
+	cmds = append(cmds, FetchMyChannelMembers(m.reqCtx(), m.client, msg.TeamID))
+	if m.activeTeam != nil && msg.TeamID == m.activeTeam.ID {
+		// Auto-select the first channel only on the very first load, not
+		// on later reloads (e.g. after navigating back to the team list).
+		if !m.channelAutoSelected && m.activeChan == nil && len(msg.Channels) > 0 {
+			cmds = append(cmds, m.selectChannel(msg.Channels[0]))
+		}
+	}
+	return m, tea.Batch(cmds...)
 }

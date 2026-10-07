@@ -1,12 +1,16 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/infrashift/chit/clients/chit-tui/internal/config"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/skinpicker"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
 
 // View renders the full UI.
@@ -277,4 +281,36 @@ func splitLines(s string) []string {
 	}
 	lines = append(lines, s[start:])
 	return lines
+}
+
+// handleThemeChosen restyles everything with the chosen theme and saves the
+// choice.
+func (m Model) handleThemeChosen(msg skinpicker.SkinSelectedMsg) (tea.Model, tea.Cmd) {
+	t, _, err := theme.ResolveNamed(msg.Name, config.ThemesDir())
+	if err != nil {
+		// The name came from a list this component built, so a failure
+		// here means the file changed underneath us.
+		errCmd := m.setError(fmt.Errorf("load theme %q: %w", msg.Name, err))
+		return m, tea.Batch(m.setFocus(FocusInput), errCmd)
+	}
+
+	// Persist so the choice survives a restart. Failing to write is worth
+	// surfacing but must not undo the theme change for this session.
+	var saveCmd tea.Cmd
+	if err := config.SaveThemeSetting(m.themeSetting, msg.Name); err != nil {
+		saveCmd = m.setError(fmt.Errorf("theme applied but not saved: %w", err))
+	}
+
+	newStyles := styles.New(t)
+	m.styles = newStyles
+	m.viewport.SetStyles(newStyles)
+	m.input.SetStyles(newStyles)
+	m.thread.SetStyles(newStyles)
+	m.mention.SetStyles(newStyles)
+	m.actionBar.SetStyles(newStyles)
+	m.loginModel.SetStyles(newStyles)
+	for _, o := range m.overlays() {
+		o.setStyles(newStyles)
+	}
+	return m, tea.Batch(m.setFocus(FocusInput), saveCmd)
 }
