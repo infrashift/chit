@@ -1,6 +1,9 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -160,26 +163,34 @@ func TestAuthExtract_MissingHeader(t *testing.T) {
 	}
 }
 
+// The request log line records method, path, status, and both the peer and
+// the unverified X-Forwarded-For, as separate fields.
 func TestStructuredLogger(t *testing.T) {
-	var called bool
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
 
-	handler := StructuredLogger(next)
-
+	handler := StructuredLogger(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	}))
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/test", http.NoBody)
+	r.Header.Set("X-Forwarded-For", "203.0.113.9")
 	w := httptest.NewRecorder()
-
 	handler.ServeHTTP(w, r)
 
-	if !called {
-		t.Fatal("expected next handler to be called")
+	var line map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &line); err != nil {
+		t.Fatalf("log line is not JSON: %q", buf.String())
 	}
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
+	want := map[string]any{
+		"method": "GET", "path": "/test", "status": float64(http.StatusTeapot),
+		"remote_addr": r.RemoteAddr, "forwarded_for": "203.0.113.9",
+	}
+	for k, v := range want {
+		if line[k] != v {
+			t.Errorf("%s = %v, want %v", k, line[k], v)
+		}
 	}
 }
 

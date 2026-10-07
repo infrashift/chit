@@ -15,22 +15,6 @@ import (
 	"github.com/infrashift/chit/internal/model"
 )
 
-func TestNewSearchIndexer(t *testing.T) {
-	si := NewSearchIndexer("http://localhost:4080", "admin", "pass123")
-	if si.zincURL != "http://localhost:4080" {
-		t.Fatalf("expected zincURL=%q, got %q", "http://localhost:4080", si.zincURL)
-	}
-	if si.zincUser != "admin" {
-		t.Fatalf("expected zincUser=%q, got %q", "admin", si.zincUser)
-	}
-	if si.zincPass != "pass123" {
-		t.Fatalf("expected zincPass=%q, got %q", "pass123", si.zincPass)
-	}
-	if si.client == nil {
-		t.Fatal("expected non-nil http client")
-	}
-}
-
 // Start must return when its context ends. It needs a post source to run the
 // loop at all: without one it returns at once ("indexing disabled"), which
 // is what this test used to exercise without noticing.

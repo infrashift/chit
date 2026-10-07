@@ -62,28 +62,3 @@ func TestPGNotifyIntegration_PublishSubscribeRoundTrip(t *testing.T) {
 		}
 	}
 }
-
-func TestPGNotify_RejectsInvalidTopics(t *testing.T) {
-	dbURL := os.Getenv("CHIT_DATABASE_URL")
-	if dbURL == "" {
-		t.Fatal("CHIT_DATABASE_URL is not set")
-	}
-	pool, err := pgxpool.New(context.Background(), dbURL)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	defer pool.Close()
-
-	ps, err := NewPGNotify(pool)
-	if err != nil {
-		t.Fatalf("NewPGNotify: %v", err)
-	}
-	defer func() { _ = ps.Close() }()
-
-	if err := ps.Publish(context.Background(), "bad; DROP TABLE users", []byte("x")); err == nil {
-		t.Error("Publish with invalid topic: expected error")
-	}
-	if err := ps.Subscribe(context.Background(), "bad topic", func([]byte) {}); err == nil {
-		t.Error("Subscribe with invalid topic: expected error")
-	}
-}

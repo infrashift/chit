@@ -94,7 +94,7 @@ func TestUpdatePost(t *testing.T) {
 	defer cleanup()
 
 	handler := updatePost(a)
-	body := `{"content":"updated content","channel_id":"` + testChannelID + `"}`
+	body := `{"content":"updated content"}`
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	r = withChiParam(r, "id", testRootPost)
@@ -105,6 +105,11 @@ func TestUpdatePost(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+	var p model.Post
+	decodeJSON(t, w.Body, &p)
+	if p.Content != "updated content" || p.EditAt == 0 {
+		t.Fatalf("got %+v, want the edited content with edit_at set", p)
 	}
 }
 

@@ -68,7 +68,7 @@ func TestValidationMiddleware_InvalidBody(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusBadRequest && w.Code != http.StatusUnsupportedMediaType {
-		t.Fatalf("expected 400 or 415 for invalid body, got %d", w.Code)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for a body the spec does not accept, got %d", w.Code)
 	}
 }

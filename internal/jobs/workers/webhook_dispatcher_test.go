@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -167,8 +168,13 @@ func TestWebhookDispatcher_StartStop(t *testing.T) {
 	}
 }
 
+// A receiver answering 500 is logged, not fatal: the worker must deliver,
+// survive the error, and stop cleanly. This used to assert nothing beyond
+// "did not crash", not even that a delivery was attempted.
 func TestWebhookDispatcher_ServerError(t *testing.T) {
+	var attempts atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer srv.Close()
@@ -190,8 +196,13 @@ func TestWebhookDispatcher_ServerError(t *testing.T) {
 		Status:      "executed",
 	}
 
-	// The worker should log the error but not crash.
-	time.Sleep(100 * time.Millisecond)
+	deadline := time.Now().Add(2 * time.Second)
+	for attempts.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if attempts.Load() != 1 {
+		t.Fatalf("delivery attempts = %d, want 1", attempts.Load())
+	}
 	cancel()
 
 	select {
