@@ -345,7 +345,7 @@ func (a *App) AddChannelMember(ctx context.Context, channelID, userID, actorID s
 	}
 	a.Hub.NotifyMembershipChanged(userID, channelID, true)
 
-	_ = a.keto.WriteRelation(ctx, model.KetoNamespaceChannel, channelID, model.KetoRelationMember, userID)
+	a.logKeto(a.keto.WriteRelation(ctx, model.KetoNamespaceChannel, channelID, model.KetoRelationMember, userID), channelID, userID)
 
 	a.publishEvent(ctx, &model.WebSocketEvent{
 		Event: model.WebSocketEventUserAdded,
@@ -382,7 +382,7 @@ func (a *App) RemoveChannelMember(ctx context.Context, channelID, userID, actorI
 	}
 	a.Hub.NotifyMembershipChanged(userID, channelID, false)
 
-	_ = a.keto.DeleteRelation(ctx, model.KetoNamespaceChannel, channelID, model.KetoRelationMember, userID)
+	a.logKeto(a.keto.DeleteRelation(ctx, model.KetoNamespaceChannel, channelID, model.KetoRelationMember, userID), channelID, userID)
 	a.publishUserRemoved(ctx, channelID, userID)
 	return nil
 }

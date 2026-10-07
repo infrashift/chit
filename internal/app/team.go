@@ -167,7 +167,7 @@ func (a *App) RemoveTeamMember(ctx context.Context, teamID, userID, actorID stri
 	}
 	for _, channelID := range channelIDs {
 		a.Hub.NotifyMembershipChanged(userID, channelID, false)
-		_ = a.keto.DeleteRelation(ctx, model.KetoNamespaceChannel, channelID, model.KetoRelationMember, userID)
+		a.logKeto(a.keto.DeleteRelation(ctx, model.KetoNamespaceChannel, channelID, model.KetoRelationMember, userID), channelID, userID)
 		a.publishUserRemoved(ctx, channelID, userID)
 	}
 	return nil

@@ -81,6 +81,16 @@ func (a *App) writeKetoMembersAsync(channelID string, userIDs []string) {
 	}()
 }
 
+// logKeto records a failed Keto membership write. Keto mirrors
+// channel_members best-effort and a failure does not fail the request, but a
+// silent one lets the mirror drift unnoticed.
+func (a *App) logKeto(err error, channelID, userID string) {
+	if err != nil {
+		slog.Warn("keto: failed to mirror channel membership",
+			"channel_id", channelID, "user_id", userID, "error", err)
+	}
+}
+
 // WaitBackground blocks until background work started by the App, such as
 // Keto writes, has finished.
 func (a *App) WaitBackground() {

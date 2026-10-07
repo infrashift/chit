@@ -3,8 +3,8 @@
 # Chit E2E Tests
 #
 # Exercises the full stack: Kratos → Oathkeeper → chitd → PostgreSQL → Keto
-# using curl + jq. Requires all services up (make kube-up && make kube-migrate
-# && make migrate-up && make run &).
+# using curl + jq. Requires all services up: make kube-up runs chitd in the
+# pod alongside them.
 #
 # Usage: bash tests/e2e/test_e2e.sh
 # ============================================================================
@@ -707,11 +707,11 @@ assert_status "4.3 DM members" 200 "$LAST_STATUS"
 assert_json_gte "4.3 DM has 2 members" "length" 2 "$LAST_BODY"
 
 # 4.4 Keto: Alice is member of DM
-KETO_CHECK=$(curl -s "${KETO_READ}/relation-tuples/check?namespace=chit/channel&object=${DM_CHANNEL_ID}&relation=member&subject_id=${ALICE_ID}")
+KETO_CHECK="{\"allowed\": $(keto_allowed "${DM_CHANNEL_ID}" "${ALICE_ID}")}"
 assert_json "4.4 Keto: Alice DM member" ".allowed" "true" "$KETO_CHECK"
 
 # 4.5 Keto: Bob is member of DM
-KETO_CHECK=$(curl -s "${KETO_READ}/relation-tuples/check?namespace=chit/channel&object=${DM_CHANNEL_ID}&relation=member&subject_id=${BOB_ID}")
+KETO_CHECK="{\"allowed\": $(keto_allowed "${DM_CHANNEL_ID}" "${BOB_ID}")}"
 assert_json "4.5 Keto: Bob DM member" ".allowed" "true" "$KETO_CHECK"
 
 # 4.6 Alice sends DM
