@@ -147,6 +147,8 @@ type Model struct {
 	// user ID; commandResponses numbers the outputs so each has its own ID.
 	commandAuthors   map[string]string
 	commandResponses int
+	// confirmDeleteID is the post awaiting a second delete keypress.
+	confirmDeleteID string
 	// threadRootID is the root of the thread in the main pane, set as soon
 	// as it opens, before the thread itself has loaded.
 	threadRootID string
@@ -164,6 +166,8 @@ var (
 	errDisconnected = errors.New("connection lost — reconnecting")
 	errReconnected  = errors.New("reconnected — reloading messages")
 	errDesynced     = errors.New("fell behind the server — reloading messages")
+	// Not a failure, but the status line is the only place to ask.
+	errConfirmDelete = errors.New("delete this message? Press d again to confirm, any other key to cancel")
 )
 
 // threadInboxPageSize bounds the inbox at one screenful's worth. Following
@@ -356,6 +360,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
+		// A pending delete is confirmed by pressing the key again on the
+		// same post, while the question is still on screen; once it has
+		// timed out or been replaced, nothing is being asked. Anything else
+		// cancels it and then does what it does.
+		if id := m.confirmDeleteID; id != "" {
+			m.confirmDeleteID = ""
+			asking := errors.Is(m.err, errConfirmDelete)
+			if asking {
+				m.err = nil
+			}
+			if asking && key.Matches(msg, m.keys.Delete) && m.focus == FocusViewport {
+				if p := m.ownSelectedPost(); p != nil && p.ID == id {
+					return m, DeletePost(m.client, p.ID)
+				}
+			}
+		}
+
 		// A visible overlay intercepts all keys. If it self-closes (Esc or a
 		// selection), restore focus to a live component and run any
 		// close-time behavior.
@@ -410,6 +431,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.closeThread()
 			}
 			if m.focus == FocusInput {
+				m.cancelEdit()
 				return m, m.setFocus(FocusViewport)
 			}
 		}
@@ -438,9 +460,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Deleting cannot be undone and "d" is one stray keystroke away, so
+		// it asks first.
 		if key.Matches(msg, m.keys.Delete) && m.focus == FocusViewport {
 			if p := m.ownSelectedPost(); p != nil {
-				return m, DeletePost(m.client, p.ID)
+				m.confirmDeleteID = p.ID
+				return m, m.setError(errConfirmDelete)
 			}
 		}
 
@@ -598,7 +623,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			// An empty thread pane would take whatever is typed next and
 			// post it to the channel, so go back to the channel instead.
-			return m, tea.Batch(m.closeThread(), m.setError(msg.Err))
+			return m, tea.Batch(m.leaveThread(), m.setError(msg.Err))
 		}
 		if msg.Posts != nil && len(msg.Posts.Order) > 0 {
 			root := msg.Posts.Order[0]
@@ -718,6 +743,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleWSEvent(msg)
 
 	case viewport.PostSelectedMsg:
+		m.cancelEdit()
 		cmds = append(cmds, FetchThread(m.client, msg.Post.ID))
 		m.mainPane = paneThread
 		m.threadRootID = msg.Post.ID
@@ -1012,6 +1038,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if ch := m.channelByID(msg.ChannelID); ch != nil && (m.activeChan == nil || m.activeChan.ID != ch.ID) {
 			cmds = append(cmds, m.selectChannel(ch))
 		}
+		m.cancelEdit()
 		cmds = append(cmds, FetchThread(m.client, msg.RootID))
 		m.mainPane = paneThread
 		m.threadRootID = msg.RootID
@@ -1418,6 +1445,14 @@ type overlayRef struct {
 // render on top; earlier entries win key interception, though only one
 // overlay is ever open at a time).
 func (m *Model) overlays() []overlayRef {
+	// The tag picker acts on the post under the cursor or the open thread's
+	// root, so it returns to whichever pane that was. The history pane is
+	// hidden behind an open thread, and keys sent there act on posts the
+	// reader cannot see.
+	tagPickerReturn := FocusViewport
+	if m.mainPane == paneThread {
+		tagPickerReturn = FocusThread
+	}
 	return []overlayRef{
 		{
 			visible: func() bool { return m.dmPicker.Visible() },
@@ -1482,7 +1517,7 @@ func (m *Model) overlays() []overlayRef {
 			blur:       m.tagPicker.Blur,
 			setSize:    m.tagPicker.SetSize,
 			setStyles:  m.tagPicker.SetStyles,
-			closeFocus: FocusViewport,
+			closeFocus: tagPickerReturn,
 		},
 		{
 			visible: func() bool { return m.palette.Visible() },
@@ -1532,6 +1567,7 @@ func (m *Model) syncActionBar() {
 	m.actionBar.SetError(errStr)
 	m.actionBar.SetConnected(m.wsConnected)
 	m.actionBar.SetThreadOpen(m.mainPane == paneThread)
+	m.actionBar.SetEditing(m.editingPostID != "")
 
 	// Replying needs a focused history pane with a post under the cursor;
 	// the button appears only then, which is also the hint that the pane has
@@ -1581,6 +1617,7 @@ func (m *Model) selectChannel(ch *model.Channel) tea.Cmd {
 	}
 	m.activeChan = ch
 	m.channelAutoSelected = true
+	m.cancelEdit()
 	// A highlight from a search in the previous channel would otherwise
 	// carry over and mark unrelated text here.
 	m.clearSearchHighlight()
@@ -1675,6 +1712,32 @@ func (m *Model) closeThread() tea.Cmd {
 	cmd := m.setFocus(FocusViewport)
 	m.resizeComponents()
 	return cmd
+}
+
+// leaveThread closes the thread for a reason other than the reader asking,
+// such as its root being deleted. Someone typing a reply keeps the input:
+// moving them to the history pane would read the rest of their sentence as
+// single-key commands.
+func (m *Model) leaveThread() tea.Cmd {
+	if m.focus != FocusInput {
+		return m.closeThread()
+	}
+	m.mainPane = paneChannel
+	m.threadRootID = ""
+	m.thread.Clear()
+	m.resizeComponents()
+	return nil
+}
+
+// cancelEdit abandons a post edit in progress, along with its text. An edit
+// left pending used to be applied by the next message sent, whatever
+// channel it was sent in.
+func (m *Model) cancelEdit() {
+	if m.editingPostID == "" {
+		return
+	}
+	m.editingPostID = ""
+	m.input.SetValue("")
 }
 
 // openChCreator opens the channel creator overlay for the active team.
@@ -1822,7 +1885,7 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 			// showing an empty pane.
 			if m.mainPane == paneThread && m.thread.RootPost() != nil &&
 				m.thread.RootPost().ID == postID {
-				cmds = append(cmds, m.closeThread())
+				cmds = append(cmds, m.leaveThread())
 			}
 		}
 

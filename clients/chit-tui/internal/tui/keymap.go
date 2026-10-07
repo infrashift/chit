@@ -65,7 +65,7 @@ func DefaultKeyMap() KeyMap {
 		),
 		Delete: key.NewBinding(
 			key.WithKeys("d"),
-			key.WithHelp("d", "delete your post"),
+			key.WithHelp("d d", "delete your post"),
 		),
 		Pin: key.NewBinding(
 			key.WithKeys("p"),

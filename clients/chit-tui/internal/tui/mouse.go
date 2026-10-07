@@ -126,6 +126,11 @@ func (m Model) handlePaletteClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	if idx, ok := m.palette.RowAt(msg.Y - py); ok {
 		cmd := m.palette.ChooseRow(idx)
+		// Choosing closes the palette, which then has to hand focus back
+		// as the keyboard path does; left on it, keys went nowhere.
+		if !m.palette.Visible() {
+			cmd = tea.Batch(cmd, m.setFocus(FocusInput))
+		}
 		return m, cmd
 	}
 	return m, nil
