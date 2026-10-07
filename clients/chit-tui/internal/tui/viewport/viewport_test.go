@@ -791,3 +791,29 @@ func TestEmptyAndLoadingStates(t *testing.T) {
 		}
 	})
 }
+
+// Paging is by offset, so posts that arrived since the first page shift the
+// boundary and an older page repeats some of what is already shown.
+func TestViewport_PrependPostsSkipsPostsAlreadyShown(t *testing.T) {
+	m := viewport.New(testStyles())
+	m.SetSize(80, 24)
+	// Newest-first, like the API.
+	m.SetPosts([]*model.Post{
+		{ID: "p3", UserID: "u1", Content: "three", CreateAt: 1700000003000},
+		{ID: "p2", UserID: "u1", Content: "two", CreateAt: 1700000002000},
+	})
+
+	// p2 overlaps.
+	m.PrependPosts([]*model.Post{
+		{ID: "p2", UserID: "u1", Content: "two", CreateAt: 1700000002000},
+		{ID: "p1", UserID: "u1", Content: "one", CreateAt: 1700000001000},
+	})
+
+	var ids []string
+	for _, p := range m.Posts() {
+		ids = append(ids, p.ID)
+	}
+	if got := strings.Join(ids, ","); got != "p1,p2,p3" {
+		t.Errorf("posts = %s, want p1,p2,p3", got)
+	}
+}

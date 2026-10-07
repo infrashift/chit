@@ -147,6 +147,11 @@ type Model struct {
 	// user ID; commandResponses numbers the outputs so each has its own ID.
 	commandAuthors   map[string]string
 	commandResponses int
+	// threadRootID is the root of the thread in the main pane, set as soon
+	// as it opens, before the thread itself has loaded.
+	threadRootID string
+	// userQuery is the latest user search sent; older answers are dropped.
+	userQuery string
 	// expiredUserID is who was signed in when the session expired. Their
 	// state is kept for the re-login, which may not be theirs.
 	expiredUserID string
@@ -522,11 +527,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case PostsLoadedMsg:
+		if m.activeChan == nil || msg.ChannelID != m.activeChan.ID {
+			// The reader moved on while this was in flight; applying it
+			// would show one channel's history under another's name.
+			return m, nil
+		}
 		m.viewport.SetLoading(false)
 		if msg.Err != nil {
 			return m, m.setError(msg.Err)
 		}
-		m.viewport.SetLoading(false)
 		m.viewport.SetPosts(msg.Posts.Order)
 		m.historyPage = 0
 		m.loadingOlder = false
@@ -582,8 +591,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case ThreadLoadedMsg:
+		if m.mainPane != paneThread || msg.PostID != m.threadRootID {
+			// Another thread was opened, or this one closed, meanwhile.
+			return m, nil
+		}
 		if msg.Err != nil {
-			return m, m.setError(msg.Err)
+			// An empty thread pane would take whatever is typed next and
+			// post it to the channel, so go back to the channel instead.
+			return m, tea.Batch(m.closeThread(), m.setError(msg.Err))
 		}
 		if msg.Posts != nil && len(msg.Posts.Order) > 0 {
 			root := msg.Posts.Order[0]
@@ -705,6 +720,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case viewport.PostSelectedMsg:
 		cmds = append(cmds, FetchThread(m.client, msg.Post.ID))
 		m.mainPane = paneThread
+		m.threadRootID = msg.Post.ID
 		cmds = append(cmds, m.setFocus(FocusInput))
 		m.resizeComponents()
 		return m, tea.Batch(cmds...)
@@ -714,11 +730,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// In the thread pane the input composes a reply to the thread root.
-		if m.mainPane == paneThread && m.thread.RootPost() != nil {
+		// The root's ID is known from the moment the thread opens, so a
+		// reply typed while it loads is still a reply.
+		if m.mainPane == paneThread && m.threadRootID != "" {
+			channelID := m.activeChan.ID
+			if root := m.thread.RootPost(); root != nil && root.ChannelID != "" {
+				channelID = root.ChannelID
+			}
 			reply := &model.Post{
-				ChannelID: m.activeChan.ID,
+				ChannelID: channelID,
 				UserID:    m.me.ID,
-				RootID:    m.thread.RootPost().ID,
+				RootID:    m.threadRootID,
 				Content:   msg.Content,
 			}
 			cmds = append(cmds, CreatePost(m.client, reply))
@@ -839,6 +861,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case palette.UserQueryMsg:
+		m.userQuery = msg.Term
 		cmds = append(cmds, SearchUsersCmd(m.client, msg.Term))
 		return m, tea.Batch(cmds...)
 
@@ -870,6 +893,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case SearchResultsMsg:
+		if msg.Term != m.searchTerm {
+			return m, nil // superseded by a later search
+		}
 		if msg.Err != nil {
 			return m, m.setError(msg.Err)
 		}
@@ -935,10 +961,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case dmpicker.SearchTriggeredMsg:
+		m.userQuery = msg.Term
 		cmds = append(cmds, SearchUsersCmd(m.client, msg.Term))
 		return m, tea.Batch(cmds...)
 
 	case UserSearchResultsMsg:
+		if msg.Term != m.userQuery {
+			return m, nil // superseded by a later keystroke
+		}
 		if msg.Err != nil {
 			return m, m.setError(msg.Err)
 		}
@@ -953,11 +983,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Both the palette ("@" mode) and the DM picker (member selection)
 		// consume user searches; route to whichever is open.
-		if m.palette.Visible() {
+		switch {
+		case m.palette.Visible():
 			m.palette.SetUsers(filtered)
-			return m, nil
+		case m.dmPicker.Visible():
+			m.dmPicker.SetResults(filtered)
 		}
-		m.dmPicker.SetResults(filtered)
 		return m, nil
 
 	case ThreadsLoadedMsg:
@@ -983,6 +1014,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, FetchThread(m.client, msg.RootID))
 		m.mainPane = paneThread
+		m.threadRootID = msg.RootID
 		cmds = append(cmds, m.setFocus(FocusThread))
 		m.resizeComponents()
 		if m.activeTeam != nil {
@@ -1221,13 +1253,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.setError(fmt.Errorf("copied %d %s to the clipboard", msg.lines, noun))
 
 	case OlderPostsLoadedMsg:
+		if m.activeChan == nil || msg.ChannelID != m.activeChan.ID || msg.Page != m.historyPage+1 {
+			// The reader moved on, or the history was reloaded, while this
+			// was in flight.
+			return m, nil
+		}
 		m.loadingOlder = false
 		if msg.Err != nil {
 			return m, m.setError(msg.Err)
-		}
-		if m.activeChan == nil || msg.ChannelID != m.activeChan.ID {
-			// The reader moved on while this was in flight.
-			return m, nil
 		}
 		older := msg.Posts.Order
 		if len(older) < historyPageSize {
@@ -1559,6 +1592,8 @@ func (m *Model) selectChannel(ch *model.Channel) tea.Cmd {
 	}
 	m.viewport.SetPosts(nil)
 	m.viewport.SetLoading(true)
+	// Paging state belongs to the channel being left.
+	m.historyPage, m.loadingOlder, m.historyExhausted = 0, false, false
 	cmds = append(cmds, FetchPosts(m.client, ch.ID, 0, historyPageSize))
 	cmds = append(cmds, ViewChannel(m.client, ch.ID))
 	// Members are only read for the active channel, to build the @-mention
@@ -1635,6 +1670,7 @@ func (m *Model) clearSearchHighlight() {
 
 func (m *Model) closeThread() tea.Cmd {
 	m.mainPane = paneChannel
+	m.threadRootID = ""
 	m.thread.Clear()
 	cmd := m.setFocus(FocusViewport)
 	m.resizeComponents()
@@ -2289,7 +2325,9 @@ const historyPageSize = 60
 // loaded history. Without it the channel is capped at the first page and
 // older messages are simply unreachable.
 func (m *Model) maybeLoadOlder() tea.Cmd {
-	if m.activeChan == nil || m.loadingOlder || m.historyExhausted {
+	// An empty history pane is "at the top" while the channel loads, but
+	// there is no first page yet to page back from.
+	if m.activeChan == nil || m.loadingOlder || m.historyExhausted || m.viewport.Loading() {
 		return nil
 	}
 	if !m.viewport.AtTop() {

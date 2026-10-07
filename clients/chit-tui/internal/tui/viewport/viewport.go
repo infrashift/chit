@@ -152,10 +152,21 @@ func (m *Model) PrependPosts(older []*model.Post) {
 	}
 
 	// Older arrives newest-first, like the rest of the history API; reverse
-	// it so the combined list stays chronological.
-	reversed := make([]*model.Post, len(older))
-	for i, p := range older {
-		reversed[len(older)-1-i] = p
+	// it so the combined list stays chronological. Paging is by offset, so
+	// posts that arrived since the first page shift the boundary and the
+	// page can repeat some of what is shown; those are skipped.
+	shown := make(map[string]bool, len(m.posts))
+	for _, p := range m.posts {
+		shown[p.ID] = true
+	}
+	reversed := make([]*model.Post, 0, len(older))
+	for i := len(older) - 1; i >= 0; i-- {
+		if !shown[older[i].ID] {
+			reversed = append(reversed, older[i])
+		}
+	}
+	if len(reversed) == 0 {
+		return
 	}
 
 	linesBefore := len(m.plainLines)
@@ -366,6 +377,9 @@ func (m Model) placeholder() string {
 // SetLoading marks a fetch as in flight, so the pane can say so instead of
 // showing a stale or blank view while the request is out.
 func (m *Model) SetLoading(loading bool) { m.loading = loading }
+
+// Loading reports whether the channel's first page is still on its way.
+func (m Model) Loading() bool { return m.loading }
 
 // Note: a "loading older" banner is deliberately not injected into the
 // rendered content. Every line of that content is indexed for selection and

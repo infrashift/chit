@@ -64,8 +64,10 @@ type ChannelViewedMsg struct {
 	Err       error
 }
 
-// SearchResultsMsg is sent when search results are returned.
+// SearchResultsMsg is sent when search results are returned. Term is the
+// search they answer, so a slower earlier search can be told apart.
 type SearchResultsMsg struct {
+	Term  string
 	Posts *model.PostList
 	Err   error
 }
@@ -121,8 +123,10 @@ type DMChannelsLoadedMsg struct {
 	Err      error
 }
 
-// UserSearchResultsMsg is sent when user search results are returned.
+// UserSearchResultsMsg is sent when user search results are returned. Term
+// is the query they answer; queries fire per keystroke and race.
 type UserSearchResultsMsg struct {
+	Term  string
 	Users []*model.User
 	Err   error
 }

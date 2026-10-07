@@ -823,6 +823,7 @@ func TestModel_WSEventPostedIncrementsThreadCount(t *testing.T) {
 
 func TestModel_ThreadLoadedCachesCount(t *testing.T) {
 	m := setupModel(t)
+	m = startThread(t, m, &model.Post{ID: "p1", UserID: "u1", Content: "Hello"})
 
 	updated, _ := m.Update(tui.ThreadLoadedMsg{
 		PostID: "p1",
@@ -834,6 +835,7 @@ func TestModel_ThreadLoadedCachesCount(t *testing.T) {
 		},
 	})
 	m = updated.(tui.Model)
+	m, _ = step(t, m, tea.KeyMsg{Type: tea.KeyEscape})
 
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "1 replies") {
@@ -1975,6 +1977,7 @@ func TestModel_TagPickerOpensFromThread(t *testing.T) {
 	m = updated.(tui.Model)
 
 	updated, _ = m.Update(tui.ThreadLoadedMsg{
+		PostID: "p1",
 		Posts: &model.PostList{Order: []*model.Post{
 			{ID: "p1", UserID: "u1", Content: "root", CreateAt: 1700000000000},
 		}},
@@ -2264,6 +2267,8 @@ func (c *countingClient) GetChannelMembers(ctx context.Context, id string) ([]*m
 func TestModel_ChannelLoadIssuesOneTagRequest(t *testing.T) {
 	client := &countingClient{mockClient: &mockClient{}}
 	m := modelWithClient(t, client)
+	m, _ = step(t, m, tui.TeamsLoadedMsg{Teams: []*model.Team{{ID: "t1"}}})
+	m, _ = step(t, m, tui.ChannelsLoadedMsg{TeamID: "t1", Channels: []*model.Channel{{ID: "c1", TeamID: "t1"}}})
 
 	posts := make([]*model.Post, 0, 60)
 	for i := range 60 {

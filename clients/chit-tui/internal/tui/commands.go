@@ -93,7 +93,7 @@ func ViewChannel(client api.ChitClient, channelID string) tea.Cmd {
 func SearchPosts(client api.ChitClient, channelID, term string, tagIDs []string) tea.Cmd {
 	return func() tea.Msg {
 		pl, err := client.SearchPosts(context.Background(), channelID, term, tagIDs)
-		return SearchResultsMsg{Posts: pl, Err: err}
+		return SearchResultsMsg{Term: term, Posts: pl, Err: err}
 	}
 }
 
@@ -138,7 +138,7 @@ func ListenWSState(wsClient ws.WSClient) tea.Cmd {
 func SearchPostsEverywhere(client api.ChitClient, term string, tagIDs []string) tea.Cmd {
 	return func() tea.Msg {
 		pl, err := client.SearchPostsEverywhere(context.Background(), term, tagIDs)
-		return SearchResultsMsg{Posts: pl, Err: err}
+		return SearchResultsMsg{Term: term, Posts: pl, Err: err}
 	}
 }
 
@@ -154,7 +154,7 @@ func FetchDMChannels(client api.ChitClient) tea.Cmd {
 func SearchUsersCmd(client api.ChitClient, term string) tea.Cmd {
 	return func() tea.Msg {
 		users, err := client.SearchUsers(context.Background(), term, 0, 20)
-		return UserSearchResultsMsg{Users: users, Err: err}
+		return UserSearchResultsMsg{Term: term, Users: users, Err: err}
 	}
 }
 
