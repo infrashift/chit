@@ -144,22 +144,6 @@ func TestLoadFromFile_NotFound(t *testing.T) {
 	}
 }
 
-func TestLoadNamed_Empty_ReturnsDefault(t *testing.T) {
-	th := theme.LoadNamed("")
-	def := theme.TokyoNight()
-	if th.Name != def.Name {
-		t.Errorf("name = %q, want %q", th.Name, def.Name)
-	}
-}
-
-func TestLoadNamed_Missing_ReturnsDefault(t *testing.T) {
-	th := theme.LoadNamed("nonexistent-theme-name-xyz")
-	def := theme.TokyoNight()
-	if th.Name != def.Name {
-		t.Errorf("name = %q, want default %q", th.Name, def.Name)
-	}
-}
-
 func assertThemeComplete(t *testing.T, th theme.Theme) {
 	t.Helper()
 	if th.Name == "" {
@@ -220,34 +204,6 @@ func TestNightfox_HasAllColors(t *testing.T) {
 	assertThemeComplete(t, th)
 	if th.Name != "Nightfox" {
 		t.Errorf("name = %q", th.Name)
-	}
-}
-
-func TestLoadNamed_BuiltinCatppuccin(t *testing.T) {
-	th := theme.LoadNamed("catppuccin")
-	if th.Name != "Catppuccin Mocha" {
-		t.Errorf("name = %q, want %q", th.Name, "Catppuccin Mocha")
-	}
-}
-
-func TestLoadNamed_BuiltinKanagawa(t *testing.T) {
-	th := theme.LoadNamed("kanagawa")
-	if th.Name != "Kanagawa" {
-		t.Errorf("name = %q, want %q", th.Name, "Kanagawa")
-	}
-}
-
-func TestLoadNamed_BuiltinNightfox(t *testing.T) {
-	th := theme.LoadNamed("nightfox")
-	if th.Name != "Nightfox" {
-		t.Errorf("name = %q, want %q", th.Name, "Nightfox")
-	}
-}
-
-func TestLoadNamed_BuiltinTokyoNight(t *testing.T) {
-	th := theme.LoadNamed("tokyo-night")
-	if th.Name != "Tokyo Night" {
-		t.Errorf("name = %q, want %q", th.Name, "Tokyo Night")
 	}
 }
 

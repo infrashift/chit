@@ -121,17 +121,6 @@ func (ss *SessionStore) Clear() error {
 	return err
 }
 
-// Package-level functions for backward compatibility with tests.
-
-// SaveSession writes a session using the default path.
-func SaveSession(s StoredSession) error { return NewSessionStore("").Save(s) }
-
-// LoadSession reads a session using the default path.
-func LoadSession() (*StoredSession, error) { return NewSessionStore("").Load() }
-
-// ClearSession removes the session at the default path.
-func ClearSession() error { return NewSessionStore("").Clear() }
-
 func sessionDir() (string, error) {
 	configDir, err := os.UserConfigDir()
 	if err != nil {

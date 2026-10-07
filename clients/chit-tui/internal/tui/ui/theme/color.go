@@ -10,7 +10,7 @@ import (
 )
 
 // Colors are image/color.Color rather than lipgloss.Color so palettes can be
-// derived arithmetically (see ShiftLightness and Blend). A nil color means
+// derived arithmetically (see Blend). A nil color means
 // "terminal default" — Lip turns it into lipgloss.NoColor, and the fg/bg
 // helpers in styles.go skip the attribute entirely.
 
@@ -60,30 +60,6 @@ func clamp8(v int) uint8 {
 		return 255
 	default:
 		return uint8(v)
-	}
-}
-
-// ShiftLightness moves every channel by amount: up when the channel average is
-// below 128 (dark colors get lighter) and down otherwise. This is an exact port
-// of tuicr's shift_lightness — deliberately not an HSL-based lighten/darken,
-// which produces visibly different results on desaturated colors.
-func ShiftLightness(c color.Color, amount int) color.Color {
-	r, g, b, ok := rgbComponents(c)
-	if !ok {
-		return c
-	}
-
-	avg := (int(r) + int(g) + int(b)) / 3
-	delta := amount
-	if avg >= 128 {
-		delta = -amount
-	}
-
-	return color.RGBA{
-		R: clamp8(int(r) + delta),
-		G: clamp8(int(g) + delta),
-		B: clamp8(int(b) + delta),
-		A: 0xff,
 	}
 }
 

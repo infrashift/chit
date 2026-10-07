@@ -69,14 +69,6 @@ func TestPostView_NilPost(t *testing.T) {
 	}
 }
 
-func TestPostView_Height(t *testing.T) {
-	p := &model.Post{ID: "p1", Content: "Hello", CreateAt: 1700000000000}
-	m := post.New(p, "alice", testStyles(), 80, nil, "", 0, nil)
-	if m.Height() < 2 {
-		t.Errorf("expected height >= 2, got %d", m.Height())
-	}
-}
-
 func TestPostView_WithRenderer(t *testing.T) {
 	p := &model.Post{ID: "p1", Content: "Hello", CreateAt: 1700000000000}
 	m := post.New(p, "alice", testStyles(), 80, testRenderer(), "", 0, nil)

@@ -85,41 +85,6 @@ func TestWSClient_ConnectAndReceive(t *testing.T) {
 	}
 }
 
-func TestWSClient_Send(t *testing.T) {
-	received := make(chan model.WebSocketMessage, 1)
-
-	srv := newTestWSServer(t, func(conn *websocket.Conn) {
-		_, msg, err := conn.ReadMessage()
-		if err != nil {
-			return
-		}
-		var wsMsg model.WebSocketMessage
-		if err := json.Unmarshal(msg, &wsMsg); err == nil {
-			received <- wsMsg
-		}
-	})
-
-	client := ws.NewWSClient(wsURL(srv), "test-token", 10)
-	if err := client.Connect(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = client.Close() }()
-
-	msg := model.WebSocketMessage{Action: "typing", Seq: 1, Data: map[string]any{"channel_id": "c1"}}
-	if err := client.Send(msg); err != nil {
-		t.Fatal(err)
-	}
-
-	select {
-	case got := <-received:
-		if got.Action != "typing" {
-			t.Errorf("action = %q, want %q", got.Action, "typing")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for message")
-	}
-}
-
 func TestWSClient_Close(t *testing.T) {
 	srv := newTestWSServer(t, func(conn *websocket.Conn) {
 		// Echo server — keep reading until closed.

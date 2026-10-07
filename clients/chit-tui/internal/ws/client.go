@@ -38,7 +38,6 @@ type WSClient interface {
 	Events() <-chan model.WebSocketEvent
 	// State reports connect and disconnect transitions.
 	State() <-chan ConnState
-	Send(msg model.WebSocketMessage) error
 	SetToken(token string)
 }
 
@@ -342,13 +341,4 @@ func (c *wsClient) SetToken(token string) {
 
 func (c *wsClient) Events() <-chan model.WebSocketEvent {
 	return c.events
-}
-
-func (c *wsClient) Send(msg model.WebSocketMessage) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.conn == nil {
-		return ErrNotConnected
-	}
-	return c.conn.WriteJSON(msg)
 }

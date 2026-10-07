@@ -234,7 +234,6 @@ func (m *mockWSClient) Connect() error                      { return nil }
 func (m *mockWSClient) Close() error                        { m.closes++; return nil }
 func (m *mockWSClient) Events() <-chan model.WebSocketEvent { return m.events }
 func (m *mockWSClient) State() <-chan ws.ConnState          { return m.state }
-func (m *mockWSClient) Send(_ model.WebSocketMessage) error { return nil }
 func (m *mockWSClient) SetToken(_ string)                   {}
 
 func TestFetchMe_ReturnsUserLoadedMsg(t *testing.T) {

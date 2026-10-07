@@ -141,25 +141,6 @@ func ListAvailable(themesDir string) []string {
 	return append(names, local...)
 }
 
-// LoadNamed resolves a theme by name. It checks built-in themes first,
-// then looks for ~/.config/chit/skins/<name>.json.
-// Returns the default TokyoNight theme if nothing matches.
-func LoadNamed(name string) Theme {
-	if name == "" {
-		return TokyoNight()
-	}
-	if t, ok := Lookup(name); ok {
-		return t
-	}
-	dir := skinsDir()
-	path := filepath.Join(dir, name+".json")
-	t, err := LoadFromFile(path)
-	if err != nil {
-		return TokyoNight()
-	}
-	return t
-}
-
 func skinsDir() string {
 	configDir, err := os.UserConfigDir()
 	if err != nil {

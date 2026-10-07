@@ -19,11 +19,11 @@ func TestSaveAndLoadSession(t *testing.T) {
 		ExpiresAt: "2026-12-31T23:59:59Z",
 	}
 
-	if err := auth.SaveSession(s); err != nil {
+	if err := auth.NewSessionStore("").Save(s); err != nil {
 		t.Fatal(err)
 	}
 
-	loaded, err := auth.LoadSession()
+	loaded, err := auth.NewSessionStore("").Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestSaveSession_FilePermissions(t *testing.T) {
 		ExpiresAt: "2026-12-31T23:59:59Z",
 	}
 
-	if err := auth.SaveSession(s); err != nil {
+	if err := auth.NewSessionStore("").Save(s); err != nil {
 		t.Fatal(err)
 	}
 
@@ -68,7 +68,7 @@ func TestLoadSession_NoFile(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", tmp)
 
-	_, err := auth.LoadSession()
+	_, err := auth.NewSessionStore("").Load()
 	if err == nil {
 		t.Fatal("expected error when no session file exists")
 	}
@@ -86,7 +86,7 @@ func TestLoadSession_CorruptFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := auth.LoadSession()
+	_, err := auth.NewSessionStore("").Load()
 	if err == nil {
 		t.Fatal("expected error for corrupt session file")
 	}
@@ -102,15 +102,15 @@ func TestClearSession(t *testing.T) {
 		ExpiresAt: "2026-12-31T23:59:59Z",
 	}
 
-	if err := auth.SaveSession(s); err != nil {
+	if err := auth.NewSessionStore("").Save(s); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := auth.ClearSession(); err != nil {
+	if err := auth.NewSessionStore("").Clear(); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err := auth.LoadSession()
+	_, err := auth.NewSessionStore("").Load()
 	if err == nil {
 		t.Fatal("expected error after clearing session")
 	}
@@ -121,7 +121,7 @@ func TestClearSession_NoFile(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", tmp)
 
 	// Should not error when no file exists.
-	if err := auth.ClearSession(); err != nil {
+	if err := auth.NewSessionStore("").Clear(); err != nil {
 		t.Fatalf("ClearSession() should not error when no file exists: %v", err)
 	}
 }
@@ -131,16 +131,16 @@ func TestSaveSession_Overwrite(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", tmp)
 
 	s1 := auth.StoredSession{ServerURL: "http://a", Token: "old", ExpiresAt: "2026-01-01T00:00:00Z"}
-	if err := auth.SaveSession(s1); err != nil {
+	if err := auth.NewSessionStore("").Save(s1); err != nil {
 		t.Fatal(err)
 	}
 
 	s2 := auth.StoredSession{ServerURL: "http://b", Token: "new", ExpiresAt: "2026-06-01T00:00:00Z"}
-	if err := auth.SaveSession(s2); err != nil {
+	if err := auth.NewSessionStore("").Save(s2); err != nil {
 		t.Fatal(err)
 	}
 
-	loaded, err := auth.LoadSession()
+	loaded, err := auth.NewSessionStore("").Load()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestSaveSession_NoConfigDir(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 
 	s := auth.StoredSession{ServerURL: "http://x", Token: "tok", ExpiresAt: "2026-01-01T00:00:00Z"}
-	err := auth.SaveSession(s)
+	err := auth.NewSessionStore("").Save(s)
 	if err == nil {
 		t.Fatal("expected error when config dir is unavailable")
 	}
@@ -167,7 +167,7 @@ func TestLoadSession_NoConfigDir(t *testing.T) {
 	t.Setenv("HOME", "")
 	t.Setenv("XDG_CONFIG_HOME", "")
 
-	_, err := auth.LoadSession()
+	_, err := auth.NewSessionStore("").Load()
 	if err == nil {
 		t.Fatal("expected error when config dir is unavailable")
 	}
@@ -177,7 +177,7 @@ func TestClearSession_NoConfigDir(t *testing.T) {
 	t.Setenv("HOME", "")
 	t.Setenv("XDG_CONFIG_HOME", "")
 
-	err := auth.ClearSession()
+	err := auth.NewSessionStore("").Clear()
 	if err == nil {
 		t.Fatal("expected error when config dir is unavailable")
 	}
@@ -188,17 +188,17 @@ func TestSaveAndClear_Cycle(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", tmp)
 
 	s := auth.StoredSession{ServerURL: "http://x", Token: "tok", ExpiresAt: "2026-01-01T00:00:00Z"}
-	if err := auth.SaveSession(s); err != nil {
+	if err := auth.NewSessionStore("").Save(s); err != nil {
 		t.Fatal(err)
 	}
-	if err := auth.ClearSession(); err != nil {
+	if err := auth.NewSessionStore("").Clear(); err != nil {
 		t.Fatal(err)
 	}
 	// Save again after clear.
-	if err := auth.SaveSession(s); err != nil {
+	if err := auth.NewSessionStore("").Save(s); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := auth.LoadSession()
+	loaded, err := auth.NewSessionStore("").Load()
 	if err != nil {
 		t.Fatal(err)
 	}
