@@ -709,14 +709,32 @@ func (s *PostStore) GetPostsSince(_ context.Context, since int64, limit int) ([]
 	return out, nil
 }
 
-func (s *PostStore) SearchByContent(_ context.Context, channelID, query string, page, perPage int) ([]*model.Post, error) {
+func (s *PostStore) GetByIDs(_ context.Context, ids []string) ([]*model.Post, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	query = strings.ToLower(query)
+	var out []*model.Post
+	for _, id := range ids {
+		if p, ok := s.live(id); ok {
+			out = append(out, cp(p))
+		}
+	}
+	return out, nil
+}
+
+// Search applies every filter before paginating, as the SQL query does.
+func (s *PostStore) Search(_ context.Context, q *model.PostSearch) ([]*model.Post, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	s.tags.mu.RLock()
+	defer s.tags.mu.RUnlock()
+	terms := strings.ToLower(q.Terms)
 	posts := s.list(func(p *model.Post) bool {
-		return (channelID == "" || p.ChannelID == channelID) && strings.Contains(strings.ToLower(p.Content), query)
+		return slices.Contains(q.ChannelIDs, p.ChannelID) &&
+			strings.Contains(strings.ToLower(p.Content), terms) &&
+			(q.AuthorID == "" || p.UserID == q.AuthorID) &&
+			s.tags.hasAll(p.ID, q.TagIDs)
 	})
-	return paginate(posts, page, perPage), nil
+	return paginate(posts, q.Page, q.PerPage), nil
 }
 
 // ─── Threads ─────────────────────────────────────────────────────
@@ -957,19 +975,6 @@ func (s *TagStore) hasAll(postID string, tagIDs []string) bool {
 		}
 	}
 	return true
-}
-
-func (s *TagStore) GetPostIDsByTags(_ context.Context, tagIDs []string, page, perPage int) ([]string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var ids []string
-	for postID := range s.postTags {
-		if s.hasAll(postID, tagIDs) {
-			ids = append(ids, postID)
-		}
-	}
-	sort.Strings(ids)
-	return paginate(ids, page, perPage), nil
 }
 
 func (s *TagStore) FilterPostIDsByTags(_ context.Context, postIDs, tagIDs []string) ([]string, error) {

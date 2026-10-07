@@ -63,6 +63,19 @@ func (p *Post) PreUpdate() {
 	p.UpdateAt = GetMillis()
 }
 
+// PostSearch is a scoped post search. ChannelIDs is the scope and is
+// required: an empty scope matches nothing. Terms is matched as a substring
+// of the content; every tag in TagIDs must be on a post; AuthorID, when set,
+// limits results to one author. Page is zero-based.
+type PostSearch struct {
+	Terms      string
+	TagIDs     []string
+	ChannelIDs []string
+	AuthorID   string
+	Page       int
+	PerPage    int
+}
+
 // PostList holds an ordered list of posts along with an ordering slice.
 type PostList struct {
 	Order []*Post `json:"order"`

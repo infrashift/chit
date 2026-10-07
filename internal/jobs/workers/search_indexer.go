@@ -202,6 +202,12 @@ func (si *SearchIndexer) Search(ctx context.Context, query string, from, size in
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	// Without this a 401 or 500 decoded as an empty hit list: search said
+	// "nothing found" when it had not looked.
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("search: status %d", resp.StatusCode)
+	}
+
 	var result struct {
 		Hits struct {
 			Hits []struct {

@@ -135,9 +135,9 @@ func New(a *app.App) http.Handler {
 			r.Get("/commands", listCommands(a))
 
 			// Search
-			r.Post("/posts/search", searchPostsGlobal(a))
-			r.Post("/teams/{id}/posts/search", searchPostsInTeam(a))
-			r.Post("/channels/{id}/posts/search", searchPostsInChannel(a))
+			r.Post("/posts/search", searchPosts(a, searchEverywhere))
+			r.Post("/teams/{id}/posts/search", searchPosts(a, searchTeam))
+			r.Post("/channels/{id}/posts/search", searchPosts(a, searchChannel))
 
 			// WebSocket
 			r.Get("/websocket", handleWebSocket(a))

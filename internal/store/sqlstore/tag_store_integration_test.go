@@ -40,12 +40,14 @@ func TestTagStoreIntegration_TagsAndAssociations(t *testing.T) {
 		t.Errorf("GetTagsForPost: got %v", tags)
 	}
 
-	ids, err := ss.Tag().GetPostIDsByTags(t.Context(), []string{tag.ID}, 0, 10)
+	found, err := ss.Post().Search(t.Context(), &model.PostSearch{
+		TagIDs: []string{tag.ID}, ChannelIDs: []string{post1.ChannelID}, PerPage: 10,
+	})
 	if err != nil {
-		t.Fatalf("GetPostIDsByTags: %v", err)
+		t.Fatalf("Search by tag: %v", err)
 	}
-	if len(ids) != 1 || ids[0] != post1.ID {
-		t.Errorf("GetPostIDsByTags: got %v, want [%s]", ids, post1.ID)
+	if len(found) != 1 || found[0].ID != post1.ID {
+		t.Errorf("Search by tag: got %d posts, want only %s", len(found), post1.ID)
 	}
 
 	filtered, err := ss.Tag().FilterPostIDsByTags(t.Context(), []string{post1.ID, post2.ID}, []string{tag.ID})

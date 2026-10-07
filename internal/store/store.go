@@ -79,7 +79,11 @@ type PostStore interface {
 	GetPostsForThread(ctx context.Context, rootID string) (*model.PostList, error)
 	GetPinnedPosts(ctx context.Context, channelID string) (*model.PostList, error)
 	SetPinned(ctx context.Context, id string, pinned bool) error
-	SearchByContent(ctx context.Context, channelID, query string, page, perPage int) ([]*model.Post, error)
+	// GetByIDs returns the live posts among ids, in no particular order.
+	GetByIDs(ctx context.Context, ids []string) ([]*model.Post, error)
+	// Search returns one page of posts matching q, newest first, with every
+	// filter (scope included) applied before pagination.
+	Search(ctx context.Context, q *model.PostSearch) ([]*model.Post, error)
 	GetPostsSince(ctx context.Context, sinceUpdateAt int64, limit int) ([]*model.Post, error)
 }
 
@@ -105,6 +109,5 @@ type TagStore interface {
 	GetTagsForPost(ctx context.Context, messageID string) ([]*model.Tag, error)
 	// GetTagsForPosts is the bulk form, keyed by post ID.
 	GetTagsForPosts(ctx context.Context, messageIDs []string) (map[string][]*model.Tag, error)
-	GetPostIDsByTags(ctx context.Context, tagIDs []string, page, perPage int) ([]string, error)
 	FilterPostIDsByTags(ctx context.Context, postIDs, tagIDs []string) ([]string, error)
 }

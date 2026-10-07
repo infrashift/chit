@@ -20,19 +20,25 @@ type searchPostsBody struct {
 	PerPage int    `json:"per_page"`
 }
 
-// searchPostsGlobal searches across every channel the requesting user is a
-// member of (no team or channel scope).
-func searchPostsGlobal(a *app.App) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		user := ContextGetUser(r)
+// searchScope says which path parameter, if any, narrows a search.
+type searchScope int
 
+const (
+	searchEverywhere searchScope = iota // every channel the caller is in
+	searchTeam                          // the caller's channels in team {id}
+	searchChannel                       // channel {id}
+)
+
+// searchPosts serves the three search routes, which differ only in scope.
+func searchPosts(a *app.App, scope searchScope) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		var body searchPostsBody
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			WriteError(w, model.NewBadRequestError("searchPostsGlobal", "invalid request body"))
+			WriteError(w, model.NewBadRequestError("searchPosts", "invalid request body"))
 			return
 		}
 		if body.Terms == "" && len(body.TagIDs) == 0 {
-			WriteError(w, model.NewBadRequestError("searchPostsGlobal", "terms or tag_ids required"))
+			WriteError(w, model.NewBadRequestError("searchPosts", "terms or tag_ids required"))
 			return
 		}
 		if body.PerPage == 0 {
@@ -40,70 +46,22 @@ func searchPostsGlobal(a *app.App) http.HandlerFunc {
 		}
 		body.Page, body.PerPage = clampPagination(body.Page, body.PerPage)
 
-		results, err := a.SearchPostsFrom(r.Context(), "", user.ID, body.Terms, body.From, body.TagIDs, body.Page, body.PerPage)
+		req := &app.SearchRequest{
+			UserID: ContextGetUser(r).ID, Terms: body.Terms, TagIDs: body.TagIDs,
+			From: body.From, Page: body.Page, PerPage: body.PerPage,
+		}
+		switch scope {
+		case searchTeam:
+			req.TeamID = chi.URLParam(r, "id")
+		case searchChannel:
+			req.ChannelID = chi.URLParam(r, "id")
+		}
+
+		results, err := a.SearchPosts(r.Context(), req)
 		if err != nil {
-			WriteAppError(w, "searchPostsGlobal", err)
+			WriteAppError(w, "searchPosts", err)
 			return
 		}
-
-		WriteJSON(w, http.StatusOK, results)
-	}
-}
-
-func searchPostsInTeam(a *app.App) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		user := ContextGetUser(r)
-		_ = chi.URLParam(r, "id")
-
-		var body searchPostsBody
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			WriteError(w, model.NewBadRequestError("searchPostsInTeam", "invalid request body"))
-			return
-		}
-		if body.Terms == "" && len(body.TagIDs) == 0 {
-			WriteError(w, model.NewBadRequestError("searchPostsInTeam", "terms or tag_ids required"))
-			return
-		}
-		if body.PerPage == 0 {
-			body.PerPage = 60
-		}
-		body.Page, body.PerPage = clampPagination(body.Page, body.PerPage)
-
-		results, err := a.SearchPostsFrom(r.Context(), "", user.ID, body.Terms, body.From, body.TagIDs, body.Page, body.PerPage)
-		if err != nil {
-			WriteAppError(w, "searchPostsInTeam", err)
-			return
-		}
-
-		WriteJSON(w, http.StatusOK, results)
-	}
-}
-
-func searchPostsInChannel(a *app.App) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		user := ContextGetUser(r)
-		channelID := chi.URLParam(r, "id")
-
-		var body searchPostsBody
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			WriteError(w, model.NewBadRequestError("searchPostsInChannel", "invalid request body"))
-			return
-		}
-		if body.Terms == "" && len(body.TagIDs) == 0 {
-			WriteError(w, model.NewBadRequestError("searchPostsInChannel", "terms or tag_ids required"))
-			return
-		}
-		if body.PerPage == 0 {
-			body.PerPage = 60
-		}
-		body.Page, body.PerPage = clampPagination(body.Page, body.PerPage)
-
-		results, err := a.SearchPostsFrom(r.Context(), channelID, user.ID, body.Terms, body.From, body.TagIDs, body.Page, body.PerPage)
-		if err != nil {
-			WriteAppError(w, "searchPostsInChannel", err)
-			return
-		}
-
 		WriteJSON(w, http.StatusOK, results)
 	}
 }

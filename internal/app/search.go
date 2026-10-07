@@ -2,176 +2,188 @@ package app
 
 import (
 	"context"
-	"log"
+	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/infrashift/chit/internal/model"
 )
 
-// searchByContent performs a SQL ILIKE fallback search.
-func (a *App) searchByContent(ctx context.Context, channelID, query string, page, perPage int) (*model.PostList, error) {
-	posts, err := a.Store.Post().SearchByContent(ctx, channelID, query, page, perPage)
+// Zinc scanning bounds. The index cannot filter by channel or author, so a
+// search through it reads hits in batches and filters them here; this caps
+// how far it reads before settling for what it has found.
+const (
+	zincScanBatch = 100
+	zincScanLimit = 1000
+)
+
+// SearchRequest is a post search on UserID's behalf. At most one of TeamID and
+// ChannelID narrows the scope; with neither, the search spans every channel
+// the user belongs to. From limits results to one author by username (a
+// leading @ is accepted). Page is zero-based.
+type SearchRequest struct {
+	UserID    string
+	TeamID    string
+	ChannelID string
+	Terms     string
+	TagIDs    []string
+	From      string
+	Page      int
+	PerPage   int
+}
+
+// SearchPosts runs a search and returns one page of results.
+//
+// Scope (the channels the user may read, narrowed by team or channel) and the
+// author filter are resolved first and applied BEFORE pagination. They used
+// to be applied to a page the backend had already cut, so pages came back
+// short or empty while later pages still held hits, and a team search was
+// not scoped to the team at all.
+func (a *App) SearchPosts(ctx context.Context, req *SearchRequest) (*model.PostList, error) {
+	empty := &model.PostList{Order: []*model.Post{}}
+
+	tagIDs := slices.Compact(slices.Sorted(slices.Values(req.TagIDs)))
+	for _, id := range tagIDs {
+		if !model.IsValidID(id) {
+			return nil, model.NewBadRequestError("App.SearchPosts", "invalid tag id")
+		}
+	}
+	if req.Terms == "" && len(tagIDs) == 0 {
+		return empty, nil
+	}
+
+	channelIDs, err := a.searchScope(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	return &model.PostList{Order: posts}, nil
-}
-
-// zincSearch tries ZincSearch; on failure it falls back to SQL ILIKE.
-// zincSearch queries the index. It deliberately does not take a channel: the
-// index has no field filtering wired up, so scoping is applied to the results
-// instead — see the channel check in SearchPostsFrom.
-func (a *App) zincSearch(ctx context.Context, query string, page, perPage int) (ids []string, ok bool, err error) {
-	if a.Config.ZincSearchURL == "" {
-		return nil, false, nil
-	}
-	ids, err = a.searchClient().Search(ctx, query, page*perPage, perPage)
-	if err != nil {
-		log.Printf("ZincSearch unavailable, falling back to SQL: %v", err)
-		return nil, false, nil
-	}
-	return ids, true, nil
-}
-
-// SearchPosts searches for posts matching a query and/or tags on behalf of
-// userID. When channelID is non-empty, results are scoped to that channel and
-// the caller must be a member; otherwise results are filtered to channels the
-// caller is a member of.
-func (a *App) SearchPosts(ctx context.Context, channelID, userID, query string, tagIDs []string, page, perPage int) (*model.PostList, error) {
-	return a.SearchPostsFrom(ctx, channelID, userID, query, "", tagIDs, page, perPage)
-}
-
-// SearchPostsFrom is SearchPosts with an optional author filter. fromUsername
-// restricts results to posts written by that user.
-//
-// The author filter is applied after the backend returns a page, not pushed
-// into the query, so a page can come back smaller than perPage when most of
-// its hits are by other people. That is a fair trade here: it works
-// identically against the ZincSearch index and the SQL fallback, and needs no
-// second index. Push it down if result sets ever get large enough to matter.
-func (a *App) SearchPostsFrom(ctx context.Context, channelID, userID, query, fromUsername string, tagIDs []string, page, perPage int) (*model.PostList, error) {
-	if channelID != "" {
-		if err := a.requireChannelMember(ctx, channelID, userID); err != nil {
-			return nil, err
-		}
+	if len(channelIDs) == 0 {
+		return empty, nil
 	}
 
-	hasQuery := query != ""
-	hasTags := len(tagIDs) > 0
-
-	var ids []string
-
-	switch {
-	case hasTags && !hasQuery:
-		// Tag-only search (already DB-based)
-		var err error
-		ids, err = a.Store.Tag().GetPostIDsByTags(ctx, tagIDs, page, perPage)
-		if err != nil {
-			return nil, err
-		}
-
-	case hasQuery && !hasTags:
-		zincIDs, ok, err := a.zincSearch(ctx, query, page, perPage)
-		if err != nil {
-			return nil, err
-		}
-		if !ok || len(zincIDs) == 0 {
-			// The SQL fallback returns posts directly rather than IDs, so it
-			// skips the filtering below. Collect its IDs instead so scoping
-			// is applied identically whichever backend answered.
-			list, err := a.searchByContent(ctx, channelID, query, page, perPage)
-			if err != nil {
-				return nil, err
+	q := &model.PostSearch{
+		Terms: req.Terms, TagIDs: tagIDs, ChannelIDs: channelIDs,
+		Page: req.Page, PerPage: req.PerPage,
+	}
+	if req.From != "" {
+		author, lookupErr := a.Store.User().GetByUsername(ctx, strings.ToLower(strings.TrimPrefix(req.From, "@")))
+		if lookupErr != nil {
+			if isNotFound(lookupErr) {
+				// An unknown author matches nothing, which is more useful than
+				// silently returning everything.
+				return empty, nil
 			}
-			ids = make([]string, 0, len(list.Order))
-			for _, p := range list.Order {
-				ids = append(ids, p.ID)
-			}
-			break
+			return nil, lookupErr
 		}
-		ids = zincIDs
-
-	case hasQuery && hasTags:
-		zincIDs, ok, err := a.zincSearch(ctx, query, page, perPage*3)
-		if err != nil {
-			return nil, err
-		}
-		if !ok || len(zincIDs) == 0 {
-			// SQL fallback: search by content, then filter by tags
-			posts, sqlErr := a.Store.Post().SearchByContent(ctx, channelID, query, page, perPage*3)
-			if sqlErr != nil {
-				return nil, sqlErr
-			}
-			if len(posts) > 0 {
-				candidateIDs := make([]string, len(posts))
-				for i, p := range posts {
-					candidateIDs[i] = p.ID
-				}
-				ids, err = a.Store.Tag().FilterPostIDsByTags(ctx, candidateIDs, tagIDs)
-				if err != nil {
-					return nil, err
-				}
-			}
-		} else {
-			ids, err = a.Store.Tag().FilterPostIDsByTags(ctx, zincIDs, tagIDs)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-	default:
-		return &model.PostList{Order: []*model.Post{}}, nil
-	}
-
-	if len(ids) == 0 {
-		return &model.PostList{Order: []*model.Post{}}, nil
-	}
-
-	// Resolve the author filter once, before walking the results.
-	var fromUserID string
-	if fromUsername != "" {
-		author, err := a.Store.User().GetByUsername(ctx, strings.TrimPrefix(fromUsername, "@"))
-		if err != nil {
-			// An unknown author matches nothing, which is more useful than
-			// silently returning everything.
-			return &model.PostList{Order: []*model.Post{}}, nil
-		}
-		fromUserID = author.ID
-	}
-
-	// Filter results to channels the caller can access. Membership is checked
-	// once per distinct channel in the result set.
-	allowed := map[string]bool{}
-	if channelID != "" {
-		allowed[channelID] = true // verified above
+		q.AuthorID = author.ID
 	}
 
 	var posts []*model.Post
-	for _, id := range ids {
-		post, err := a.Store.Post().Get(ctx, id)
+	if req.Terms != "" && a.Config.ZincSearchURL != "" {
+		posts, err = a.searchZinc(ctx, q)
 		if err != nil {
-			continue
+			// Zinc being down is not a reason to fail the search. Zinc
+			// answering with no hits is an answer, and is not second-guessed
+			// with a full-table ILIKE.
+			slog.Warn("search: ZincSearch failed, falling back to SQL", "error", err)
+			posts, err = a.Store.Post().Search(ctx, q)
 		}
-		ok, seen := allowed[post.ChannelID]
-		if !seen {
-			ok = a.isChannelMember(ctx, post.ChannelID, userID)
-			allowed[post.ChannelID] = ok
-		}
-		if !ok {
-			continue
-		}
-		// Scope to the requested channel. The index is queried without a
-		// channel filter, and membership alone is not scope: a search "in
-		// this channel" was returning hits from every other channel the
-		// caller belongs to.
-		if channelID != "" && post.ChannelID != channelID {
-			continue
-		}
-		if fromUserID != "" && post.UserID != fromUserID {
-			continue
-		}
-		posts = append(posts, post)
+	} else {
+		posts, err = a.Store.Post().Search(ctx, q)
 	}
-
+	if err != nil {
+		return nil, err
+	}
+	if posts == nil {
+		posts = []*model.Post{}
+	}
 	return &model.PostList{Order: posts}, nil
+}
+
+// searchScope returns the channels req may search, after checking the caller
+// may search them.
+func (a *App) searchScope(ctx context.Context, req *SearchRequest) ([]string, error) {
+	switch {
+	case req.ChannelID != "":
+		if err := a.requireChannelMember(ctx, req.ChannelID, req.UserID); err != nil {
+			return nil, err
+		}
+		return []string{req.ChannelID}, nil
+	case req.TeamID != "":
+		if err := a.requireTeamMember(ctx, req.TeamID, req.UserID); err != nil {
+			return nil, err
+		}
+		channels, err := a.Store.Channel().GetChannelsForUser(ctx, req.UserID, req.TeamID)
+		if err != nil {
+			return nil, err
+		}
+		ids := make([]string, 0, len(channels))
+		for _, c := range channels {
+			ids = append(ids, c.ID)
+		}
+		return ids, nil
+	default:
+		return a.Store.Channel().GetChannelIDsForUser(ctx, req.UserID)
+	}
+}
+
+// searchZinc pages through ZincSearch hits, keeping those that fall in q's
+// scope, until it has q's page or has read zincScanLimit hits.
+func (a *App) searchZinc(ctx context.Context, q *model.PostSearch) ([]*model.Post, error) {
+	inScope := make(map[string]bool, len(q.ChannelIDs))
+	for _, id := range q.ChannelIDs {
+		inScope[id] = true
+	}
+	skip := q.Page * q.PerPage
+	out := make([]*model.Post, 0, q.PerPage)
+
+	for from := 0; from < zincScanLimit; from += zincScanBatch {
+		ids, err := a.searchClient().Search(ctx, q.Terms, from, zincScanBatch)
+		if err != nil {
+			return nil, err
+		}
+		if len(ids) == 0 {
+			break
+		}
+
+		posts, err := a.Store.Post().GetByIDs(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		byID := make(map[string]*model.Post, len(posts))
+		for _, p := range posts {
+			byID[p.ID] = p
+		}
+		tagged := map[string]bool{}
+		if len(q.TagIDs) > 0 {
+			matches, err := a.Store.Tag().FilterPostIDsByTags(ctx, ids, q.TagIDs)
+			if err != nil {
+				return nil, err
+			}
+			for _, id := range matches {
+				tagged[id] = true
+			}
+		}
+
+		// Walk in hit order, which is Zinc's relevance order.
+		for _, id := range ids {
+			p := byID[id]
+			if p == nil || !inScope[p.ChannelID] ||
+				(q.AuthorID != "" && p.UserID != q.AuthorID) ||
+				(len(q.TagIDs) > 0 && !tagged[id]) {
+				continue
+			}
+			if skip > 0 {
+				skip--
+				continue
+			}
+			out = append(out, p)
+			if len(out) == q.PerPage {
+				return out, nil
+			}
+		}
+		if len(ids) < zincScanBatch {
+			break
+		}
+	}
+	return out, nil
 }
