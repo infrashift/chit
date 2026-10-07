@@ -70,7 +70,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.expiredUserID != "" {
 			return m.resumeAfterReLogin(msg.User)
 		}
+		firstLoad := m.me == nil
 		m.applyMe(msg.User)
+		// Member rows that arrived before the user did could not be
+		// matched to them; work their badges out now.
+		if firstLoad {
+			for channelID, members := range m.channelMembers {
+				m.applyMembers(channelID, members)
+			}
+		}
 		return m, m.fetchMissingUsers()
 
 	case TeamsLoadedMsg:
@@ -94,6 +102,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.channelsByTeam[msg.TeamID] = msg.Channels
 		m.channels = m.flattenChannels()
 		m.palette.SetChannels(m.channels)
+		// Every channel's badges, in one request for the team.
+		cmds = append(cmds, FetchMyChannelMembers(m.client, msg.TeamID))
 		if m.activeTeam != nil && msg.TeamID == m.activeTeam.ID {
 			// Auto-select the first channel only on the very first load, not
 			// on later reloads (e.g. after navigating back to the team list).
@@ -113,13 +123,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			return m, m.setError(msg.Err)
 		}
-		m.viewport.SetPosts(msg.Posts.Order)
+		var page []*model.Post
+		if msg.Posts != nil {
+			page = msg.Posts.Order
+		}
+		m.viewport.SetPosts(page)
 		m.historyPage = 0
 		m.loadingOlder = false
 		// A short first page means there is nothing older to ask for.
-		m.historyExhausted = len(msg.Posts.Order) < historyPageSize
+		m.historyExhausted = len(page) < historyPageSize
 		m.postTags = make(map[string][]*model.Tag)
-		return m, m.afterPostsLoaded(msg.Posts.Order)
+		return m, m.afterPostsLoaded(page)
 
 	case PostCreatedMsg:
 		if msg.Err != nil {
@@ -200,8 +214,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.setError(msg.Err)
 		}
 		m.channelMembers[msg.ChannelID] = msg.Members
-		m.computeUnread(msg.ChannelID, msg.Members)
-		m.computeMentions(msg.ChannelID, msg.Members)
+		m.applyMembers(msg.ChannelID, msg.Members)
+		return m, nil
+
+	case MyChannelMembersLoadedMsg:
+		if msg.Err != nil {
+			return m, m.setError(msg.Err)
+		}
+		for _, mem := range msg.Members {
+			m.applyMyMembership(mem)
+		}
 		return m, nil
 
 	case ChannelViewedMsg:
@@ -716,7 +738,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			return m, m.setError(msg.Err)
 		}
-		older := msg.Posts.Order
+		var older []*model.Post
+		if msg.Posts != nil {
+			older = msg.Posts.Order
+		}
 		if len(older) < historyPageSize {
 			m.historyExhausted = true
 		}

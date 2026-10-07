@@ -18,48 +18,34 @@ func (m *Model) setMention(channelID string, count int64) {
 	m.mentions[channelID] = count
 }
 
-func (m *Model) computeUnread(channelID string, members []*model.ChannelMember) {
+// applyMembers sets a channel's badges from its member rows, using the
+// signed-in user's row.
+func (m *Model) applyMembers(channelID string, members []*model.ChannelMember) {
 	if m.me == nil {
-		return
-	}
-	var ch *model.Channel
-	for _, c := range m.channels {
-		if c.ID == channelID {
-			ch = c
-			break
-		}
-	}
-	if ch == nil {
-		for _, c := range m.dmChannels {
-			if c.ID == channelID {
-				ch = c
-				break
-			}
-		}
-	}
-	if ch == nil {
 		return
 	}
 	for _, mem := range members {
 		if mem.UserID == m.me.ID {
-			unread := ch.TotalMsgCount - mem.MsgCount
-			if unread < 0 {
-				unread = 0
-			}
-			m.setUnread(channelID, unread)
+			m.applyMyMembership(mem)
 			return
 		}
 	}
 }
 
-func (m *Model) computeMentions(channelID string, members []*model.ChannelMember) {
-	if m.me == nil {
+// applyMyMembership sets a channel's unread and mention badges from the
+// signed-in user's member row. The open channel is being read, so it stays
+// at zero: a row fetched alongside marking it viewed can predate the view
+// and would otherwise bring the old count back.
+func (m *Model) applyMyMembership(mem *model.ChannelMember) {
+	if m.activeChan != nil && mem.ChannelID == m.activeChan.ID {
+		m.setUnread(mem.ChannelID, 0)
+		m.setMention(mem.ChannelID, 0)
 		return
 	}
-	for _, mem := range members {
-		if mem.UserID == m.me.ID {
-			m.setMention(channelID, mem.MentionCount)
-			return
-		}
+	ch := m.channelByID(mem.ChannelID)
+	if ch == nil {
+		return
 	}
+	m.setUnread(mem.ChannelID, max(ch.TotalMsgCount-mem.MsgCount, 0))
+	m.setMention(mem.ChannelID, mem.MentionCount)
 }

@@ -106,6 +106,15 @@ func FetchChannelMembers(client api.ChitClient, channelID string) tea.Cmd {
 	}
 }
 
+// FetchMyChannelMembers fetches the signed-in user's member rows for every
+// channel in a team, in one request.
+func FetchMyChannelMembers(client api.ChitClient, teamID string) tea.Cmd {
+	return func() tea.Msg {
+		members, err := client.GetMyChannelMembers(context.Background(), teamID)
+		return MyChannelMembersLoadedMsg{TeamID: teamID, Members: members, Err: err}
+	}
+}
+
 // ListenWebSocket returns a command that waits for the next WS event.
 func ListenWebSocket(wsClient ws.WSClient) tea.Cmd {
 	if wsClient == nil {

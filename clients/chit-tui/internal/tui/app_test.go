@@ -584,27 +584,26 @@ func TestModel_WSConnectedStartsListening(t *testing.T) {
 func TestModel_ChannelMembersComputesUnread(t *testing.T) {
 	m := setupModel(t)
 
-	// Channel c1 has TotalMsgCount=0 from setupModel. Set a channel with known count.
+	// c1 is open, and so always read; c2 has ten messages.
 	updated, _ := m.Update(tui.ChannelsLoadedMsg{
 		TeamID: "t1",
-		Channels: []*model.Channel{{
-			ID:            "c1",
-			DisplayName:   "General",
-			TotalMsgCount: 10,
-		}},
+		Channels: []*model.Channel{
+			{ID: "c1", DisplayName: "General"},
+			{ID: "c2", DisplayName: "Random", TotalMsgCount: 10},
+		},
 	})
 	m = updated.(tui.Model)
 
 	// Simulate channel members loaded with user having read 7 messages
 	updated, _ = m.Update(tui.ChannelMembersLoadedMsg{
-		ChannelID: "c1",
+		ChannelID: "c2",
 		Members: []*model.ChannelMember{
-			{ChannelID: "c1", UserID: "u1", MsgCount: 7},
+			{ChannelID: "c2", UserID: "u1", MsgCount: 7},
 		},
 	})
 	m = updated.(tui.Model)
 
-	if got := m.UnreadCount("c1"); got != 3 {
+	if got := m.UnreadCount("c2"); got != 3 {
 		t.Fatalf("expected unread count 3, got %d", got)
 	}
 
@@ -668,13 +667,17 @@ func TestModel_MentionChosenIsInserted(t *testing.T) {
 // The member row for the signed-in user carries their unread mentions.
 func TestModel_ChannelMembersSetTheMentionBadge(t *testing.T) {
 	m := setupModel(t)
-
-	m, _ = step(t, m, tui.ChannelMembersLoadedMsg{ChannelID: "c1", Members: []*model.ChannelMember{
-		{ChannelID: "c1", UserID: "someone-else", MentionCount: 9},
-		{ChannelID: "c1", UserID: "u1", MsgCount: 7, MentionCount: 2},
+	m, _ = step(t, m, tui.ChannelsLoadedMsg{TeamID: "t1", Channels: []*model.Channel{
+		{ID: "c1", DisplayName: "General"},
+		{ID: "c2", DisplayName: "Random"},
 	}})
 
-	if got := m.MentionCount("c1"); got != 2 {
+	m, _ = step(t, m, tui.ChannelMembersLoadedMsg{ChannelID: "c2", Members: []*model.ChannelMember{
+		{ChannelID: "c2", UserID: "someone-else", MentionCount: 9},
+		{ChannelID: "c2", UserID: "u1", MsgCount: 7, MentionCount: 2},
+	}})
+
+	if got := m.MentionCount("c2"); got != 2 {
 		t.Errorf("mentions = %d, want the signed-in user's 2", got)
 	}
 }

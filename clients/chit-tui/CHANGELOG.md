@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Badges** — team channels showed no unread or mention badge until opened; they now load for the whole team at startup in one request (needs the server's `GET /users/me/teams/{id}/channels/members`). The open channel's badge no longer comes back after viewing it, your own posts from another device no longer count as unread, a mention in the channel you are reading no longer raises its badge, and DM badges are worked out even when their members load before you do
 - **Your own posts signed with your user ID** — in a channel where nobody else's posts had loaded, your messages showed your truncated user ID instead of your username
 - **A DM had two names** — the action bar named a direct message by the other person's username while the palette used their display name
 - **TOML themes missing from the theme list** — themes in `~/.config/chit/themes/` loaded by name but never appeared in `/theme` or `--list-themes`. Names that cannot load (not lowercase, or shadowed by a bundled theme) are no longer listed

@@ -59,7 +59,8 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 			if fetchCmd := m.fetchMissingUsers(); fetchCmd != nil {
 				cmds = append(cmds, fetchCmd)
 			}
-		} else {
+		} else if m.me == nil || p.UserID != m.me.ID {
+			// Your own post, sent from another device, is not unread.
 			m.setUnread(p.ChannelID, m.unread[p.ChannelID]+1)
 		}
 
@@ -155,7 +156,9 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case model.WebSocketEventMentioned:
-		if evt.Broadcast != nil && evt.Broadcast.ChannelID != "" {
+		// A mention in the channel being read is seen as it arrives.
+		if evt.Broadcast != nil && evt.Broadcast.ChannelID != "" &&
+			(m.activeChan == nil || evt.Broadcast.ChannelID != m.activeChan.ID) {
 			chanID := evt.Broadcast.ChannelID
 			m.setMention(chanID, m.mentions[chanID]+1)
 		}

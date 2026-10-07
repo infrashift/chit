@@ -704,6 +704,18 @@ func TestClient_Endpoints(t *testing.T) {
 			wantBody: `{"post_ids":["p1","p2"]}`,
 		},
 		{
+			name:  "my memberships in a team",
+			route: "GET /api/v1/users/me/teams/t1/channels/members",
+			reply: []*model.ChannelMember{{ChannelID: "c1", UserID: "u1", MentionCount: 2}},
+			call: func(c api.ChitClient) error {
+				ms, err := c.GetMyChannelMembers(context.Background(), "t1")
+				if err == nil && (len(ms) != 1 || ms[0].MentionCount != 2) {
+					return fmt.Errorf("members = %v", ms)
+				}
+				return err
+			},
+		},
+		{
 			name:  "leave",
 			route: "DELETE /api/v1/channels/c1/members/u1",
 			call:  func(c api.ChitClient) error { return c.RemoveChannelMember(context.Background(), "c1", "u1") },

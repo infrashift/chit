@@ -39,6 +39,9 @@ type ChitClient interface {
 	// SearchPostsEverywhere searches every channel the user belongs to.
 	SearchPostsEverywhere(ctx context.Context, term string, tagIDs []string) (*model.PostList, error)
 	GetChannelMembers(ctx context.Context, channelID string) ([]*model.ChannelMember, error)
+	// GetMyChannelMembers returns the caller's own member rows for a team's
+	// channels, which carry their unread and mention counts.
+	GetMyChannelMembers(ctx context.Context, teamID string) ([]*model.ChannelMember, error)
 	CreateDirectChannel(ctx context.Context, userID1, userID2 string) (*model.Channel, error)
 	GetMyDirectChannels(ctx context.Context) ([]*model.Channel, error)
 	SearchUsers(ctx context.Context, term string, page, perPage int) ([]*model.User, error)
@@ -295,6 +298,12 @@ func (c *httpClient) SearchPostsEverywhere(ctx context.Context, term string, tag
 func (c *httpClient) GetChannelMembers(ctx context.Context, channelID string) ([]*model.ChannelMember, error) {
 	var members []*model.ChannelMember
 	err := c.get(ctx, fmt.Sprintf("/channels/%s/members", channelID), &members)
+	return members, err
+}
+
+func (c *httpClient) GetMyChannelMembers(ctx context.Context, teamID string) ([]*model.ChannelMember, error) {
+	var members []*model.ChannelMember
+	err := c.get(ctx, fmt.Sprintf("/users/me/teams/%s/channels/members", teamID), &members)
 	return members, err
 }
 

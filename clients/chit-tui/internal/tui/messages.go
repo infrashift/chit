@@ -128,6 +128,14 @@ type DMChannelsLoadedMsg struct {
 	Err      error
 }
 
+// MyChannelMembersLoadedMsg carries the signed-in user's member rows for a
+// team's channels, from which every channel's badges are worked out.
+type MyChannelMembersLoadedMsg struct {
+	TeamID  string
+	Members []*model.ChannelMember
+	Err     error
+}
+
 // UserSearchResultsMsg is sent when user search results are returned. Term
 // is the query they answer; queries fire per keystroke and race.
 type UserSearchResultsMsg struct {
@@ -242,37 +250,38 @@ type PostPinnedMsg struct {
 
 // requestError reports the failure this message carries, so session
 // expiry can be handled in one place rather than per message type.
-func (m UserLoadedMsg) requestError() error           { return m.Err }
-func (m ProfileUpdatedMsg) requestError() error       { return m.Err }
-func (m ThreadsLoadedMsg) requestError() error        { return m.Err }
-func (m ThreadFollowChangedMsg) requestError() error  { return m.Err }
-func (m TeamsLoadedMsg) requestError() error          { return m.Err }
-func (m ChannelsLoadedMsg) requestError() error       { return m.Err }
-func (m PostsLoadedMsg) requestError() error          { return m.Err }
-func (m PostCreatedMsg) requestError() error          { return m.Err }
-func (m ThreadLoadedMsg) requestError() error         { return m.Err }
-func (m CommandsLoadedMsg) requestError() error       { return m.Err }
-func (m UsersLoadedMsg) requestError() error          { return m.Err }
-func (m ChannelViewedMsg) requestError() error        { return m.Err }
-func (m SearchResultsMsg) requestError() error        { return m.Err }
-func (m ChannelMembersLoadedMsg) requestError() error { return m.Err }
-func (m WSStateMsg) requestError() error              { return m.Err }
-func (m DMChannelsLoadedMsg) requestError() error     { return m.Err }
-func (m UserSearchResultsMsg) requestError() error    { return m.Err }
-func (m DMCreatedMsg) requestError() error            { return m.Err }
-func (m ChannelCreatedMsg) requestError() error       { return m.Err }
-func (m AllTagsLoadedMsg) requestError() error        { return m.Err }
-func (m TagCreatedMsg) requestError() error           { return m.Err }
-func (m PostTagsLoadedMsg) requestError() error       { return m.Err }
-func (m PostsTagsLoadedMsg) requestError() error      { return m.Err }
-func (m TagAddedToPostMsg) requestError() error       { return m.Err }
-func (m TagRemovedFromPostMsg) requestError() error   { return m.Err }
-func (m ChannelMemberAddedMsg) requestError() error   { return m.Err }
-func (m ErrMsg) requestError() error                  { return m.Err }
-func (m PostEditedMsg) requestError() error           { return m.Err }
-func (m PostDeletedMsg) requestError() error          { return m.Err }
-func (m OlderPostsLoadedMsg) requestError() error     { return m.Err }
-func (m PostPinnedMsg) requestError() error           { return m.Err }
+func (m UserLoadedMsg) requestError() error             { return m.Err }
+func (m ProfileUpdatedMsg) requestError() error         { return m.Err }
+func (m ThreadsLoadedMsg) requestError() error          { return m.Err }
+func (m ThreadFollowChangedMsg) requestError() error    { return m.Err }
+func (m TeamsLoadedMsg) requestError() error            { return m.Err }
+func (m ChannelsLoadedMsg) requestError() error         { return m.Err }
+func (m PostsLoadedMsg) requestError() error            { return m.Err }
+func (m PostCreatedMsg) requestError() error            { return m.Err }
+func (m ThreadLoadedMsg) requestError() error           { return m.Err }
+func (m CommandsLoadedMsg) requestError() error         { return m.Err }
+func (m UsersLoadedMsg) requestError() error            { return m.Err }
+func (m ChannelViewedMsg) requestError() error          { return m.Err }
+func (m SearchResultsMsg) requestError() error          { return m.Err }
+func (m MyChannelMembersLoadedMsg) requestError() error { return m.Err }
+func (m ChannelMembersLoadedMsg) requestError() error   { return m.Err }
+func (m WSStateMsg) requestError() error                { return m.Err }
+func (m DMChannelsLoadedMsg) requestError() error       { return m.Err }
+func (m UserSearchResultsMsg) requestError() error      { return m.Err }
+func (m DMCreatedMsg) requestError() error              { return m.Err }
+func (m ChannelCreatedMsg) requestError() error         { return m.Err }
+func (m AllTagsLoadedMsg) requestError() error          { return m.Err }
+func (m TagCreatedMsg) requestError() error             { return m.Err }
+func (m PostTagsLoadedMsg) requestError() error         { return m.Err }
+func (m PostsTagsLoadedMsg) requestError() error        { return m.Err }
+func (m TagAddedToPostMsg) requestError() error         { return m.Err }
+func (m TagRemovedFromPostMsg) requestError() error     { return m.Err }
+func (m ChannelMemberAddedMsg) requestError() error     { return m.Err }
+func (m ErrMsg) requestError() error                    { return m.Err }
+func (m PostEditedMsg) requestError() error             { return m.Err }
+func (m PostDeletedMsg) requestError() error            { return m.Err }
+func (m OlderPostsLoadedMsg) requestError() error       { return m.Err }
+func (m PostPinnedMsg) requestError() error             { return m.Err }
 
 // ChannelLeftMsg reports the result of leaving a channel.
 type ChannelLeftMsg struct {

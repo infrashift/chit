@@ -3,16 +3,6 @@
 Open work. Completed lists are in `docs/history/`; what changed is in the
 CHANGELOG.
 
-## Unread and mention badges
-
-- [ ] Team channels show no unread or mention badge until opened: member rows,
-      which the counts come from, are fetched only for DMs and the open
-      channel. Needs counts in bulk, one request per team.
-- [ ] A badge can come back on the channel just opened: `ViewChannel` and
-      `FetchChannelMembers` race, and a late member row restores the old count.
-- [ ] Your own posts from another device count as unread.
-- [ ] A mention in the channel being read still raises its badge.
-
 ## Smaller behaviour
 
 - [ ] Pinning is shown only when the WebSocket echo arrives; with the socket
