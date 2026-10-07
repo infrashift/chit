@@ -71,11 +71,11 @@ func TestCreateTeam_InvalidBody(t *testing.T) {
 const inviteTeamID = "019421a0-0000-7000-8000-000000000011"
 
 func seedInviteOnlyTeam(ms *mockStore) {
-	ms.team.seed(&model.Team{
+	ms.Teams.Seed(&model.Team{
 		ID: inviteTeamID, Name: "secret", DisplayName: "Secret",
 		Type: model.TeamInviteOnly, CreatorID: extraUserID, CreateAt: 1000, UpdateAt: 1000,
 	})
-	ms.team.seedMember(&model.TeamMember{TeamID: inviteTeamID, UserID: extraUserID, Roles: "team_user"})
+	ms.Teams.SeedMember(&model.TeamMember{TeamID: inviteTeamID, UserID: extraUserID, Roles: "team_user"})
 }
 
 // serveTeamRoute runs handler for a /teams/{id} route as user, with an
@@ -150,7 +150,7 @@ func TestUpdateTeam(t *testing.T) {
 			if w.Code != tc.want {
 				t.Fatalf("expected %d, got %d; body: %s", tc.want, w.Code, w.Body.String())
 			}
-			team, _ := ms.team.Get(t.Context(), testTeamID)
+			team, _ := ms.Teams.Get(t.Context(), testTeamID)
 			if tc.want != http.StatusOK && team.DisplayName != "Engineering" {
 				t.Fatalf("a rejected update still changed display_name to %q", team.DisplayName)
 			}
@@ -161,13 +161,15 @@ func TestUpdateTeam(t *testing.T) {
 func TestUpdateTeam_ClearsDescription(t *testing.T) {
 	a, ms, cleanup := setupTestApp(t)
 	defer cleanup()
-	ms.team.byID[testTeamID].Description = "old"
+	team, _ := ms.Teams.Get(t.Context(), testTeamID)
+	team.Description = "old"
+	ms.Teams.Seed(team)
 
 	w := serveTeamRoute(t, updateTeam(a), http.MethodPut, testTeamID, `{"description":""}`, testUser())
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
 	}
-	if team, _ := ms.team.Get(t.Context(), testTeamID); team.Description != "" {
+	if team, _ := ms.Teams.Get(t.Context(), testTeamID); team.Description != "" {
 		t.Fatal("an explicit empty description should clear it")
 	}
 }
@@ -192,7 +194,7 @@ func TestDeleteTeam(t *testing.T) {
 			if w.Code != tc.want {
 				t.Fatalf("expected %d, got %d; body: %s", tc.want, w.Code, w.Body.String())
 			}
-			_, err := ms.team.Get(t.Context(), testTeamID)
+			_, err := ms.Teams.Get(t.Context(), testTeamID)
 			if deleted := err != nil; deleted != (tc.want == http.StatusOK) {
 				t.Fatalf("deleted=%v after a %d response", deleted, w.Code)
 			}
@@ -326,7 +328,7 @@ func TestAddTeamMember_ReAddKeepsRoles(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d; body: %s", w.Code, w.Body.String())
 	}
-	m, err := ms.team.GetMember(t.Context(), testTeamID, testUserID)
+	m, err := ms.Teams.GetMember(t.Context(), testTeamID, testUserID)
 	if err != nil || !m.IsTeamAdmin() {
 		t.Fatalf("re-adding the creator dropped team_admin: %+v, %v", m, err)
 	}

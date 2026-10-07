@@ -169,28 +169,11 @@ func TestSearchIndexer_Search_EmptyHits(t *testing.T) {
 	}
 }
 
-// fakePostStore implements just enough of store.PostStore for the indexer.
+// fakePostStore is a PostSource over a fixed slice.
 type fakePostStore struct {
 	posts []*model.Post
 }
 
-func (f *fakePostStore) Save(_ context.Context, p *model.Post) (*model.Post, error)   { return p, nil }
-func (f *fakePostStore) Get(_ context.Context, _ string) (*model.Post, error)         { return nil, nil }
-func (f *fakePostStore) Update(_ context.Context, p *model.Post) (*model.Post, error) { return p, nil }
-func (f *fakePostStore) Delete(_ context.Context, _ string, _ int64) error            { return nil }
-func (f *fakePostStore) GetPostsForChannel(_ context.Context, _ string, _ model.GetPostsOptions) (*model.PostList, error) {
-	return nil, nil
-}
-func (f *fakePostStore) GetPostsForThread(_ context.Context, _ string) (*model.PostList, error) {
-	return nil, nil
-}
-func (f *fakePostStore) GetPinnedPosts(_ context.Context, _ string) (*model.PostList, error) {
-	return nil, nil
-}
-func (f *fakePostStore) SetPinned(_ context.Context, _ string, _ bool) error { return nil }
-func (f *fakePostStore) SearchByContent(_ context.Context, _, _ string, _, _ int) ([]*model.Post, error) {
-	return nil, nil
-}
 func (f *fakePostStore) GetPostsSince(_ context.Context, since int64, limit int) ([]*model.Post, error) {
 	var out []*model.Post
 	for _, p := range f.posts {

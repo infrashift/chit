@@ -135,7 +135,7 @@ func TestAuthz_SystemAdminCanDeleteAnyPost(t *testing.T) {
 	defer cleanup()
 
 	admin := &model.User{ID: "019421a0-0000-7000-8000-0000000000aa", Username: "admin", Roles: "system_user system_admin"}
-	ms.user.seed(admin)
+	ms.Users.Seed(admin)
 
 	handler := deletePost(a)
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/", http.NoBody)
@@ -257,7 +257,7 @@ func TestAuthz_NonMemberCannotInviteThemselves(t *testing.T) {
 	defer cleanup()
 
 	// Make the seeded channel private so team membership is not sufficient.
-	ms.channel.seed(&model.Channel{
+	ms.Channels.Seed(&model.Channel{
 		ID:          testChannelID,
 		TeamID:      testTeamID,
 		CreatorID:   testUserID,
@@ -310,7 +310,7 @@ func TestAuthz_CreateUserRequiresAdmin(t *testing.T) {
 		t.Fatalf("expected 403, got %d; body: %s", w.Code, w.Body.String())
 	}
 	// The status code alone would pass if the handler 403'd AFTER writing.
-	if _, err := ms.user.GetByUsername(t.Context(), "mallory"); err == nil {
+	if _, err := ms.Users.GetByUsername(t.Context(), "mallory"); err == nil {
 		t.Fatal("a refused createUser still persisted the user")
 	}
 }
@@ -354,7 +354,7 @@ func TestAuthz_CreateUserCannotBindOAuthClientWithoutAdmin(t *testing.T) {
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d; body: %s", w.Code, w.Body.String())
 	}
-	if _, err := ms.user.GetByOAuthClientID(t.Context(), "stolen-client"); err == nil {
+	if _, err := ms.Users.GetByOAuthClientID(t.Context(), "stolen-client"); err == nil {
 		t.Fatal("a refused createUser still bound the OAuth2 client")
 	}
 }

@@ -9,10 +9,16 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/infrashift/chit/internal/store"
+	"github.com/infrashift/chit/internal/model"
 )
 
 const indexBatchSize = 200
+
+// PostSource is what the indexer reads posts from: the one PostStore method
+// it uses, so tests and callers need not supply the rest.
+type PostSource interface {
+	GetPostsSince(ctx context.Context, sinceUpdateAt int64, limit int) ([]*model.Post, error)
+}
 
 // SearchIndexer is a background worker that syncs posts to ZincSearch.
 // It is also used as a plain ZincSearch client by the search path (posts nil).
@@ -23,7 +29,7 @@ type SearchIndexer struct {
 	client   *http.Client
 	stop     chan struct{}
 
-	posts     store.PostStore
+	posts     PostSource
 	watermark int64 // update_at of the last indexed post
 }
 
@@ -40,7 +46,7 @@ func NewSearchIndexer(zincURL, zincUser, zincPass string) *SearchIndexer {
 
 // WithPostStore enables the background indexing loop by giving the worker a
 // source of posts to poll.
-func (si *SearchIndexer) WithPostStore(ps store.PostStore) *SearchIndexer {
+func (si *SearchIndexer) WithPostStore(ps PostSource) *SearchIndexer {
 	si.posts = ps
 	return si
 }

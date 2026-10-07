@@ -14,12 +14,12 @@ import (
 const privateChannelID = "019421a0-0000-7000-8000-000000000021"
 
 func seedPrivateChannel(ms *mockStore) {
-	ms.channel.seed(&model.Channel{
+	ms.Channels.Seed(&model.Channel{
 		ID: privateChannelID, TeamID: testTeamID, CreatorID: testUserID,
 		Name: "secret", DisplayName: "Secret", Header: "the plan",
 		Type: model.ChannelPrivate, CreateAt: 1000, UpdateAt: 1000,
 	})
-	ms.channel.seedMember(&model.ChannelMember{ChannelID: privateChannelID, UserID: testUserID})
+	ms.Channels.SeedMember(&model.ChannelMember{ChannelID: privateChannelID, UserID: testUserID})
 }
 
 // serveChannelRoute runs handler for a /channels/{id} route as user, with an
@@ -130,7 +130,7 @@ func TestUpdateChannel_Patch(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
 		}
-		if ch, _ := ms.channel.Get(t.Context(), privateChannelID); ch.Header != "" {
+		if ch, _ := ms.Channels.Get(t.Context(), privateChannelID); ch.Header != "" {
 			t.Fatalf("header = %q, want cleared", ch.Header)
 		}
 	})

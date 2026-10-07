@@ -1,108 +1,23 @@
 package app
 
 import (
-	"context"
 	"strings"
 	"testing"
 
 	"github.com/infrashift/chit/internal/model"
-	"github.com/infrashift/chit/internal/store"
 )
 
-// membershipChannelStore returns a real channel from Get. The shared mention
-// mock answers (nil, nil), which no real store does, and which the membership
-// path would dereference.
-type membershipChannelStore struct {
-	*mentionMockChannelStore
-	channel *model.Channel
-}
-
-// Update returns what it was given. The shared mock answers (nil, nil),
-// which no real store does and which the broadcast path dereferences.
-func (s *membershipChannelStore) Update(_ context.Context, c *model.Channel) (*model.Channel, error) {
-	s.channel = c
-	return c, nil
-}
-
-func (s *membershipChannelStore) Get(_ context.Context, id string) (*model.Channel, error) {
-	if s.channel == nil {
-		return nil, errNotFound
-	}
-	c := *s.channel
-	c.ID = id
-	return &c, nil
-}
-
-// memberChannelID is the channel the membership tests act on. It must be a
-// real UUID: UpdateChannel validates the channel before saving it.
-const memberChannelID = "019421a0-0000-7000-8000-0000000000c1"
-
-// membershipTestApp reuses the command test harness and seeds a couple of
-// users so the membership commands have somebody to resolve.
-func membershipTestApp(t *testing.T) *App {
+// newMembershipFixture puts alice and bob in the general channel.
+func newMembershipFixture(t *testing.T) *fixture {
 	t.Helper()
-
-	a := newCommandTestApp(t, true)
-	ms := a.Store.(*cmdMockStore)
-	ms.user.users = map[string]*model.User{
-		"alice": {ID: "u-alice", Username: "alice"},
-		"bob":   {ID: "u-bob", Username: "bob"},
-	}
-	// Seed membership so the actor passes requireChannelMember; the rules
-	// under test are the ones layered on top of it.
-	ms.channel.members = map[string][]*model.ChannelMember{
-		memberChannelID: {
-			{ChannelID: memberChannelID, UserID: "u-alice"},
-			{ChannelID: memberChannelID, UserID: "u-bob"},
-		},
-	}
-
-	a.Store = &membershipStore{
-		cmdMockStore: ms,
-		channels: &membershipChannelStore{
-			mentionMockChannelStore: ms.channel,
-			channel: &model.Channel{
-				Type: model.ChannelOpen, TeamID: "t1",
-				Name: "general", DisplayName: "General", CreateAt: 1,
-			},
-		},
-		users: &membershipUserStore{
-			mentionMockUserStore: &ms.user.mentionMockUserStore,
-			byID:                 map[string]*model.User{},
-		},
-	}
-	return a
-}
-
-// membershipStore swaps in the stores above; cmdMockStore's fields are
-// concretely typed, so they cannot simply be reassigned.
-type membershipStore struct {
-	*cmdMockStore
-	channels store.ChannelStore
-	users    *membershipUserStore
-}
-
-func (s *membershipStore) Channel() store.ChannelStore { return s.channels }
-func (s *membershipStore) User() store.UserStore       { return s.users }
-
-// membershipUserStore resolves users by ID as well as by name. The shared mock
-// fails every Get, which would make an admin look like a missing user.
-type membershipUserStore struct {
-	*mentionMockUserStore
-	byID map[string]*model.User
-}
-
-func (s *membershipUserStore) Get(_ context.Context, id string) (*model.User, error) {
-	u, ok := s.byID[id]
-	if !ok {
-		return nil, errNotFound
-	}
-	return u, nil
+	f := newFixture(t)
+	f.join(f.channel, "alice", "bob")
+	return f
 }
 
 func TestResolveCommandUser(t *testing.T) {
-	a := membershipTestApp(t)
-	ctx := context.Background()
+	a := newMembershipFixture(t).app
+	ctx := t.Context()
 
 	tests := []struct {
 		name    string
@@ -148,22 +63,22 @@ func TestResolveCommandUser(t *testing.T) {
 // an error: an error surfaces as the generic "Error executing /invite" instead
 // of something the user can act on.
 func TestMembershipCommandsReportFailureAsText(t *testing.T) {
-	a := membershipTestApp(t)
-	ctx := context.Background()
+	f := newMembershipFixture(t)
+	a, ctx, alice, channelID := f.app, t.Context(), f.user("alice").ID, f.channel.ID
 
 	tests := []struct {
 		name string
 		run  func() (string, error)
 	}{
 		{name: "invite", run: func() (string, error) {
-			res, err := a.HandleInvite(ctx, "u-alice", memberChannelID, "nosuchperson")
+			res, err := a.HandleInvite(ctx, alice, channelID, "nosuchperson")
 			if res == nil {
 				return "", err
 			}
 			return res.ResponseText, err
 		}},
 		{name: "kick", run: func() (string, error) {
-			res, err := a.HandleKick(ctx, "u-alice", memberChannelID, "nosuchperson")
+			res, err := a.HandleKick(ctx, alice, channelID, "nosuchperson")
 			if res == nil {
 				return "", err
 			}
@@ -187,18 +102,18 @@ func TestMembershipCommandsReportFailureAsText(t *testing.T) {
 // Whatever the outcome, the reply must name the user so it is legible in the
 // channel where it appears.
 func TestMembershipCommandsNameTheTarget(t *testing.T) {
-	a := membershipTestApp(t)
-	ctx := context.Background()
+	f := newMembershipFixture(t)
+	a, ctx, alice, channelID := f.app, t.Context(), f.user("alice").ID, f.channel.ID
 
 	for _, name := range []string{"invite", "kick"} {
 		t.Run(name, func(t *testing.T) {
 			var text string
 			var err error
 			if name == "invite" {
-				r, e := a.HandleInvite(ctx, "u-alice", memberChannelID, "bob")
+				r, e := a.HandleInvite(ctx, alice, channelID, "bob")
 				text, err = r.ResponseText, e
 			} else {
-				r, e := a.HandleKick(ctx, "u-alice", memberChannelID, "bob")
+				r, e := a.HandleKick(ctx, alice, channelID, "bob")
 				text, err = r.ResponseText, e
 			}
 			if err != nil {
@@ -218,37 +133,23 @@ func TestMembershipCommandsNameTheTarget(t *testing.T) {
 func TestRemoveChannelMemberRequiresAdminForOthers(t *testing.T) {
 	tests := []struct {
 		name      string
-		actor     *model.User
+		admin     bool
 		target    string
 		wantAllow bool
 	}{
-		{
-			name:      "member removing themselves is leaving",
-			actor:     &model.User{ID: "u-alice", Username: "alice"},
-			target:    "u-alice",
-			wantAllow: true,
-		},
-		{
-			name:      "member removing someone else is refused",
-			actor:     &model.User{ID: "u-alice", Username: "alice"},
-			target:    "u-bob",
-			wantAllow: false,
-		},
-		{
-			name:      "system admin may remove someone else",
-			actor:     &model.User{ID: "u-alice", Username: "alice", Roles: "system_admin"},
-			target:    "u-bob",
-			wantAllow: true,
-		},
+		{name: "member removing themselves is leaving", target: "alice", wantAllow: true},
+		{name: "member removing someone else is refused", target: "bob", wantAllow: false},
+		{name: "system admin may remove someone else", admin: true, target: "bob", wantAllow: true},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			a := membershipTestApp(t)
-			ms := a.Store.(*membershipStore)
-			ms.users.byID = map[string]*model.User{tc.actor.ID: tc.actor}
+			f := newMembershipFixture(t)
+			if tc.admin {
+				f.admin("alice")
+			}
 
-			err := a.RemoveChannelMember(context.Background(), memberChannelID, tc.target, tc.actor.ID)
+			err := f.app.RemoveChannelMember(t.Context(), f.channel.ID, f.user(tc.target).ID, f.user("alice").ID)
 
 			if tc.wantAllow && err != nil {
 				t.Errorf("removal was refused: %v", err)
@@ -268,11 +169,11 @@ func TestRemoveChannelMemberRequiresAdminForOthers(t *testing.T) {
 // /topic was declared in the registry with no handler, so setting a channel
 // topic was impossible.
 func TestHandleTopic(t *testing.T) {
-	a := membershipTestApp(t)
-	ctx := context.Background()
+	f := newMembershipFixture(t)
+	a, ctx, alice, channelID := f.app, t.Context(), f.user("alice").ID, f.channel.ID
 
 	t.Run("with no argument reports the current topic", func(t *testing.T) {
-		res, err := a.HandleTopic(ctx, "u-alice", memberChannelID, "")
+		res, err := a.HandleTopic(ctx, alice, channelID, "")
 		if err != nil {
 			t.Fatalf("HandleTopic: %v", err)
 		}
@@ -282,7 +183,7 @@ func TestHandleTopic(t *testing.T) {
 	})
 
 	t.Run("sets the topic", func(t *testing.T) {
-		res, err := a.HandleTopic(ctx, "u-alice", memberChannelID, "  release planning  ")
+		res, err := a.HandleTopic(ctx, alice, channelID, "  release planning  ")
 		if err != nil {
 			t.Fatalf("HandleTopic: %v", err)
 		}
@@ -294,8 +195,7 @@ func TestHandleTopic(t *testing.T) {
 	// A failure is reported as text, like the other membership commands, so
 	// the user sees why rather than a generic execution error.
 	t.Run("unknown channel is reported as text", func(t *testing.T) {
-		empty := newCommandTestApp(t, true)
-		res, err := empty.HandleTopic(ctx, "u-alice", "missing", "x")
+		res, err := a.HandleTopic(ctx, alice, model.NewID(), "x")
 		if err != nil {
 			t.Fatalf("expected a text response, got an error: %v", err)
 		}

@@ -16,7 +16,7 @@ const privateRootPost = "019421a0-0000-7000-8000-000000000032"
 
 func seedPrivateRoot(ms *mockStore) {
 	seedPrivateChannel(ms)
-	ms.post.seed(&model.Post{
+	ms.Posts.Seed(&model.Post{
 		ID: privateRootPost, ChannelID: privateChannelID, UserID: testUserID,
 		Content: "private plans", CreateAt: 2000, UpdateAt: 2000,
 	})
@@ -54,7 +54,7 @@ func TestCreatePost_RootMustBeInTheSameChannel(t *testing.T) {
 			if w.Code != http.StatusBadRequest {
 				t.Fatalf("expected 400, got %d; body: %s", w.Code, w.Body.String())
 			}
-			if _, err := ms.thread.Get(t.Context(), privateRootPost); err == nil {
+			if _, err := ms.Threads.Get(t.Context(), privateRootPost); err == nil {
 				t.Fatal("a rejected reply still created a thread on the private root")
 			}
 		})
@@ -89,7 +89,9 @@ func TestCreatePost_IgnoresServerOwnedFields(t *testing.T) {
 func TestUpdatePost_ReturnsTheWholePost(t *testing.T) {
 	a, ms, cleanup := setupTestApp(t)
 	defer cleanup()
-	ms.post.byID[testReplyPost].Props = map[string]any{"keep": "me", "drop": "me"}
+	reply, _ := ms.Posts.Get(t.Context(), testReplyPost)
+	reply.Props = map[string]any{"keep": "me", "drop": "me"}
+	ms.Posts.Seed(reply)
 
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/",
 		strings.NewReader(`{"content":"edited","props":{"drop":null,"add":1}}`))
@@ -164,7 +166,7 @@ func TestThreadRoutes_RequireChannelAccess(t *testing.T) {
 				if w.Code != tc.want {
 					t.Fatalf("expected %d, got %d; body: %s", tc.want, w.Code, w.Body.String())
 				}
-				if _, err := ms.thread.GetMembership(t.Context(), tc.postID, tc.user.ID); err == nil && tc.want == http.StatusForbidden {
+				if _, err := ms.Threads.GetMembership(t.Context(), tc.postID, tc.user.ID); err == nil && tc.want == http.StatusForbidden {
 					t.Fatal("a rejected follow still created a thread membership")
 				}
 			})

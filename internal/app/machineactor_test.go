@@ -6,70 +6,37 @@ import (
 
 	"github.com/infrashift/chit/internal/model"
 	"github.com/infrashift/chit/internal/store"
+	"github.com/infrashift/chit/internal/store/storetest"
 )
 
-// A stateful user store, because every property worth asserting here is about
-// what the SECOND call sees.
-type maUserStore struct {
-	byClient map[string]*model.User
-	saves    int
-	updates  int
+// countingUsers counts writes, because every property worth asserting here is
+// about what the SECOND boot does to the row.
+type countingUsers struct {
+	*storetest.UserStore
+	saves, updates int
 }
 
-func newMAUserStore() *maUserStore {
-	return &maUserStore{byClient: map[string]*model.User{}}
+func (c *countingUsers) Save(ctx context.Context, u *model.User) (*model.User, error) {
+	c.saves++
+	return c.UserStore.Save(ctx, u)
 }
 
-func (s *maUserStore) Save(_ context.Context, u *model.User) (*model.User, error) {
-	s.saves++
-	cp := *u
-	s.byClient[u.OAuthClientID] = &cp
-	return &cp, nil
-}
-func (s *maUserStore) Update(_ context.Context, u *model.User) (*model.User, error) {
-	s.updates++
-	cp := *u
-	s.byClient[u.OAuthClientID] = &cp
-	return &cp, nil
-}
-func (s *maUserStore) GetByOAuthClientID(_ context.Context, id string) (*model.User, error) {
-	if u, ok := s.byClient[id]; ok {
-		return u, nil
-	}
-	return nil, errNotFound
-}
-func (s *maUserStore) Get(_ context.Context, _ string) (*model.User, error) { return nil, errNotFound }
-func (s *maUserStore) GetByKratosID(_ context.Context, _ string) (*model.User, error) {
-	return nil, errNotFound
-}
-func (s *maUserStore) GetByUsername(_ context.Context, _ string) (*model.User, error) {
-	return nil, errNotFound
-}
-func (s *maUserStore) GetByEmail(_ context.Context, _ string) (*model.User, error) {
-	return nil, errNotFound
-}
-func (s *maUserStore) Search(_ context.Context, _ string, _, _ int) ([]*model.User, error) {
-	return nil, nil
-}
-func (s *maUserStore) GetByIDs(_ context.Context, _ []string) ([]*model.User, error) {
-	return nil, nil
+func (c *countingUsers) Update(ctx context.Context, u *model.User) (*model.User, error) {
+	c.updates++
+	return c.UserStore.Update(ctx, u)
 }
 
-type maStore struct{ users *maUserStore }
+type maStore struct {
+	*storetest.Store
+	users *countingUsers
+}
 
 func (m *maStore) User() store.UserStore { return m.users }
-func (m *maStore) Team() store.TeamStore { return mentionMockTeamStore{} }
-func (m *maStore) Channel() store.ChannelStore {
-	return &mentionMockChannelStore{}
-}
-func (m *maStore) Post() store.PostStore     { return &searchMockPostStore{} }
-func (m *maStore) Thread() store.ThreadStore { return &mentionMockThreadStore{} }
-func (m *maStore) Tag() store.TagStore       { return searchMockTagStore{} }
-func (m *maStore) Close()                    {}
 
-func newMAApp() (*App, *maUserStore) {
-	us := newMAUserStore()
-	return &App{Store: &maStore{users: us}}, us
+func newMAApp() (*App, *countingUsers) {
+	ms := storetest.New()
+	us := &countingUsers{UserStore: ms.Users}
+	return &App{Store: &maStore{Store: ms, users: us}}, us
 }
 
 const notifier = "chit-notifier"
@@ -155,8 +122,11 @@ func TestEnsureMachineActors_ReconcilesRolesBothWays(t *testing.T) {
 
 func TestEnsureMachineActors_RejectsAnInvalidActorType(t *testing.T) {
 	a, us := newMAApp()
+	// Everything else is valid, so actor_type is the only reason to refuse.
+	// Without a display name this passed on display_name validation and would
+	// have kept passing with the actor_type check deleted.
 	err := a.EnsureMachineActors(context.Background(), []MachineActor{{
-		ClientID: notifier, Username: "notifier", ActorType: "robot",
+		ClientID: notifier, Username: "notifier", DisplayName: "Forge Notifier", ActorType: "robot",
 	}})
 	if err == nil {
 		t.Fatal("expected an invalid actor_type to be refused")

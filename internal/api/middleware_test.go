@@ -50,7 +50,7 @@ func TestAuthExtract_OAuthClientResolvesToUser(t *testing.T) {
 	a, ms, cleanup := setupTestApp(t)
 	defer cleanup()
 
-	ms.user.seed(&model.User{
+	ms.Users.Seed(&model.User{
 		ID:            agentUserID,
 		KratosID:      "kratos-agent-001",
 		Username:      "claude-architect",
@@ -108,7 +108,7 @@ func TestAuthExtract_ClientHeaderBeatsForgedUserHeader(t *testing.T) {
 	a, ms, cleanup := setupTestApp(t)
 	defer cleanup()
 
-	ms.user.seed(&model.User{
+	ms.Users.Seed(&model.User{
 		ID:            agentUserID,
 		KratosID:      "kratos-agent-001",
 		Username:      "claude-architect",

@@ -293,13 +293,13 @@ func TestGetMyDirectChannels(t *testing.T) {
 		CreateAt:    1000,
 		UpdateAt:    1000,
 	}
-	ms.channel.seed(dmChannel)
-	ms.channel.seedMember(&model.ChannelMember{
+	ms.Channels.Seed(dmChannel)
+	ms.Channels.SeedMember(&model.ChannelMember{
 		ChannelID: dmChannel.ID,
 		UserID:    testUserID,
 		CreateAt:  1000,
 	})
-	ms.channel.seedMember(&model.ChannelMember{
+	ms.Channels.SeedMember(&model.ChannelMember{
 		ChannelID: dmChannel.ID,
 		UserID:    extraUserID,
 		CreateAt:  1000,
