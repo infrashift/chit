@@ -7,16 +7,10 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/testutil"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/thread"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
 
-func testStyles() styles.Styles {
-	return styles.New(theme.TokyoNight())
-}
-
 func TestThread_SetThread(t *testing.T) {
-	m := thread.New(testStyles())
+	m := thread.New(testutil.Styles())
 	m.SetSize(40, 20)
 	root := &model.Post{ID: "root", UserID: "u1", Content: "Root post", CreateAt: 1700000000000}
 	reply := &model.Post{ID: "r1", UserID: "u2", Content: "Reply", RootID: "root", CreateAt: 1700000001000}
@@ -31,7 +25,7 @@ func TestThread_SetThread(t *testing.T) {
 }
 
 func TestThread_View(t *testing.T) {
-	m := thread.New(testStyles())
+	m := thread.New(testutil.Styles())
 	m.SetSize(40, 20)
 	m.SetThread(
 		&model.Post{ID: "root", UserID: "u1", Content: "Root post", CreateAt: 1700000000000},
@@ -49,7 +43,7 @@ func TestThread_View(t *testing.T) {
 }
 
 func TestThread_Clear(t *testing.T) {
-	m := thread.New(testStyles())
+	m := thread.New(testutil.Styles())
 	m.SetSize(40, 20)
 	m.SetThread(
 		&model.Post{ID: "root", UserID: "u1", Content: "Root", CreateAt: 1700000000000},
@@ -66,7 +60,7 @@ func TestThread_Clear(t *testing.T) {
 }
 
 func TestThread_AppendReply(t *testing.T) {
-	m := thread.New(testStyles())
+	m := thread.New(testutil.Styles())
 	m.SetSize(40, 20)
 	m.SetThread(
 		&model.Post{ID: "root", UserID: "u1", Content: "Root", CreateAt: 1700000000000},
@@ -80,7 +74,7 @@ func TestThread_AppendReply(t *testing.T) {
 }
 
 func TestThread_SetCurrentUsername(t *testing.T) {
-	m := thread.New(testStyles())
+	m := thread.New(testutil.Styles())
 	m.SetSize(40, 20)
 	m.SetThread(
 		&model.Post{ID: "root", UserID: "u1", Content: "hey @alice", CreateAt: 1700000000000},
@@ -95,7 +89,7 @@ func TestThread_SetCurrentUsername(t *testing.T) {
 }
 
 func TestThread_SetUsernames(t *testing.T) {
-	m := thread.New(testStyles())
+	m := thread.New(testutil.Styles())
 	m.SetSize(40, 20)
 	m.SetThread(
 		&model.Post{ID: "root", UserID: "u1", Content: "Root", CreateAt: 1700000000000},
@@ -113,7 +107,7 @@ func TestThread_SetUsernames(t *testing.T) {
 }
 
 func TestThread_FocusBlur(t *testing.T) {
-	m := thread.New(testStyles())
+	m := thread.New(testutil.Styles())
 	if m.Focused() {
 		t.Error("should not be focused initially")
 	}
@@ -130,7 +124,7 @@ func TestThread_FocusBlur(t *testing.T) {
 // The HTTP response and the WebSocket echo both carry your own reply, so it
 // can be appended twice.
 func TestThread_AppendReplyIgnoresARepeat(t *testing.T) {
-	m := thread.New(testStyles())
+	m := thread.New(testutil.Styles())
 	m.SetSize(40, 20)
 	m.SetThread(&model.Post{ID: "root", UserID: "u1", Content: "Root", CreateAt: 1700000000000}, nil)
 	reply := &model.Post{ID: "r1", UserID: "u1", Content: "Reply", RootID: "root", CreateAt: 1700000001000}
@@ -144,7 +138,7 @@ func TestThread_AppendReplyIgnoresARepeat(t *testing.T) {
 }
 
 func TestThread_RemoveReply(t *testing.T) {
-	m := thread.New(testStyles())
+	m := thread.New(testutil.Styles())
 	m.SetSize(40, 20)
 	m.SetThread(&model.Post{ID: "root", UserID: "u1", Content: "Root", CreateAt: 1700000000000},
 		[]*model.Post{{ID: "r1", UserID: "u1", Content: "doomed reply", RootID: "root", CreateAt: 1700000001000}})
@@ -162,7 +156,7 @@ func TestThread_RemoveReply(t *testing.T) {
 
 // Tags set on an open thread did not show until something else redrew it.
 func TestThread_SetPostTagsRedraws(t *testing.T) {
-	m := thread.New(testStyles())
+	m := thread.New(testutil.Styles())
 	m.SetSize(60, 20)
 	m.SetThread(&model.Post{ID: "root", UserID: "u1", Content: "Root", CreateAt: 1700000000000}, nil)
 	_ = m.View()

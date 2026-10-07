@@ -6,14 +6,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/testutil"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/tagpicker"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
-
-func testStyles() styles.Styles {
-	return styles.New(theme.TokyoNight())
-}
 
 func testTags() []*model.Tag {
 	return []*model.Tag{
@@ -24,7 +19,7 @@ func testTags() []*model.Tag {
 }
 
 func TestTagPicker_OpenClose(t *testing.T) {
-	m := tagpicker.New(testStyles())
+	m := tagpicker.New(testutil.Styles())
 	if m.Visible() {
 		t.Error("expected not visible initially")
 	}
@@ -41,7 +36,7 @@ func TestTagPicker_OpenClose(t *testing.T) {
 }
 
 func TestTagPicker_ViewShowsTags(t *testing.T) {
-	m := tagpicker.New(testStyles())
+	m := tagpicker.New(testutil.Styles())
 	m.SetSize(80, 24)
 	m.Open("p1", testTags(), nil)
 	view := m.View()
@@ -54,7 +49,7 @@ func TestTagPicker_ViewShowsTags(t *testing.T) {
 }
 
 func TestTagPicker_ViewShowsApplied(t *testing.T) {
-	m := tagpicker.New(testStyles())
+	m := tagpicker.New(testutil.Styles())
 	m.SetSize(80, 24)
 	applied := []*model.Tag{{ID: "t1", Name: "urgent"}}
 	m.Open("p1", testTags(), applied)
@@ -65,7 +60,7 @@ func TestTagPicker_ViewShowsApplied(t *testing.T) {
 }
 
 func TestTagPicker_EscapeCloses(t *testing.T) {
-	m := tagpicker.New(testStyles())
+	m := tagpicker.New(testutil.Styles())
 	m.SetSize(80, 24)
 	m.Open("p1", testTags(), nil)
 
@@ -76,7 +71,7 @@ func TestTagPicker_EscapeCloses(t *testing.T) {
 }
 
 func TestTagPicker_EnterTogglesTag(t *testing.T) {
-	m := tagpicker.New(testStyles())
+	m := tagpicker.New(testutil.Styles())
 	m.SetSize(80, 24)
 	m.Open("p1", testTags(), nil)
 
@@ -99,7 +94,7 @@ func TestTagPicker_EnterTogglesTag(t *testing.T) {
 }
 
 func TestTagPicker_CursorNavigation(t *testing.T) {
-	m := tagpicker.New(testStyles())
+	m := tagpicker.New(testutil.Styles())
 	m.SetSize(80, 24)
 	m.Open("p1", testTags(), nil)
 
@@ -119,7 +114,7 @@ func TestTagPicker_CursorNavigation(t *testing.T) {
 }
 
 func TestTagPicker_CtrlNCreateTag(t *testing.T) {
-	m := tagpicker.New(testStyles())
+	m := tagpicker.New(testutil.Styles())
 	m.SetSize(80, 24)
 	m.Open("p1", testTags(), nil)
 
@@ -147,7 +142,7 @@ func TestTagPicker_CtrlNCreateTag(t *testing.T) {
 }
 
 func TestTagPicker_NotVisibleReturnsEmpty(t *testing.T) {
-	m := tagpicker.New(testStyles())
+	m := tagpicker.New(testutil.Styles())
 	m.SetSize(80, 24)
 	if m.View() != "" {
 		t.Error("expected empty view when not visible")
@@ -155,7 +150,7 @@ func TestTagPicker_NotVisibleReturnsEmpty(t *testing.T) {
 }
 
 func TestTagPicker_UpdateWhenNotVisible(t *testing.T) {
-	m := tagpicker.New(testStyles())
+	m := tagpicker.New(testutil.Styles())
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd != nil {
 		t.Error("expected nil command when not visible")
@@ -163,7 +158,7 @@ func TestTagPicker_UpdateWhenNotVisible(t *testing.T) {
 }
 
 func TestTagPicker_CtrlNEmptyInput(t *testing.T) {
-	m := tagpicker.New(testStyles())
+	m := tagpicker.New(testutil.Styles())
 	m.SetSize(80, 24)
 	m.Open("p1", testTags(), nil)
 
@@ -174,7 +169,7 @@ func TestTagPicker_CtrlNEmptyInput(t *testing.T) {
 }
 
 func TestTagPicker_CursorUpAtTop(t *testing.T) {
-	m := tagpicker.New(testStyles())
+	m := tagpicker.New(testutil.Styles())
 	m.SetSize(80, 24)
 	m.Open("p1", testTags(), nil)
 
@@ -192,7 +187,7 @@ func TestTagPicker_CursorUpAtTop(t *testing.T) {
 }
 
 func TestTagPicker_CursorDownAtBottom(t *testing.T) {
-	m := tagpicker.New(testStyles())
+	m := tagpicker.New(testutil.Styles())
 	m.SetSize(80, 24)
 	m.Open("p1", testTags(), nil)
 
@@ -212,7 +207,7 @@ func TestTagPicker_CursorDownAtBottom(t *testing.T) {
 }
 
 func TestTagPicker_FilterNoMatches(t *testing.T) {
-	m := tagpicker.New(testStyles())
+	m := tagpicker.New(testutil.Styles())
 	m.SetSize(80, 24)
 	m.Open("p1", testTags(), nil)
 
@@ -227,7 +222,7 @@ func TestTagPicker_FilterNoMatches(t *testing.T) {
 }
 
 func TestTagPicker_EnterWithNoFiltered(t *testing.T) {
-	m := tagpicker.New(testStyles())
+	m := tagpicker.New(testutil.Styles())
 	m.SetSize(80, 24)
 	m.Open("p1", testTags(), nil)
 
@@ -243,7 +238,7 @@ func TestTagPicker_EnterWithNoFiltered(t *testing.T) {
 }
 
 func TestTagPicker_ToggleOffAppliedTag(t *testing.T) {
-	m := tagpicker.New(testStyles())
+	m := tagpicker.New(testutil.Styles())
 	m.SetSize(80, 24)
 	applied := []*model.Tag{{ID: "t1", Name: "urgent"}}
 	m.Open("p1", testTags(), applied)

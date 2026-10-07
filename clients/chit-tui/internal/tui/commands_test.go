@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/infrashift/chit/clients/chit-tui/internal/api"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui"
 	"github.com/infrashift/chit/clients/chit-tui/internal/ws"
@@ -213,6 +214,13 @@ func (m *mockClient) AddChannelMember(_ context.Context, _, _ string) error {
 func (m *mockClient) RemoveChannelMember(_ context.Context, _, _ string) error {
 	return m.err
 }
+
+// Fail at compile time, not with a confusing error, if the mocks fall
+// behind the interfaces they stand in for.
+var (
+	_ api.ChitClient = (*mockClient)(nil)
+	_ ws.WSClient    = (*mockWSClient)(nil)
+)
 
 // mockWSClient implements ws.WSClient for testing.
 type mockWSClient struct {

@@ -7,17 +7,14 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/testutil"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/dmpicker"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
 
-func testStyles() styles.Styles {
-	return styles.New(theme.TokyoNight())
-}
-
 func TestDMPicker_OpenClose(t *testing.T) {
-	m := dmpicker.New(testStyles())
+	m := dmpicker.New(testutil.Styles())
 	if m.Visible() {
 		t.Error("should not be visible initially")
 	}
@@ -34,7 +31,7 @@ func TestDMPicker_OpenClose(t *testing.T) {
 }
 
 func TestDMPicker_EscapeCloses(t *testing.T) {
-	m := dmpicker.New(testStyles())
+	m := dmpicker.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.OpenForMembers()
 
@@ -45,7 +42,7 @@ func TestDMPicker_EscapeCloses(t *testing.T) {
 }
 
 func TestDMPicker_NavigateResults(t *testing.T) {
-	m := dmpicker.New(testStyles())
+	m := dmpicker.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.OpenForMembers()
 	m.SetResults([]*model.User{
@@ -75,7 +72,7 @@ func TestDMPicker_NavigateResults(t *testing.T) {
 }
 
 func TestDMPicker_SelectFirstUser(t *testing.T) {
-	m := dmpicker.New(testStyles())
+	m := dmpicker.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.OpenForMembers()
 	m.SetResults([]*model.User{
@@ -98,7 +95,7 @@ func TestDMPicker_SelectFirstUser(t *testing.T) {
 }
 
 func TestDMPicker_SearchTrigger(t *testing.T) {
-	m := dmpicker.New(testStyles())
+	m := dmpicker.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.OpenForMembers()
 
@@ -124,7 +121,7 @@ func TestDMPicker_SearchTrigger(t *testing.T) {
 }
 
 func TestDMPicker_EnterEmptyNoOp(t *testing.T) {
-	m := dmpicker.New(testStyles())
+	m := dmpicker.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.OpenForMembers()
 
@@ -137,7 +134,7 @@ func TestDMPicker_EnterEmptyNoOp(t *testing.T) {
 }
 
 func TestDMPicker_UpBounds(t *testing.T) {
-	m := dmpicker.New(testStyles())
+	m := dmpicker.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.OpenForMembers()
 	m.SetResults([]*model.User{
@@ -156,7 +153,7 @@ func TestDMPicker_UpBounds(t *testing.T) {
 }
 
 func TestDMPicker_DownBounds(t *testing.T) {
-	m := dmpicker.New(testStyles())
+	m := dmpicker.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.OpenForMembers()
 	m.SetResults([]*model.User{
@@ -175,7 +172,7 @@ func TestDMPicker_DownBounds(t *testing.T) {
 }
 
 func TestDMPicker_ViewShowsResults(t *testing.T) {
-	m := dmpicker.New(testStyles())
+	m := dmpicker.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.OpenForMembers()
 	m.SetResults([]*model.User{
@@ -192,7 +189,7 @@ func TestDMPicker_ViewShowsResults(t *testing.T) {
 }
 
 func TestDMPicker_ViewHiddenEmpty(t *testing.T) {
-	m := dmpicker.New(testStyles())
+	m := dmpicker.New(testutil.Styles())
 	m.SetSize(80, 40)
 
 	view := m.View()
@@ -202,7 +199,7 @@ func TestDMPicker_ViewHiddenEmpty(t *testing.T) {
 }
 
 func TestDMPicker_IgnoresInputWhenNotVisible(t *testing.T) {
-	m := dmpicker.New(testStyles())
+	m := dmpicker.New(testutil.Styles())
 	m.SetSize(80, 40)
 
 	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -212,7 +209,7 @@ func TestDMPicker_IgnoresInputWhenNotVisible(t *testing.T) {
 }
 
 func TestDMPicker_FocusBlur(t *testing.T) {
-	m := dmpicker.New(testStyles())
+	m := dmpicker.New(testutil.Styles())
 	m.OpenForMembers()
 	m.Blur()
 	// When blurred, should not respond to keys
@@ -233,7 +230,7 @@ func TestDMPicker_FocusBlur(t *testing.T) {
 // --- Multi-select tests ---
 
 func TestDMPicker_TabTogglesSelection(t *testing.T) {
-	m := dmpicker.New(testStyles())
+	m := dmpicker.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.OpenForMembers()
 	m.SetResults([]*model.User{
@@ -256,7 +253,7 @@ func TestDMPicker_TabTogglesSelection(t *testing.T) {
 }
 
 func TestDMPicker_MultiSelectPicksAll(t *testing.T) {
-	m := dmpicker.New(testStyles())
+	m := dmpicker.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.OpenForMembers()
 	m.SetResults([]*model.User{
@@ -287,7 +284,7 @@ func TestDMPicker_MultiSelectPicksAll(t *testing.T) {
 }
 
 func TestDMPicker_MaxSelection(t *testing.T) {
-	m := dmpicker.New(testStyles())
+	m := dmpicker.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.OpenForMembers()
 
@@ -325,7 +322,7 @@ func TestDMPicker_MaxSelection(t *testing.T) {
 }
 
 func TestDMPicker_BackspaceRemovesLastSelected(t *testing.T) {
-	m := dmpicker.New(testStyles())
+	m := dmpicker.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.OpenForMembers()
 	m.SetResults([]*model.User{
@@ -357,7 +354,7 @@ func TestDMPicker_BackspaceRemovesLastSelected(t *testing.T) {
 }
 
 func TestDMPicker_OpenResetsSelected(t *testing.T) {
-	m := dmpicker.New(testStyles())
+	m := dmpicker.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.OpenForMembers()
 	m.SetResults([]*model.User{
@@ -381,7 +378,7 @@ func TestDMPicker_OpenResetsSelected(t *testing.T) {
 }
 
 func TestDMPicker_ViewShowsSelectedChips(t *testing.T) {
-	m := dmpicker.New(testStyles())
+	m := dmpicker.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.OpenForMembers()
 	m.SetResults([]*model.User{
@@ -404,7 +401,7 @@ func TestDMPicker_ViewShowsSelectedChips(t *testing.T) {
 }
 
 func TestDMPicker_ViewShowsGroupHint(t *testing.T) {
-	m := dmpicker.New(testStyles())
+	m := dmpicker.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.OpenForMembers()
 	m.SetResults([]*model.User{
@@ -430,7 +427,7 @@ func TestDMPicker_ViewShowsGroupHint(t *testing.T) {
 }
 
 func TestDMPicker_MemberPickerMode(t *testing.T) {
-	m := dmpicker.New(testStyles())
+	m := dmpicker.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.OpenForMembers()
 
@@ -440,7 +437,7 @@ func TestDMPicker_MemberPickerMode(t *testing.T) {
 }
 
 func TestDMPicker_MemberPickerEmitsMembersPickedMsg(t *testing.T) {
-	m := dmpicker.New(testStyles())
+	m := dmpicker.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.OpenForMembers()
 	m.SetResults([]*model.User{
@@ -468,7 +465,7 @@ func TestDMPicker_MemberPickerEmitsMembersPickedMsg(t *testing.T) {
 }
 
 func TestDMPicker_MemberPickerSingleUser(t *testing.T) {
-	m := dmpicker.New(testStyles())
+	m := dmpicker.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.OpenForMembers()
 	m.SetResults([]*model.User{
@@ -491,7 +488,7 @@ func TestDMPicker_MemberPickerSingleUser(t *testing.T) {
 }
 
 func TestDMPicker_MemberPickerHintText(t *testing.T) {
-	m := dmpicker.New(testStyles())
+	m := dmpicker.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.OpenForMembers()
 	m.SetResults([]*model.User{
@@ -507,7 +504,7 @@ func TestDMPicker_MemberPickerHintText(t *testing.T) {
 }
 
 func TestDMPicker_SingleSelectedEnterPicksMember(t *testing.T) {
-	m := dmpicker.New(testStyles())
+	m := dmpicker.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.OpenForMembers()
 	m.SetResults([]*model.User{

@@ -6,17 +6,12 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/testutil"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/chcreator"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
 
-func testStyles() styles.Styles {
-	return styles.New(theme.TokyoNight())
-}
-
 func TestChCreator_OpenClose(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	if m.Visible() {
 		t.Error("should not be visible initially")
 	}
@@ -33,7 +28,7 @@ func TestChCreator_OpenClose(t *testing.T) {
 }
 
 func TestChCreator_EscapeCloses(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.Open("t1")
 
@@ -44,7 +39,7 @@ func TestChCreator_EscapeCloses(t *testing.T) {
 }
 
 func TestChCreator_FieldNavigation(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.Open("t1")
 
@@ -85,7 +80,7 @@ func TestChCreator_AutoSlug(t *testing.T) {
 }
 
 func TestChCreator_AutoSlugWhileTyping(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.Open("t1")
 
@@ -101,7 +96,7 @@ func TestChCreator_AutoSlugWhileTyping(t *testing.T) {
 }
 
 func TestChCreator_ManualNameDisablesAutoSlug(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.Open("t1")
 
@@ -138,7 +133,7 @@ func TestChCreator_ManualNameDisablesAutoSlug(t *testing.T) {
 }
 
 func TestChCreator_TypeToggle(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.Open("t1")
 
@@ -168,7 +163,7 @@ func TestChCreator_TypeToggle(t *testing.T) {
 }
 
 func TestChCreator_ValidationEmptyDisplayName(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.Open("t1")
 
@@ -184,7 +179,7 @@ func TestChCreator_ValidationEmptyDisplayName(t *testing.T) {
 }
 
 func TestChCreator_ValidationInvalidName(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.Open("t1")
 
@@ -205,7 +200,7 @@ func TestChCreator_ValidationInvalidName(t *testing.T) {
 }
 
 func TestChCreator_SubmitSuccess(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.Open("t1")
 
@@ -239,7 +234,7 @@ func TestChCreator_SubmitSuccess(t *testing.T) {
 }
 
 func TestChCreator_SubmitPrivate(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.Open("t1")
 
@@ -268,7 +263,7 @@ func TestChCreator_SubmitPrivate(t *testing.T) {
 }
 
 func TestChCreator_SubmitWithPurpose(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.Open("t1")
 
@@ -298,7 +293,7 @@ func TestChCreator_SubmitWithPurpose(t *testing.T) {
 }
 
 func TestChCreator_ViewHiddenEmpty(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 
 	view := m.View()
@@ -308,7 +303,7 @@ func TestChCreator_ViewHiddenEmpty(t *testing.T) {
 }
 
 func TestChCreator_ViewShowsAllFields(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.Open("t1")
 
@@ -328,7 +323,7 @@ func TestChCreator_ViewShowsAllFields(t *testing.T) {
 }
 
 func TestChCreator_IgnoresInputWhenNotVisible(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 
 	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -361,7 +356,7 @@ func TestChCreator_ValidateName(t *testing.T) {
 }
 
 func TestChCreator_ClearsValidErrOnType(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.Open("t1")
 

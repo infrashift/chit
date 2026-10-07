@@ -4,17 +4,12 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/infrashift/chit/clients/chit-tui/internal/testutil"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/input"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
 
-func testStyles() styles.Styles {
-	return styles.New(theme.TokyoNight())
-}
-
 func TestInput_SendMsg(t *testing.T) {
-	m := input.New(testStyles())
+	m := input.New(testutil.Styles())
 	m.SetSize(80, 5)
 	m.Focus()
 
@@ -49,7 +44,7 @@ func TestInput_SendMsg(t *testing.T) {
 }
 
 func TestInput_SlashTrigger(t *testing.T) {
-	m := input.New(testStyles())
+	m := input.New(testutil.Styles())
 	m.SetSize(80, 5)
 	m.Focus()
 
@@ -73,7 +68,7 @@ func TestInput_SlashTrigger(t *testing.T) {
 }
 
 func TestInput_EmptyEnterNoOp(t *testing.T) {
-	m := input.New(testStyles())
+	m := input.New(testutil.Styles())
 	m.SetSize(80, 5)
 	m.Focus()
 
@@ -85,7 +80,7 @@ func TestInput_EmptyEnterNoOp(t *testing.T) {
 }
 
 func TestInput_FocusBlur(t *testing.T) {
-	m := input.New(testStyles())
+	m := input.New(testutil.Styles())
 	if m.Focused() {
 		t.Error("should not be focused initially")
 	}
@@ -100,7 +95,7 @@ func TestInput_FocusBlur(t *testing.T) {
 }
 
 func TestInput_IgnoresWhenBlurred(t *testing.T) {
-	m := input.New(testStyles())
+	m := input.New(testutil.Styles())
 	m.SetSize(80, 5)
 	// Not focused
 
@@ -113,7 +108,7 @@ func TestInput_IgnoresWhenBlurred(t *testing.T) {
 }
 
 func TestInput_Reset(t *testing.T) {
-	m := input.New(testStyles())
+	m := input.New(testutil.Styles())
 	m.SetSize(80, 5)
 	m.Focus()
 
@@ -127,7 +122,7 @@ func TestInput_Reset(t *testing.T) {
 }
 
 func TestInput_AtTrigger(t *testing.T) {
-	m := input.New(testStyles())
+	m := input.New(testutil.Styles())
 	m.SetSize(80, 5)
 	m.Focus()
 
@@ -154,7 +149,7 @@ func TestInput_AtTrigger(t *testing.T) {
 }
 
 func TestInput_AtDismissOnSpace(t *testing.T) {
-	m := input.New(testStyles())
+	m := input.New(testutil.Styles())
 	m.SetSize(80, 5)
 	m.Focus()
 
@@ -172,7 +167,7 @@ func TestInput_AtDismissOnSpace(t *testing.T) {
 }
 
 func TestInput_ReplaceAtMention(t *testing.T) {
-	m := input.New(testStyles())
+	m := input.New(testutil.Styles())
 	m.SetSize(80, 5)
 	m.Focus()
 
@@ -189,7 +184,7 @@ func TestInput_ReplaceAtMention(t *testing.T) {
 }
 
 func TestInput_AltEnterInsertsNewline(t *testing.T) {
-	m := input.New(testStyles())
+	m := input.New(testutil.Styles())
 	m.SetSize(80, 5)
 	m.Focus()
 
@@ -220,7 +215,7 @@ func TestInput_AltEnterInsertsNewline(t *testing.T) {
 }
 
 func TestInput_MultilineContentPreservedInSendMsg(t *testing.T) {
-	m := input.New(testStyles())
+	m := input.New(testutil.Styles())
 	m.SetSize(80, 5)
 	m.Focus()
 
@@ -254,7 +249,7 @@ func TestInput_MultilineContentPreservedInSendMsg(t *testing.T) {
 }
 
 func TestInput_PlainEnterStillSends(t *testing.T) {
-	m := input.New(testStyles())
+	m := input.New(testutil.Styles())
 	m.SetSize(80, 5)
 	m.Focus()
 
@@ -278,7 +273,7 @@ func TestInput_PlainEnterStillSends(t *testing.T) {
 }
 
 func TestInput_SlashDoesNotTriggerAt(t *testing.T) {
-	m := input.New(testStyles())
+	m := input.New(testutil.Styles())
 	m.SetSize(80, 5)
 	m.Focus()
 
@@ -296,7 +291,7 @@ func TestInput_SlashDoesNotTriggerAt(t *testing.T) {
 // The replacement sliced the line by byte at a character column, so text
 // with an accented letter before the @ was cut mid-character.
 func TestInput_ReplaceAtMentionAfterNonASCII(t *testing.T) {
-	m := input.New(testStyles())
+	m := input.New(testutil.Styles())
 	m.SetSize(80, 5)
 	m.Focus()
 	for _, ch := range "héllo @al" {
@@ -313,7 +308,7 @@ func TestInput_ReplaceAtMentionAfterNonASCII(t *testing.T) {
 // Replacing on a later line must leave the cursor after the inserted name,
 // so typing carries on from there.
 func TestInput_ReplaceAtMentionOnASecondLine(t *testing.T) {
-	m := input.New(testStyles())
+	m := input.New(testutil.Styles())
 	m.SetSize(80, 5)
 	m.Focus()
 	m.SetValue("first line\nsay @al")

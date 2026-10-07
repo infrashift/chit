@@ -5,13 +5,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
+	"github.com/infrashift/chit/clients/chit-tui/internal/testutil"
 )
-
-func testStyles() styles.Styles {
-	return styles.New(theme.TokyoNight())
-}
 
 func testEntries() []MentionEntry {
 	return []MentionEntry{
@@ -25,7 +20,7 @@ func testEntries() []MentionEntry {
 }
 
 func TestModel_ShowHide(t *testing.T) {
-	m := New(testStyles())
+	m := New(testutil.Styles())
 	m.SetEntries(testEntries())
 
 	if m.Visible() {
@@ -44,7 +39,7 @@ func TestModel_ShowHide(t *testing.T) {
 }
 
 func TestModel_FilterNarrows(t *testing.T) {
-	m := New(testStyles())
+	m := New(testutil.Styles())
 	m.SetEntries(testEntries())
 	m.Show("", 0)
 
@@ -59,7 +54,7 @@ func TestModel_FilterNarrows(t *testing.T) {
 }
 
 func TestModel_UpDown(t *testing.T) {
-	m := New(testStyles())
+	m := New(testutil.Styles())
 	m.SetEntries(testEntries())
 	m.Show("", 0)
 
@@ -85,7 +80,7 @@ func TestModel_UpDown(t *testing.T) {
 }
 
 func TestModel_EnterSelectsUser(t *testing.T) {
-	m := New(testStyles())
+	m := New(testutil.Styles())
 	m.SetEntries(testEntries())
 	m.Show("", 5)
 
@@ -116,7 +111,7 @@ func TestModel_EnterSelectsUser(t *testing.T) {
 }
 
 func TestModel_TabSelectsUser(t *testing.T) {
-	m := New(testStyles())
+	m := New(testutil.Styles())
 	m.SetEntries(testEntries())
 	m.Show("al", 0)
 
@@ -137,7 +132,7 @@ func TestModel_TabSelectsUser(t *testing.T) {
 }
 
 func TestModel_EscHides(t *testing.T) {
-	m := New(testStyles())
+	m := New(testutil.Styles())
 	m.SetEntries(testEntries())
 	m.Show("", 0)
 
@@ -151,7 +146,7 @@ func TestModel_EscHides(t *testing.T) {
 }
 
 func TestModel_ViewWhenVisible(t *testing.T) {
-	m := New(testStyles())
+	m := New(testutil.Styles())
 	m.SetEntries(testEntries())
 	m.Show("", 0)
 
@@ -165,7 +160,7 @@ func TestModel_ViewWhenVisible(t *testing.T) {
 }
 
 func TestModel_ViewWhenHidden(t *testing.T) {
-	m := New(testStyles())
+	m := New(testutil.Styles())
 	m.SetEntries(testEntries())
 
 	view := m.View()
@@ -175,7 +170,7 @@ func TestModel_ViewWhenHidden(t *testing.T) {
 }
 
 func TestModel_EmptyPrefixShowsAll(t *testing.T) {
-	m := New(testStyles())
+	m := New(testutil.Styles())
 	m.SetEntries(testEntries())
 	m.Show("", 0)
 
@@ -189,7 +184,7 @@ func TestModel_EmptyPrefixShowsAll(t *testing.T) {
 }
 
 func TestModel_DownDoesNotExceedBounds(t *testing.T) {
-	m := New(testStyles())
+	m := New(testutil.Styles())
 	m.SetEntries([]MentionEntry{{Username: "alice"}})
 	m.Show("", 0)
 
@@ -200,7 +195,7 @@ func TestModel_DownDoesNotExceedBounds(t *testing.T) {
 }
 
 func TestModel_UpdateFilter_ResetsCursor(t *testing.T) {
-	m := New(testStyles())
+	m := New(testutil.Styles())
 	m.SetEntries(testEntries())
 	m.Show("", 0)
 
@@ -216,7 +211,7 @@ func TestModel_UpdateFilter_ResetsCursor(t *testing.T) {
 }
 
 func TestModel_IgnoresWhenHidden(t *testing.T) {
-	m := New(testStyles())
+	m := New(testutil.Styles())
 	m.SetEntries(testEntries())
 	// Not visible
 

@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/testutil"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/viewport"
 )
 
@@ -25,7 +26,7 @@ func history(n int) []*model.Post {
 
 func loaded(b *testing.B, n int) viewport.Model {
 	b.Helper()
-	m := viewport.New(testStyles())
+	m := viewport.New(testutil.Styles())
 	m.SetSize(120, 40)
 	m.SetPosts(history(n))
 	m.Focus()

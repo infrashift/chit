@@ -5,12 +5,10 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/infrashift/chit/clients/chit-tui/internal/testutil"
 )
 
 // isASCIILetter reports whether b terminates an ANSI escape sequence.
-func isASCIILetter(b byte) bool {
-	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z')
-}
 
 func TestPlaceOverlay_BasicASCII(t *testing.T) {
 	bg := "AAAAAAAAAA\nBBBBBBBBBB\nCCCCCCCCCC"
@@ -45,7 +43,7 @@ func TestPlaceOverlay_ANSIAware(t *testing.T) {
 	lines := strings.Split(got, "\n")
 	for i, line := range lines {
 		// Strip all ANSI escape sequences and check no raw escape fragments
-		stripped := stripANSI(line)
+		stripped := testutil.StripANSI(line)
 		if strings.Contains(stripped, "38;") || strings.Contains(stripped, "2;192") {
 			t.Errorf("line %d contains raw ANSI fragments: %q", i, stripped)
 		}
@@ -115,24 +113,3 @@ func TestPlaceOverlay_BeyondHeight(t *testing.T) {
 }
 
 // stripANSI removes ANSI escape sequences from a string.
-func stripANSI(s string) string {
-	var result strings.Builder
-	i := 0
-	for i < len(s) {
-		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
-			// Skip until we find the terminating letter
-			j := i + 2
-			for j < len(s) && !isASCIILetter(s[j]) {
-				j++
-			}
-			if j < len(s) {
-				j++ // skip the terminating letter
-			}
-			i = j
-		} else {
-			result.WriteByte(s[i])
-			i++
-		}
-	}
-	return result.String()
-}

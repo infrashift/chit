@@ -1,6 +1,11 @@
 package tui
 
-import "testing"
+import (
+	"bytes"
+	"encoding/base64"
+	"strings"
+	"testing"
+)
 
 func TestCountLines(t *testing.T) {
 	tests := []struct {
@@ -26,5 +31,22 @@ func TestCountLines(t *testing.T) {
 func TestCopyToClipboardIgnoresEmpty(t *testing.T) {
 	if msg := copyToClipboard("")(); msg != nil {
 		t.Errorf("copying an empty string returned %v, want nil", msg)
+	}
+}
+
+func TestCopyToClipboardWritesOSC52(t *testing.T) {
+	var out bytes.Buffer
+	prev := clipboardOut
+	clipboardOut = &out
+	t.Cleanup(func() { clipboardOut = prev })
+
+	msg := copyToClipboard("one\ntwo")()
+
+	want := "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte("one\ntwo"))
+	if !strings.HasPrefix(out.String(), want) {
+		t.Errorf("wrote %q, want an OSC 52 sequence starting %q", out.String(), want)
+	}
+	if got, ok := msg.(clipboardCopiedMsg); !ok || got.lines != 2 {
+		t.Errorf("message = %#v, want two lines copied", msg)
 	}
 }
