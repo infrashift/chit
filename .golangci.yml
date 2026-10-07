@@ -21,6 +21,14 @@ linters:
       rules:
         - name: unexported-return
           disabled: true
+    staticcheck:
+      # Every analyzer, including the stylecheck (ST) set that golangci-lint
+      # leaves off by default. Excluded: ST1000 (package comments) and ST1003
+      # (initialism naming), which would churn exported names for no defect.
+      checks:
+        - all
+        - -ST1000
+        - -ST1003
   exclusions:
     generated: lax
     paths:

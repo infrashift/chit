@@ -1,4 +1,4 @@
-.PHONY: build build-mcp build-reconcile build-claude build-tui build-all run test test-tui test-all test-container test-e2e test-e2e-tui test-e2e-clean lint lint-tui check-deps validate-spec cue-validate reconcile migrate-up migrate-down kube-migrate kube-build kube-up kube-down kube-restart kube-logs kube-clean uat-up uat-seed-kratos uat-down uat-clean docs-dev clean
+.PHONY: build build-mcp build-reconcile build-claude build-tui build-all run test test-integration test-tui test-all test-container test-e2e test-e2e-tui test-e2e-clean lint vuln lint-tui check-deps validate-spec cue-validate reconcile migrate-up migrate-down kube-migrate kube-build kube-up kube-down kube-restart kube-logs kube-clean uat-up uat-seed-kratos uat-down uat-clean docs-dev clean
 
 BINARY=bin/chitd
 MCP_BINARY=bin/chit-mcp
@@ -68,8 +68,37 @@ test-e2e:
 test-e2e-clean:
 	-podman pod rm -f $(E2E_POD) 2>/dev/null
 
+# Tags bring the integration- and e2e-tagged files into scope; an untagged
+# run never compiles them, so their findings would go unseen.
+# Found on PATH or in GOPATH/bin, which `go install` uses and PATH often lacks.
+GOLANGCI_LINT?=$(shell command -v golangci-lint 2>/dev/null || echo $(shell go env GOPATH)/bin/golangci-lint)
 lint:
-	golangci-lint run
+	GOWORK=off $(GOLANGCI_LINT) run --build-tags integration,e2e ./...
+
+vuln:
+	GOWORK=off go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+# Integration tests need a real PostgreSQL. This starts a throwaway one in
+# podman on $(ITEST_PORT), applies every migration, and removes it afterwards.
+# The suite TRUNCATEs every table: never point it at a database you care about.
+MIGRATE?=$(shell command -v migrate 2>/dev/null || echo $(shell go env GOPATH)/bin/migrate)
+ITEST_PORT?=55432
+ITEST_URL=postgres://chit:chit@localhost:$(ITEST_PORT)/chit?sslmode=disable
+test-integration:
+	-podman rm -f chit-itest-pg 2>/dev/null
+	podman run -d --rm --name chit-itest-pg -p $(ITEST_PORT):5432 \
+		-e POSTGRES_USER=chit -e POSTGRES_PASSWORD=chit -e POSTGRES_DB=chit $(PG_IMAGE)
+	@until podman exec chit-itest-pg pg_isready -U chit -d chit >/dev/null 2>&1; do sleep 1; done
+	@sleep 1
+	$(MIGRATE) -database "$(ITEST_URL)" -path migrations up ; \
+	EXIT_CODE=$$? ; \
+	if [ $$EXIT_CODE -eq 0 ]; then \
+		CHIT_DATABASE_URL="$(ITEST_URL)" GOWORK=off go test -race -count=1 -tags integration \
+			./internal/store/sqlstore/... ./internal/pubsub/... ; \
+		EXIT_CODE=$$? ; \
+	fi ; \
+	podman rm -f chit-itest-pg >/dev/null ; \
+	exit $$EXIT_CODE
 
 # Dependency-boundary guards: the client binaries (chit-claude, chit-mcp)
 # talk to chitd over HTTP/WS only and must never link server-side deps;
