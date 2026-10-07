@@ -72,6 +72,18 @@ func (s *SqlThreadStore) IncrementReplyCount(ctx context.Context, postID string,
 	return nil
 }
 
+func (s *SqlThreadStore) DecrementReplyCount(ctx context.Context, postID string) error {
+	query := `UPDATE threads SET
+		reply_count = GREATEST(reply_count - 1, 0),
+		last_reply_at = COALESCE(
+			(SELECT MAX(create_at) FROM posts WHERE root_id = $1 AND delete_at = 0), 0)
+		WHERE post_id = $1`
+	if _, err := s.sqlStore.pool.Exec(ctx, query, postID); err != nil {
+		return fmt.Errorf("decrement reply count: %w", err)
+	}
+	return nil
+}
+
 func (s *SqlThreadStore) IncrementMentionCount(ctx context.Context, postID, userID string) error {
 	query := `UPDATE thread_memberships SET unread_mention_count = unread_mention_count + 1 WHERE post_id = $1 AND user_id = $2`
 	_, err := s.sqlStore.pool.Exec(ctx, query, postID, userID)
@@ -90,7 +102,7 @@ func (s *SqlThreadStore) SaveMembership(ctx context.Context, membership *model.T
 		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (post_id, user_id) DO UPDATE SET
 			following = EXCLUDED.following,
-			last_viewed_at = EXCLUDED.last_viewed_at`
+			last_viewed_at = GREATEST(thread_memberships.last_viewed_at, EXCLUDED.last_viewed_at)`
 
 	_, err := s.sqlStore.pool.Exec(ctx, query,
 		membership.PostID, membership.UserID, membership.Following,

@@ -37,8 +37,10 @@ func (a *App) CreatePost(ctx context.Context, post *model.Post) (*model.Post, er
 		}
 	}
 
+	var root *model.Post
 	if post.RootID != "" {
-		if err := a.requireReplyableRoot(ctx, post); err != nil {
+		var err error
+		if root, err = a.requireReplyableRoot(ctx, post); err != nil {
 			return nil, err
 		}
 	}
@@ -64,7 +66,7 @@ func (a *App) CreatePost(ctx context.Context, post *model.Post) (*model.Post, er
 
 	// Handle threading
 	if saved.RootID != "" {
-		if err := a.handleThreadReply(ctx, saved); err != nil {
+		if err := a.handleThreadReply(ctx, saved, root); err != nil {
 			// Don't fail the post creation, but the thread metadata is now stale.
 			slog.Error("failed to update thread for reply", "post_id", saved.ID, "root_id", saved.RootID, "error", err)
 		}
@@ -85,21 +87,21 @@ func (a *App) CreatePost(ctx context.Context, post *model.Post) (*model.Post, er
 // channel, so a reply could name a root in a channel the author could not
 // read: the thread row was then created under the author's channel and the
 // author auto-followed it, which put the private root into their thread inbox.
-func (a *App) requireReplyableRoot(ctx context.Context, post *model.Post) error {
+func (a *App) requireReplyableRoot(ctx context.Context, post *model.Post) (*model.Post, error) {
 	root, err := a.Store.Post().Get(ctx, post.RootID)
 	if err != nil {
 		if isNotFound(err) {
-			return model.NewBadRequestError("App.CreatePost", "root_id does not name a post")
+			return nil, model.NewBadRequestError("App.CreatePost", "root_id does not name a post")
 		}
-		return err
+		return nil, err
 	}
 	if root.ChannelID != post.ChannelID {
-		return model.NewBadRequestError("App.CreatePost", "a reply must be in its root post's channel")
+		return nil, model.NewBadRequestError("App.CreatePost", "a reply must be in its root post's channel")
 	}
 	if root.RootID != "" {
-		return model.NewBadRequestError("App.CreatePost", "root_id names a reply; reply to its root instead")
+		return nil, model.NewBadRequestError("App.CreatePost", "root_id names a reply; reply to its root instead")
 	}
-	return nil
+	return root, nil
 }
 
 // GetPost retrieves a post by ID, requiring the caller to be a member of its channel.
@@ -188,6 +190,13 @@ func (a *App) DeletePost(ctx context.Context, id, actorID string) error {
 	if err := a.Store.Post().Delete(ctx, id, model.GetMillis()); err != nil {
 		return err
 	}
+	if post.RootID != "" {
+		if err := a.Store.Thread().DecrementReplyCount(ctx, post.RootID); err != nil {
+			slog.Error("failed to update thread after reply deletion", "post_id", id, "root_id", post.RootID, "error", err)
+		} else {
+			a.broadcastThreadUpdated(ctx, post.RootID)
+		}
+	}
 
 	a.publishEvent(ctx, &model.WebSocketEvent{
 		Event: model.WebSocketEventPostDeleted,
@@ -264,30 +273,64 @@ func (a *App) GetPinnedPosts(ctx context.Context, channelID, userID string) (*mo
 	return list, nil
 }
 
-func (a *App) handleThreadReply(ctx context.Context, post *model.Post) error {
-	// Ensure thread record exists, then increment atomically
+// handleThreadReply updates root's thread for the reply post: it creates the
+// thread row if needed, advances its counters, and keeps the participants'
+// memberships current.
+func (a *App) handleThreadReply(ctx context.Context, post, root *model.Post) error {
 	thread := &model.Thread{
-		PostID:       post.RootID,
-		ChannelID:    post.ChannelID,
-		ReplyCount:   0,
-		LastReplyAt:  0,
+		PostID:       root.ID,
+		ChannelID:    root.ChannelID,
 		Participants: []string{},
 	}
 	if err := a.Store.Thread().SaveOrUpdate(ctx, thread); err != nil {
 		return err
 	}
-
-	if err := a.Store.Thread().IncrementReplyCount(ctx, post.RootID, post.CreateAt, post.UserID); err != nil {
+	if err := a.Store.Thread().IncrementReplyCount(ctx, root.ID, post.CreateAt, post.UserID); err != nil {
 		return err
 	}
 
-	// Auto-follow the thread
-	membership := &model.ThreadMembership{
-		PostID:    post.RootID,
-		UserID:    post.UserID,
-		Following: true,
+	// Replying follows the thread, and the replier has read it up to their
+	// own reply. The upsert never moves last_viewed_at backwards: it used to
+	// reset it to 0 on every reply, leaving the thread permanently unread for
+	// whoever was most active in it.
+	if err := a.Store.Thread().SaveMembership(ctx, &model.ThreadMembership{
+		PostID: root.ID, UserID: post.UserID, Following: true, LastViewedAt: post.CreateAt,
+	}); err != nil {
+		return err
 	}
-	return a.Store.Thread().SaveMembership(ctx, membership)
+
+	// The root's author follows their thread from its first reply, unless
+	// they already have a membership (and so may have unfollowed on purpose).
+	// Without one they never saw their own thread in the inbox, and thread
+	// mention counts had nowhere to land.
+	if root.UserID != post.UserID {
+		if _, err := a.Store.Thread().GetMembership(ctx, root.ID, root.UserID); isNotFound(err) {
+			if err := a.Store.Thread().SaveMembership(ctx, &model.ThreadMembership{
+				PostID: root.ID, UserID: root.UserID, Following: true, LastViewedAt: root.CreateAt,
+			}); err != nil {
+				return err
+			}
+		}
+	}
+
+	a.broadcastThreadUpdated(ctx, root.ID)
+	return nil
+}
+
+// broadcastThreadUpdated sends the thread's current counters to its channel.
+// The event carries only the thread: the reply itself already went out as
+// "posted", and clients that append a reply on both would show it twice.
+func (a *App) broadcastThreadUpdated(ctx context.Context, rootID string) {
+	thread, err := a.Store.Thread().Get(ctx, rootID)
+	if err != nil {
+		slog.Warn("thread_updated: could not read thread", "root_id", rootID, "error", err)
+		return
+	}
+	a.Hub.Broadcast(&model.WebSocketEvent{
+		Event:     model.WebSocketEventThreadUpdated,
+		Data:      map[string]any{"thread": thread},
+		Broadcast: &model.WebSocketBroadcast{ChannelID: thread.ChannelID},
+	})
 }
 
 func (a *App) broadcastPostEvent(ctx context.Context, event string, post *model.Post) {

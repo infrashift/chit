@@ -197,3 +197,53 @@ func TestThreadStoreIntegration_InboxRequiresAccess(t *testing.T) {
 		t.Fatalf("inbox after leaving the channel = %v, want empty", got)
 	}
 }
+
+// Re-saving a membership keeps the later read mark, and DecrementReplyCount
+// recomputes last_reply_at from the replies left.
+func TestThreadStoreIntegration_MembershipAndDecrement(t *testing.T) {
+	ss := testStore(t)
+	user, channel := newTestChannelFixture(t, ss)
+	root := savePost(t, ss, channel.ID, user.ID, "", "root", 1000)
+	if err := ss.Thread().SaveOrUpdate(t.Context(), &model.Thread{PostID: root.ID, ChannelID: channel.ID, Participants: []string{}}); err != nil {
+		t.Fatalf("SaveOrUpdate: %v", err)
+	}
+	r1 := savePost(t, ss, channel.ID, user.ID, root.ID, "one", 2000)
+	r2 := savePost(t, ss, channel.ID, user.ID, root.ID, "two", 3000)
+	for _, r := range []*model.Post{r1, r2} {
+		if err := ss.Thread().IncrementReplyCount(t.Context(), root.ID, r.CreateAt, user.ID); err != nil {
+			t.Fatalf("IncrementReplyCount: %v", err)
+		}
+	}
+
+	save := func(at int64) {
+		t.Helper()
+		if err := ss.Thread().SaveMembership(t.Context(), &model.ThreadMembership{
+			PostID: root.ID, UserID: user.ID, Following: true, LastViewedAt: at,
+		}); err != nil {
+			t.Fatalf("SaveMembership: %v", err)
+		}
+	}
+	save(3000)
+	save(0)
+	m, err := ss.Thread().GetMembership(t.Context(), root.ID, user.ID)
+	if err != nil {
+		t.Fatalf("GetMembership: %v", err)
+	}
+	if m.LastViewedAt != 3000 {
+		t.Errorf("last_viewed_at = %d, want 3000 kept", m.LastViewedAt)
+	}
+
+	if err = ss.Post().Delete(t.Context(), r2.ID, model.GetMillis()); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if err = ss.Thread().DecrementReplyCount(t.Context(), root.ID); err != nil {
+		t.Fatalf("DecrementReplyCount: %v", err)
+	}
+	th, err := ss.Thread().Get(t.Context(), root.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if th.ReplyCount != 1 || th.LastReplyAt != 2000 {
+		t.Errorf("thread = %d replies, last at %d; want 1 and 2000", th.ReplyCount, th.LastReplyAt)
+	}
+}

@@ -791,7 +791,7 @@ func (s *ThreadStore) SaveMembership(_ context.Context, m *model.ThreadMembershi
 	key := membershipKey(m.PostID, m.UserID)
 	if old, ok := s.memberships[key]; ok {
 		old.Following = m.Following
-		old.LastViewedAt = m.LastViewedAt
+		old.LastViewedAt = max(old.LastViewedAt, m.LastViewedAt)
 		return nil
 	}
 	s.memberships[key] = cp(m)
@@ -845,6 +845,17 @@ func (s *ThreadStore) IncrementReplyCount(_ context.Context, postID string, at i
 		if !slices.Contains(t.Participants, userID) {
 			t.Participants = append(t.Participants, userID)
 		}
+	}
+	return nil
+}
+
+// DecrementReplyCount lowers the count. Unlike the SQL store it cannot see
+// posts, so last_reply_at is left as it is.
+func (s *ThreadStore) DecrementReplyCount(_ context.Context, postID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if t, ok := s.threads[postID]; ok && t.ReplyCount > 0 {
+		t.ReplyCount--
 	}
 	return nil
 }
