@@ -30,6 +30,12 @@ func (a *App) GetThreadsForUser(ctx context.Context, userID, teamID string, page
 	return a.Store.Thread().GetThreadsForUser(ctx, userID, teamID, page, perPage)
 }
 
+// GetDirectThreadsForUser retrieves the threads a user follows in direct and
+// group channels.
+func (a *App) GetDirectThreadsForUser(ctx context.Context, userID string, page, perPage int) (*model.UserThreadList, error) {
+	return a.Store.Thread().GetDirectThreadsForUser(ctx, userID, page, perPage)
+}
+
 // requireThreadReadable returns an error unless postID is a thread root in a
 // channel userID belongs to. Following a thread puts its root post in the
 // follower's inbox, so without this anyone who knew a post ID could read it.

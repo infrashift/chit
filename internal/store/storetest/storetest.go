@@ -928,6 +928,13 @@ func (s *ThreadStore) GetThreadsForUser(_ context.Context, userID, _ string, pag
 	return &model.UserThreadList{Threads: paginate(out, page, perPage), Total: int64(len(out))}, nil
 }
 
+// GetDirectThreadsForUser is GetThreadsForUser: this store cannot tell a
+// team's channels from direct ones (the SQL scoping is covered by the
+// sqlstore integration tests).
+func (s *ThreadStore) GetDirectThreadsForUser(ctx context.Context, userID string, page, perPage int) (*model.UserThreadList, error) {
+	return s.GetThreadsForUser(ctx, userID, "", page, perPage)
+}
+
 func (s *ThreadStore) IncrementReplyCount(_ context.Context, postID string, at int64, userID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

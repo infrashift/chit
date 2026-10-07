@@ -166,6 +166,9 @@ stored; the response is a stand-in post that is not persisted. See
 | GET | `/users/me/teams/{id}/threads` | The caller's thread inbox for a team: followed threads in channels they still belong to, newest reply first, each with its root post, `last_viewed_at` and `unread_mentions` | Any user (own inbox only) |
 | PUT | `/users/me/teams/{team_id}/threads/{id}/read` | Mark a thread read | Members of the root's channel |
 | PUT | `/users/me/teams/{team_id}/threads/{id}/following` | Follow or unfollow (`{"following": bool}`) | Members of the root's channel |
+| GET | `/users/me/threads/direct` | The caller's thread inbox for direct and group channels, which belong to no team and so never appear in a team's inbox. Same shape and filtering as the team inbox | Any user (own inbox only) |
+| PUT | `/users/me/threads/{id}/read` | As the team-scoped route, without a `team_id` (which that route ignores); use it for DM and group threads | Members of the root's channel |
+| PUT | `/users/me/threads/{id}/following` | As the team-scoped route, without a `team_id` | Members of the root's channel |
 
 Replying follows a thread. The root's author starts following it at its first
 reply, unless they already have a membership (for example, they unfollowed).

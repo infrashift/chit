@@ -121,6 +121,12 @@ func New(a *app.App) http.Handler {
 			r.Get("/users/me/teams/{id}/threads", getMyThreads(a))
 			r.Put("/users/me/teams/{team_id}/threads/{id}/read", markThreadAsRead(a))
 			r.Put("/users/me/teams/{team_id}/threads/{id}/following", updateThreadFollowing(a))
+			// Threads in direct and group channels belong to no team. The
+			// read and follow routes ignore team_id, so they also exist
+			// without it, rather than make a client invent one for a DM.
+			r.Get("/users/me/threads/direct", getMyDirectThreads(a))
+			r.Put("/users/me/threads/{id}/read", markThreadAsRead(a))
+			r.Put("/users/me/threads/{id}/following", updateThreadFollowing(a))
 
 			// Tags
 			r.Post("/tags", createTag(a))

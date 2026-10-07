@@ -37,6 +37,20 @@ func getMyThreads(a *app.App) http.HandlerFunc {
 	}
 }
 
+// getMyDirectThreads lists the followed threads in direct and group channels,
+// which have no team and so never appear in a team's thread list.
+func getMyDirectThreads(a *app.App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		page, perPage := parsePagination(r, 25)
+		threads, err := a.GetDirectThreadsForUser(r.Context(), ContextGetUser(r).ID, page, perPage)
+		if err != nil {
+			WriteAppError(w, "getMyDirectThreads", err)
+			return
+		}
+		WriteJSON(w, http.StatusOK, threads)
+	}
+}
+
 func markThreadAsRead(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)

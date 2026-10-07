@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/jackc/pgx/v5"
 
@@ -152,34 +153,60 @@ func (s *SqlThreadStore) UpdateMembership(ctx context.Context, membership *model
 	return nil
 }
 
+// GetThreadsForUser lists the threads userID follows in teamID's channels.
 func (s *SqlThreadStore) GetThreadsForUser(ctx context.Context, userID, teamID string, page, perPage int) (*model.UserThreadList, error) {
-	// Only threads the user can still read: a member of the channel, with the
-	// root and channel not deleted. Following is not access, and a user removed
-	// from a channel kept seeing its thread roots here.
-	//
-	// The root post and the caller's read state come back with the list. The
-	// endpoint is documented to report unread status, and a client that had to
-	// fetch each root separately would issue one request per thread.
-	query := `SELECT t.post_id, t.channel_id, t.reply_count, t.last_reply_at, t.participants,
-			tm.last_viewed_at, tm.unread_mention_count,
-			` + postColumnsAs("p") + `
-		FROM threads t
+	if !validIDs(userID, teamID) {
+		return &model.UserThreadList{Threads: []*model.ThreadResponse{}}, nil
+	}
+	return s.listThreads(ctx, userID, "c.team_id = $2", []any{teamID}, page, perPage)
+}
+
+// GetDirectThreadsForUser lists the threads userID follows in direct and
+// group channels, which belong to no team and so never appear in a team's
+// list.
+func (s *SqlThreadStore) GetDirectThreadsForUser(ctx context.Context, userID string, page, perPage int) (*model.UserThreadList, error) {
+	if !validIDs(userID) {
+		return &model.UserThreadList{Threads: []*model.ThreadResponse{}}, nil
+	}
+	return s.listThreads(ctx, userID, "c.team_id IS NULL", nil, page, perPage)
+}
+
+// listThreads lists the threads userID follows in the channels scope selects.
+// scope is a SQL predicate on channels c whose parameters, scopeArgs, are
+// numbered from $2.
+//
+// Only threads the user can still read: a member of the channel, with the
+// root and channel not deleted. Following is not access, and a user removed
+// from a channel kept seeing its thread roots here.
+//
+// The root post and the caller's read state come back with the list. The
+// endpoint is documented to report unread status, and a client that had to
+// fetch each root separately would issue one request per thread.
+func (s *SqlThreadStore) listThreads(ctx context.Context, userID, scope string, scopeArgs []any, page, perPage int) (*model.UserThreadList, error) {
+	from := `FROM threads t
 		INNER JOIN thread_memberships tm ON t.post_id = tm.post_id
 		INNER JOIN channels c ON t.channel_id = c.id
 		INNER JOIN channel_members cm ON cm.channel_id = c.id AND cm.user_id = tm.user_id
 		INNER JOIN posts p ON p.id = t.post_id
-		WHERE tm.user_id = $1 AND tm.following = TRUE AND c.team_id = $2
-			AND c.delete_at = 0 AND p.delete_at = 0
-		ORDER BY t.last_reply_at DESC
-		LIMIT $3 OFFSET $4`
+		WHERE tm.user_id = $1 AND tm.following = TRUE AND ` + scope + `
+			AND c.delete_at = 0 AND p.delete_at = 0`
+	args := append([]any{userID}, scopeArgs...)
+	n := len(args)
 
-	rows, err := s.sqlStore.pool.Query(ctx, query, userID, teamID, perPage, page*perPage)
+	query := `SELECT t.post_id, t.channel_id, t.reply_count, t.last_reply_at, t.participants,
+			tm.last_viewed_at, tm.unread_mention_count,
+			` + postColumnsAs("p") + `
+		` + from + `
+		ORDER BY t.last_reply_at DESC
+		LIMIT $` + strconv.Itoa(n+1) + ` OFFSET $` + strconv.Itoa(n+2)
+
+	rows, err := s.sqlStore.pool.Query(ctx, query, append(args, perPage, page*perPage)...)
 	if err != nil {
 		return nil, fmt.Errorf("get threads for user: %w", err)
 	}
 	defer rows.Close()
 
-	var threads []*model.ThreadResponse
+	threads := []*model.ThreadResponse{}
 	for rows.Next() {
 		t := &model.Thread{}
 		root := &model.Post{}
@@ -200,17 +227,8 @@ func (s *SqlThreadStore) GetThreadsForUser(ctx context.Context, userID, teamID s
 		return nil, err
 	}
 
-	countQuery := `SELECT COUNT(*)
-		FROM threads t
-		INNER JOIN thread_memberships tm ON t.post_id = tm.post_id
-		INNER JOIN channels c ON t.channel_id = c.id
-		INNER JOIN channel_members cm ON cm.channel_id = c.id AND cm.user_id = tm.user_id
-		INNER JOIN posts p ON p.id = t.post_id
-		WHERE tm.user_id = $1 AND tm.following = TRUE AND c.team_id = $2
-			AND c.delete_at = 0 AND p.delete_at = 0`
-
 	var total int64
-	if err := s.sqlStore.pool.QueryRow(ctx, countQuery, userID, teamID).Scan(&total); err != nil {
+	if err := s.sqlStore.pool.QueryRow(ctx, `SELECT COUNT(*) `+from, args...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("count threads for user: %w", err)
 	}
 

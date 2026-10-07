@@ -110,6 +110,9 @@ type ThreadStore interface {
 	GetMembership(ctx context.Context, postID, userID string) (*model.ThreadMembership, error)
 	UpdateMembership(ctx context.Context, membership *model.ThreadMembership) error
 	GetThreadsForUser(ctx context.Context, userID, teamID string, page, perPage int) (*model.UserThreadList, error)
+	// GetDirectThreadsForUser lists followed threads in direct and group
+	// channels, which belong to no team.
+	GetDirectThreadsForUser(ctx context.Context, userID string, page, perPage int) (*model.UserThreadList, error)
 	IncrementReplyCount(ctx context.Context, postID string, timestamp int64, userID string) error
 	// DecrementReplyCount accounts for a deleted reply: it lowers the count
 	// and recomputes last_reply_at from the replies that remain.

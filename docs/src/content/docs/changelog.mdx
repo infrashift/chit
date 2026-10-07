@@ -56,6 +56,10 @@ Behaviour changes an operator must act on or know about:
 
 ### Added
 
+- `GET /users/me/threads/direct`: the thread inbox for direct and group
+  channels, whose threads never appeared in any team's inbox because they
+  have no team. `PUT /users/me/threads/{id}/read` and `/following` work
+  without a `team_id` for them (the team-scoped routes ignore it anyway).
 - OAuth2 authentication for agents and bots through Ory Hydra: Hydra is
   deployed, Oathkeeper introspects `client_credentials` tokens (audience
   `chit`; `chit:read` for GET, `chit:write` otherwise) and forwards the client

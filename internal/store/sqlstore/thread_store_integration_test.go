@@ -247,3 +247,58 @@ func TestThreadStoreIntegration_MembershipAndDecrement(t *testing.T) {
 		t.Errorf("thread = %d replies, last at %d; want 1 and 2000", th.ReplyCount, th.LastReplyAt)
 	}
 }
+
+// Threads in direct and group channels have no team, so a team's inbox never
+// listed them; they have their own list, and it holds only them.
+func TestThreadStoreIntegration_DirectThreadsHaveTheirOwnInbox(t *testing.T) {
+	ss := testStore(t)
+	user, teamChannel := newTestChannelFixture(t, ss)
+	peer, err := ss.User().Save(t.Context(), newTestUser("dmpeerthreads"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = ss.Channel().SaveMember(t.Context(), &model.ChannelMember{ChannelID: teamChannel.ID, UserID: user.ID}); err != nil {
+		t.Fatal(err)
+	}
+	dm, err := ss.Channel().SaveDirectChannel(t.Context(), &model.Channel{
+		Name: user.ID + "__" + peer.ID, DisplayName: "dm", Type: model.ChannelDirect, CreatorID: user.ID,
+	}, []string{user.ID, peer.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	follow := func(channelID, content string, at int64) *model.Post {
+		t.Helper()
+		root := savePost(t, ss, channelID, user.ID, "", content, at)
+		if err := ss.Thread().SaveOrUpdate(t.Context(), &model.Thread{PostID: root.ID, ChannelID: channelID, Participants: []string{}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := ss.Thread().SaveMembership(t.Context(), &model.ThreadMembership{PostID: root.ID, UserID: user.ID, Following: true}); err != nil {
+			t.Fatal(err)
+		}
+		return root
+	}
+	inTeam := follow(teamChannel.ID, "team thread", 1000)
+	inDM := follow(dm.ID, "dm thread", 2000)
+
+	ids := func(list *model.UserThreadList, err error) []string {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, tr := range list.Threads {
+			out = append(out, tr.Thread.PostID)
+		}
+		if int(list.Total) != len(out) {
+			t.Errorf("Total = %d for %d threads", list.Total, len(out))
+		}
+		return out
+	}
+	if got := ids(ss.Thread().GetThreadsForUser(t.Context(), user.ID, teamChannel.TeamID, 0, 50)); len(got) != 1 || got[0] != inTeam.ID {
+		t.Errorf("team inbox = %v, want only the team thread", got)
+	}
+	if got := ids(ss.Thread().GetDirectThreadsForUser(t.Context(), user.ID, 0, 50)); len(got) != 1 || got[0] != inDM.ID {
+		t.Errorf("direct inbox = %v, want only the DM thread", got)
+	}
+}
