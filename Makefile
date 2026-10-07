@@ -79,7 +79,9 @@ vuln:
 	GOWORK=off go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
 # Integration tests need a real PostgreSQL. This starts a throwaway one in
-# podman on $(ITEST_PORT), applies every migration, and removes it afterwards.
+# podman on $(ITEST_PORT), runs every migration up, all the way down and up
+# again (so a broken down migration fails here, not during a rollback), and
+# removes it afterwards.
 # The suite TRUNCATEs every table: never point it at a database you care about.
 MIGRATE?=$(shell command -v migrate 2>/dev/null || echo $(shell go env GOPATH)/bin/migrate)
 ITEST_PORT?=55432
@@ -90,6 +92,8 @@ test-integration:
 		-e POSTGRES_USER=chit -e POSTGRES_PASSWORD=chit -e POSTGRES_DB=chit $(PG_IMAGE)
 	@until podman exec chit-itest-pg pg_isready -U chit -d chit >/dev/null 2>&1; do sleep 1; done
 	@sleep 1
+	$(MIGRATE) -database "$(ITEST_URL)" -path migrations up && \
+	$(MIGRATE) -database "$(ITEST_URL)" -path migrations down -all && \
 	$(MIGRATE) -database "$(ITEST_URL)" -path migrations up ; \
 	EXIT_CODE=$$? ; \
 	if [ $$EXIT_CODE -eq 0 ]; then \

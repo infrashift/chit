@@ -113,8 +113,13 @@ jobs:
           go-version-file: go.mod
       - name: Install golang-migrate
         run: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
-      - name: Run migrations
-        run: migrate -database "$CHIT_DATABASE_URL" -path migrations up
+      # Up, all the way down, and up again: a broken down migration fails
+      # here rather than during a rollback.
+      - name: Run migrations (round trip)
+        run: |
+          migrate -database "$CHIT_DATABASE_URL" -path migrations up
+          migrate -database "$CHIT_DATABASE_URL" -path migrations down -all
+          migrate -database "$CHIT_DATABASE_URL" -path migrations up
       - name: Integration tests
         run: go test -race -count=1 -tags integration ./internal/store/sqlstore/... ./internal/pubsub/...
 

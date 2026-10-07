@@ -3,6 +3,8 @@
 package sqlstore
 
 import (
+	"errors"
+	"net/http"
 	"testing"
 
 	"github.com/infrashift/chit/internal/model"
@@ -305,5 +307,32 @@ func TestChannelStoreIntegration_AddTeamMembers(t *testing.T) {
 	}
 	if _, err = ss.Channel().GetMember(t.Context(), channel.ID, other.ID); err != nil {
 		t.Errorf("teammate is not a member: %v", err)
+	}
+}
+
+// Direct channels are unique by name. Without the index two concurrent
+// "open a DM" requests each created one and the conversation split.
+func TestChannelStoreIntegration_DirectChannelNameIsUnique(t *testing.T) {
+	ss := testStore(t)
+	a, err := ss.User().Save(t.Context(), newTestUser("dmone"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := ss.User().Save(t.Context(), newTestUser("dmtwo"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := a.ID + "__" + b.ID
+	dm := func() (*model.Channel, error) {
+		return ss.Channel().SaveDirectChannel(t.Context(), &model.Channel{
+			Name: name, DisplayName: "dm", Type: model.ChannelDirect, CreatorID: a.ID,
+		}, []string{a.ID, b.ID})
+	}
+	if _, err = dm(); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	var appErr *model.AppError
+	if _, err = dm(); !errors.As(err, &appErr) || appErr.StatusCode != http.StatusConflict {
+		t.Fatalf("second: got %v, want a 409 so the caller can fetch the existing channel", err)
 	}
 }

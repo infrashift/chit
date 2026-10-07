@@ -332,6 +332,10 @@ func (s *SqlChannelStore) SaveDirectChannel(ctx context.Context, channel *model.
 		channel.LastPostAt, channel.CreateAt, channel.UpdateAt, channel.DeleteAt,
 	)
 	if err != nil {
+		if isUniqueViolation(err) {
+			// Another request created the same direct channel first.
+			return nil, model.NewConflictError("SqlChannelStore.SaveDirectChannel", "direct channel already exists")
+		}
 		return nil, fmt.Errorf("save direct channel: %w", err)
 	}
 

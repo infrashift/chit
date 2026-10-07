@@ -3,8 +3,10 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"slices"
 	"sort"
 	"strings"
@@ -207,7 +209,7 @@ func (a *App) CreateDirectChannel(ctx context.Context, actorID, userID1, userID2
 		CreatorID:   userID1,
 	}
 
-	saved, err := a.Store.Channel().SaveDirectChannel(ctx, channel, members)
+	saved, err := a.saveDirectChannel(ctx, channel, members)
 	if err != nil {
 		return nil, err
 	}
@@ -254,7 +256,7 @@ func (a *App) CreateGroupChannel(ctx context.Context, actorID string, userIDs []
 		CreatorID:   userIDs[0],
 	}
 
-	saved, err := a.Store.Channel().SaveDirectChannel(ctx, channel, userIDs)
+	saved, err := a.saveDirectChannel(ctx, channel, userIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -266,6 +268,19 @@ func (a *App) CreateGroupChannel(ctx context.Context, actorID string, userIDs []
 
 	a.broadcastChannelEvent(ctx, model.WebSocketEventChannelCreated, saved)
 	return saved, nil
+}
+
+// saveDirectChannel saves a new direct or group channel. If a concurrent
+// request created the same one first, the unique name index refuses this one
+// and the existing channel is returned instead, as if it had been found by
+// the lookup that preceded the save.
+func (a *App) saveDirectChannel(ctx context.Context, channel *model.Channel, members []string) (*model.Channel, error) {
+	saved, err := a.Store.Channel().SaveDirectChannel(ctx, channel, members)
+	var appErr *model.AppError
+	if errors.As(err, &appErr) && appErr.StatusCode == http.StatusConflict {
+		return a.Store.Channel().GetDirectChannelByName(ctx, channel.Name)
+	}
+	return saved, err
 }
 
 // requireUsersExist returns a 400 unless every ID names an existing user.
