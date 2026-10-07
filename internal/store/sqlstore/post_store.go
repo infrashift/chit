@@ -216,20 +216,24 @@ func (s *SqlPostStore) SetPinned(ctx context.Context, id string, pinned bool) er
 }
 
 // GetPostsSince returns posts (including soft-deleted ones, so callers can
-// remove them from derived indexes) whose update_at is strictly after the
-// given watermark, oldest first.
-func (s *SqlPostStore) GetPostsSince(ctx context.Context, sinceUpdateAt int64, limit int) ([]*model.Post, error) {
+// remove them from derived indexes) after the cursor in (update_at, id) order,
+// updated no later than until.
+func (s *SqlPostStore) GetPostsSince(ctx context.Context, after model.PostCursor, until int64, limit int) ([]*model.Post, error) {
 	if limit <= 0 {
 		limit = 100
+	}
+	afterID := after.ID
+	if afterID == "" {
+		afterID = "00000000-0000-0000-0000-000000000000"
 	}
 
 	query := `SELECT ` + postColumns + `
 		FROM posts
-		WHERE update_at > $1
-		ORDER BY update_at ASC
-		LIMIT $2`
+		WHERE (update_at, id) > ($1, $2::uuid) AND update_at <= $3
+		ORDER BY update_at ASC, id ASC
+		LIMIT $4`
 
-	rows, err := s.sqlStore.pool.Query(ctx, query, sinceUpdateAt, limit)
+	rows, err := s.sqlStore.pool.Query(ctx, query, after.UpdateAt, afterID, until, limit)
 	if err != nil {
 		return nil, fmt.Errorf("get posts since: %w", err)
 	}

@@ -63,6 +63,14 @@ func (p *Post) PreUpdate() {
 	p.UpdateAt = GetMillis()
 }
 
+// PostCursor is a position in update order: the (update_at, id) of the last
+// post read. update_at alone is not a position, since many posts can share
+// one, and resuming from it either re-reads or skips them.
+type PostCursor struct {
+	UpdateAt int64
+	ID       string
+}
+
 // PostSearch is a scoped post search. ChannelIDs is the scope and is
 // required: an empty scope matches nothing. Terms is matched as a substring
 // of the content; every tag in TagIDs must be on a post; AuthorID, when set,

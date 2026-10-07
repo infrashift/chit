@@ -210,12 +210,16 @@ func (s *Server) initCommands() {
 
 func (s *Server) initJobs() {
 	s.scheduler = jobs.NewScheduler()
-	indexer := workers.NewSearchIndexer(
-		s.config.ZincSearchURL,
-		s.config.ZincSearchUser,
-		s.config.ZincSearchPassword,
-	).WithPostStore(s.store.Post())
-	s.scheduler.AddWorker(indexer)
+	// Without ZincSearch there is nothing to index into, and an indexer
+	// left running would fail and log every five seconds.
+	if s.config.ZincSearchURL != "" {
+		indexer := workers.NewSearchIndexer(
+			s.config.ZincSearchURL,
+			s.config.ZincSearchUser,
+			s.config.ZincSearchPassword,
+		).WithPostStore(s.store.Post())
+		s.scheduler.AddWorker(indexer)
+	}
 
 	if s.webhookCh != nil {
 		dispatcher := workers.NewWebhookDispatcher(

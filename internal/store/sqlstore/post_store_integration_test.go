@@ -4,6 +4,7 @@ package sqlstore
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"testing"
@@ -166,5 +167,46 @@ func TestPostStoreIntegration_GetByIDsAndBadIDs(t *testing.T) {
 	var appErr *model.AppError
 	if _, err = ss.Post().Get(t.Context(), "not-a-uuid"); !errors.As(err, &appErr) || appErr.StatusCode != http.StatusNotFound {
 		t.Errorf("Get(not-a-uuid) = %v, want a 404 AppError rather than a uuid cast failure", err)
+	}
+}
+
+// GetPostsSince pages by (update_at, id), so posts sharing an update_at are
+// split across pages without being skipped or repeated, and stops at until.
+func TestPostStoreIntegration_GetPostsSinceKeyset(t *testing.T) {
+	ss := testStore(t)
+	user, channel := newTestChannelFixture(t, ss)
+	var want []string
+	for i := range 5 {
+		p := savePost(t, ss, channel.ID, user.ID, "", fmt.Sprintf("tie %d", i), 1000)
+		want = append(want, p.ID)
+	}
+	late := savePost(t, ss, channel.ID, user.ID, "", "late", 1000)
+	// Give every post the same update_at, and one a later one.
+	if _, err := ss.pool.Exec(t.Context(), `UPDATE posts SET update_at = 500 WHERE channel_id = $1`, channel.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ss.pool.Exec(t.Context(), `UPDATE posts SET update_at = 900 WHERE id = $1`, late.ID); err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(want)
+
+	var got []string
+	var cursor model.PostCursor
+	for {
+		page, err := ss.Post().GetPostsSince(t.Context(), cursor, 800, 2)
+		if err != nil {
+			t.Fatalf("GetPostsSince: %v", err)
+		}
+		if len(page) == 0 {
+			break
+		}
+		for _, p := range page {
+			got = append(got, p.ID)
+		}
+		last := page[len(page)-1]
+		cursor = model.PostCursor{UpdateAt: last.UpdateAt, ID: last.ID}
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("paged %v, want %v (each tied post once, the post past until excluded)", got, want)
 	}
 }

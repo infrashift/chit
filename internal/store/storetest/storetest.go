@@ -720,18 +720,23 @@ func (s *PostStore) SetPinned(_ context.Context, id string, pinned bool) error {
 	return nil
 }
 
-// GetPostsSince returns posts, deleted ones included, updated after since, in
-// update order.
-func (s *PostStore) GetPostsSince(_ context.Context, since int64, limit int) ([]*model.Post, error) {
+// GetPostsSince returns posts, deleted ones included, after the cursor in
+// (update_at, id) order and updated no later than until.
+func (s *PostStore) GetPostsSince(_ context.Context, after model.PostCursor, until int64, limit int) ([]*model.Post, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var out []*model.Post
 	for _, p := range s.byID {
-		if p.UpdateAt > since {
+		if p.UpdateAt <= until && (p.UpdateAt > after.UpdateAt || (p.UpdateAt == after.UpdateAt && p.ID > after.ID)) {
 			out = append(out, cp(p))
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].UpdateAt < out[j].UpdateAt })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].UpdateAt != out[j].UpdateAt {
+			return out[i].UpdateAt < out[j].UpdateAt
+		}
+		return out[i].ID < out[j].ID
+	})
 	if len(out) > limit {
 		out = out[:limit]
 	}

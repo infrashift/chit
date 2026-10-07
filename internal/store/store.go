@@ -89,7 +89,9 @@ type PostStore interface {
 	// Search returns one page of posts matching q, newest first, with every
 	// filter (scope included) applied before pagination.
 	Search(ctx context.Context, q *model.PostSearch) ([]*model.Post, error)
-	GetPostsSince(ctx context.Context, sinceUpdateAt int64, limit int) ([]*model.Post, error)
+	// GetPostsSince returns posts, deleted ones included, after the cursor
+	// in (update_at, id) order and updated no later than until.
+	GetPostsSince(ctx context.Context, after model.PostCursor, until int64, limit int) ([]*model.Post, error)
 }
 
 // ThreadStore handles persistence for threads and thread memberships.
