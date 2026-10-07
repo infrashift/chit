@@ -150,3 +150,26 @@ func TestChannelStoreIntegration_DirectChannel(t *testing.T) {
 		t.Errorf("GetDirectChannelByName: got %s, want %s", found.ID, dm.ID)
 	}
 }
+
+// The team channel list is for browsing and joining. It used to include
+// private channels, so any team member could read their names, headers and
+// purposes without being in them.
+func TestChannelStoreIntegration_GetChannelsForTeamListsOnlyOpen(t *testing.T) {
+	ss := testStore(t)
+	user, open := newTestChannelFixture(t, ss)
+
+	if _, err := ss.Channel().Save(t.Context(), &model.Channel{
+		TeamID: open.TeamID, Name: "secret", DisplayName: "Secret",
+		Type: model.ChannelPrivate, CreatorID: user.ID,
+	}); err != nil {
+		t.Fatalf("save private channel: %v", err)
+	}
+
+	channels, err := ss.Channel().GetChannelsForTeam(t.Context(), open.TeamID, 0, 50)
+	if err != nil {
+		t.Fatalf("GetChannelsForTeam: %v", err)
+	}
+	if len(channels) != 1 || channels[0].ID != open.ID {
+		t.Errorf("got %d channels, want only the open one", len(channels))
+	}
+}

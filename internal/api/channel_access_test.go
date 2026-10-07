@@ -205,3 +205,21 @@ func TestCreateGroupChannel_DuplicateIDs(t *testing.T) {
 		t.Fatalf("expected 400 for two distinct members, got %d; body: %s", w.Code, w.Body.String())
 	}
 }
+
+func TestGetChannelsForTeam_HidesPrivateChannels(t *testing.T) {
+	a, ms, cleanup := setupTestApp(t)
+	defer cleanup()
+	seedPrivateChannel(ms)
+
+	w := serveChannelRoute(t, getChannelsForTeam(a), http.MethodGet, testTeamID, "", aliceUser())
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var channels []model.Channel
+	decodeJSON(t, w.Body, &channels)
+	for i := range channels {
+		if channels[i].ID == privateChannelID {
+			t.Fatal("a private channel was listed to a team member outside it")
+		}
+	}
+}

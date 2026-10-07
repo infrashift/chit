@@ -109,9 +109,12 @@ func (s *SqlChannelStore) Delete(ctx context.Context, id string, deleteAt int64)
 	return nil
 }
 
+// GetChannelsForTeam lists a team's open channels: the ones any team member
+// may browse and join. Private channels are listed only to their members, by
+// GetChannelsForUser.
 func (s *SqlChannelStore) GetChannelsForTeam(ctx context.Context, teamID string, page, perPage int) ([]*model.Channel, error) {
 	query := `SELECT id, COALESCE(team_id::text, ''), creator_id, name, display_name, header, purpose, type, total_msg_count, last_post_at, create_at, update_at, delete_at
-		FROM channels WHERE team_id = $1 AND delete_at = 0 ORDER BY display_name LIMIT $2 OFFSET $3`
+		FROM channels WHERE team_id = $1 AND type = 'O' AND delete_at = 0 ORDER BY display_name LIMIT $2 OFFSET $3`
 
 	rows, err := s.sqlStore.pool.Query(ctx, query, teamID, perPage, page*perPage)
 	if err != nil {
