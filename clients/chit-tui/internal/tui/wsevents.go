@@ -151,10 +151,15 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case model.WebSocketEventMentioned:
+		// The server names the channel in the data; the broadcast only
+		// addresses the mentioned user. Reading the channel from the
+		// broadcast found nothing, so live mentions were never counted.
+		chanID, _ := evt.Data["channel_id"].(string)
+		if chanID == "" && evt.Broadcast != nil {
+			chanID = evt.Broadcast.ChannelID
+		}
 		// A mention in the channel being read is seen as it arrives.
-		if evt.Broadcast != nil && evt.Broadcast.ChannelID != "" &&
-			(m.activeChan == nil || evt.Broadcast.ChannelID != m.activeChan.ID) {
-			chanID := evt.Broadcast.ChannelID
+		if chanID != "" && (m.activeChan == nil || chanID != m.activeChan.ID) {
 			m.setMention(chanID, m.mentions[chanID]+1)
 		}
 

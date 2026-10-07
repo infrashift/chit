@@ -585,9 +585,11 @@ func TestModel_ChannelMembersComputesUnread(t *testing.T) {
 func TestModel_MentionBadgeCountsUntilViewed(t *testing.T) {
 	m := setupModel(t)
 	mentioned := tui.WebSocketEventMsg{Event: model.WebSocketEvent{
-		Event:     model.WebSocketEventMentioned,
-		Data:      map[string]any{},
-		Broadcast: &model.WebSocketBroadcast{ChannelID: "c2"},
+		Event: model.WebSocketEventMentioned,
+		Data:  map[string]any{"channel_id": "c2", "post_id": "x1", "user_id": "u2"},
+		// As the server sends it: the channel in the data, only the
+		// recipient in the broadcast.
+		Broadcast: &model.WebSocketBroadcast{UserID: "u1"},
 	}}
 
 	m, _ = step(t, m, mentioned)

@@ -83,9 +83,11 @@ func TestModel_MentionInTheOpenChannelIsNotCounted(t *testing.T) {
 	m, _ := twoChannels(t, &mockClient{})
 
 	m, _ = step(t, m, tui.WebSocketEventMsg{Event: model.WebSocketEvent{
-		Event:     model.WebSocketEventMentioned,
-		Data:      map[string]any{},
-		Broadcast: &model.WebSocketBroadcast{ChannelID: "c1"},
+		Event: model.WebSocketEventMentioned,
+		Data:  map[string]any{"channel_id": "c1", "post_id": "x1", "user_id": "u2"},
+		// As the server sends it: the channel in the data, only the
+		// recipient in the broadcast.
+		Broadcast: &model.WebSocketBroadcast{UserID: "u1"},
 	}})
 
 	if got := m.MentionCount("c1"); got != 0 {
