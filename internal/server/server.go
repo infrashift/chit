@@ -314,6 +314,7 @@ func (s *Server) Shutdown() error {
 
 	s.hub.Stop()
 	s.scheduler.Stop()
+	s.app.WaitBackground()
 
 	if s.pubsub != nil {
 		if err := s.pubsub.Close(); err != nil {

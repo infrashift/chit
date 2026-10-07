@@ -38,39 +38,30 @@ func (a *App) CreateChannel(ctx context.Context, channel *model.Channel) (*model
 		return nil, err
 	}
 
-	member := &model.ChannelMember{
+	if _, err := a.Store.Channel().SaveMember(ctx, &model.ChannelMember{
 		ChannelID: saved.ID,
 		UserID:    saved.CreatorID,
-	}
-	if _, err := a.Store.Channel().SaveMember(ctx, member); err != nil {
+	}); err != nil {
 		return nil, err
 	}
-	a.Hub.NotifyMembershipChanged(saved.CreatorID, saved.ID, true)
-
-	// Write Keto relation for channel membership
-	if err := a.WriteKetoRelation(ctx, model.KetoNamespaceChannel, saved.ID, model.KetoRelationMember, saved.CreatorID); err != nil {
-		// Log but don't fail — Keto may not be available in dev
-		fmt.Printf("warning: failed to write keto relation: %v\n", err)
-	}
+	members := []string{saved.CreatorID}
 
 	// For open channels, auto-add all team members so the channel appears
-	// in every member's sidebar via GetChannelsForUser.
-	if saved.Type == model.ChannelOpen && saved.TeamID != "" {
-		teamMembers, tmErr := a.Store.Team().GetMembers(ctx, saved.TeamID, 0, 10000)
-		if tmErr == nil {
-			for _, tm := range teamMembers {
-				if tm.UserID == saved.CreatorID {
-					continue // already added above
-				}
-				_, _ = a.Store.Channel().SaveMember(ctx, &model.ChannelMember{
-					ChannelID: saved.ID,
-					UserID:    tm.UserID,
-				})
-				a.Hub.NotifyMembershipChanged(tm.UserID, saved.ID, true)
-				_ = a.WriteKetoRelation(ctx, model.KetoNamespaceChannel, saved.ID, model.KetoRelationMember, tm.UserID)
-			}
+	// in every member's sidebar via GetChannelsForUser. One INSERT ... SELECT,
+	// rather than reading up to 10,000 members (silently stopping there)
+	// and inserting them one by one inside the request.
+	if saved.Type == model.ChannelOpen {
+		added, err := a.Store.Channel().AddTeamMembers(ctx, saved.ID, saved.TeamID)
+		if err != nil {
+			return nil, err
 		}
+		members = append(members, added...)
 	}
+
+	for _, uid := range members {
+		a.Hub.NotifyMembershipChanged(uid, saved.ID, true)
+	}
+	a.writeKetoMembersAsync(saved.ID, members)
 
 	a.broadcastChannelEvent(ctx, model.WebSocketEventChannelCreated, saved)
 	return saved, nil
@@ -223,8 +214,8 @@ func (a *App) CreateDirectChannel(ctx context.Context, actorID, userID1, userID2
 
 	for _, uid := range members {
 		a.Hub.NotifyMembershipChanged(uid, saved.ID, true)
-		_ = a.WriteKetoRelation(ctx, model.KetoNamespaceChannel, saved.ID, model.KetoRelationMember, uid)
 	}
+	a.writeKetoMembersAsync(saved.ID, members)
 
 	a.broadcastChannelEvent(ctx, model.WebSocketEventChannelCreated, saved)
 	return saved, nil
@@ -270,8 +261,8 @@ func (a *App) CreateGroupChannel(ctx context.Context, actorID string, userIDs []
 
 	for _, uid := range userIDs {
 		a.Hub.NotifyMembershipChanged(uid, saved.ID, true)
-		_ = a.WriteKetoRelation(ctx, model.KetoNamespaceChannel, saved.ID, model.KetoRelationMember, uid)
 	}
+	a.writeKetoMembersAsync(saved.ID, userIDs)
 
 	a.broadcastChannelEvent(ctx, model.WebSocketEventChannelCreated, saved)
 	return saved, nil

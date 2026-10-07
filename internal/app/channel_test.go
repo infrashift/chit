@@ -51,6 +51,11 @@ func TestCreateChannel_Membership(t *testing.T) {
 			if got := channelMemberNames(t, f, created.ID); !slices.Equal(got, tc.want) {
 				t.Fatalf("members = %v, want %v", got, tc.want)
 			}
+			// Keto is written off the request path, but still for everyone.
+			f.app.WaitBackground()
+			if f.keto.writes != len(tc.want) {
+				t.Fatalf("keto writes = %d, want one per member (%d)", f.keto.writes, len(tc.want))
+			}
 		})
 	}
 }

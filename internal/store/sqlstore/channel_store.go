@@ -110,6 +110,22 @@ func (s *SqlChannelStore) Delete(ctx context.Context, id string, deleteAt int64)
 	return nil
 }
 
+// AddTeamMembers adds every member of teamID to channelID in one statement,
+// returning the user IDs it added (existing members are skipped).
+func (s *SqlChannelStore) AddTeamMembers(ctx context.Context, channelID, teamID string) ([]string, error) {
+	rows, err := s.sqlStore.pool.Query(ctx,
+		`INSERT INTO channel_members (channel_id, user_id, create_at)
+		SELECT $1, tm.user_id, $3 FROM team_members tm
+		WHERE tm.team_id = $2 AND tm.delete_at = 0
+		ON CONFLICT (channel_id, user_id) DO NOTHING
+		RETURNING user_id::text`,
+		channelID, teamID, model.GetMillis())
+	if err != nil {
+		return nil, fmt.Errorf("add team members to channel: %w", err)
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
 // DeleteForTeam soft-deletes every channel on a team, returning their IDs.
 func (s *SqlChannelStore) DeleteForTeam(ctx context.Context, teamID string, deleteAt int64) ([]string, error) {
 	rows, err := s.sqlStore.pool.Query(ctx,

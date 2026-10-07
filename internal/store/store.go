@@ -73,6 +73,9 @@ type ChannelStore interface {
 	// GetMemberIDsByUsernames returns the user IDs of the named users who are
 	// members of channelID; other names are ignored.
 	GetMemberIDsByUsernames(ctx context.Context, channelID string, usernames []string) ([]string, error)
+	// AddTeamMembers adds every member of the channel's team to it, returning
+	// the user IDs added.
+	AddTeamMembers(ctx context.Context, channelID, teamID string) ([]string, error)
 	// DeleteForTeam soft-deletes every channel on a team, returning their IDs.
 	DeleteForTeam(ctx context.Context, teamID string, deleteAt int64) ([]string, error)
 	// RemoveMemberFromTeam removes a user from every channel on a team,

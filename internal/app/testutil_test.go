@@ -55,6 +55,8 @@ func newFixture(t *testing.T) *fixture {
 	}
 	ms.Teams.Seed(f.team)
 	ms.Channels.Seed(f.channel)
+	// Runs before the fake Keto server closes (cleanups run last-in first-out).
+	t.Cleanup(f.app.WaitBackground)
 	return f
 }
 

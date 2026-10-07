@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -45,6 +46,46 @@ type App struct {
 	// userCache caches ProvisionUser lookups (kratos ID → user) so every
 	// authenticated request does not hit the database.
 	userCache *cache.LRU[string, *model.User]
+
+	// background tracks work started off the request path, so shutdown can
+	// let it finish.
+	background sync.WaitGroup
+}
+
+// ketoAsyncTimeout bounds one background batch of Keto writes.
+const ketoAsyncTimeout = 30 * time.Second
+
+// writeKetoMembersAsync records channel membership tuples in Keto off the
+// request path. channel_members is the access check and Keto a best-effort
+// mirror of it, and writing inline cost one synchronous HTTP round trip (up
+// to five seconds when Keto is slow) per member: for an open channel on a
+// large team, longer than the request's write timeout.
+func (a *App) writeKetoMembersAsync(channelID string, userIDs []string) {
+	if len(userIDs) == 0 {
+		return
+	}
+	ids := slices.Clone(userIDs)
+	a.background.Add(1)
+	go func() {
+		defer a.background.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), ketoAsyncTimeout)
+		defer cancel()
+		for _, uid := range ids {
+			if err := a.WriteKetoRelation(ctx, model.KetoNamespaceChannel, channelID, model.KetoRelationMember, uid); err != nil {
+				slog.Warn("keto: failed to record channel membership",
+					"channel_id", channelID, "user_id", uid, "error", err)
+				if ctx.Err() != nil {
+					return
+				}
+			}
+		}
+	}()
+}
+
+// WaitBackground blocks until background work started by the App, such as
+// Keto writes, has finished.
+func (a *App) WaitBackground() {
+	a.background.Wait()
 }
 
 // searchClient returns a shared ZincSearch client (the SearchIndexer type

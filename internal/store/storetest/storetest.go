@@ -47,6 +47,14 @@ func New() *Store {
 	}
 	s.Posts.channels = s.Channels
 	s.Posts.tags = s.Tags
+	s.Channels.teamMembers = func(teamID string) ([]string, error) {
+		members, err := s.Teams.GetMembers(context.Background(), teamID, 0, 0)
+		ids := make([]string, 0, len(members))
+		for _, m := range members {
+			ids = append(ids, m.UserID)
+		}
+		return ids, err
+	}
 	s.Channels.usernames = func(name string) (string, bool) {
 		u, err := s.Users.GetByUsername(context.Background(), name)
 		if err != nil {
@@ -355,6 +363,8 @@ type ChannelStore struct {
 	members map[string][]*model.ChannelMember
 	// usernames resolves a live user by name; set by New.
 	usernames func(name string) (id string, ok bool)
+	// teamMembers lists a team's member IDs; set by New.
+	teamMembers func(teamID string) ([]string, error)
 }
 
 func (s *ChannelStore) Seed(c *model.Channel) {
@@ -565,6 +575,25 @@ func (s *ChannelStore) GetDirectChannelsForUser(_ context.Context, userID string
 		}
 	}
 	return out, nil
+}
+
+func (s *ChannelStore) AddTeamMembers(_ context.Context, channelID, teamID string) ([]string, error) {
+	userIDs, err := s.teamMembers(teamID)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var added []string
+	for _, uid := range userIDs {
+		if !s.isMember(channelID, uid) {
+			s.members[channelID] = append(s.members[channelID], &model.ChannelMember{
+				ChannelID: channelID, UserID: uid, Roles: "channel_user", CreateAt: model.GetMillis(),
+			})
+			added = append(added, uid)
+		}
+	}
+	return added, nil
 }
 
 func (s *ChannelStore) DeleteForTeam(_ context.Context, teamID string, deleteAt int64) ([]string, error) {

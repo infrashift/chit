@@ -278,3 +278,32 @@ func TestChannelStoreIntegration_MentionQueries(t *testing.T) {
 		t.Errorf("mention_count = %v (%v), want 1", m, err)
 	}
 }
+
+func TestChannelStoreIntegration_AddTeamMembers(t *testing.T) {
+	ss := testStore(t)
+	user, channel := newTestChannelFixture(t, ss)
+	other, err := ss.User().Save(t.Context(), newTestUser("teammate"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{user.ID, other.ID} {
+		if _, err = ss.Team().SaveMember(t.Context(), &model.TeamMember{TeamID: channel.TeamID, UserID: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The creator is already in; only the teammate is new.
+	if _, err = ss.Channel().SaveMember(t.Context(), &model.ChannelMember{ChannelID: channel.ID, UserID: user.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	added, err := ss.Channel().AddTeamMembers(t.Context(), channel.ID, channel.TeamID)
+	if err != nil {
+		t.Fatalf("AddTeamMembers: %v", err)
+	}
+	if len(added) != 1 || added[0] != other.ID {
+		t.Errorf("added %v, want only the teammate %s", added, other.ID)
+	}
+	if _, err = ss.Channel().GetMember(t.Context(), channel.ID, other.ID); err != nil {
+		t.Errorf("teammate is not a member: %v", err)
+	}
+}
