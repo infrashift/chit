@@ -3,50 +3,36 @@ title: Quick Start
 description: Get the full Chit stack running in under five minutes.
 ---
 
-This guide walks you through starting the complete Chit stack using Podman
-Kube, running migrations, and verifying the server.
+This guide walks you through starting the complete Chit stack, chitd included,
+with Podman Kube, verifying it, and registering a user.
 
-## 1. Start the infrastructure pod
+## 1. Start the stack
 
 ```bash
 make kube-up
 ```
 
-This runs `podman kube play --network host deploy/chit.kube.yml`, which starts:
+This builds the chitd image (`localhost/chit:latest`, from
+`deploy/Containerfile`) and runs `podman kube play --network host` on
+`deploy/chit.kube.yml`, which starts two pods:
 
-- PostgreSQL 17
-- Ory Kratos (identity)
-- Ory Oathkeeper (auth proxy)
-- Ory Keto (authorization)
-- ZincSearch (full-text search)
+- **`chit-db`**: PostgreSQL 17
+- **`chit-app`**: Ory Kratos (identity), Ory Hydra (OAuth2 for machine
+  actors), Ory Oathkeeper (auth proxy), Ory Keto (authorization), ZincSearch
+  (full-text search) and **chitd** on `:8065`
 
-Kratos, Keto, and Chit schema migrations run automatically via init/migrate
-containers — no separate migration step is needed on first start.
+Kratos, Keto, Hydra and Chit schema migrations run automatically in init
+containers before the services start; no separate migration step is needed.
 
 :::tip
 If you later pull new Chit migration files, apply them to the running pod
-with `make kube-migrate` — it runs a one-shot migrate container against the
+with `make kube-migrate`. It runs a one-shot migrate container against the
 pod's PostgreSQL, no restart required.
 :::
 
-## 2. Configure the environment
+## 2. Verify
 
-```bash
-cp .env.example .env
-```
-
-The defaults in `.env.example` are configured for the local Podman Kube pod.
-No changes are needed for local development.
-
-## 3. Build and run the server
-
-```bash
-make run
-```
-
-The server starts on `:8065` by default.
-
-## 4. Verify
+chitd's health check needs no authentication when you call chitd directly:
 
 ```bash
 curl http://localhost:8065/api/v1/system/ping
@@ -55,29 +41,73 @@ curl http://localhost:8065/api/v1/system/ping
 Expected response:
 
 ```json
-{"status": "OK"}
+{"status":"OK"}
 ```
 
-## 5. Register a user
+Through the Oathkeeper gateway on `:4455`, every `/api/v1` route, this one
+included, needs a Kratos session token or a Hydra access token, so the same
+request there answers 401.
 
-Create an identity via Kratos:
+Follow chitd's logs with `make kube-log-chitd`.
+
+## 3. Register a user
+
+Kratos API registration is two steps: create a registration flow, then submit
+the form to the URL the flow returns. The identity schema requires `email`,
+`username` (lowercase) and `display_name`:
 
 ```bash
-curl -s -X POST http://localhost:4433/self-service/registration?flow=api \
+ACTION=$(curl -s http://localhost:4433/self-service/registration/api \
+  | jq -r .ui.action)
+
+curl -s -X POST "$ACTION" \
   -H 'Content-Type: application/json' \
   -d '{
     "method": "password",
+    "password": "securepassword123!",
     "traits": {
       "email": "alice@example.com",
       "username": "alice",
-      "name": "Alice"
-    },
-    "password": "securepassword123!"
+      "display_name": "Alice"
+    }
   }'
 ```
 
-On first authenticated request through Oathkeeper, Chit auto-provisions a
-local user record from the Kratos identity.
+Then log in to get a session token, and make a request through Oathkeeper:
+
+```bash
+FLOW=$(curl -s http://localhost:4433/self-service/login/api | jq -r .id)
+TOKEN=$(curl -s -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{"method":"password","identifier":"alice@example.com","password":"securepassword123!"}' \
+  "http://localhost:4433/self-service/login?flow=$FLOW" | jq -r .session_token)
+
+curl -H "X-Session-Token: $TOKEN" http://localhost:4455/api/v1/users/me
+```
+
+On that first authenticated request, Chit provisions a local user record from
+the Kratos identity.
+
+## Develop against a local chitd
+
+The pod's chitd already holds `:8065`, so `make run` cannot bind while it is
+running. Stop that container (Podman does not restart a container you stopped
+yourself), then run your own build in its place:
+
+```bash
+podman stop chit-app-chitd
+
+cp .env.example .env
+make run
+```
+
+`make run` builds `bin/chitd` and starts it with the variables from `.env`,
+whose defaults point at the pod's services. Oathkeeper forwards to
+`localhost:8065`, so requests through the gateway now reach your build.
+
+To go back to the containerized chitd, stop `make run` and
+`podman start chit-app-chitd`. To run the pod with your changes instead,
+`make kube-restart` rebuilds the image and recreates the pods.
 
 ## Next steps
 

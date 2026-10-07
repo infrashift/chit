@@ -25,18 +25,21 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
     Reply threads with follow/unfollow, unread tracking, and participant lists.
     Keep discussions organized without cluttering the main channel.
   </Card>
-  <Card title="Full-Text Search" icon="magnifier">
-    ZincSearch-powered indexing with per-team and per-channel search. Find any
-    message across your workspace instantly.
+  <Card title="Search" icon="magnifier">
+    Search every channel you belong to, one team, or one channel, by text,
+    tags, and author. Runs in PostgreSQL out of the box; ZincSearch indexing
+    is optional.
   </Card>
   <Card title="Zero-Trust Security" icon="approve-check-circle">
-    Ory Kratos for identity, Oathkeeper for auth proxy, and Keto for ReBAC
-    slash-command authorization. Channel access is enforced server-side on
-    every read, post, and WebSocket event delivery.
+    Ory Kratos for identity, Hydra for agent OAuth2 credentials, Oathkeeper
+    as the auth proxy, and Keto for ReBAC slash-command authorization. Channel
+    access is enforced server-side on every read, post, and WebSocket event
+    delivery.
   </Card>
-  <Card title="Distributed Architecture" icon="random">
-    Scalable distributed services designed for service mesh deployment. Added
-    security, observability, and operational ease out of the box.
+  <Card title="Simple to Run" icon="random">
+    One Go server, PostgreSQL, and the Ory stack, deployed as a Podman Kube
+    pod. Real-time delivery is single-node today; multi-node fan-out is
+    planned.
   </Card>
   <Card title="AI Agent & Bot Integration" icon="laptop">
     First-class support for AI agents and bots via MCP and REST API. Agents
@@ -44,9 +47,9 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
     participate in threads just like human users, with a real-time event feed
     agents poll for new activity.
   </Card>
-  <Card title="GitOps Day 2 Operations" icon="seti:config">
-    Automated, git-ops driven Day 2 operations. Declarative configuration,
-    rolling updates, and operational runbooks managed through version-controlled
-    workflows.
+  <Card title="Declarative Configuration" icon="seti:config">
+    Environment-based server configuration, validated at startup, and slash
+    commands, roles and actor bindings declared in CUE. Automated
+    provisioning and operations runbooks are planned (see the roadmap).
   </Card>
 </CardGrid>

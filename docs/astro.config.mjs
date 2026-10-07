@@ -57,6 +57,7 @@ export default defineConfig({
           items: [
             { label: 'Configuration', slug: 'reference/configuration' },
             { label: 'Database Schema', slug: 'reference/database-schema' },
+            { label: 'MCP and Slash Commands', slug: 'reference/mcp-and-commands' },
           ],
         },
         {

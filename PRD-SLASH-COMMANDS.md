@@ -10,7 +10,8 @@ Integrating **CloudEvents (CNCF)** as the envelope standard ensures that any dow
 
 **Feature:** Sovereign Command Intercept, Audit, & Eventing
 
-**Status:** Implementation Ready
+**Status:** Implemented, except where noted below. See
+[SPECS-SLASH-COMMANDS.md](SPECS-SLASH-COMMANDS.md) for the behaviour as built.
 
 ### 1. Objective
 
@@ -18,14 +19,14 @@ Establish a deterministic, role-based command system for the Chit platform. This
 
 ### 2. Functional Requirements
 
-* **Universal Intercept:** Every message entry point must check for the `/` prefix.
+* **Universal Intercept:** Every message entry point must check for the `/` prefix. *(Implemented: `POST /api/v1/posts` is the only entry point that creates messages, and it intercepts commands after checking channel membership.)*
 * **Role-Based Access (ReBAC):** Access must resolve via: `Actor -> Role -> Command`.
 * **Hermetic Configuration:** All AuthZ metadata must be managed in CUE.
-* **Structured Audit Logging:** Every command attempt (Success/Failure) must be logged to a local file using `slog` in JSON format.
-* **Outbound Webhooks (Opt-in):** **(NEW)** When configured, the platform must emit a **CloudEvents v1.0** compliant JSON payload to a registered URL upon successful command execution.
+* **Structured Audit Logging:** Every command attempt (Success/Failure) must be logged to a local file using `slog` in JSON format. *(Implemented for every registered command that reaches the permission check, allowed or denied. Unknown commands are not logged.)*
+* **Outbound Webhooks (Opt-in):** **(NEW)** When configured, the platform must emit a **CloudEvents v1.0** compliant JSON payload to a registered URL upon successful command execution. *(Implemented for commands that change state: `/invite`, `/kick`, `/topic <text>`. Delivery is best-effort with no retry.)*
 
 ### 3. Success Criteria
 
 * **Interoperability:** Webhook payloads pass validation against the CloudEvents JSON schema.
-* **Admin Sovereignty:** Webhooks are disabled by default and require explicit administrator "Opt-in" per channel or global scope.
+* **Admin Sovereignty:** Webhooks are disabled by default and require explicit administrator "Opt-in" per channel or global scope. *(Global opt-in only, via `CHIT_WEBHOOK_ENABLED`. Per-channel opt-in is **not implemented**.)*
 

@@ -3,8 +3,10 @@ title: Manual Acceptance Testing
 description: Spin up a self-contained UAT environment with pre-seeded users for manual testing.
 ---
 
-The UAT environment runs the full Ory stack (Kratos, Oathkeeper, Keto) with
-chitd and PostgreSQL in a Podman pod. Five test users are pre-seeded with
+The UAT environment runs Kratos, Oathkeeper and Keto with chitd, ZincSearch
+and PostgreSQL in two Podman pods (`chit-uat-db` and `chit-uat-app`), defined
+in `deploy/chit-uat.kube.yml`. Unlike the `make kube-up` stack it runs no
+Hydra, so machine actors cannot authenticate here. Five test users are pre-seeded with
 Kratos identities so you can test both API access and chit-tui login.
 
 ## Prerequisites
@@ -12,7 +14,7 @@ Kratos identities so you can test both API access and chit-tui login.
 | Dependency | Version | Purpose |
 |---|---|---|
 | Podman | 4.0+ | Run the UAT pod |
-| Go | 1.24+ | Run the Kratos seed script |
+| Go | 1.25.14+ | Run the Kratos seed script |
 
 ## Start the environment
 
@@ -20,9 +22,9 @@ Kratos identities so you can test both API access and chit-tui login.
 make uat-up
 ```
 
-This builds the container images, creates a Podman pod, starts PostgreSQL,
-runs migrations, seeds chit test data, and starts all services (Kratos,
-Oathkeeper, Keto, chitd, Zincsearch).
+This builds the container images, starts PostgreSQL, runs migrations, seeds
+chit test data, and starts all services (Kratos, Oathkeeper, Keto, chitd,
+ZincSearch).
 
 Watch the server logs to confirm all services are ready:
 
@@ -48,7 +50,8 @@ and safe to run multiple times.
 # Direct server access
 curl http://localhost:8065/api/v1/system/ping
 
-# Through Oathkeeper proxy
+# Through Oathkeeper proxy (the UAT rules let unauthenticated requests
+# through to chitd; the `make kube-up` stack answers 401 here)
 curl http://localhost:4455/api/v1/system/ping
 ```
 
@@ -200,12 +203,11 @@ silent refusal with `"authorized":false` in the chitd log.
 ### 1. Push the command grants
 
 `make uat-up` does not run the reconciler, so the role→command tuples do not
-exist yet:
+exist yet. `chit-reconcile` reads only `CHIT_KETO_WRITE_URL` and
+`CHIT_COMMANDS_CUE_DIR` (default `auth`), and needs no database:
 
 ```bash
-CHIT_DATABASE_URL="postgres://chit:chit@localhost:5432/chit?sslmode=disable" \
-CHIT_KETO_WRITE_URL=http://localhost:4467 \
-make reconcile
+CHIT_KETO_WRITE_URL=http://localhost:4467 make reconcile
 ```
 
 ### 2. Bind the seeded users to roles
@@ -355,6 +357,8 @@ closes the overlay.
 
 ### Search users
 
+The term matches usernames and display names, not email addresses:
+
 ```bash
 curl -H "$ALICE" 'http://localhost:8065/api/v1/users?term=bob'
 ```
@@ -371,11 +375,16 @@ curl -X POST -H "$ALICE" -H 'Content-Type: application/json' \
 
 ### List teams
 
+Open teams plus the caller's own (a system admin sees every team):
+
 ```bash
 curl -H "$ALICE" http://localhost:8065/api/v1/teams
 ```
 
 ### List channels in a team
+
+The team's open channels, for team members only. Private channels you belong
+to are under `/users/me/teams/TEAM_ID/channels`:
 
 ```bash
 curl -H "$ALICE" http://localhost:8065/api/v1/teams/TEAM_ID/channels
@@ -406,7 +415,7 @@ In the UAT environment, the full Ory stack is running:
 
 1. **Oathkeeper** (port 4455) — auth proxy for all requests
 2. **Kratos** (ports 4433/4434) — manages user identities and sessions
-3. **Keto** (ports 4466/4467) — relationship-based authorization
+3. **Keto** (ports 4466/4467) — slash-command authorization
 
 The request flow is:
 1. Client sends `X-Session-Token` header to Oathkeeper
@@ -414,6 +423,10 @@ The request flow is:
 3. On success, Oathkeeper extracts `identity.id` and sets `X-User-Id` header
 4. Oathkeeper forwards the request to chitd
 5. chitd's `AuthExtract` middleware reads `X-User-Id` and calls `ProvisionUser`
+
+A request without a session token still passes the UAT Oathkeeper (its rules
+keep an anonymous `noop` fallback), arrives with no `X-User-Id`, and is
+answered 401 by chitd unless the route is public, such as `/system/ping`.
 
 Direct access to chitd on port 8065 bypasses Oathkeeper entirely. Since the
 seed program pre-creates users with known Kratos IDs, `ProvisionUser` finds

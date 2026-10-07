@@ -7,10 +7,11 @@ description: Prerequisites and build instructions for the Chit server.
 
 | Dependency | Version | Purpose |
 |---|---|---|
-| Go | 1.22+ | Build the server binary |
-| Podman | 4.0+ | Run infrastructure containers |
+| Go | 1.25.14+ | Build the binaries (`go.mod` requires 1.25.14) |
+| Podman | 4.0+ | Run the stack and the containerized tests |
 | PostgreSQL | 17 | Primary data store (runs in the pod) |
-| golang-migrate | latest | Apply database migrations |
+| golang-migrate | latest | `make migrate-up`/`migrate-down` and `make test-integration` (the pod migrates itself) |
+| golangci-lint | v2 | `make lint` only |
 
 ## Build from source
 
@@ -44,14 +45,34 @@ bridge.
 ## Build the container image
 
 ```bash
-podman build -t chit:latest -f deploy/Containerfile .
+make kube-build
 ```
 
-## Run tests in a container
+This builds `localhost/chit:latest` from `deploy/Containerfile`, containing
+`chitd` and `chit-reconcile` and the CUE definitions at `/etc/chit/auth`.
+`make kube-up` runs it first.
+
+## Run the tests
+
+```bash
+make test               # unit tests, with -race
+make test-integration   # store and pub/sub tests against a throwaway PostgreSQL
+make lint               # golangci-lint, including integration- and e2e-tagged files
+make vuln               # govulncheck
+make check-deps         # dependency boundaries between the binaries
+```
+
+`make test-integration` starts a disposable `postgres:17-alpine` container in
+Podman on port `55432` (override with `ITEST_PORT`), runs every migration up,
+all the way down and up again, runs the `integration`-tagged tests in
+`internal/store/sqlstore` and `internal/pubsub`, and removes the container. The
+suite truncates every table, so never point it at a database you care about.
+
+### In a container
 
 The test Containerfile builds a UBI9-based image with the Go toolchain and runs
-all unit tests inside it. No PostgreSQL or external services are required — every
-test uses in-memory mocks.
+the unit tests inside it. No PostgreSQL or external services are required; the
+unit tests use in-memory fakes.
 
 ```bash
 make test-container
@@ -69,15 +90,20 @@ podman run --rm chit-test:latest go test -run TestSpecific ./internal/model/...
 To build with a different Go version:
 
 ```bash
-podman build --build-arg GO_VERSION=1.25.4 \
+podman build --build-arg GO_VERSION=1.25.14 \
   -t chit-test:latest -f Containerfiles/Containerfile.test .
 ```
 
 ## Verify the build
 
+chitd takes no command-line flags; running it starts the server, which exits at
+once without `CHIT_DATABASE_URL`. To check the build, list the binaries:
+
 ```bash
-./bin/chitd --help
+ls bin/
 ```
+
+To run chitd, see [Quick Start](/chit/getting-started/quick-start/).
 
 ## Next steps
 

@@ -3,10 +3,11 @@ title: User Management
 description: Creating and managing user identities and authorization for Chit.
 ---
 
-Chit uses Ory Kratos for identity management and Ory Keto for authorization.
-Users authenticate through Kratos, and channel access is controlled by Keto
-relationship tuples. This guide covers how to create users, manage sessions,
-and configure authorization.
+Chit uses Ory Kratos for people's identities and Ory Hydra for machine
+actors (agents and bots). Access to teams and channels is decided by Chit
+itself from its PostgreSQL membership tables; Ory Keto authorizes slash
+commands. This guide covers how to create users, manage sessions, and how
+authorization works.
 
 ## How user provisioning works
 
@@ -20,12 +21,21 @@ Chit does not require you to create users in two places. The flow is:
 
 You only need to create the Kratos identity. Chit handles the rest.
 
+Machine actors are different: they have no Kratos identity and are never
+created on first use. Declare them in `CHIT_MACHINE_ACTORS` and chitd creates
+or updates them at every boot; see
+[Machine actors](/chit/reference/configuration/#machine-actors) and
+[Headless Claude Code](/chit/deployment/headless-claude/).
+
+`POST /api/v1/users` creates a user record directly. It is restricted to
+`system_admin`, and is meant for cases neither path covers, such as
+addressing a person who has never signed in.
+
 ## Prerequisites
 
 | Dependency | Purpose |
 |---|---|
 | Kratos Admin API access (port 4434) | Create and manage identities |
-| Keto Write API access (port 4467) | Manage channel authorization |
 | `curl` and `jq` | Command-line examples below |
 
 ## Creating users
@@ -157,10 +167,19 @@ curl -s -X PUT http://localhost:4434/admin/identities/IDENTITY_ID \
 ```
 
 :::caution
-Updating traits in Kratos does **not** automatically update the Chit local user
-record. The local record is only populated during auto-provisioning (first
-login). To update a user's display name or username in Chit after provisioning,
-update the Chit database directly.
+Updating traits in Kratos does **not** update the Chit local user record,
+which is only populated during auto-provisioning (first login). A user changes
+their own Chit username and display name with `PUT /api/v1/users/me`:
+
+```bash
+curl -s -X PUT -H "X-Session-Token: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"username": "newname", "display_name": "New Name"}' \
+  http://localhost:4455/api/v1/users/me | jq .
+```
+
+Either field may be omitted. The username is lowercased and must match the
+schema pattern above; a username already taken answers 409. Email and roles
+cannot be changed through the API.
 :::
 
 ### Delete an identity
@@ -168,6 +187,9 @@ update the Chit database directly.
 ```bash
 curl -s -X DELETE http://localhost:4434/admin/identities/IDENTITY_ID
 ```
+
+This stops the person from logging in. Their Chit user record and messages
+remain.
 
 ### Reset a user's password
 
@@ -222,35 +244,52 @@ curl -s -H "X-Session-Token: SESSION_TOKEN" \
   http://localhost:4433/sessions/whoami | jq .
 ```
 
-## Authorization with Keto
+## Authorization
 
-Chit uses Ory Keto for channel-level access control. Authorization is managed
-automatically — when users join or leave channels, Chit writes the appropriate
-Keto relationship tuples.
+Team and channel access is decided by chitd from the `team_members` and
+`channel_members` tables in PostgreSQL. The rules:
 
-### Namespaces and relations
+- **Teams.** Anyone may create a team and becomes its `team_admin`. Renaming
+  or deleting a team requires `team_admin` or `system_admin`; deleting it
+  deletes its channels. Invite-only teams are visible only to their members
+  and to system admins, and `GET /api/v1/teams` lists open teams plus the
+  caller's own. Only members (and system admins) may list a team's members.
+  Adding a member requires being a member; removing anyone but yourself
+  requires `system_admin`. A user removed from a team is removed from all of
+  that team's channels.
+- **Channels.** `POST /api/v1/channels` creates open (`O`) or private (`P`)
+  channels only, needs a `team_id`, and requires the creator to be on that
+  team. A new open channel includes everyone on the team at that moment;
+people who join the team later join its open channels themselves. Anyone on
+  the team may see an open channel and add members to it; private channels
+  only by their members. A user added to an open or private channel must be on
+  its team. Removing anyone but yourself requires `system_admin`; deleting a
+  channel requires being its creator or `system_admin`.
+- **Direct and group channels** are created with `/channels/direct` and
+  `/channels/group`, must include the caller, and have fixed membership: no
+  one can be added later.
+- **Reading.** Posts, members and the details of private, direct and group
+  channels are readable by channel members only.
+- **Slash commands** require channel membership and a Keto `execute` grant
+  (below).
+
+### Keto namespaces
 
 | Namespace | Object | Relation | Subject | Meaning |
 |---|---|---|---|---|
-| `chit/channel` | Channel ID | `member` | User ID | User can access the channel |
 | `chit/command` | `Command:{id}` | `execute` | `Actor:{id}` | User can execute the command |
+| `chit/channel` | Channel ID | `member` | User ID | Mirror of channel membership |
 
-### Automatic authorization
+Keto is authoritative only for slash commands. chitd mirrors channel
+membership into `chit/channel` on a best-effort basis: a failed write does not
+fail the request and is not retried, and members added when a channel is
+created are written in the background, after the response. chitd never reads that namespace, so the tuples are useful
+for inspection but **writing or deleting them does not grant or revoke
+access**. Use the channel member endpoints for that.
 
-You do **not** need to manually create Keto tuples for normal operations:
+### Inspecting the channel mirror
 
-- **Channel creation** — creator is added as `member`; for open channels, all
-  team members are auto-added
-- **Join channel** — `member` relation is written
-- **Leave channel** — `member` relation is deleted
-- **Direct messages** — both users are added as `member`
-- **Group channels** — all participants are added as `member`
-
-### Manual Keto management
-
-For advanced scenarios, you can interact with Keto directly.
-
-**Check if a user has channel access:**
+**Check whether Keto has a user as a channel member:**
 
 ```bash
 curl -s -X POST http://localhost:4466/relation-tuples/check \
@@ -265,27 +304,7 @@ curl -s -X POST http://localhost:4466/relation-tuples/check \
 
 Response: `{"allowed": true}` or `{"allowed": false}`
 
-**Grant channel access:**
-
-```bash
-curl -s -X PUT http://localhost:4467/admin/relation-tuples \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "namespace": "chit/channel",
-    "object": "CHANNEL_ID",
-    "relation": "member",
-    "subject_id": "USER_ID"
-  }'
-```
-
-**Revoke channel access:**
-
-```bash
-curl -s -X DELETE \
-  "http://localhost:4467/admin/relation-tuples?namespace=chit/channel&object=CHANNEL_ID&relation=member&subject_id=USER_ID"
-```
-
-**List all members of a channel:**
+**List all members Keto has for a channel:**
 
 ```bash
 curl -s "http://localhost:4466/relation-tuples?namespace=chit/channel&object=CHANNEL_ID" \
@@ -295,11 +314,15 @@ curl -s "http://localhost:4466/relation-tuples?namespace=chit/channel&object=CHA
 ## System admin role
 
 Alice (`alice@example.com`) is assigned the `system_admin` role in the Chit
-database during UAT seeding. System admins can manage teams, channels, and
-users through the Chit API. Other users are assigned `system_user`.
+database during UAT seeding. Other users are assigned `system_user`. A system
+admin can create users (`POST /api/v1/users`), rename or delete any team,
+see invite-only teams, remove other members from teams and channels, and
+delete any channel.
 
-Admin role assignment is stored in the Chit database (`users.roles` column),
-not in Kratos or Keto.
+Roles are stored in the Chit database (`users.roles`, space-separated), not
+in Kratos or Keto. No API endpoint changes them: grant `system_admin` to a
+person by updating that column, and to a machine actor through its `roles`
+in `CHIT_MACHINE_ACTORS`.
 
 ## End-to-end example
 
@@ -340,13 +363,14 @@ echo "Session token: $TOKEN"
 curl -s -H "X-Session-Token: $TOKEN" \
   http://localhost:4455/api/v1/users/me | jq .
 
-# 4. List available teams and channels
+# 4. List visible teams (open teams plus the user's own)
 curl -s -H "X-Session-Token: $TOKEN" \
   http://localhost:4455/api/v1/teams | jq .
 ```
 
-After step 3, the user exists in Chit's database and can be added to channels,
-send messages, and use all features.
+After step 3, the user exists in Chit's database. A member of a team can then
+add them to it (`POST /api/v1/teams/{id}/members`), after which they can see
+and join that team's open channels.
 
 ## See also
 

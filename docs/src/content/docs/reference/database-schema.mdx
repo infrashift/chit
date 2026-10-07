@@ -26,30 +26,41 @@ millisecond precision.
 
 ### Soft Deletes
 
-Tables with a `delete_at` column use soft deletes. A value of `0` means the
-row is active; a non-zero value is the deletion timestamp. Indexes filter on
-`WHERE delete_at = 0` for efficient queries on active rows.
+Users, teams, channels and posts are soft-deleted. A `delete_at` of `0`
+means the row is active; a non-zero value is the deletion timestamp. Queries
+for live rows filter on `delete_at = 0`, and the partial unique indexes on
+`channels` cover live rows only. Membership rows (`team_members`,
+`channel_members`) are deleted outright when a member leaves; the
+`team_members.delete_at` column stays `0`.
 
 ## Tables
 
 ### users
 
-Local profile cache linked to an Ory Kratos identity.
+Every actor: people (linked to an Ory Kratos identity) and machine actors
+(agents and bots, linked to an Ory Hydra OAuth2 client).
 
 | Column | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | UUID | PK | UUIDv7 primary key |
-| `kratos_id` | UUID | UNIQUE, NOT NULL | Ory Kratos identity ID |
-| `username` | VARCHAR(64) | UNIQUE, NOT NULL | Login username |
+| `kratos_id` | UUID | UNIQUE, nullable | Ory Kratos identity ID. NULL for machine actors (since `000006`). |
+| `username` | VARCHAR(64) | UNIQUE, NOT NULL | Login username (lowercase) |
 | `display_name` | VARCHAR(100) | NOT NULL | Display name |
-| `email` | VARCHAR(128) | UNIQUE, NOT NULL | Email address |
-| `roles` | VARCHAR(256) | DEFAULT `'system_user'` | Comma-separated roles |
-| `actor_type` | TEXT | NOT NULL, DEFAULT `'user'`, CHECK | Actor type: `user`, `agent`, or `bot` — humans, AI agents, and bots are equal first-class actors |
+| `email` | VARCHAR(128) | UNIQUE, nullable | Email address, from Kratos. NULL for machine actors (since `000006`). |
+| `roles` | VARCHAR(256) | DEFAULT `'system_user'` | Space-separated roles, e.g. `system_user system_admin` |
+| `actor_type` | TEXT | NOT NULL, DEFAULT `'user'`, CHECK | Actor type: `user`, `agent`, or `bot`. Humans, AI agents, and bots are equal first-class actors. |
+| `oauth_client_id` | TEXT | UNIQUE, nullable | Hydra OAuth2 client ID of a machine actor; NULL for people (since `000005`) |
 | `create_at` | BIGINT | NOT NULL | Creation timestamp (ms) |
 | `update_at` | BIGINT | NOT NULL | Last update timestamp (ms) |
 | `delete_at` | BIGINT | DEFAULT `0` | Deletion timestamp (0 = active) |
 
-**Indexes:** `kratos_id`, `username`, `email`, `delete_at`
+A user must have a `kratos_id` or an `oauth_client_id`; a user with a
+`kratos_id` must also have an `email`. The application enforces this, not the
+schema. The store writes NULL, never `''`, to the three nullable identity
+columns, since a UNIQUE column admits many NULLs but only one `''`.
+
+**Indexes:** the UNIQUE constraints on `kratos_id`, `username`, `email` and
+`oauth_client_id`; `delete_at`
 
 ### teams
 
@@ -61,13 +72,13 @@ Top-level organizational unit.
 | `name` | VARCHAR(64) | UNIQUE, NOT NULL | URL-safe team slug |
 | `display_name` | VARCHAR(64) | NOT NULL | Human-readable name |
 | `description` | VARCHAR(255) | DEFAULT `''` | Team description |
-| `type` | VARCHAR(1) | DEFAULT `'O'` | Team type (O = open) |
+| `type` | VARCHAR(1) | DEFAULT `'O'` | Team type: `O` open, `I` invite-only |
 | `creator_id` | UUID | FK → users | Team creator |
 | `create_at` | BIGINT | NOT NULL | Creation timestamp (ms) |
 | `update_at` | BIGINT | NOT NULL | Last update timestamp (ms) |
 | `delete_at` | BIGINT | DEFAULT `0` | Deletion timestamp (0 = active) |
 
-**Indexes:** `name`, `delete_at`
+**Indexes:** the UNIQUE constraint on `name`; `delete_at`
 
 ### team_members
 
@@ -75,7 +86,7 @@ Top-level organizational unit.
 |---|---|---|---|
 | `team_id` | UUID | PK, FK → teams (CASCADE) | Team reference |
 | `user_id` | UUID | PK, FK → users (CASCADE) | User reference |
-| `roles` | VARCHAR(256) | DEFAULT `'team_user'` | Member roles |
+| `roles` | VARCHAR(256) | DEFAULT `'team_user'` | Space-separated roles; a team's creator gets `team_admin team_user` |
 | `create_at` | BIGINT | NOT NULL | Join timestamp (ms) |
 | `delete_at` | BIGINT | DEFAULT `0` | Removal timestamp (0 = active) |
 
@@ -110,7 +121,17 @@ Belong to a team. `team_id` is NULL for direct and group messages.
 | `D` | Direct message (1:1) |
 | `G` | Group message |
 
-**Indexes:** `(team_id, name) WHERE delete_at = 0` (unique), `team_id`, `delete_at`
+Direct channel names are the two member IDs, sorted and joined with `__`;
+group channel names join all member IDs the same way. The name is how a DM or
+group is found again, so it cannot be changed.
+
+**Indexes:**
+
+- `(team_id, name) WHERE delete_at = 0`, unique: team channel names
+- `name WHERE team_id IS NULL AND delete_at = 0`, unique: one live DM or group
+  per member set (since `000007`; `team_id` is NULL for these, and NULLs never
+  collide in the first index)
+- `team_id`, `delete_at`
 
 ### channel_members
 
@@ -147,7 +168,9 @@ Messages in channels. Replies reference a `root_id`.
 | `update_at` | BIGINT | NOT NULL | Last update timestamp (ms) |
 | `delete_at` | BIGINT | DEFAULT `0` | Deletion timestamp (0 = active) |
 
-**Indexes:** `(channel_id, create_at)`, `root_id WHERE root_id IS NOT NULL`, `user_id`, `delete_at`
+**Indexes:** `(channel_id, create_at)`, `root_id WHERE root_id IS NOT NULL`,
+`user_id`, `delete_at`, `(update_at, id)` (the search indexer's cursor, since
+`000007`)
 
 ### threads
 
@@ -161,7 +184,8 @@ Denormalized aggregate for root posts with replies.
 | `last_reply_at` | BIGINT | DEFAULT `0` | Timestamp of latest reply |
 | `participants` | JSONB | DEFAULT `'[]'` | Array of participant user IDs |
 
-**Indexes:** `channel_id`
+**Indexes:** `channel_id`, `last_reply_at DESC` (the thread inbox order, since
+`000007`)
 
 ### thread_memberships
 
@@ -200,9 +224,12 @@ Junction table linking posts to tags.
 Migrations are stored in `migrations/` and applied with golang-migrate:
 
 ```bash
-make migrate-up    # Apply all pending migrations
+make migrate-up    # Apply all pending migrations (MIGRATE_URL)
 make migrate-down  # Roll back all migrations
 ```
+
+`make kube-up` applies them automatically inside the pod, and
+`make kube-migrate` re-applies them against a running pod.
 
 | Migration | Description |
 |---|---|
@@ -210,3 +237,19 @@ make migrate-down  # Roll back all migrations
 | `000002_widen_channel_name` | Widens `channels.name` to VARCHAR(512) and `display_name` to VARCHAR(256) for DM/GM names |
 | `000003_drop_content_encrypted` | Drops the abandoned `posts.content_encrypted` encryption-at-rest column |
 | `000004_actor_type` | Adds `users.actor_type` (`user` \| `agent` \| `bot`) so humans, AI agents, and bots are equal actors |
+| `000005_oauth_client_id` | Adds `users.oauth_client_id` (UNIQUE, nullable), mapping a Hydra OAuth2 client to a machine actor |
+| `000006_nullable_person_columns` | Drops NOT NULL from `users.kratos_id` and `users.email` so a machine actor can exist; UNIQUE stays |
+| `000007_query_indexes_and_dm_uniqueness` | Adds `posts (update_at, id)` and `threads (last_reply_at DESC)`; merges duplicate live DMs and groups into the oldest copy (posts, threads and members move, the rest are soft-deleted) and adds a partial unique index on `channels (name)` for team-less channels; drops `idx_users_kratos_id`, `idx_users_username`, `idx_users_email` and `idx_teams_name`, which duplicated UNIQUE constraints |
+
+### Rolling back
+
+- `000002` down fails once any direct or group channel exists: their names
+  (74 characters for a DM) do not fit back into VARCHAR(64). Delete those
+  channels first if it must be reversed.
+- `000006` down refuses to run while machine actors exist, rather than delete
+  them or invent identities for them.
+- `000007` down does not split merged DMs apart again; which posts belonged to
+  which copy is not recorded.
+
+`make test-integration` and CI apply every migration up, all the way down, and
+up again, so a broken down migration fails the build.

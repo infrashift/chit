@@ -1,6 +1,6 @@
 ---
 title: Architecture Overview
-description: Layered architecture, store decorators, and project structure.
+description: Layered architecture, store and cache, server lifecycle, and project structure.
 ---
 
 Chit follows a layered architecture inspired by Mattermost, with clear
@@ -13,7 +13,7 @@ HTTP Request
     │
     ▼
 ┌─────────┐
-│   API   │  chi router, JSON encoding, request validation
+│   API   │  chi router, auth headers, rate limit, request validation, JSON
 └────┬────┘
      │
      ▼
@@ -23,61 +23,80 @@ HTTP Request
      │
      ▼
 ┌─────────┐
-│  Store  │  Data access layer with decorator chain
+│  Store  │  Data access interface (store.Store)
 └────┬────┘
      │
      ▼
 ┌─────────┐
-│   PG    │  PostgreSQL via pgx/v5
+│   PG    │  PostgreSQL via pgx/v5 (sqlstore)
 └─────────┘
 ```
 
 ### API Layer
 
-The API layer uses the [chi](https://github.com/go-chi/chi) router to handle
-HTTP requests. Each handler parses the request, calls the App layer, and
-serializes the response. OpenAPI validation middleware checks requests against
-the spec at `api/openapi.yaml`.
+The API layer (`internal/api`) uses the [chi](https://github.com/go-chi/chi)
+router. Middleware resolves the caller from the trusted proxy headers, applies
+a per-user rate limit, and (by default) validates requests against
+`api/openapi.yaml`. Each handler decodes the request into a request-specific
+struct (bodies are capped at 1 MiB), calls the App layer, and writes JSON.
+Errors are written as `AppError` JSON with their status code.
 
 ### App Layer
 
-The App layer contains all business logic. It is **request-scoped** and
-**stateless** — no mutable state is held between requests. The App layer
-coordinates between the Store, WebSocket hub, and pub/sub system.
+The App layer (`internal/app`) contains all business logic and every
+authorization check: channel membership (from `channel_members`), team
+membership and `team_admin`, `system_admin`, and post ownership. A single
+long-lived `App` is shared by all requests and holds no per-request state. It
+coordinates the Store, the WebSocket hub, pub/sub, Keto, Kratos, and
+ZincSearch.
+
+Channel membership is mirrored to Keto best-effort: a failed write is logged
+and does not fail the request. The tuples for a newly created channel's
+members are written in the background, and shutdown waits for those writes.
+Keto is authoritative only for slash-command permissions.
 
 ### Store Layer
 
-The Store layer provides data access through a Go interface. The concrete
-implementation uses pgx/v5 for PostgreSQL queries.
+The Store layer (`internal/store`) is a Go interface, `store.Store`, composed
+of per-entity stores (`User`, `Team`, `Channel`, `Post`, `Thread`, `Tag`). It
+has one production implementation, `internal/store/sqlstore`, which runs SQL
+through a pgx/v5 connection pool. There are no decorators: no timing, retry
+or caching layer wraps it.
 
-## Store Decorator Chain
+`internal/store/storetest` is an in-memory `store.Store` used only by tests.
+It follows the SQL store's observable contract (404 `AppError`s on a miss,
+copies on read, soft-deleted rows invisible, validation on save).
 
-Store operations pass through a chain of decorators:
+## Caching
 
-```
-Timer → Retry → Cache → SqlStore
-```
-
-| Decorator | Purpose |
-|---|---|
-| **Timer** | Records query latency metrics |
-| **Retry** | Retries transient failures with backoff |
-| **Cache** | LRU cache using hashicorp/golang-lru/v2 |
-| **SqlStore** | Executes SQL against PostgreSQL |
-
-Each decorator implements the same Store interface, enabling transparent
-composition.
+The only cache is a user LRU in the App layer (`internal/cache`, built on
+hashicorp/golang-lru/v2 with a TTL). It maps a Kratos identity ID, or an OAuth2
+client ID, to the user it authenticates as, so most requests resolve their
+caller without a database read. Its size and TTL are `CHIT_CACHE_SIZE`
+(default `20000`) and `CHIT_CACHE_TTL` (default `5m`). Profile edits
+invalidate the user's entries.
 
 ## Server Lifecycle
 
-1. Load configuration from environment (koanf with `CHIT_` prefix)
-2. Connect to PostgreSQL and initialize the store decorator chain
-3. Initialize the pub/sub backend (PG LISTEN/NOTIFY or NATS)
-4. Start the WebSocket hub event loop
-5. Start background workers (search indexer)
-6. Register API routes and start the HTTP server
-7. Wait for shutdown signal (SIGINT/SIGTERM)
-8. Graceful shutdown: drain connections, stop workers, close database
+1. Load configuration from environment (koanf, `CHIT_` prefix) and validate
+   it. Every invalid setting is reported at once and the server refuses to
+   start.
+2. Configure logging, then connect to PostgreSQL.
+3. Start the WebSocket hub event loop.
+4. Initialize the pub/sub backend (PG LISTEN/NOTIFY or NATS).
+5. Create the App, then reconcile the declared machine actors
+   (`CHIT_MACHINE_ACTORS`). A failure here stops startup.
+6. Load slash commands from CUE, the audit logger, and the webhook queue
+   when enabled.
+7. Register background workers: the search indexer (only when
+   `CHIT_ZINCSEARCH_URL` is set) and the webhook dispatcher (only when
+   webhooks are enabled).
+8. Register API routes, start the workers, and start the HTTP server.
+9. Wait for SIGINT/SIGTERM, or for the listener to fail.
+10. Shut down: stop the HTTP server (30-second grace), stop the hub and the
+    workers, wait for background Keto writes, close pub/sub and the audit
+    log, and close the database. A listener failure runs the same shutdown
+    before exiting.
 
 ## Project Structure
 
@@ -85,30 +104,40 @@ composition.
 chit/
 ├── cmd/
 │   ├── chitd/              Main server binary
-│   ├── chit-mcp/           MCP agent binary (HTTP/WS client of chitd,
-│   │                       like chit-claude)
+│   ├── chit-mcp/           MCP server for agents (HTTP/WS client of chitd)
 │   ├── chit-reconcile/     One-shot job pushing CUE-defined roles,
-│   │                       commands, and actors into Keto
+│   │                       commands, and actors into Keto (no database)
 │   └── chit-claude/        Bridge driving headless Claude Code sessions
 │                           from Chit channels
 ├── internal/
 │   ├── api/                HTTP handlers and middleware
-│   ├── app/                Business logic
-│   ├── cache/              LRU cache implementation
+│   ├── app/                Business logic and authorization
+│   ├── bridge/             chit-claude bridge logic
+│   ├── cache/              TTL LRU cache (used for the user cache)
 │   ├── chitclient/         Shared HTTP/WS client of chitd used by the
 │   │                       headless agent binaries (chit-claude, chit-mcp)
-│   ├── config/             Configuration loading
-│   ├── jobs/               Background workers (search indexer)
+│   ├── command/            Slash-command parsing, registry, CUE loader,
+│   │                       Keto reconciler, audit log, CloudEvents
+│   ├── config/             Configuration loading and validation
+│   ├── jobs/               Scheduler and workers (search indexer,
+│   │                       webhook dispatcher)
+│   ├── keto/               Keto relation-tuple HTTP client
 │   ├── mcp/                MCP server implementation
 │   ├── model/              Data models and constants
 │   ├── pubsub/             Pub/sub interface and backends
 │   ├── server/             Server setup and lifecycle
-│   ├── store/              Data access layer and decorators
+│   ├── store/              Store interface, sqlstore, and the in-memory
+│   │                       storetest used by tests
 │   └── websocket/          WebSocket hub and client management
+├── clients/chit-tui/       Terminal client (nested Go module)
 ├── api/                    OpenAPI specification
-├── deploy/                 Podman Kube manifest and Ory configs
+├── auth/                   CUE command registry, roles, and actor bindings
+├── deploy/                 Podman Kube manifests, Containerfile, Ory and
+│                           Hydra configs
+├── Containerfiles/         Test and e2e images
 ├── migrations/             SQL migration files (golang-migrate)
-├── tests/                  System test scaffolding
+├── scripts/                Seeders and test entrypoints
+├── tests/                  End-to-end tests
 ├── docs/                   Documentation site (Astro + Starlight)
 └── Makefile                Build, test, deploy targets
 ```
