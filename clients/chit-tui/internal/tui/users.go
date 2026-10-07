@@ -101,5 +101,10 @@ func (m *Model) applyMe(u *model.User) {
 	m.users[u.ID] = u
 	m.viewport.SetCurrentUsername(u.Username)
 	m.thread.SetCurrentUsername(u.Username)
+	// The panes only learn names from here or from a user lookup, and the
+	// signed-in user is never looked up, so their own posts showed their ID
+	// until some other author happened to load.
+	m.viewport.SetUsernames(m.usernameMap())
+	m.thread.SetUsernames(m.usernameMap())
 	m.resolveDMDisplayNames()
 }
