@@ -35,111 +35,82 @@ func parseMentions(content string) []string {
 	return result
 }
 
+// maxMentionNames caps how many distinct @names one post resolves. Each name
+// used to cost two queries inside the post request; a post of a few hundred
+// @names was a few hundred round trips.
+const maxMentionNames = 50
+
 // processMentions resolves @username mentions in a post to user IDs.
 // It handles @all/@channel by collecting all channel members.
 // Self-mentions and non-channel-members are filtered out.
 func (a *App) processMentions(ctx context.Context, post *model.Post) ([]string, error) {
 	usernames := parseMentions(post.Content)
 	if len(usernames) == 0 {
-		slog.Debug("processMentions: no usernames parsed from content",
-			"channel_id", post.ChannelID, "content_len", len(post.Content))
 		return nil, nil
 	}
-	slog.Info("processMentions: parsed usernames",
-		"usernames", usernames, "channel_id", post.ChannelID, "user_id", post.UserID)
 
-	// Check for @all or @channel — collect all channel members
 	broadcastAll := false
-	var individualUsernames []string
+	individual := make([]string, 0, len(usernames))
 	for _, u := range usernames {
 		if u == "all" || u == "channel" {
 			broadcastAll = true
-		} else {
-			individualUsernames = append(individualUsernames, u)
+		} else if len(individual) < maxMentionNames {
+			individual = append(individual, u)
 		}
 	}
 
-	mentionedIDs := make(map[string]struct{})
-
+	mentioned := make(map[string]struct{})
 	if broadcastAll {
-		// Paginate through all channel members
-		page := 0
-		const perPage = 200
-		for {
-			members, err := a.Store.Channel().GetMembers(ctx, post.ChannelID, page, perPage)
-			if err != nil {
-				slog.Warn("processMentions: failed to get channel members", "error", err)
-				break
-			}
-			for _, m := range members {
-				mentionedIDs[m.UserID] = struct{}{}
-			}
-			if len(members) < perPage {
-				break
-			}
-			page++
+		ids, err := a.Store.Channel().GetMemberIDs(ctx, post.ChannelID)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range ids {
+			mentioned[id] = struct{}{}
 		}
 	}
-
-	// Resolve individual @username mentions
-	for _, username := range individualUsernames {
-		user, err := a.Store.User().GetByUsername(ctx, username)
+	if len(individual) > 0 {
+		// One query resolves the names and checks membership together.
+		ids, err := a.Store.Channel().GetMemberIDsByUsernames(ctx, post.ChannelID, individual)
 		if err != nil {
-			slog.Debug("processMentions: user not found", "username", username, "error", err)
-			continue
+			return nil, err
 		}
-
-		// Verify channel membership
-		_, err = a.Store.Channel().GetMember(ctx, post.ChannelID, user.ID)
-		if err != nil {
-			slog.Debug("processMentions: user not a channel member",
-				"username", username, "user_id", user.ID,
-				"channel_id", post.ChannelID, "error", err)
-			continue
+		for _, id := range ids {
+			mentioned[id] = struct{}{}
 		}
-
-		mentionedIDs[user.ID] = struct{}{}
 	}
+	delete(mentioned, post.UserID)
 
-	// Remove self-mention
-	delete(mentionedIDs, post.UserID)
-
-	if len(mentionedIDs) == 0 {
-		slog.Info("processMentions: no mentions after filtering",
-			"channel_id", post.ChannelID, "user_id", post.UserID)
+	if len(mentioned) == 0 {
 		return nil, nil
 	}
-
-	result := make([]string, 0, len(mentionedIDs))
-	for id := range mentionedIDs {
+	result := make([]string, 0, len(mentioned))
+	for id := range mentioned {
 		result = append(result, id)
 	}
-	slog.Info("processMentions: resolved mentions",
-		"mentioned_ids", result, "channel_id", post.ChannelID)
+	slog.Debug("processMentions: resolved mentions",
+		"count", len(result), "channel_id", post.ChannelID, "post_user_id", post.UserID)
 	return result, nil
 }
 
-// notifyMentionedUsers increments mention counters and sends targeted WebSocket events.
+// notifyMentionedUsers increments mention counters, in one statement per
+// table rather than one per user, and sends each user a targeted WebSocket
+// event.
 func (a *App) notifyMentionedUsers(ctx context.Context, post *model.Post, userIDs []string) {
+	if err := a.Store.Channel().IncrementMentionCounts(ctx, post.ChannelID, userIDs); err != nil {
+		slog.Warn("notifyMentionedUsers: failed to increment channel mention counts",
+			"channel_id", post.ChannelID, "error", err)
+	}
+	// Only followers have a thread membership to count against; the store
+	// skips the rest.
+	if post.RootID != "" {
+		if err := a.Store.Thread().IncrementMentionCounts(ctx, post.RootID, userIDs); err != nil {
+			slog.Warn("notifyMentionedUsers: failed to increment thread mention counts",
+				"root_id", post.RootID, "error", err)
+		}
+	}
+
 	for _, userID := range userIDs {
-		// Increment channel mention count
-		if err := a.Store.Channel().IncrementMentionCount(ctx, post.ChannelID, userID); err != nil {
-			slog.Warn("notifyMentionedUsers: failed to increment channel mention count",
-				"channel_id", post.ChannelID, "user_id", userID, "error", err)
-		}
-
-		// If this is a thread reply and the user follows the thread, increment thread mention count
-		if post.RootID != "" {
-			membership, err := a.Store.Thread().GetMembership(ctx, post.RootID, userID)
-			if err == nil && membership.Following {
-				if err := a.Store.Thread().IncrementMentionCount(ctx, post.RootID, userID); err != nil {
-					slog.Warn("notifyMentionedUsers: failed to increment thread mention count",
-						"root_id", post.RootID, "user_id", userID, "error", err)
-				}
-			}
-		}
-
-		// Send targeted WebSocket event
 		a.publishEvent(ctx, &model.WebSocketEvent{
 			Event: model.WebSocketEventMentioned,
 			Data: map[string]any{

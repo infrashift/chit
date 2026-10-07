@@ -360,13 +360,34 @@ func (s *SqlChannelStore) IncrementMsgCount(ctx context.Context, channelID strin
 	return nil
 }
 
-func (s *SqlChannelStore) IncrementMentionCount(ctx context.Context, channelID, userID string) error {
-	query := `UPDATE channel_members SET mention_count = mention_count + 1 WHERE channel_id = $1 AND user_id = $2`
-	_, err := s.sqlStore.pool.Exec(ctx, query, channelID, userID)
-	if err != nil {
-		return fmt.Errorf("increment mention count: %w", err)
+func (s *SqlChannelStore) IncrementMentionCounts(ctx context.Context, channelID string, userIDs []string) error {
+	query := `UPDATE channel_members SET mention_count = mention_count + 1
+		WHERE channel_id = $1 AND user_id = ANY($2::uuid[])`
+	if _, err := s.sqlStore.pool.Exec(ctx, query, channelID, userIDs); err != nil {
+		return fmt.Errorf("increment mention counts: %w", err)
 	}
 	return nil
+}
+
+func (s *SqlChannelStore) GetMemberIDs(ctx context.Context, channelID string) ([]string, error) {
+	rows, err := s.sqlStore.pool.Query(ctx,
+		`SELECT user_id::text FROM channel_members WHERE channel_id = $1`, channelID)
+	if err != nil {
+		return nil, fmt.Errorf("get member ids: %w", err)
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
+func (s *SqlChannelStore) GetMemberIDsByUsernames(ctx context.Context, channelID string, usernames []string) ([]string, error) {
+	rows, err := s.sqlStore.pool.Query(ctx,
+		`SELECT u.id::text FROM users u
+		INNER JOIN channel_members cm ON cm.user_id = u.id AND cm.channel_id = $1
+		WHERE u.username = ANY($2) AND u.delete_at = 0`,
+		channelID, usernames)
+	if err != nil {
+		return nil, fmt.Errorf("get member ids by usernames: %w", err)
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
 func scanChannels(rows pgx.Rows) ([]*model.Channel, error) {

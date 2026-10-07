@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
 
@@ -82,6 +83,9 @@ func (s *SqlPostStore) Get(ctx context.Context, id string) (*model.Post, error) 
 // GetByIDs returns the live posts among ids, in no particular order. Missing
 // and deleted posts are skipped.
 func (s *SqlPostStore) GetByIDs(ctx context.Context, ids []string) ([]*model.Post, error) {
+	// A non-UUID names no post, and in the array it would fail the whole
+	// query's cast.
+	ids = slices.DeleteFunc(slices.Clone(ids), func(id string) bool { return !model.IsValidID(id) })
 	if len(ids) == 0 {
 		return nil, nil
 	}

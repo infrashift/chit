@@ -238,3 +238,43 @@ func TestChannelStoreIntegration_TeamWideMembershipAndDeletion(t *testing.T) {
 		t.Errorf("a channel on another team was deleted: %v", err)
 	}
 }
+
+func TestChannelStoreIntegration_MentionQueries(t *testing.T) {
+	ss := testStore(t)
+	user, channel := newTestChannelFixture(t, ss)
+	other, err := ss.User().Save(t.Context(), newTestUser("mentionee"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	outsider, err := ss.User().Save(t.Context(), newTestUser("outsider"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{user.ID, other.ID} {
+		if _, err = ss.Channel().SaveMember(t.Context(), &model.ChannelMember{ChannelID: channel.ID, UserID: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	all, err := ss.Channel().GetMemberIDs(t.Context(), channel.ID)
+	if err != nil || len(all) != 2 {
+		t.Fatalf("GetMemberIDs = %v, %v; want both members", all, err)
+	}
+
+	named, err := ss.Channel().GetMemberIDsByUsernames(t.Context(), channel.ID,
+		[]string{"mentionee", "outsider", "nosuchuser"})
+	if err != nil {
+		t.Fatalf("GetMemberIDsByUsernames: %v", err)
+	}
+	if len(named) != 1 || named[0] != other.ID {
+		t.Errorf("resolved %v, want only the member (%s), not %s", named, other.ID, outsider.ID)
+	}
+
+	if err = ss.Channel().IncrementMentionCounts(t.Context(), channel.ID, []string{other.ID, outsider.ID}); err != nil {
+		t.Fatalf("IncrementMentionCounts: %v", err)
+	}
+	m, err := ss.Channel().GetMember(t.Context(), channel.ID, other.ID)
+	if err != nil || m.MentionCount != 1 {
+		t.Errorf("mention_count = %v (%v), want 1", m, err)
+	}
+}

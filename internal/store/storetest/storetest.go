@@ -47,6 +47,13 @@ func New() *Store {
 	}
 	s.Posts.channels = s.Channels
 	s.Posts.tags = s.Tags
+	s.Channels.usernames = func(name string) (string, bool) {
+		u, err := s.Users.GetByUsername(context.Background(), name)
+		if err != nil {
+			return "", false
+		}
+		return u.ID, true
+	}
 	return s
 }
 
@@ -346,6 +353,8 @@ type ChannelStore struct {
 	mu      sync.RWMutex
 	byID    map[string]*model.Channel
 	members map[string][]*model.ChannelMember
+	// usernames resolves a live user by name; set by New.
+	usernames func(name string) (id string, ok bool)
 }
 
 func (s *ChannelStore) Seed(c *model.Channel) {
@@ -594,15 +603,39 @@ func (s *ChannelStore) IncrementMsgCount(_ context.Context, channelID string, at
 	return nil
 }
 
-func (s *ChannelStore) IncrementMentionCount(_ context.Context, channelID, userID string) error {
+func (s *ChannelStore) IncrementMentionCounts(_ context.Context, channelID string, userIDs []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, m := range s.members[channelID] {
-		if m.UserID == userID {
+		if slices.Contains(userIDs, m.UserID) {
 			m.MentionCount++
 		}
 	}
 	return nil
+}
+
+func (s *ChannelStore) GetMemberIDs(_ context.Context, channelID string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ids := make([]string, 0, len(s.members[channelID]))
+	for _, m := range s.members[channelID] {
+		ids = append(ids, m.UserID)
+	}
+	return ids, nil
+}
+
+// GetMemberIDsByUsernames needs users, which this store does not hold; the
+// Store wires users in through New.
+func (s *ChannelStore) GetMemberIDsByUsernames(_ context.Context, channelID string, usernames []string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var ids []string
+	for _, name := range usernames {
+		if id, ok := s.usernames(name); ok && s.isMember(channelID, id) {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
 }
 
 // ─── Posts ───────────────────────────────────────────────────────
@@ -905,11 +938,13 @@ func (s *ThreadStore) MarkAsRead(_ context.Context, postID, userID string, at in
 	return nil
 }
 
-func (s *ThreadStore) IncrementMentionCount(_ context.Context, postID, userID string) error {
+func (s *ThreadStore) IncrementMentionCounts(_ context.Context, postID string, userIDs []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if m, ok := s.memberships[membershipKey(postID, userID)]; ok {
-		m.UnreadMentionCount++
+	for _, id := range userIDs {
+		if m, ok := s.memberships[membershipKey(postID, id)]; ok && m.Following {
+			m.UnreadMentionCount++
+		}
 	}
 	return nil
 }

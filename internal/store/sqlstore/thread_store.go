@@ -85,11 +85,11 @@ func (s *SqlThreadStore) DecrementReplyCount(ctx context.Context, postID string)
 	return nil
 }
 
-func (s *SqlThreadStore) IncrementMentionCount(ctx context.Context, postID, userID string) error {
-	query := `UPDATE thread_memberships SET unread_mention_count = unread_mention_count + 1 WHERE post_id = $1 AND user_id = $2`
-	_, err := s.sqlStore.pool.Exec(ctx, query, postID, userID)
-	if err != nil {
-		return fmt.Errorf("increment thread mention count: %w", err)
+func (s *SqlThreadStore) IncrementMentionCounts(ctx context.Context, postID string, userIDs []string) error {
+	query := `UPDATE thread_memberships SET unread_mention_count = unread_mention_count + 1
+		WHERE post_id = $1 AND user_id = ANY($2::uuid[]) AND following = TRUE`
+	if _, err := s.sqlStore.pool.Exec(ctx, query, postID, userIDs); err != nil {
+		return fmt.Errorf("increment thread mention counts: %w", err)
 	}
 	return nil
 }

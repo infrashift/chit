@@ -66,7 +66,13 @@ type ChannelStore interface {
 	GetDirectChannelByName(ctx context.Context, name string) (*model.Channel, error)
 	GetDirectChannelsForUser(ctx context.Context, userID string) ([]*model.Channel, error)
 	IncrementMsgCount(ctx context.Context, channelID string, timestamp int64) error
-	IncrementMentionCount(ctx context.Context, channelID, userID string) error
+	// IncrementMentionCounts adds one mention for each of userIDs in channelID.
+	IncrementMentionCounts(ctx context.Context, channelID string, userIDs []string) error
+	// GetMemberIDs returns every member's user ID.
+	GetMemberIDs(ctx context.Context, channelID string) ([]string, error)
+	// GetMemberIDsByUsernames returns the user IDs of the named users who are
+	// members of channelID; other names are ignored.
+	GetMemberIDsByUsernames(ctx context.Context, channelID string, usernames []string) ([]string, error)
 	// DeleteForTeam soft-deletes every channel on a team, returning their IDs.
 	DeleteForTeam(ctx context.Context, teamID string, deleteAt int64) ([]string, error)
 	// RemoveMemberFromTeam removes a user from every channel on a team,
@@ -107,7 +113,9 @@ type ThreadStore interface {
 	// and recomputes last_reply_at from the replies that remain.
 	DecrementReplyCount(ctx context.Context, postID string) error
 	MarkAsRead(ctx context.Context, postID, userID string, timestamp int64) error
-	IncrementMentionCount(ctx context.Context, postID, userID string) error
+	// IncrementMentionCounts adds one unread mention for each of userIDs that
+	// follows the thread.
+	IncrementMentionCounts(ctx context.Context, postID string, userIDs []string) error
 }
 
 // TagStore handles persistence for tags and message-tag associations.

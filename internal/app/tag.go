@@ -59,14 +59,17 @@ func (a *App) GetTagsForPosts(ctx context.Context, messageIDs []string, actorID 
 		return map[string][]*model.Tag{}, nil
 	}
 
-	allowed := map[string]bool{}
-	visible := make([]string, 0, len(messageIDs))
+	// One read for the whole page, rather than one Post().Get per id: the
+	// bulk store method below exists to avoid exactly that.
+	posts, err := a.Store.Post().GetByIDs(ctx, messageIDs)
+	if err != nil {
+		return nil, err
+	}
 
-	for _, id := range messageIDs {
-		post, err := a.Store.Post().Get(ctx, id)
-		if err != nil {
-			continue
-		}
+	allowed := map[string]bool{}
+	visible := make([]string, 0, len(posts))
+	for _, post := range posts {
+		id := post.ID
 		ok, seen := allowed[post.ChannelID]
 		if !seen {
 			ok = a.isChannelMember(ctx, post.ChannelID, actorID)

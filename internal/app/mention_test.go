@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"reflect"
 	"sort"
 	"testing"
@@ -117,5 +118,53 @@ func TestProcessMentions(t *testing.T) {
 				t.Errorf("got %v, want %v (%v)", ids, want, tc.want)
 			}
 		})
+	}
+}
+
+func TestNotifyMentionedUsers_CountsInBulk(t *testing.T) {
+	f := newFixture(t)
+	f.join(f.channel, "author", "alice", "bob", "carol")
+	root := f.post(f.channel, "carol", "root", 1)
+	// alice follows the thread; bob does not.
+	f.store.Threads.Seed(&model.Thread{PostID: root.ID, ChannelID: f.channel.ID, Participants: []string{}})
+	f.store.Threads.SeedMembership(&model.ThreadMembership{PostID: root.ID, UserID: f.user("alice").ID, Following: true})
+	f.store.Threads.SeedMembership(&model.ThreadMembership{PostID: root.ID, UserID: f.user("bob").ID, Following: false})
+
+	if _, err := f.app.CreatePost(t.Context(), &model.Post{
+		ChannelID: f.channel.ID, RootID: root.ID, UserID: f.user("author").ID, Content: "@alice @bob look",
+	}); err != nil {
+		t.Fatalf("CreatePost: %v", err)
+	}
+
+	for name, want := range map[string]int64{"alice": 1, "bob": 1, "carol": 0, "author": 0} {
+		m, _ := f.store.Channels.GetMember(t.Context(), f.channel.ID, f.user(name).ID)
+		if m.MentionCount != want {
+			t.Errorf("%s channel mentions = %d, want %d", name, m.MentionCount, want)
+		}
+	}
+	if m, _ := f.store.Threads.GetMembership(t.Context(), root.ID, f.user("alice").ID); m.UnreadMentionCount != 1 {
+		t.Errorf("follower's thread mentions = %d, want 1", m.UnreadMentionCount)
+	}
+	if m, _ := f.store.Threads.GetMembership(t.Context(), root.ID, f.user("bob").ID); m.UnreadMentionCount != 0 {
+		t.Errorf("non-follower's thread mentions = %d, want 0", m.UnreadMentionCount)
+	}
+}
+
+func TestProcessMentions_CapsDistinctNames(t *testing.T) {
+	f := newFixture(t)
+	var content string
+	for i := range maxMentionNames + 10 {
+		name := fmt.Sprintf("user%03d", i)
+		f.join(f.channel, name)
+		content += "@" + name + " "
+	}
+	f.join(f.channel, "author")
+
+	ids, err := f.app.processMentions(t.Context(), &model.Post{ChannelID: f.channel.ID, UserID: f.user("author").ID, Content: content})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != maxMentionNames {
+		t.Fatalf("resolved %d mentions, want the cap of %d", len(ids), maxMentionNames)
 	}
 }
