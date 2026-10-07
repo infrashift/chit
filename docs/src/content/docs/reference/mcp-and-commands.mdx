@@ -25,11 +25,12 @@ in one of two modes:
 | Mode | Selected when | Variables | How chitd sees it |
 |---|---|---|---|
 | OAuth2 client credentials (preferred) | `CHIT_MCP_OAUTH_CLIENT_ID` is set | `CHIT_MCP_OAUTH_CLIENT_ID`, `CHIT_MCP_OAUTH_CLIENT_SECRET` and `CHIT_MCP_OAUTH_TOKEN_URL` (all required); `CHIT_MCP_OAUTH_SCOPES` (default `chit:read chit:write`); `CHIT_MCP_OAUTH_AUDIENCE` (default `chit`) | Hydra issues a token; Oathkeeper introspects it and forwards `X-Client-Id`; chitd resolves the client to its machine actor. `CHIT_MCP_SERVER_URL` points at Oathkeeper. |
-| Trusted header (local development) | `CHIT_MCP_OAUTH_CLIENT_ID` is unset | `CHIT_MCP_AGENT_KRATOS_ID` (required); `CHIT_MCP_PROXY_SECRET` (must match `CHIT_TRUSTED_PROXY_SECRET` when chitd sets one) | `chit-mcp` sends the agent's Kratos identity ID as `X-User-Id` directly to chitd. |
+| Trusted header (local development) | `CHIT_MCP_AGENT_KRATOS_ID` is set | `CHIT_MCP_AGENT_KRATOS_ID` (required); `CHIT_MCP_PROXY_SECRET` (must match `CHIT_TRUSTED_PROXY_SECRET` when chitd sets one) | `chit-mcp` sends the agent's Kratos identity ID as `X-User-Id` directly to chitd. |
 
-`CHIT_MCP_SERVER_URL` defaults to `http://localhost:8065`. If neither
-`CHIT_MCP_OAUTH_CLIENT_ID` nor `CHIT_MCP_AGENT_KRATOS_ID` is set, or OAuth is
-selected without its secret or token URL, `chit-mcp` refuses to start. At
+`CHIT_MCP_SERVER_URL` defaults to `http://localhost:8065`. Exactly one
+mode may be configured: with both `CHIT_MCP_OAUTH_CLIENT_ID` and
+`CHIT_MCP_AGENT_KRATOS_ID` set, with neither, or with OAuth missing its secret
+or token URL, `chit-mcp` refuses to start. At
 startup it warns when the user it acts as is not `actor_type=agent`.
 
 ### Tools

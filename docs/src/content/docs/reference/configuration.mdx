@@ -122,9 +122,10 @@ still apply to whatever values are set.
 | `CHIT_MCP_AGENT_KRATOS_ID` | _(empty)_ | Kratos identity ID to act as, sent in `X-User-Id` (development) |
 | `CHIT_MCP_PROXY_SECRET` | _(empty)_ | Sent as `X-Proxy-Secret`; must match chitd's `CHIT_TRUSTED_PROXY_SECRET` |
 
-One authentication mode is required. When `CHIT_MCP_OAUTH_CLIENT_ID` is set,
-`CHIT_MCP_OAUTH_CLIENT_SECRET` and `CHIT_MCP_OAUTH_TOKEN_URL` are required too
-and the Kratos ID is ignored; otherwise `CHIT_MCP_AGENT_KRATOS_ID` is required.
+Exactly one authentication mode is required: `CHIT_MCP_OAUTH_CLIENT_ID`, with
+`CHIT_MCP_OAUTH_CLIENT_SECRET` and `CHIT_MCP_OAUTH_TOKEN_URL`, or
+`CHIT_MCP_AGENT_KRATOS_ID`. Setting both, or neither, stops chit-mcp at
+startup.
 
 ## chit-claude
 
@@ -154,9 +155,9 @@ The [headless Claude Code bridge](/chit/deployment/headless-claude/) uses the
 | `CHIT_CLAUDE_RUN_TIMEOUT` | `30m` | Per-run timeout |
 | `CHIT_CLAUDE_CONTEXT_WINDOW` | `200000` | Context size assumed for the footer's `context ~N%` estimate |
 
-The authentication rule is the same as chit-mcp's: OAuth2 when
-`CHIT_CLAUDE_OAUTH_CLIENT_ID` is set (secret and token URL then required),
-otherwise `CHIT_CLAUDE_AGENT_KRATOS_ID` is required.
+The authentication rule is the same as chit-mcp's: exactly one of
+`CHIT_CLAUDE_OAUTH_CLIENT_ID` (secret and token URL then required) and
+`CHIT_CLAUDE_AGENT_KRATOS_ID`.
 
 ## Notes
 

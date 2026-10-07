@@ -104,9 +104,9 @@ subscribes to it yet. WebSocket fan-out is single-node and in-process, and
 | `CHIT_MCP_AGENT_KRATOS_ID` | Kratos identity ID of the agent user chit-mcp acts as (e.g., the seeded `chit-agent`); development only |
 | `CHIT_MCP_PROXY_SECRET` | Must match `CHIT_TRUSTED_PROXY_SECRET` when chitd requires it |
 
-chit-mcp needs one authentication mode. With `CHIT_MCP_OAUTH_CLIENT_ID` set,
-the client secret and token URL are required and the Kratos ID is ignored;
-otherwise `CHIT_MCP_AGENT_KRATOS_ID` is required.
+chit-mcp needs exactly one authentication mode: `CHIT_MCP_OAUTH_CLIENT_ID`
+(with the client secret and token URL) or `CHIT_MCP_AGENT_KRATOS_ID`. Setting
+both, or neither, stops it at startup.
 
 ### Headless Claude bridge
 

@@ -199,10 +199,11 @@ make build-claude
 ```
 
 The full variable list is in `.env.example` (`CHIT_CLAUDE_*` block) and the
-[configuration reference](/chit/reference/configuration/#chit-claude). Setting
-`CHIT_CLAUDE_OAUTH_CLIENT_ID` selects OAuth2 mode, and the bridge then refuses
-to start without the client secret and token URL rather than falling back to
-the weaker mode; without it, `CHIT_CLAUDE_AGENT_KRATOS_ID` is required.
+[configuration reference](/chit/reference/configuration/#chit-claude). Set
+exactly one of `CHIT_CLAUDE_OAUTH_CLIENT_ID` (OAuth2 mode, which then also
+requires the client secret and token URL) and `CHIT_CLAUDE_AGENT_KRATOS_ID`.
+The bridge refuses to start with both, with neither, or with an incomplete
+OAuth2 block, rather than picking a mode for you.
 `CHIT_CLAUDE_CHANNELS` and `CHIT_CLAUDE_WORKDIR` are always required.
 
 Tokens are cached and renewed automatically — the bridge fetches a new one only

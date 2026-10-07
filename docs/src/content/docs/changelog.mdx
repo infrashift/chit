@@ -14,6 +14,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Behaviour changes an operator must act on or know about:
 
+- **`chit-mcp` and `chit-claude` take exactly one auth mode.** Setting both
+  `*_OAUTH_CLIENT_ID` and `*_AGENT_KRATOS_ID` now stops them at startup;
+  OAuth2 used to win silently. Unset the one you do not use.
 - **`actor_type` is required for machine actors.** Every entry in
   `CHIT_MACHINE_ACTORS` must set `actor_type` to `agent` or `bot`; an entry
   without it now fails boot, naming the client. Add it before upgrading.
@@ -148,6 +151,9 @@ Behaviour changes an operator must act on or know about:
 
 ### Changed
 
+- `chit-mcp` and `chit-claude` refuse to start when both an OAuth2 client
+  (`*_OAUTH_CLIENT_ID`) and a Kratos identity (`*_AGENT_KRATOS_ID`) are set.
+  OAuth2 used to win silently. Remove the one you do not mean.
 - Anyone may join an open team themselves (`POST /teams/{id}/members` with
   their own `user_id`). Adding someone else, or joining an invite-only team,
   still requires membership. The user added must exist (`400` otherwise).
