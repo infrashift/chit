@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/listwin"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 )
 
@@ -179,6 +180,7 @@ func (m *Model) Open(prefix string) {
 	m.input.Focus()
 	m.users = nil
 	m.posts = nil
+	m.cursor = 0
 	m.refresh()
 }
 
@@ -292,6 +294,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	m.input, cmd = m.input.Update(msg)
 	if m.input.Value() != prevValue {
 		prevMode := m.mode
+		// A new filter re-ranks the rows, so the best match is at the top;
+		// keeping the old index would point Enter at whatever landed there.
+		m.cursor = 0
 		m.refresh()
 		// Editing a submitted search invalidates its results.
 		if m.mode == ModeSearch {
@@ -518,11 +523,8 @@ func (m Model) maxVisibleRows() int {
 
 // windowStart is the index of the first visible row, keeping the cursor in view.
 func (m Model) windowStart() int {
-	n := m.maxVisibleRows()
-	if m.cursor < n {
-		return 0
-	}
-	return m.cursor - n + 1
+	start, _ := listwin.Window(m.cursor, len(m.rows), m.maxVisibleRows())
+	return start
 }
 
 // contextLine renders the second line of the palette body.

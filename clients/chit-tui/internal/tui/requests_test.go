@@ -3,6 +3,7 @@ package tui_test
 import (
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -97,5 +98,29 @@ func TestModel_TaggingWithAKnownTagDoesNotReloadTheTagList(t *testing.T) {
 
 	if client.allTagsFetches != 0 {
 		t.Errorf("tag list fetched %d times, want 0", client.allTagsFetches)
+	}
+}
+
+// A tag created from the open picker with Ctrl+N was applied, but the picker
+// went on listing the tags it opened with, so the new one never appeared.
+func TestModel_TagCreatedInThePickerAppearsInIt(t *testing.T) {
+	m := setupModel(t)
+	m, _ = step(t, m, tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	for _, r := range "fresh" {
+		m, _ = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+
+	// Ctrl+N asks the app to create the tag; the app's command creates and
+	// applies it, and its result comes back to the app.
+	m, cmd := step(t, m, tea.KeyMsg{Type: tea.KeyCtrlN})
+	for _, msg := range messagesOf(cmd) {
+		var next tea.Cmd
+		m, next = step(t, m, msg)
+		m = feed(t, m, next)
+	}
+
+	if !strings.Contains(viewOf(m), "[x] #fresh") {
+		t.Errorf("the new tag is not listed as applied:\n%s", viewOf(m))
 	}
 }

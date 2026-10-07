@@ -1,12 +1,14 @@
 package tagpicker
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/listwin"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 )
 
@@ -64,6 +66,21 @@ func (m *Model) Open(postID string, allTags []*model.Tag, appliedTags []*model.T
 	m.input.Reset()
 	m.input.Focus()
 	m.cursor = 0
+	m.filter()
+}
+
+// AddApplied lists a tag just created and applied to postID. The picker
+// otherwise goes on listing the tags it opened with, and the new one, made
+// from inside it with Ctrl+N, never appears.
+func (m *Model) AddApplied(postID string, tag *model.Tag) {
+	if !m.visible || postID != m.postID || tag == nil {
+		return
+	}
+	if !slices.ContainsFunc(m.allTags, func(t *model.Tag) bool { return t.ID == tag.ID }) {
+		// Clip so the append cannot write into the caller's backing array.
+		m.allTags = append(slices.Clip(m.allTags), tag)
+	}
+	m.postTags[tag.ID] = true
 	m.filter()
 }
 
@@ -147,6 +164,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if name != "" {
 				postID := m.postID
 				m.input.Reset()
+				m.filter()
 				return m, func() tea.Msg {
 					return TagCreateRequestMsg{Name: name, PostID: postID}
 				}
@@ -171,8 +189,8 @@ func (m Model) View() string {
 	items = append(items, m.input.View())
 	items = append(items, "")
 
-	maxItems := min(len(m.filtered), max((m.height/2)-4, 5))
-	for i := range maxItems {
+	start, end := listwin.Window(m.cursor, len(m.filtered), listwin.Rows(m.height))
+	for i := start; i < end; i++ {
 		tag := m.filtered[i]
 		check := "[ ]"
 		if m.postTags[tag.ID] {

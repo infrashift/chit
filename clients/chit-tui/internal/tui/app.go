@@ -1226,6 +1226,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.NewTag != nil && m.tagByName(msg.NewTag.Name) == nil {
 			m.allTags = append(m.allTags, msg.NewTag)
 		}
+		m.tagPicker.AddApplied(msg.PostID, msg.NewTag)
 		cmds = append(cmds, FetchPostTags(m.client, msg.PostID))
 		return m, tea.Batch(cmds...)
 

@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Pickers lost the cursor** — the theme, tag and member pickers drew only their first few rows, so moving down past them moved the cursor out of sight, and the thread inbox ran off the bottom of the screen. All of them now scroll to keep the cursor visible
+- **Palette chose the wrong row** — after moving down and then typing, Enter picked whatever landed at the old cursor index rather than the top match
+- **New tags missing from the tag picker** — a tag created with `Ctrl+N` was applied but did not appear in the open picker
 - **HTTPS servers got an insecure WebSocket** — `CHIT_WS_SCHEME` defaulted to `ws` whatever the server; it now defaults to `wss` for an `https://` server. A trailing `/` on the server URL no longer breaks every path
 - **Requests could hang forever** — API requests now time out after 30s
 - **Session file permissions** — an existing `session.json` kept whatever mode it had; it is now rewritten atomically, readable by the owner alone
