@@ -258,3 +258,43 @@ func TestSessionStore_TwoStoresIsolated(t *testing.T) {
 		t.Errorf("store2 Token = %q, want bob-tok", loaded2.Token)
 	}
 }
+
+// WriteFile only applies its mode when it creates the file, so a session
+// file that already existed world-readable kept the token readable by others.
+func TestSessionStore_SaveTightensAnExistingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.json")
+	if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := auth.NewSessionStore(path).Save(auth.StoredSession{Token: "secret"}); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o600 {
+		t.Errorf("mode = %o, want 600", mode)
+	}
+}
+
+// A write interrupted halfway used to leave a truncated file, which fails to
+// parse and signs the user out.
+func TestSessionStore_SaveLeavesNoTempFiles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.json")
+
+	if err := auth.NewSessionStore(path).Save(auth.StoredSession{Token: "secret"}); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("dir holds %d entries, want only the session file", len(entries))
+	}
+}

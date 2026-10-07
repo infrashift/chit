@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 // Config holds the application configuration.
@@ -20,6 +21,8 @@ type Config struct {
 
 // defaults
 const (
+	// DefaultWSScheme is the WebSocket scheme for a plain-HTTP server; an
+	// HTTPS server defaults to "wss".
 	DefaultWSScheme   = "ws"
 	DefaultAuthHeader = "X-Session-Token"
 )
@@ -33,10 +36,13 @@ const (
 func Load() (*Config, []string, error) {
 	file, warnings := LoadFile(FilePath())
 
+	// Paths are appended to the server URL, so a trailing slash doubled up.
+	serverURL := strings.TrimRight(firstNonEmpty(os.Getenv("CHIT_SERVER_URL"), file.ServerURL), "/")
+
 	cfg := &Config{
-		ServerURL:    firstNonEmpty(os.Getenv("CHIT_SERVER_URL"), file.ServerURL),
+		ServerURL:    serverURL,
 		SessionToken: os.Getenv("CHIT_SESSION_TOKEN"),
-		WSScheme:     firstNonEmpty(os.Getenv("CHIT_WS_SCHEME"), file.WSScheme, DefaultWSScheme),
+		WSScheme:     firstNonEmpty(os.Getenv("CHIT_WS_SCHEME"), file.WSScheme, defaultWSScheme(serverURL)),
 		ThemeName:    firstNonEmpty(os.Getenv("CHIT_THEME"), file.Theme),
 		ThemeDark:    file.ThemeDark,
 		ThemeLight:   file.ThemeLight,
@@ -50,6 +56,16 @@ func Load() (*Config, []string, error) {
 	}
 
 	return cfg, warnings, nil
+}
+
+// defaultWSScheme matches the WebSocket to the server's own security. A
+// fixed "ws" failed to dial an HTTPS server, or sent the session token in the
+// clear.
+func defaultWSScheme(serverURL string) string {
+	if strings.HasPrefix(strings.ToLower(serverURL), "https://") {
+		return "wss"
+	}
+	return DefaultWSScheme
 }
 
 // firstNonEmpty returns the first value that is set, which is how each setting

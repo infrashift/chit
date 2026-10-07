@@ -57,7 +57,38 @@ func (ss *SessionStore) Save(s StoredSession) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(p, data, filePermissions)
+	return writeFileAtomic(p, data)
+}
+
+// writeFileAtomic replaces path with data, readable by the owner alone.
+// WriteFile applies its mode only when it creates a file, so an existing
+// session file kept whatever looser mode it had, token and all; and a write
+// interrupted halfway left a truncated file that no longer parsed.
+func writeFileAtomic(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".session-*.json")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	if err := tmp.Chmod(filePermissions); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(name)
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(name)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(name)
+		return err
+	}
+	if err := os.Rename(name, path); err != nil {
+		_ = os.Remove(name)
+		return err
+	}
+	return nil
 }
 
 // Load reads a stored session from disk.

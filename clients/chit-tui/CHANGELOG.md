@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **HTTPS servers got an insecure WebSocket** — `CHIT_WS_SCHEME` defaulted to `ws` whatever the server; it now defaults to `wss` for an `https://` server. A trailing `/` on the server URL no longer breaks every path
+- **Requests could hang forever** — API requests now time out after 30s
+- **Session file permissions** — an existing `session.json` kept whatever mode it had; it is now rewritten atomically, readable by the owner alone
 - **Slow channel switches and thread opens** — every channel switch and thread open or close re-rendered the whole loaded history through glamour, though the pane size had not changed. Opening and closing a thread with 300 posts loaded took 113ms; it now takes about 4ms. Tags for a page of history are applied in one redraw instead of one per post, and moving the cursor no longer re-strips the whole history
 - **Crash when searching** — a search highlight could crash the client on text containing characters that change length when lowercased (such as the Kelvin sign), and the post under the cursor was drawn without the highlight
 - **Repeated requests** — authors the server does not return (deleted users) were asked for on every post and page load; DM member rows were refetched for every conversation on each DM event; the whole tag list was refetched after every tagging

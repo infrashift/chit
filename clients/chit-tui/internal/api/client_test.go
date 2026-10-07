@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/infrashift/chit/clients/chit-tui/internal/api"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
@@ -591,5 +592,37 @@ func TestUpdateMe_ErrorResponse(t *testing.T) {
 
 	if _, err := client.UpdateMe(context.Background(), &model.User{Username: "bob"}); err == nil {
 		t.Fatal("expected an error for a taken username")
+	}
+}
+
+// With no timeout, a server that accepted a request and never answered left
+// the command waiting forever: "Loading messages…" never cleared, and paging
+// stayed locked for the channel.
+func TestClient_GivesUpOnAServerThatNeverAnswers(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer srv.Close()
+	defer close(release)
+
+	c := api.NewClient(srv.URL, "token")
+	if api.DefaultTimeout <= 0 {
+		t.Fatal("no default timeout")
+	}
+	api.SetTimeout(c, 50*time.Millisecond)
+
+	done := make(chan error, 1)
+	go func() { _, err := c.GetMe(context.Background()); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a request that never got an answer succeeded")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the request never gave up")
 	}
 }

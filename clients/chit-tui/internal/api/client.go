@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 )
@@ -60,11 +61,16 @@ type httpClient struct {
 	http    *http.Client
 }
 
+// DefaultTimeout bounds every request. Without one, a server that accepted a
+// request and never answered left its command waiting forever.
+const DefaultTimeout = 30 * time.Second
+
 // NewClient creates a new ChitClient.
 func NewClient(baseURL, token string) ChitClient {
 	return &httpClient{
 		baseURL: baseURL + "/api/v1",
 		http: &http.Client{
+			Timeout:   DefaultTimeout,
 			Transport: newAuthTransport(nil, func() string { return token }),
 		},
 	}
@@ -75,6 +81,7 @@ func NewClientWithHeader(baseURL, token, headerName string) ChitClient {
 	return &httpClient{
 		baseURL: baseURL + "/api/v1",
 		http: &http.Client{
+			Timeout:   DefaultTimeout,
 			Transport: newAuthTransportWithHeader(nil, func() string { return token }, headerName),
 		},
 	}
@@ -85,6 +92,7 @@ func NewClientWithTokenFn(baseURL string, tokenFn func() string, headerName stri
 	return &httpClient{
 		baseURL: baseURL + "/api/v1",
 		http: &http.Client{
+			Timeout:   DefaultTimeout,
 			Transport: newAuthTransportWithHeader(nil, tokenFn, headerName),
 		},
 	}
@@ -145,10 +153,15 @@ func (c *httpClient) do(req *http.Request, out any) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		// A body left partly unread closes the connection rather than
+		// returning it for reuse.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+		_ = resp.Body.Close()
+	}()
 	if resp.StatusCode >= 400 {
 		return parseErrorResponse(resp)
 	}
-	defer func() { _ = resp.Body.Close() }()
 	if out == nil {
 		return nil
 	}
