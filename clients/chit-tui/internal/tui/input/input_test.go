@@ -292,3 +292,36 @@ func TestInput_SlashDoesNotTriggerAt(t *testing.T) {
 		t.Errorf("value = %q", m.Value())
 	}
 }
+
+// The replacement sliced the line by byte at a character column, so text
+// with an accented letter before the @ was cut mid-character.
+func TestInput_ReplaceAtMentionAfterNonASCII(t *testing.T) {
+	m := input.New(testStyles())
+	m.SetSize(80, 5)
+	m.Focus()
+	for _, ch := range "héllo @al" {
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ch}})
+	}
+
+	m.ReplaceAtMention(6, "alice")
+
+	if got := m.Value(); got != "héllo @alice " {
+		t.Errorf("value = %q, want %q", got, "héllo @alice ")
+	}
+}
+
+// Replacing on a later line must leave the cursor after the inserted name,
+// so typing carries on from there.
+func TestInput_ReplaceAtMentionOnASecondLine(t *testing.T) {
+	m := input.New(testStyles())
+	m.SetSize(80, 5)
+	m.Focus()
+	m.SetValue("first line\nsay @al")
+
+	m.ReplaceAtMention(4, "alice")
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'!'}})
+
+	if got := m.Value(); got != "first line\nsay @alice !" {
+		t.Errorf("value = %q", got)
+	}
+}

@@ -136,14 +136,7 @@ func (m *Model) detectAtTrigger() tea.Cmd {
 		return nil
 	}
 	currentLine := lines[row]
-	col := m.textarea.LineInfo().CharOffset
-
-	prefix, startCol, active := mention.ExtractMentionPrefix(currentLine, col)
-
-	// Don't trigger for slash commands
-	if active && startCol == 0 && len(currentLine) > 0 && currentLine[0] == '/' {
-		active = false
-	}
+	prefix, startCol, active := mention.ExtractMentionPrefix(currentLine, m.cursorCol())
 
 	if active {
 		m.prevAtActive = true
@@ -157,33 +150,22 @@ func (m *Model) detectAtTrigger() tea.Cmd {
 }
 
 // ReplaceAtMention replaces text from @ at startCol through the current cursor
-// position with @username followed by a trailing space.
+// position with @username followed by a trailing space. startCol counts
+// characters. The typed prefix is deleted at the cursor and the name
+// inserted there, so the cursor ends up after it on whichever line it is.
 func (m *Model) ReplaceAtMention(startCol int, username string) {
-	val := m.textarea.Value()
-	lines := strings.Split(val, "\n")
-	row := m.textarea.Line()
-	if row < 0 || row >= len(lines) {
-		return
+	for range max(m.cursorCol()-startCol, 0) {
+		m.textarea, _ = m.textarea.Update(tea.KeyMsg{Type: tea.KeyBackspace})
 	}
-	col := m.textarea.LineInfo().CharOffset
+	m.textarea.InsertString("@" + username + " ")
+}
 
-	line := lines[row]
-	replacement := "@" + username + " "
-	end := col
-	if end > len(line) {
-		end = len(line)
-	}
-	newLine := line[:startCol] + replacement + line[end:]
-	lines[row] = newLine
-	newVal := strings.Join(lines, "\n")
-	m.textarea.SetValue(newVal)
-
-	// Position cursor after the replacement
-	newCol := startCol + len(replacement)
-	// Move cursor: set value resets cursor to end, use CursorEnd or navigate
-	// SetValue puts cursor at end, which is fine for single-line common case.
-	// For multi-line we'd need more, but this is sufficient.
-	_ = newCol
+// cursorCol is the cursor's position in its line, in characters.
+// LineInfo's CharOffset is a display width within the wrapped row, so it
+// is wrong after wide characters and on a wrapped line.
+func (m Model) cursorCol() int {
+	li := m.textarea.LineInfo()
+	return li.StartColumn + li.ColumnOffset
 }
 
 // View renders the input area.

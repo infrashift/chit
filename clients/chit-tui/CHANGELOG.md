@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **@-mentions after accented text** — completing a mention on a line with a non-ASCII character before the `@` cut the line in the wrong place. An email address no longer opens the mention popup, and `@bob.` at the end of a sentence is highlighted as a mention of bob
 - **Pickers lost the cursor** — the theme, tag and member pickers drew only their first few rows, so moving down past them moved the cursor out of sight, and the thread inbox ran off the bottom of the screen. All of them now scroll to keep the cursor visible
 - **Palette chose the wrong row** — after moving down and then typing, Enter picked whatever landed at the old cursor index rather than the top match
 - **New tags missing from the tag picker** — a tag created with `Ctrl+N` was applied but did not appear in the open picker
