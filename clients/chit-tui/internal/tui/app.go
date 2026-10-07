@@ -72,9 +72,11 @@ const (
 
 // Model is the root TUI model.
 type Model struct {
-	cfg                   *config.Config
-	client                api.ChitClient
-	wsClient              ws.WSClient
+	cfg      *config.Config
+	client   api.ChitClient
+	wsClient ws.WSClient
+	// wsListening is set once the event and state listeners are running.
+	wsListening           bool
 	viewport              viewport.Model
 	input                 input.Model
 	thread                thread.Model
@@ -291,10 +293,7 @@ func (m Model) initRunning() tea.Cmd {
 	}
 	if m.wsClient != nil {
 		cmds = append(cmds, func() tea.Msg {
-			if err := m.wsClient.Connect(); err != nil {
-				return ErrMsg{Err: err}
-			}
-			return WSConnectedMsg{}
+			return WSConnectedMsg{Err: m.wsClient.Connect()}
 		})
 	}
 	return tea.Batch(cmds...)
@@ -634,7 +633,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if msg.Unauthorized {
 			m.wsConnected = false
-			return m.handleAuthExpired()
+			updated, cmd := m.handleAuthExpired()
+			return updated, tea.Batch(append(cmds, cmd)...)
 		}
 
 		wasConnected := m.wsConnected
@@ -667,10 +667,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case WSConnectedMsg:
-		m.wsConnected = true
+		if errors.Is(msg.Err, ws.ErrUnauthorized) {
+			return m.handleAuthExpired()
+		}
+		m.wsConnected = msg.Err == nil
 		// Both listeners start here: one for events, one for transport
 		// state. Returning only the first is what left disconnects silent.
-		return m, tea.Batch(ListenWebSocket(m.wsClient), ListenWSState(m.wsClient))
+		// The client's channels outlive a sign-out, so the listeners from
+		// the first session keep serving every later one; starting another
+		// pair on each sign-in would leave several reading the same stream.
+		if !m.wsListening {
+			m.wsListening = true
+			cmds = append(cmds, ListenWebSocket(m.wsClient), ListenWSState(m.wsClient))
+		}
+		if msg.Err != nil {
+			// The client keeps redialing, and WSStateMsg reports when it
+			// gets through.
+			cmds = append(cmds, m.setError(fmt.Errorf("real-time updates are offline, retrying: %w", msg.Err)))
+		}
+		return m, tea.Batch(cmds...)
 
 	case WebSocketEventMsg:
 		return m.handleWSEvent(msg)
@@ -2021,6 +2036,16 @@ func (m Model) usernameMap() map[string]string {
 }
 
 func (m Model) updateLogin(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// The listeners are one chain each, re-armed by every message they
+	// deliver. Whatever arrives while signed out is stale, but dropping it
+	// without re-arming would leave the next session deaf.
+	switch msg.(type) {
+	case WebSocketEventMsg:
+		return m, ListenWebSocket(m.wsClient)
+	case WSStateMsg:
+		return m, ListenWSState(m.wsClient)
+	}
+
 	// Ctrl+C quits from login screen too.
 	if keyMsg, ok := msg.(tea.KeyMsg); ok && key.Matches(keyMsg, m.keys.Quit) {
 		return m, tea.Quit

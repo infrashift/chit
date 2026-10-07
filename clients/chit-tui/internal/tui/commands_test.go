@@ -202,6 +202,9 @@ func (m *mockClient) RemoveChannelMember(_ context.Context, _, _ string) error {
 type mockWSClient struct {
 	events chan model.WebSocketEvent
 	state  chan ws.ConnState
+	// closes counts Close calls. Like the real client, the channels outlive
+	// Close, so listeners from one session serve the next.
+	closes int
 }
 
 func newMockWSClient() *mockWSClient {
@@ -212,7 +215,7 @@ func newMockWSClient() *mockWSClient {
 }
 
 func (m *mockWSClient) Connect() error                      { return nil }
-func (m *mockWSClient) Close() error                        { close(m.events); return nil }
+func (m *mockWSClient) Close() error                        { m.closes++; return nil }
 func (m *mockWSClient) Events() <-chan model.WebSocketEvent { return m.events }
 func (m *mockWSClient) State() <-chan ws.ConnState          { return m.state }
 func (m *mockWSClient) Send(_ model.WebSocketMessage) error { return nil }

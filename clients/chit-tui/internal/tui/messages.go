@@ -77,8 +77,12 @@ type ChannelMembersLoadedMsg struct {
 	Err       error
 }
 
-// WSConnectedMsg signals that the WebSocket connection succeeded.
-type WSConnectedMsg struct{}
+// WSConnectedMsg reports how the initial WebSocket dial went. A non-nil Err
+// that is not ws.ErrUnauthorized means the dial failed but the client is
+// retrying in the background; later transitions arrive as WSStateMsg.
+type WSConnectedMsg struct {
+	Err error
+}
 
 // WSStateMsg reports a WebSocket connect or disconnect. It is distinct from
 // WSConnectedMsg, which only ever meant "the initial dial returned".

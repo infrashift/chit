@@ -24,6 +24,7 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/viewport"
+	"github.com/infrashift/chit/clients/chit-tui/internal/ws"
 )
 
 func testModel() tui.Model {
@@ -2027,6 +2028,106 @@ func TestModel_SearchResultOutsideHistoryReportsError(t *testing.T) {
 	}
 	if !strings.Contains(testutil.StripANSI(m.View()), "older than the loaded history") {
 		t.Errorf("no explanation shown:\n%s", testutil.StripANSI(m.View()))
+	}
+}
+
+// setupModelWithWS is setupModel with a WebSocket client attached.
+func setupModelWithWS(t *testing.T) (tui.Model, *mockWSClient) {
+	t.Helper()
+	wsc := newMockWSClient()
+	cfg := &config.Config{ServerURL: "http://localhost:8065"}
+	m := tui.NewModel(cfg, &mockClient{}, wsc, styles.New(theme.TokyoNight()), nil, nil, nil)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = updated.(tui.Model)
+	updated, _ = m.Update(tui.UserLoadedMsg{User: &model.User{ID: "u1", Username: "alice"}})
+	return updated.(tui.Model), wsc
+}
+
+// The client's channels outlive a sign-out, so the first session's listeners
+// serve every later one. Starting a pair per sign-in stacked readers on the
+// same stream.
+func TestModel_WSListenersStartOnce(t *testing.T) {
+	m, _ := setupModelWithWS(t)
+
+	updated, cmd := m.Update(tui.WSConnectedMsg{})
+	if cmd == nil {
+		t.Fatal("the first connect started no listeners")
+	}
+	m = updated.(tui.Model)
+
+	if _, cmd := m.Update(tui.WSConnectedMsg{}); cmd != nil {
+		t.Error("a second connect started another pair of listeners")
+	}
+}
+
+// A failed first dial used to be a toast and nothing more: the client never
+// retried, and nobody listened for it to recover.
+func TestModel_WSFirstDialFailureKeepsListening(t *testing.T) {
+	m, _ := setupModelWithWS(t)
+
+	updated, cmd := m.Update(tui.WSConnectedMsg{Err: errors.New("connection refused")})
+	m = updated.(tui.Model)
+	if cmd == nil {
+		t.Fatal("no listeners after a failed first dial")
+	}
+	if view := testutil.StripANSI(m.View()); !strings.Contains(view, "offline, retrying") {
+		t.Errorf("failed dial not explained:\n%s", view)
+	}
+
+	updated, _ = m.Update(tui.WSStateMsg{Connected: true})
+	m = updated.(tui.Model)
+	if view := testutil.StripANSI(m.View()); !strings.Contains(view, "reconnected") {
+		t.Errorf("recovery not reported:\n%s", view)
+	}
+}
+
+func TestModel_WSFirstDialUnauthorizedPromptsLogin(t *testing.T) {
+	m, wsc := setupModelWithWS(t)
+
+	updated, _ := m.Update(tui.WSConnectedMsg{Err: fmt.Errorf("ws: %w (HTTP 401)", ws.ErrUnauthorized)})
+	m = updated.(tui.Model)
+	if view := testutil.StripANSI(m.View()); !strings.Contains(view, "Chit Login") {
+		t.Errorf("rejected credentials did not prompt sign-in:\n%s", view)
+	}
+	if wsc.closes != 1 {
+		t.Errorf("closes = %d, want the client closed once", wsc.closes)
+	}
+}
+
+// Expiry reported by the socket used to drop the re-armed state listener, so
+// the next session never heard about a disconnect.
+func TestModel_WSUnauthorizedKeepsTheStateListener(t *testing.T) {
+	m, _ := setupModelWithWS(t)
+	updated, _ := m.Update(tui.WSConnectedMsg{})
+	m = updated.(tui.Model)
+
+	updated, cmd := m.Update(tui.WSStateMsg{Unauthorized: true})
+	m = updated.(tui.Model)
+	if !strings.Contains(testutil.StripANSI(m.View()), "Chit Login") {
+		t.Error("socket expiry did not prompt sign-in")
+	}
+	if cmd == nil {
+		t.Error("the state listener was not re-armed")
+	}
+}
+
+// Messages from the listeners that land while signed out are stale, but each
+// one must re-arm its listener or the next session is deaf.
+func TestModel_WSListenersRearmWhileSignedOut(t *testing.T) {
+	m, _ := setupModelWithWS(t)
+	updated, _ := m.Update(tui.WSConnectedMsg{})
+	m = updated.(tui.Model)
+	updated, _ = m.Update(input.SlashTriggerMsg{Input: "/logout"})
+	m = updated.(tui.Model)
+	if !strings.Contains(testutil.StripANSI(m.View()), "Chit Login") {
+		t.Fatal("not signed out")
+	}
+
+	if _, cmd := m.Update(tui.WebSocketEventMsg{}); cmd == nil {
+		t.Error("an event while signed out stopped the event listener")
+	}
+	if _, cmd := m.Update(tui.WSStateMsg{}); cmd == nil {
+		t.Error("a transition while signed out stopped the state listener")
 	}
 }
 

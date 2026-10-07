@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Real-time updates after signing back in** — signing out closed the WebSocket client for good: the next session showed "connected" but received nothing, and a second sign-out crashed the client. Each sign-in now starts a fresh session on the same listeners
+- **Dead links that looked alive** — a connection left half-open by sleep or a NAT timeout stayed "connected" forever. The client now pings, treats a minute of silence as a drop, and reconnects
+- **Busy redial after a long outage** — the reconnect delay overflowed to a negative wait after about 15 minutes and the client redialed in a tight loop. The delay now stays capped at 30s, with jitter
+- **No real-time updates when the server was down at launch** — a failed first connection was never retried. It now retries in the background ("offline, retrying"), and rejected credentials prompt sign-in
+- **One resync per overflow** — a full event buffer reported every dropped event, setting off a history reload for each
 - **No post selection in channels that started empty** — the history cursor stayed unset when posts only ever arrived via WebSocket appends, so `Enter` (open thread) and `t` (tag picker) silently did nothing until the channel was reloaded; the first appended post is now selected
 - **Focus loss after closing overlays** — Esc-closing the tag picker, channel creator, member picker, or skin picker left keyboard focus on the closed overlay (keys went nowhere until `Tab`/`Ctrl+K`); every overlay now restores focus to a live component on close
 - **Member picker Esc abandoned the pending channel** — dismissing the member picker after submitting a private channel silently dropped it; the channel is now created without extra members (Esc only skips member selection)
