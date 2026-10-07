@@ -135,3 +135,18 @@ func TestTeamMember_PreSave(t *testing.T) {
 		t.Fatal("expected existing Roles to be preserved")
 	}
 }
+
+func TestTeamMember_IsTeamAdmin(t *testing.T) {
+	cases := map[string]bool{
+		"team_admin":           true,
+		"team_user team_admin": true,
+		"team_user":            false,
+		"":                     false,
+		"team_administrator":   false,
+	}
+	for roles, want := range cases {
+		if got := (&TeamMember{Roles: roles}).IsTeamAdmin(); got != want {
+			t.Errorf("IsTeamAdmin(%q) = %v, want %v", roles, got, want)
+		}
+	}
+}

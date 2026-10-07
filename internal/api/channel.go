@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -13,14 +12,29 @@ import (
 func createChannel(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
-		var channel model.Channel
-		if err := json.NewDecoder(r.Body).Decode(&channel); err != nil {
-			WriteError(w, model.NewBadRequestError("createChannel", "invalid request body"))
+		// Only the fields a client may choose. Decoding straight into
+		// model.Channel let a caller set id, create_at or delete_at.
+		var body struct {
+			TeamID      string `json:"team_id"`
+			Name        string `json:"name"`
+			DisplayName string `json:"display_name"`
+			Type        string `json:"type"`
+			Header      string `json:"header"`
+			Purpose     string `json:"purpose"`
+		}
+		if !decodeBody(w, r, &body, "createChannel") {
 			return
 		}
-		channel.CreatorID = user.ID
 
-		saved, err := a.CreateChannel(r.Context(), &channel)
+		saved, err := a.CreateChannel(r.Context(), &model.Channel{
+			TeamID:      body.TeamID,
+			Name:        body.Name,
+			DisplayName: body.DisplayName,
+			Type:        body.Type,
+			Header:      body.Header,
+			Purpose:     body.Purpose,
+			CreatorID:   user.ID,
+		})
 		if err != nil {
 			WriteAppError(w, "createChannel", err)
 			return
@@ -32,10 +46,9 @@ func createChannel(a *app.App) http.HandlerFunc {
 
 func getChannel(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := chi.URLParam(r, "id")
-		channel, err := a.GetChannel(r.Context(), id)
+		channel, err := a.GetChannel(r.Context(), chi.URLParam(r, "id"), ContextGetUser(r).ID)
 		if err != nil {
-			WriteError(w, model.NewNotFoundError("getChannel", id))
+			WriteAppError(w, "getChannel", err)
 			return
 		}
 		WriteJSON(w, http.StatusOK, channel)
@@ -44,35 +57,25 @@ func getChannel(a *app.App) http.HandlerFunc {
 
 func updateChannel(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user := ContextGetUser(r)
-		id := chi.URLParam(r, "id")
-
-		existing, err := a.GetChannel(r.Context(), id)
-		if err != nil {
-			WriteAppError(w, "updateChannel", err)
+		var body struct {
+			Name        *string `json:"name"`
+			DisplayName *string `json:"display_name"`
+			Header      *string `json:"header"`
+			Purpose     *string `json:"purpose"`
+		}
+		if !decodeBody(w, r, &body, "updateChannel") {
+			return
+		}
+		if body.Name != nil {
+			WriteError(w, model.NewBadRequestError("updateChannel", "channel name cannot be changed"))
 			return
 		}
 
-		var patch model.Channel
-		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
-			WriteError(w, model.NewBadRequestError("updateChannel", "invalid request body"))
-			return
-		}
-
-		if patch.DisplayName != "" {
-			existing.DisplayName = patch.DisplayName
-		}
-		if patch.Header != "" {
-			existing.Header = patch.Header
-		}
-		if patch.Purpose != "" {
-			existing.Purpose = patch.Purpose
-		}
-		if patch.Name != "" {
-			existing.Name = patch.Name
-		}
-
-		updated, err := a.UpdateChannel(r.Context(), existing, user.ID)
+		updated, err := a.UpdateChannel(r.Context(), chi.URLParam(r, "id"), app.ChannelPatch{
+			DisplayName: body.DisplayName,
+			Header:      body.Header,
+			Purpose:     body.Purpose,
+		}, ContextGetUser(r).ID)
 		if err != nil {
 			WriteAppError(w, "updateChannel", err)
 			return
@@ -90,7 +93,7 @@ func deleteChannel(a *app.App) http.HandlerFunc {
 			WriteAppError(w, "deleteChannel", err)
 			return
 		}
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
+		writeOK(w)
 	}
 }
 
@@ -106,7 +109,7 @@ func getChannelsForTeam(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		WriteJSON(w, http.StatusOK, channels)
+		writeList(w, channels)
 	}
 }
 
@@ -117,11 +120,11 @@ func getMyChannels(a *app.App) http.HandlerFunc {
 
 		channels, err := a.GetChannelsForUser(r.Context(), user.ID, teamID)
 		if err != nil {
-			WriteError(w, model.NewInternalError("getMyChannels", err))
+			WriteAppError(w, "getMyChannels", err)
 			return
 		}
 
-		WriteJSON(w, http.StatusOK, channels)
+		writeList(w, channels)
 	}
 }
 
@@ -152,15 +155,11 @@ func getMyDirectChannels(a *app.App) http.HandlerFunc {
 
 		channels, err := a.GetDirectChannelsForUser(r.Context(), user.ID)
 		if err != nil {
-			WriteError(w, model.NewInternalError("getMyDirectChannels", err))
+			WriteAppError(w, "getMyDirectChannels", err)
 			return
 		}
 
-		if channels == nil {
-			channels = []*model.Channel{}
-		}
-
-		WriteJSON(w, http.StatusOK, channels)
+		writeList(w, channels)
 	}
 }
 
@@ -168,8 +167,7 @@ func createDirectChannel(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
 		var userIDs []string
-		if err := json.NewDecoder(r.Body).Decode(&userIDs); err != nil {
-			WriteError(w, model.NewBadRequestError("createDirectChannel", "invalid request body"))
+		if !decodeBody(w, r, &userIDs, "createDirectChannel") {
 			return
 		}
 		if len(userIDs) != 2 {
@@ -191,8 +189,7 @@ func createGroupChannel(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
 		var userIDs []string
-		if err := json.NewDecoder(r.Body).Decode(&userIDs); err != nil {
-			WriteError(w, model.NewBadRequestError("createGroupChannel", "invalid request body"))
+		if !decodeBody(w, r, &userIDs, "createGroupChannel") {
 			return
 		}
 
@@ -213,8 +210,7 @@ func addChannelMember(a *app.App) http.HandlerFunc {
 		var body struct {
 			UserID string `json:"user_id"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			WriteError(w, model.NewBadRequestError("addChannelMember", "invalid request body"))
+		if !decodeBody(w, r, &body, "addChannelMember") {
 			return
 		}
 
@@ -239,7 +235,7 @@ func removeChannelMember(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
+		writeOK(w)
 	}
 }
 
@@ -255,7 +251,7 @@ func getChannelMembers(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		WriteJSON(w, http.StatusOK, members)
+		writeList(w, members)
 	}
 }
 
@@ -269,6 +265,6 @@ func viewChannel(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
+		writeOK(w)
 	}
 }

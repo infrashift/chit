@@ -6,11 +6,23 @@ description: Environment variable configuration for the Chit server.
 Chit uses [koanf](https://github.com/knadh/koanf) to load configuration from
 environment variables. All variables use the `CHIT_` prefix.
 
-Copy the example file to get started:
+chitd reads only its environment. To run it locally, copy the example file;
+`make run` sources `.env` into the environment before starting chitd:
 
 ```bash
 cp .env.example .env
+make run
 ```
+
+`make run` sources the file with `sh`, so quote any value that contains
+spaces or JSON, and a variable set in `.env` overrides the same one in your
+shell. chitd validates its configuration at startup and exits listing every
+invalid setting at once; see
+[Validation](/chit/reference/configuration/#validation).
+
+The `make kube-up` stack already runs chitd on `:8065`, configured in
+`deploy/chit.kube.yml`. Stop that container before `make run`; see
+[Quick Start](/chit/getting-started/quick-start/#develop-against-a-local-chitd).
 
 ## Variable Groups
 
@@ -18,18 +30,19 @@ cp .env.example .env
 
 | Variable | Description |
 |---|---|
-| `CHIT_LISTEN_ADDRESS` | Address and port to bind (e.g., `:8065`) |
-| `CHIT_ALLOWED_ORIGINS` | Comma-separated CORS/WebSocket origin allowlist; default `*` (dev only, logs a warning) |
+| `CHIT_LISTEN_ADDRESS` | Address and port to bind (default `:8065`) |
+| `CHIT_ALLOWED_ORIGINS` | Comma-separated CORS/WebSocket origin allowlist; default `*` (dev only, logs a warning). Empty allows no browser origin. |
 | `CHIT_LOG_LEVEL` | Log verbosity: `debug`, `info`, `warn`, `error` |
 | `CHIT_LOG_FORMAT` | Log output format: `json` or `text` |
+| `CHIT_ENABLE_OPENAPI_VALIDATION` | Validate requests against `api/openapi.yaml` (default `true`) |
 
 ### Database
 
 | Variable | Description |
 |---|---|
-| `CHIT_DATABASE_URL` | PostgreSQL connection string |
-| `CHIT_DB_MAX_OPEN_CONN` | Maximum open connections |
-| `CHIT_DB_MAX_IDLE_CONN` | Maximum idle connections |
+| `CHIT_DATABASE_URL` | PostgreSQL connection string. Required by chitd, no default. |
+| `CHIT_DB_MAX_OPEN_CONN` | Maximum open connections (default `25`) |
+| `CHIT_DB_MAX_IDLE_CONN` | Maximum idle connections (default `10`, at most the open limit) |
 
 ### Pub/Sub
 
@@ -39,18 +52,19 @@ cp .env.example .env
 | `CHIT_NATS_URL` | NATS server URL (when using NATS backend) |
 
 :::note
-The pub/sub layer currently serves the MCP agent event feed (thin event
-envelopes on the `chit_events` topic, polled by `chit-mcp`). WebSocket
-fan-out is single-node — chitd does not yet consume the topic for
-multi-node delivery.
+chitd publishes thin event envelopes on the `chit_events` topic, but nothing
+subscribes to it yet. WebSocket fan-out is single-node and in-process, and
+`chit-mcp` gets its events from chitd's WebSocket.
 :::
 
 ### Ory Stack
 
 | Variable | Description |
 |---|---|
-| `CHIT_TRUSTED_PROXY_HEADER` | Header containing the authenticated user ID |
-| `CHIT_TRUSTED_PROXY_SECRET` | When set, `X-User-Id` is only trusted if the request carries a matching `X-Proxy-Secret` header (injected by Oathkeeper); recommended in production |
+| `CHIT_TRUSTED_PROXY_HEADER` | Header containing a person's Kratos identity ID (default `X-User-Id`) |
+| `CHIT_TRUSTED_CLIENT_HEADER` | Header containing a machine actor's OAuth2 client ID (default `X-Client-Id`); checked first |
+| `CHIT_TRUSTED_PROXY_SECRET` | When set, the identity headers are only trusted if the request carries a matching `X-Proxy-Secret` header (injected by Oathkeeper); recommended in production |
+| `CHIT_MACHINE_ACTORS` | JSON array of machine actors (agents, bots) to create or update at boot; see [Machine actors](/chit/reference/configuration/#machine-actors) |
 | `CHIT_KRATOS_ADMIN_URL` | Kratos admin API URL |
 | `CHIT_KETO_READ_URL` | Keto read API URL |
 | `CHIT_KETO_WRITE_URL` | Keto write API URL |
@@ -59,9 +73,9 @@ multi-node delivery.
 
 | Variable | Description |
 |---|---|
-| `CHIT_ZINCSEARCH_URL` | ZincSearch server URL |
-| `CHIT_ZINCSEARCH_USER` | ZincSearch username |
-| `CHIT_ZINCSEARCH_PASSWORD` | ZincSearch password |
+| `CHIT_ZINCSEARCH_URL` | ZincSearch server URL. Default empty: search uses SQL and no indexer runs. |
+| `CHIT_ZINCSEARCH_USER` | ZincSearch username (default `admin`) |
+| `CHIT_ZINCSEARCH_PASSWORD` | ZincSearch password (default empty) |
 
 ### WebSocket
 
@@ -81,23 +95,42 @@ multi-node delivery.
 
 | Variable | Description |
 |---|---|
-| `CHIT_MCP_SERVER_URL` | chitd base URL the MCP server connects to (default `http://localhost:8065`) |
-| `CHIT_MCP_AGENT_KRATOS_ID` | Kratos identity ID of the agent user chit-mcp acts as (e.g., the seeded `chit-agent`) |
+| `CHIT_MCP_SERVER_URL` | Base URL chit-mcp connects to: Oathkeeper (`:4455`) in OAuth2 mode, chitd in Kratos-ID mode (default `http://localhost:8065`) |
+| `CHIT_MCP_OAUTH_TOKEN_URL` | Hydra token endpoint, e.g. `http://localhost:4444/oauth2/token` |
+| `CHIT_MCP_OAUTH_CLIENT_ID` | Hydra client ID; setting it selects OAuth2 mode |
+| `CHIT_MCP_OAUTH_CLIENT_SECRET` | Hydra client secret |
+| `CHIT_MCP_OAUTH_SCOPES` | Space-separated scopes (default `chit:read chit:write`) |
+| `CHIT_MCP_OAUTH_AUDIENCE` | Token audience (default `chit`) |
+| `CHIT_MCP_AGENT_KRATOS_ID` | Kratos identity ID of the agent user chit-mcp acts as (e.g., the seeded `chit-agent`); development only |
 | `CHIT_MCP_PROXY_SECRET` | Must match `CHIT_TRUSTED_PROXY_SECRET` when chitd requires it |
+
+chit-mcp needs exactly one authentication mode: `CHIT_MCP_OAUTH_CLIENT_ID`
+(with the client secret and token URL) or `CHIT_MCP_AGENT_KRATOS_ID`. Setting
+both, or neither, stops it at startup.
+
+### Headless Claude bridge
+
+`chit-claude` reads `CHIT_CLAUDE_`-prefixed variables: the same connection and
+authentication settings as chit-mcp (`SERVER_URL`, `OAUTH_*`,
+`AGENT_KRATOS_ID`, `PROXY_SECRET`), plus `CHIT_CLAUDE_CHANNELS` and
+`CHIT_CLAUDE_WORKDIR` (both required) and the settings that control how
+`claude` runs. See the
+[reference table](/chit/reference/configuration/#chit-claude) and
+[Headless Claude Code](/chit/deployment/headless-claude/).
 
 ### Slash Commands & Webhooks
 
 | Variable | Description |
 |---|---|
 | `CHIT_COMMANDS_CUE_DIR` | Directory with CUE definitions for commands, roles, and actors (default `auth`) |
-| `CHIT_AUDIT_LOG_PATH` | File path for the slash-command audit log |
+| `CHIT_AUDIT_LOG_PATH` | File path for the slash-command audit log; empty or `-` logs to stderr |
 | `CHIT_WEBHOOK_ENABLED` | Enable the CloudEvents webhook dispatcher (default `false`) |
-| `CHIT_WEBHOOK_URL` | Destination URL for webhook deliveries |
+| `CHIT_WEBHOOK_URL` | Destination URL for webhook deliveries; required when enabled |
 | `CHIT_WEBHOOK_SECRET` | Shared secret used to sign webhook deliveries |
 | `CHIT_WEBHOOK_WORKER_COUNT` | Concurrent webhook delivery workers (default `4`) |
 | `CHIT_WEBHOOK_QUEUE_SIZE` | In-memory webhook queue size (default `1024`) |
 | `CHIT_WEBHOOK_TIMEOUT_SEC` | Per-delivery HTTP timeout in seconds (default `10`) |
 
-`.env.example` is the source of truth for the complete variable list. See the
-[Configuration Reference](/chit/reference/configuration/) for the
-complete table with types and defaults.
+See the [Configuration Reference](/chit/reference/configuration/) for the
+complete table with types, defaults and validation rules. `.env.example` lists
+the same variables with values for the local `make kube-up` stack.

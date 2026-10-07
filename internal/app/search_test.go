@@ -1,303 +1,245 @@
 package app
 
 import (
-	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
-	"github.com/infrashift/chit/internal/config"
 	"github.com/infrashift/chit/internal/model"
-	"github.com/infrashift/chit/internal/store"
-	"github.com/infrashift/chit/internal/websocket"
 )
 
-// ─── Search-specific mock stores ────────────────────────────────
-
-type searchMockPostStore struct {
-	searchResults []*model.Post
-	getResults    map[string]*model.Post
-}
-
-func (s *searchMockPostStore) Save(_ context.Context, p *model.Post) (*model.Post, error) {
-	return p, nil
-}
-func (s *searchMockPostStore) Get(_ context.Context, id string) (*model.Post, error) {
-	if p, ok := s.getResults[id]; ok {
-		return p, nil
-	}
-	return nil, errNotFound
-}
-func (s *searchMockPostStore) Update(_ context.Context, p *model.Post) (*model.Post, error) {
-	return p, nil
-}
-func (s *searchMockPostStore) Delete(_ context.Context, _ string, _ int64) error { return nil }
-func (s *searchMockPostStore) GetPostsForChannel(_ context.Context, _ string, _ model.GetPostsOptions) (*model.PostList, error) {
-	return &model.PostList{}, nil
-}
-func (s *searchMockPostStore) GetPostsForThread(_ context.Context, _ string) (*model.PostList, error) {
-	return &model.PostList{}, nil
-}
-func (s *searchMockPostStore) GetPinnedPosts(_ context.Context, _ string) (*model.PostList, error) {
-	return &model.PostList{}, nil
-}
-func (s *searchMockPostStore) SetPinned(_ context.Context, _ string, _ bool) error { return nil }
-func (s *searchMockPostStore) GetPostsSince(_ context.Context, _ int64, _ int) ([]*model.Post, error) {
-	return nil, nil
-}
-func (s *searchMockPostStore) SearchByContent(_ context.Context, _, _ string, _, _ int) ([]*model.Post, error) {
-	return s.searchResults, nil
-}
-
-type searchMockTagStore struct {
-	postIDsByTags    []string
-	filterPostIDsRes []string
-}
-
-func (s searchMockTagStore) Save(_ context.Context, _ *model.Tag) (*model.Tag, error) {
-	return nil, nil
-}
-func (s searchMockTagStore) GetAll(_ context.Context) ([]*model.Tag, error)         { return nil, nil }
-func (s searchMockTagStore) AddTagToPost(_ context.Context, _, _ string) error      { return nil }
-func (s searchMockTagStore) RemoveTagFromPost(_ context.Context, _, _ string) error { return nil }
-func (s searchMockTagStore) GetTagsForPost(_ context.Context, _ string) ([]*model.Tag, error) {
-	return nil, nil
-}
-func (s searchMockTagStore) GetTagsForPosts(_ context.Context, _ []string) (map[string][]*model.Tag, error) {
-	return map[string][]*model.Tag{}, nil
-}
-func (s searchMockTagStore) GetPostIDsByTags(_ context.Context, _ []string, _, _ int) ([]string, error) {
-	return s.postIDsByTags, nil
-}
-func (s searchMockTagStore) FilterPostIDsByTags(_ context.Context, _, _ []string) ([]string, error) {
-	return s.filterPostIDsRes, nil
-}
-
-type searchMockStore struct {
-	post    *searchMockPostStore
-	tag     searchMockTagStore
-	channel *mentionMockChannelStore
-}
-
-func (m *searchMockStore) User() store.UserStore { return &mentionMockUserStore{} }
-func (m *searchMockStore) Team() store.TeamStore { return mentionMockTeamStore{} }
-func (m *searchMockStore) Channel() store.ChannelStore {
-	if m.channel == nil {
-		m.channel = &mentionMockChannelStore{}
-	}
-	return m.channel
-}
-func (m *searchMockStore) Post() store.PostStore     { return m.post }
-func (m *searchMockStore) Thread() store.ThreadStore { return &mentionMockThreadStore{} }
-func (m *searchMockStore) Tag() store.TagStore       { return m.tag }
-func (m *searchMockStore) Close()                    {}
-
-func newSearchTestApp(t *testing.T, posts []*model.Post, zincURL string) *App {
+// newSearchFixture puts "searcher" in the general channel only. other is a
+// channel in the same team the searcher cannot read.
+func newSearchFixture(t *testing.T) (f *fixture, other *model.Channel) {
 	t.Helper()
+	f = newFixture(t)
+	f.join(f.channel, "searcher")
+	other = f.privateChannel("other")
+	f.join(other, "outsider")
+	return f, other
+}
 
-	hub := websocket.NewHub(nil)
-	t.Cleanup(hub.Stop)
+func (f *fixture) search(req *SearchRequest) []*model.Post {
+	f.t.Helper()
+	req.UserID = f.user("searcher").ID
+	if req.PerPage == 0 {
+		req.PerPage = 60
+	}
+	res, err := f.app.SearchPosts(f.t.Context(), req)
+	if err != nil {
+		f.t.Fatalf("SearchPosts: %v", err)
+	}
+	return res.Order
+}
 
-	getResults := make(map[string]*model.Post)
+func postIDs(posts []*model.Post) []string {
+	ids := make([]string, 0, len(posts))
 	for _, p := range posts {
-		getResults[p.ID] = p
+		ids = append(ids, p.ID)
 	}
-
-	ms := &searchMockStore{
-		post: &searchMockPostStore{
-			searchResults: posts,
-			getResults:    getResults,
-		},
-		channel: newSearchMockChannelStore(),
-	}
-
-	return &App{
-		Store: ms,
-		Hub:   hub,
-		Config: &config.Config{
-			ZincSearchURL: zincURL,
-		},
-	}
+	return ids
 }
 
-const searcherID = "user-searcher"
+func TestSearchPosts_SQLWhenZincIsNotConfigured(t *testing.T) {
+	f, _ := newSearchFixture(t)
+	f.post(f.channel, "searcher", "hello world", 1)
+	f.post(f.channel, "searcher", "hello again", 2)
+	f.post(f.channel, "searcher", "goodbye", 3)
 
-// newSearchMockChannelStore seeds ch1 with the searcher as a member so
-// SearchPosts membership checks pass.
-func newSearchMockChannelStore() *mentionMockChannelStore {
-	return &mentionMockChannelStore{
-		members: map[string][]*model.ChannelMember{
-			"ch1": {{ChannelID: "ch1", UserID: searcherID}},
-		},
-	}
-}
-
-// ─── Tests ──────────────────────────────────────────────────────
-
-func TestSearchPosts_ZincEmptyFallsBackToSQL(t *testing.T) {
-	// ZincSearch is configured but unreachable (empty URL disables it, but
-	// a non-empty URL that returns empty results should fall back to SQL).
-	// We simulate this by using a ZincSearch URL that will fail to connect,
-	// which makes zincSearch return (nil, false, nil) → SQL fallback.
-	posts := []*model.Post{
-		{ID: "p1", ChannelID: "ch1", Content: "hello world"},
-		{ID: "p2", ChannelID: "ch1", Content: "hello again"},
-	}
-
-	// Empty ZincSearchURL means zincSearch returns (nil, false, nil) → SQL fallback
-	a := newSearchTestApp(t, posts, "")
-
-	result, err := a.SearchPosts(context.Background(), "ch1", searcherID, "hello", nil, 0, 60)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(result.Order) != 2 {
-		t.Errorf("expected 2 posts from SQL fallback, got %d", len(result.Order))
-	}
-}
-
-func TestSearchPosts_TextOnlySQLFallback(t *testing.T) {
-	// When ZincSearch URL is empty (disabled), SQL fallback is used directly.
-	posts := []*model.Post{
-		{ID: "p1", ChannelID: "ch1", Content: "test content"},
-	}
-	a := newSearchTestApp(t, posts, "")
-
-	result, err := a.SearchPosts(context.Background(), "ch1", searcherID, "test", nil, 0, 60)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(result.Order) != 1 {
-		t.Errorf("expected 1 post, got %d", len(result.Order))
-	}
-	if result.Order[0].ID != "p1" {
-		t.Errorf("expected post p1, got %s", result.Order[0].ID)
+	if got := f.search(&SearchRequest{ChannelID: f.channel.ID, Terms: "hello"}); len(got) != 2 {
+		t.Errorf("got %d posts, want the 2 that match", len(got))
 	}
 }
 
 func TestSearchPosts_NoQueryNoTags_ReturnsEmpty(t *testing.T) {
-	a := newSearchTestApp(t, nil, "")
+	f, _ := newSearchFixture(t)
+	f.post(f.channel, "searcher", "anything", 1)
 
-	result, err := a.SearchPosts(context.Background(), "ch1", searcherID, "", nil, 0, 60)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(result.Order) != 0 {
-		t.Errorf("expected 0 posts, got %d", len(result.Order))
+	if got := f.search(&SearchRequest{ChannelID: f.channel.ID}); got == nil || len(got) != 0 {
+		t.Errorf("got %v, want an empty, non-nil list", got)
 	}
 }
 
-func TestSearchPosts_TagOnly(t *testing.T) {
-	posts := []*model.Post{
-		{ID: "p1", ChannelID: "ch1", Content: "tagged post"},
-	}
+func TestSearchPosts_Tags(t *testing.T) {
+	f, _ := newSearchFixture(t)
+	tag := &model.Tag{ID: model.NewID(), Name: "bug"}
+	f.store.Tags.Seed(tag)
+	tagged := f.post(f.channel, "searcher", "tagged search", 1)
+	f.post(f.channel, "searcher", "untagged search", 2)
+	f.store.Tags.SeedPostTag(tagged.ID, tag.ID)
 
-	hub := websocket.NewHub(nil)
-	t.Cleanup(hub.Stop)
-
-	ms := &searchMockStore{
-		post: &searchMockPostStore{
-			getResults: map[string]*model.Post{"p1": posts[0]},
-		},
-		tag: searchMockTagStore{
-			postIDsByTags: []string{"p1"},
-		},
-		channel: newSearchMockChannelStore(),
-	}
-
-	a := &App{
-		Store:  ms,
-		Hub:    hub,
-		Config: &config.Config{},
-	}
-
-	result, err := a.SearchPosts(context.Background(), "ch1", searcherID, "", []string{"tag1"}, 0, 60)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(result.Order) != 1 {
-		t.Errorf("expected 1 post, got %d", len(result.Order))
-	}
-}
-
-func TestSearchPosts_HybridFallsBackToSQLWhenZincEmpty(t *testing.T) {
-	posts := []*model.Post{
-		{ID: "p1", ChannelID: "ch1", Content: "tagged search"},
-	}
-
-	hub := websocket.NewHub(nil)
-	t.Cleanup(hub.Stop)
-
-	ms := &searchMockStore{
-		post: &searchMockPostStore{
-			searchResults: posts,
-			getResults:    map[string]*model.Post{"p1": posts[0]},
-		},
-		tag: searchMockTagStore{
-			filterPostIDsRes: []string{"p1"},
-		},
-		channel: newSearchMockChannelStore(),
-	}
-
-	// Empty ZincSearchURL → zincSearch returns (nil, false, nil) → SQL + tag filter
-	a := &App{
-		Store:  ms,
-		Hub:    hub,
-		Config: &config.Config{},
-	}
-
-	result, err := a.SearchPosts(context.Background(), "ch1", searcherID, "tagged", []string{"tag1"}, 0, 60)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(result.Order) != 1 {
-		t.Errorf("expected 1 post from SQL+tag fallback, got %d", len(result.Order))
-	}
+	t.Run("tags alone", func(t *testing.T) {
+		if got := f.search(&SearchRequest{TagIDs: []string{tag.ID}}); len(got) != 1 || got[0].ID != tagged.ID {
+			t.Errorf("got %v, want only the tagged post", postIDs(got))
+		}
+	})
+	t.Run("tags and terms", func(t *testing.T) {
+		if got := f.search(&SearchRequest{Terms: "search", TagIDs: []string{tag.ID}}); len(got) != 1 || got[0].ID != tagged.ID {
+			t.Errorf("got %v, want only the tagged post", postIDs(got))
+		}
+	})
+	// The SQL matched HAVING COUNT(DISTINCT tag_id) = len(tagIDs), so a
+	// repeated tag id could never match anything.
+	t.Run("a repeated tag id", func(t *testing.T) {
+		if got := f.search(&SearchRequest{TagIDs: []string{tag.ID, tag.ID}}); len(got) != 1 {
+			t.Errorf("got %v, want the tagged post", postIDs(got))
+		}
+	})
 }
 
 // Membership is not scope. A search "in this channel" was returning hits from
-// every other channel the caller belonged to, because the index is queried
-// without a channel filter and only membership was checked afterwards.
+// every other channel the caller belonged to.
 func TestSearchPosts_ScopesToTheRequestedChannel(t *testing.T) {
-	posts := []*model.Post{
-		{ID: "here", ChannelID: "ch1", Content: "needle in this channel"},
-		{ID: "elsewhere", ChannelID: "ch2", Content: "needle in another channel"},
+	f, _ := newSearchFixture(t)
+	elsewhere := &model.Channel{
+		ID: model.NewID(), TeamID: f.team.ID, Name: "random", DisplayName: "Random",
+		Type: model.ChannelOpen, CreateAt: 1, UpdateAt: 1,
 	}
-	a := newSearchTestApp(t, posts, "")
+	f.store.Channels.Seed(elsewhere)
+	f.join(elsewhere, "searcher")
+	here := f.post(f.channel, "searcher", "needle in this channel", 1)
+	f.post(elsewhere, "searcher", "needle in another channel", 2)
 
-	result, err := a.SearchPosts(context.Background(), "ch1", searcherID, "needle", nil, 0, 60)
-	if err != nil {
-		t.Fatalf("SearchPosts: %v", err)
-	}
-
-	for _, p := range result.Order {
-		if p.ChannelID != "ch1" {
-			t.Errorf("post %s from channel %s leaked into a search scoped to ch1",
-				p.ID, p.ChannelID)
-		}
-	}
-	if len(result.Order) != 1 {
-		t.Errorf("got %d results, want just the one in ch1", len(result.Order))
+	if got := f.search(&SearchRequest{ChannelID: f.channel.ID, Terms: "needle"}); len(got) != 1 || got[0].ID != here.ID {
+		t.Errorf("got %v, want just the post in the requested channel", postIDs(got))
 	}
 }
 
-// An unscoped search spans every channel the caller can read — and only
-// those. The fixture makes the searcher a member of ch1 only, so ch2 is
-// excluded by membership rather than by scope.
-func TestSearchPosts_UnscopedIsStillLimitedByMembership(t *testing.T) {
-	posts := []*model.Post{
-		{ID: "here", ChannelID: "ch1", Content: "needle one"},
-		{ID: "elsewhere", ChannelID: "ch2", Content: "needle two"},
+// Scope used to be applied after the backend had cut a page, so a page of
+// hits that were mostly unreadable came back nearly empty while the next page
+// still held readable ones.
+func TestSearchPosts_PagesAreFullAfterScoping(t *testing.T) {
+	f, other := newSearchFixture(t)
+	var readable []string
+	for i := range 6 {
+		at := int64(100 - i*10)
+		readable = append(readable, f.post(f.channel, "searcher", "needle", at).ID)
+		f.post(other, "outsider", "needle", at-5) // interleaved, unreadable
 	}
-	a := newSearchTestApp(t, posts, "")
 
-	result, err := a.SearchPosts(context.Background(), "", searcherID, "needle", nil, 0, 60)
-	if err != nil {
-		t.Fatalf("SearchPosts: %v", err)
+	page0 := f.search(&SearchRequest{Terms: "needle", Page: 0, PerPage: 4})
+	page1 := f.search(&SearchRequest{Terms: "needle", Page: 1, PerPage: 4})
+	if got := postIDs(page0); len(got) != 4 || got[0] != readable[0] || got[3] != readable[3] {
+		t.Errorf("page 0 = %v, want the 4 newest readable posts", got)
 	}
-	if len(result.Order) != 1 {
-		t.Fatalf("got %d results, want only the readable one", len(result.Order))
+	if got := postIDs(page1); len(got) != 2 || got[0] != readable[4] {
+		t.Errorf("page 1 = %v, want the remaining 2", got)
 	}
-	if result.Order[0].ChannelID != "ch1" {
-		t.Errorf("returned a post from %s, which the searcher cannot read",
-			result.Order[0].ChannelID)
+}
+
+func TestSearchPosts_TeamScope(t *testing.T) {
+	f, _ := newSearchFixture(t)
+	in := f.post(f.channel, "searcher", "needle", 1)
+
+	// A channel the searcher is in, on another team.
+	otherTeam := &model.Channel{ID: model.NewID(), TeamID: model.NewID(), Name: "x", DisplayName: "X",
+		Type: model.ChannelOpen, CreateAt: 1, UpdateAt: 1}
+	f.store.Channels.Seed(otherTeam)
+	f.store.Channels.SeedMember(&model.ChannelMember{ChannelID: otherTeam.ID, UserID: f.user("searcher").ID})
+	f.post(otherTeam, "searcher", "needle", 2)
+
+	if got := f.search(&SearchRequest{TeamID: f.team.ID, Terms: "needle"}); len(got) != 1 || got[0].ID != in.ID {
+		t.Errorf("got %v, want only the post on the requested team", postIDs(got))
 	}
+
+	_, err := f.app.SearchPosts(t.Context(), &SearchRequest{UserID: f.user("stranger").ID, TeamID: f.team.ID, Terms: "needle", PerPage: 10})
+	if !isForbidden(err) {
+		t.Errorf("a non-member searched the team: %v", err)
+	}
+}
+
+func TestSearchPosts_From(t *testing.T) {
+	f, _ := newSearchFixture(t)
+	f.join(f.channel, "alice")
+	mine := f.post(f.channel, "alice", "needle", 1)
+	f.post(f.channel, "searcher", "needle", 2)
+
+	if got := f.search(&SearchRequest{Terms: "needle", From: "@Alice"}); len(got) != 1 || got[0].ID != mine.ID {
+		t.Errorf("got %v, want only alice's post", postIDs(got))
+	}
+	if got := f.search(&SearchRequest{Terms: "needle", From: "nobody"}); len(got) != 0 {
+		t.Errorf("an unknown author matched %v", postIDs(got))
+	}
+}
+
+// fakeZinc answers searches with hits, from a fixed ordered list, or fails.
+func fakeZinc(t *testing.T, hits []string, status int) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if status != http.StatusOK {
+			w.WriteHeader(status)
+			return
+		}
+		var req struct {
+			From int `json:"from"`
+			Max  int `json:"max_results"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		end := min(req.From+req.Max, len(hits))
+		type hit struct {
+			ID string `json:"_id"`
+		}
+		out := []hit{}
+		for _, id := range hits[min(req.From, len(hits)):end] {
+			out = append(out, hit{ID: id})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"hits": map[string]any{"hits": out}})
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+func TestSearchPosts_Zinc(t *testing.T) {
+	t.Run("hits are scoped and paged after filtering", func(t *testing.T) {
+		f, other := newSearchFixture(t)
+		var hits, readable []string
+		for range 150 {
+			p := f.post(other, "outsider", "needle", 1)
+			hits = append(hits, p.ID)
+		}
+		for range 3 {
+			p := f.post(f.channel, "searcher", "needle", 2)
+			hits = append(hits, p.ID)
+			readable = append(readable, p.ID)
+		}
+		f.app.Config.ZincSearchURL = fakeZinc(t, hits, http.StatusOK)
+
+		got := postIDs(f.search(&SearchRequest{Terms: "needle", PerPage: 2}))
+		if len(got) != 2 || got[0] != readable[0] || got[1] != readable[1] {
+			t.Errorf("got %v, want the first 2 readable hits in Zinc order", got)
+		}
+		got = postIDs(f.search(&SearchRequest{Terms: "needle", Page: 1, PerPage: 2}))
+		if len(got) != 1 || got[0] != readable[2] {
+			t.Errorf("page 1 = %v, want the last readable hit", got)
+		}
+	})
+
+	// Zinc answering with nothing is an answer. Falling back to SQL there
+	// made every page past the end of Zinc's results return unrelated ILIKE
+	// hits.
+	t.Run("no hits is not a reason to ask SQL", func(t *testing.T) {
+		f, _ := newSearchFixture(t)
+		f.post(f.channel, "searcher", "needle", 1)
+		f.app.Config.ZincSearchURL = fakeZinc(t, nil, http.StatusOK)
+
+		if got := f.search(&SearchRequest{Terms: "needle"}); len(got) != 0 {
+			t.Errorf("got %v from SQL after Zinc said no hits", postIDs(got))
+		}
+	})
+
+	t.Run("a Zinc failure falls back to SQL", func(t *testing.T) {
+		f, _ := newSearchFixture(t)
+		p := f.post(f.channel, "searcher", "needle", 1)
+		f.app.Config.ZincSearchURL = fakeZinc(t, nil, http.StatusInternalServerError)
+
+		if got := f.search(&SearchRequest{Terms: "needle"}); len(got) != 1 || got[0].ID != p.ID {
+			t.Errorf("got %v, want the SQL result", postIDs(got))
+		}
+	})
+}
+
+func isForbidden(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "not a member")
 }

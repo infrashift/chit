@@ -90,33 +90,3 @@ func TestRemove(t *testing.T) {
 	// Remove absent key should not panic
 	c.Remove("nonexistent")
 }
-
-func TestLen(t *testing.T) {
-	c, _ := NewLRU[string, int](10, time.Minute)
-	if c.Len() != 0 {
-		t.Fatal("expected initial Len=0")
-	}
-
-	c.Set("a", 1)
-	c.Set("b", 2)
-	if c.Len() != 2 {
-		t.Fatalf("expected Len=2, got %d", c.Len())
-	}
-
-	c.Remove("a")
-	if c.Len() != 1 {
-		t.Fatalf("expected Len=1, got %d", c.Len())
-	}
-}
-
-func TestPurge(t *testing.T) {
-	c, _ := NewLRU[string, int](10, time.Minute)
-	c.Set("a", 1)
-	c.Set("b", 2)
-	c.Set("c", 3)
-	c.Purge()
-
-	if c.Len() != 0 {
-		t.Fatalf("expected Len=0 after Purge, got %d", c.Len())
-	}
-}

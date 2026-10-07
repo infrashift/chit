@@ -3,8 +3,8 @@
 # Chit E2E Tests
 #
 # Exercises the full stack: Kratos → Oathkeeper → chitd → PostgreSQL → Keto
-# using curl + jq. Requires all services up (make kube-up && make kube-migrate
-# && make migrate-up && make run &).
+# using curl + jq. Requires all services up: make kube-up runs chitd in the
+# pod alongside them.
 #
 # Usage: bash tests/e2e/test_e2e.sh
 # ============================================================================
@@ -99,6 +99,20 @@ assert_json_not_empty() {
     echo -e "  ${RED}FAIL${NC} ${label} — ${jq_expr}: expected non-empty, got \"${actual}\""
     FAIL_COUNT=$((FAIL_COUNT + 1))
   fi
+}
+
+# keto_allowed OBJECT SUBJECT — prints Keto's "allowed" for channel
+# membership, polling for up to 5s until it is true. chitd writes membership
+# tuples to Keto asynchronously (channel_members is the access check; Keto is
+# a best-effort mirror), so a check straight after a change can race the write.
+keto_allowed() {
+  local allowed="false"
+  for _ in $(seq 1 25); do
+    allowed=$(curl -s "${KETO_READ}/relation-tuples/check?namespace=chit/channel&object=$1&relation=member&subject_id=$2" | jq -r '.allowed')
+    [[ "$allowed" == "true" ]] && break
+    sleep 0.2
+  done
+  echo "$allowed"
 }
 
 # curl_api METHOD PATH [DATA] — returns "STATUS\nBODY"
@@ -256,7 +270,10 @@ check_service() {
 check_service "PostgreSQL (via chitd)" "${CHITD}/api/v1/system/ping"
 check_service "Kratos Public"         "${KRATOS_PUBLIC}/health/alive"
 check_service "Kratos Admin"          "${KRATOS_ADMIN}/admin/identities" "200"
-check_service "Oathkeeper Proxy"      "${PROXY}/api/v1/system/ping"
+# The gateway requires a session or token for every /api/v1 route, ping
+# included, so an unauthenticated ping answering 401 is the proxy up and
+# guarding chitd. (Ping and config/client are public only at chitd itself.)
+check_service "Oathkeeper Proxy"      "${PROXY}/api/v1/system/ping" "401"
 check_service "Keto Read"             "${KETO_READ}/health/alive"
 check_service "Keto Write"            "${KETO_WRITE}/health/alive"
 # ZincSearch may return 200 or other codes on root
@@ -310,15 +327,19 @@ echo -e "${BOLD}Setup complete. Running test scenarios...${NC}"
 # ============================================================================
 section "Scenario 1: User Provisioning"
 
-# 1.1 System ping (unauthenticated)
+# 1.1 System ping, unauthenticated, at chitd: public there, and only there.
 CURRENT_TOKEN=""
-curl_api_full GET "/system/ping"
-assert_status "1.1 system/ping" 200 "$LAST_STATUS"
+API="${CHITD}/api/v1" curl_api_full GET "/system/ping"
+assert_status "1.1 system/ping at chitd" 200 "$LAST_STATUS"
 assert_json   "1.1 ping status" ".status" "OK" "$LAST_BODY"
 
-# 1.2 Client config (unauthenticated)
-curl_api_full GET "/system/config/client"
-assert_status "1.2 system/config/client" 200 "$LAST_STATUS"
+# 1.1b Through the gateway the same request needs credentials.
+curl_api_full GET "/system/ping"
+assert_status "1.1b system/ping through the gateway needs auth" 401 "$LAST_STATUS"
+
+# 1.2 Client config, unauthenticated, at chitd
+API="${CHITD}/api/v1" curl_api_full GET "/system/config/client"
+assert_status "1.2 system/config/client at chitd" 200 "$LAST_STATUS"
 assert_json_not_empty "1.2 version present" ".version" "$LAST_BODY"
 
 # 1.3 Unauthenticated request to protected endpoint → 401
@@ -477,7 +498,9 @@ if [[ "$LAST_STATUS" == "201" ]]; then
 else
   echo -e "  ${YELLOW}WARN${NC}: Channel 'secret-ops' already exists, reusing"
   SKIP_COUNT=$((SKIP_COUNT + 1))
-  curl_api_full GET "/teams/${TEAM_ID}/channels?page=0&per_page=100"
+  # The team list shows open channels only; a private channel is found
+  # through its member's own list.
+  curl_api_full GET "/users/me/teams/${TEAM_ID}/channels"
   PRIVATE_CHANNEL_ID=$(echo "$LAST_BODY" | jq -r '.[] | select(.name=="secret-ops") | .id')
   if [[ -n "$PRIVATE_CHANNEL_ID" && "$PRIVATE_CHANNEL_ID" != "null" ]]; then
     echo -e "  ${GREEN}PASS${NC} 2.7 reused existing private channel ${PRIVATE_CHANNEL_ID}"
@@ -489,8 +512,7 @@ else
 fi
 
 # 2.8 Verify Keto relation for Alice on public channel
-KETO_CHECK=$(curl -s "${KETO_READ}/relation-tuples/check?namespace=chit/channel&object=${PUBLIC_CHANNEL_ID}&relation=member&subject_id=${ALICE_ID}")
-KETO_ALLOWED=$(echo "$KETO_CHECK" | jq -r '.allowed')
+KETO_ALLOWED=$(keto_allowed "${PUBLIC_CHANNEL_ID}" "${ALICE_ID}")
 if [[ "$KETO_ALLOWED" == "true" ]]; then
   echo -e "  ${GREEN}PASS${NC} 2.8 Keto: Alice is member of public channel"
   PASS_COUNT=$((PASS_COUNT + 1))
@@ -508,7 +530,9 @@ curl_api_full POST "/channels/${PUBLIC_CHANNEL_ID}/members" "{\"user_id\":\"${CH
 assert_status "2.10 add Charlie to public channel" 201 "$LAST_STATUS"
 
 # 2.11 Verify Keto for Bob on public channel
-KETO_CHECK=$(curl -s "${KETO_READ}/relation-tuples/check?namespace=chit/channel&object=${PUBLIC_CHANNEL_ID}&relation=member&subject_id=${BOB_ID}")
+# Bob was already on the team, so the channel's creation added him (and
+# wrote his tuple, asynchronously); 2.9 found him already a member.
+KETO_CHECK="{\"allowed\": $(keto_allowed "${PUBLIC_CHANNEL_ID}" "${BOB_ID}")}"
 assert_json "2.11 Keto: Bob is member" ".allowed" "true" "$KETO_CHECK"
 
 # 2.12 Add Bob to private channel then remove him
@@ -690,11 +714,11 @@ assert_status "4.3 DM members" 200 "$LAST_STATUS"
 assert_json_gte "4.3 DM has 2 members" "length" 2 "$LAST_BODY"
 
 # 4.4 Keto: Alice is member of DM
-KETO_CHECK=$(curl -s "${KETO_READ}/relation-tuples/check?namespace=chit/channel&object=${DM_CHANNEL_ID}&relation=member&subject_id=${ALICE_ID}")
+KETO_CHECK="{\"allowed\": $(keto_allowed "${DM_CHANNEL_ID}" "${ALICE_ID}")}"
 assert_json "4.4 Keto: Alice DM member" ".allowed" "true" "$KETO_CHECK"
 
 # 4.5 Keto: Bob is member of DM
-KETO_CHECK=$(curl -s "${KETO_READ}/relation-tuples/check?namespace=chit/channel&object=${DM_CHANNEL_ID}&relation=member&subject_id=${BOB_ID}")
+KETO_CHECK="{\"allowed\": $(keto_allowed "${DM_CHANNEL_ID}" "${BOB_ID}")}"
 assert_json "4.5 Keto: Bob DM member" ".allowed" "true" "$KETO_CHECK"
 
 # 4.6 Alice sends DM

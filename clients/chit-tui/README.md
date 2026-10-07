@@ -127,7 +127,7 @@ These run in the client; any other `/command` is sent to the server, which decid
 | `/group` | Start a group conversation with three or more people |
 | `/nick <name>` | Change your display name |
 | `/username <handle>` | Change your username (breaks existing @mentions) |
-| `/threads` | Threads you follow in this team |
+| `/threads` | Threads you follow, in this team and in DMs |
 | `/leave` | Leave the current channel |
 | `/logout` | Sign out and clear the stored session |
 

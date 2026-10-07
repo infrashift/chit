@@ -8,6 +8,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/infrashift/chit/internal/app"
+	"github.com/infrashift/chit/internal/model"
 	ws "github.com/infrashift/chit/internal/websocket"
 )
 
@@ -38,18 +39,22 @@ func handleWebSocket(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
 		if user == nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			WriteError(w, model.NewUnauthorizedError("handleWebSocket", "not authenticated"))
 			return
 		}
 
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			slog.Error("websocket: upgrade failed", "error", err)
+			// The upgrader has already answered the client. This is almost
+			// always a rejected origin or a non-WebSocket request: the
+			// client's problem, not the server's.
+			slog.Warn("websocket: upgrade failed", "user_id", user.ID, "error", err)
 			return
 		}
 
 		client := ws.NewClient(a.Hub, conn, user.ID, a.Config.WSPingInterval, a.Config.WSWriteTimeout)
 		a.Hub.Register(client)
+		client.Start()
 
 		slog.Info("websocket: client connected", "user_id", user.ID)
 	}

@@ -1,10 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
@@ -13,114 +10,20 @@ import (
 
 	"github.com/infrashift/chit/internal/command"
 	"github.com/infrashift/chit/internal/config"
+	"github.com/infrashift/chit/internal/keto"
 )
-
-// httpKetoWriter implements command.KetoWriter via the Keto HTTP write API.
-type httpKetoWriter struct {
-	writeURL string
-	client   *http.Client
-}
-
-// WriteSubjectSetRelation writes a tuple whose subject is another relation.
-// Keto expands a subject set when checking; a subject_id holding the same
-// "Role:admin#member" text is an opaque string and matches nobody, which is
-// why role-based command grants have to be written this way.
-func (h *httpKetoWriter) WriteSubjectSetRelation(ctx context.Context, namespace, object, relation,
-	subjectNamespace, subjectObject, subjectRelation string) error {
-	url := fmt.Sprintf("%s/admin/relation-tuples", h.writeURL)
-
-	body := map[string]any{
-		"namespace": namespace,
-		"object":    object,
-		"relation":  relation,
-		"subject_set": map[string]string{
-			"namespace": subjectNamespace,
-			"object":    subjectObject,
-			"relation":  subjectRelation,
-		},
-	}
-	jsonBody, err := json.Marshal(body)
-	if err != nil {
-		return fmt.Errorf("marshal keto subject-set write: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(jsonBody))
-	if err != nil {
-		return fmt.Errorf("create keto request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := h.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("keto subject-set write: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("keto subject-set write returned %d", resp.StatusCode)
-	}
-	return nil
-}
-
-func (h *httpKetoWriter) WriteRelation(ctx context.Context, namespace, object, relation, subjectID string) error {
-	url := fmt.Sprintf("%s/admin/relation-tuples", h.writeURL)
-
-	body := map[string]string{
-		"namespace":  namespace,
-		"object":     object,
-		"relation":   relation,
-		"subject_id": subjectID,
-	}
-	jsonBody, err := json.Marshal(body)
-	if err != nil {
-		return fmt.Errorf("marshal keto write: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(jsonBody))
-	if err != nil {
-		return fmt.Errorf("create keto request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := h.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("keto write: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("keto write: status %d", resp.StatusCode)
-	}
-	return nil
-}
-
-func (h *httpKetoWriter) DeleteRelation(ctx context.Context, namespace, object, relation, subjectID string) error {
-	url := fmt.Sprintf("%s/admin/relation-tuples?namespace=%s&object=%s&relation=%s&subject_id=%s",
-		h.writeURL, namespace, object, relation, subjectID)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
-	if err != nil {
-		return fmt.Errorf("create keto delete request: %w", err)
-	}
-
-	resp, err := h.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("keto delete: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("keto delete: status %d", resp.StatusCode)
-	}
-	return nil
-}
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	})))
 
-	cfg, err := config.Load()
+	// LoadWithoutDatabase, because this tool has no database. It reads CUE from
+	// disk and writes tuples to Keto over HTTP; cfg.DatabaseURL is never read.
+	// Load() would refuse to start without CHIT_DATABASE_URL, which is what made
+	// the chit-server seed job fail after successfully registering every OAuth2
+	// client — a batch job asked for a credential it would not have used.
+	cfg, err := config.LoadWithoutDatabase()
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
@@ -141,17 +44,14 @@ func main() {
 		"roles", len(cueCfg.Roles),
 		"actors", len(cueCfg.Actors))
 
-	keto := &httpKetoWriter{
-		writeURL: cfg.KetoWriteURL,
-		client:   &http.Client{Timeout: 10 * time.Second},
-	}
-
-	rec := command.NewReconciler(keto)
+	// The read URL lists what is already granted, so grants the CUE no longer
+	// declares can be revoked.
+	rec := command.NewReconciler(keto.New(cfg.KetoReadURL, cfg.KetoWriteURL, &http.Client{Timeout: 10 * time.Second}))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	if err := rec.Reconcile(ctx, cueCfg); err != nil {
+	err = rec.Reconcile(ctx, cueCfg)
+	cancel()
+	if err != nil {
 		log.Fatalf("reconcile failed: %v", err)
 	}
 

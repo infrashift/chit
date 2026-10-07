@@ -59,12 +59,16 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - uses: golangci/golangci-lint-action@v6
+      # Lint is fully enforced: the backlog is cleared, so any finding fails
+      # the build. Build tags bring the integration and e2e files into scope,
+      # which an untagged run never compiles. v8 of the action is the first to
+      # run golangci-lint v2, which .golangci.yml is written for.
+      - uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
-          # Lint has pre-existing findings in untouched code; keep CI green by
-          # only failing on issues introduced by the change under review.
-          only-new-issues: true
+          version: v2.13.2
+          args: --build-tags integration,e2e
+      - name: Vulnerability scan
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   tui-lint:
     name: TUI lint
@@ -109,8 +113,13 @@ jobs:
           go-version-file: go.mod
       - name: Install golang-migrate
         run: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
-      - name: Run migrations
-        run: migrate -database "$CHIT_DATABASE_URL" -path migrations up
+      # Up, all the way down, and up again: a broken down migration fails
+      # here rather than during a rollback.
+      - name: Run migrations (round trip)
+        run: |
+          migrate -database "$CHIT_DATABASE_URL" -path migrations up
+          migrate -database "$CHIT_DATABASE_URL" -path migrations down -all
+          migrate -database "$CHIT_DATABASE_URL" -path migrations up
       - name: Integration tests
         run: go test -race -count=1 -tags integration ./internal/store/sqlstore/... ./internal/pubsub/...
 

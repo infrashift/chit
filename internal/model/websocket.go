@@ -1,30 +1,31 @@
 package model
 
 const (
-	WebSocketEventPosted         = "posted"
-	WebSocketEventPostEdited     = "post_edited"
-	WebSocketEventPostDeleted    = "post_deleted"
-	WebSocketEventPostPinned     = "post_pinned"
-	WebSocketEventPostUnpinned   = "post_unpinned"
-	WebSocketEventTyping         = "typing"
-	WebSocketEventChannelCreated = "channel_created"
-	WebSocketEventChannelUpdated = "channel_updated"
-	WebSocketEventChannelDeleted = "channel_deleted"
-	WebSocketEventUserAdded      = "user_added"
-	WebSocketEventUserRemoved    = "user_removed"
-	WebSocketEventThreadUpdated  = "thread_updated"
-	WebSocketEventStatusChange       = "status_change"
-	WebSocketEventMentioned          = "mentioned"
-	WebSocketEventCommandResponse    = "command_response"
-	WebSocketEventPostTagsUpdated    = "post_tags_updated" // a post's whole tag list, after a change
+	WebSocketEventPosted          = "posted"
+	WebSocketEventPostEdited      = "post_edited"
+	WebSocketEventPostDeleted     = "post_deleted"
+	WebSocketEventPostPinned      = "post_pinned"
+	WebSocketEventPostUnpinned    = "post_unpinned"
+	WebSocketEventTyping          = "typing"
+	WebSocketEventChannelCreated  = "channel_created"
+	WebSocketEventChannelUpdated  = "channel_updated"
+	WebSocketEventChannelDeleted  = "channel_deleted"
+	WebSocketEventUserAdded       = "user_added"
+	WebSocketEventUserRemoved     = "user_removed"
+	WebSocketEventThreadUpdated   = "thread_updated"
+	WebSocketEventMentioned       = "mentioned"
+	WebSocketEventCommandResponse = "command_response"
+	// WebSocketEventPostTagsUpdated carries a post's whole tag list after a
+	// tag is added or removed.
+	WebSocketEventPostTagsUpdated = "post_tags_updated"
 )
 
 // WebSocketEvent is sent to clients over WebSocket connections.
 type WebSocketEvent struct {
-	Event     string         `json:"event"`
-	Data      map[string]any `json:"data"`
+	Event     string              `json:"event"`
+	Data      map[string]any      `json:"data"`
 	Broadcast *WebSocketBroadcast `json:"broadcast"`
-	Sequence  int64          `json:"seq"`
+	Sequence  int64               `json:"seq"`
 }
 
 // WebSocketBroadcast controls which clients receive a WebSocket event.

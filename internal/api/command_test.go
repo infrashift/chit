@@ -22,7 +22,7 @@ func TestListCommands(t *testing.T) {
 	a.CommandRegistry = command.NewRegistry(cmds)
 
 	handler := listCommands(a)
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/commands", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/commands", http.NoBody)
 	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()
 
@@ -49,62 +49,39 @@ func TestListCommands(t *testing.T) {
 	}
 }
 
-func TestListCommands_NoRegistry(t *testing.T) {
-	a, _, cleanup := setupTestApp(t)
-	defer cleanup()
+// With no registry (commands disabled) and with an empty one, the list is
+// [], not null: the two take different paths to it.
+func TestListCommands_NoneAvailable(t *testing.T) {
+	for name, reg := range map[string]*command.Registry{
+		"no registry":    nil,
+		"empty registry": command.NewRegistry([]*command.Command{}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			a, _, cleanup := setupTestApp(t)
+			defer cleanup()
+			a.CommandRegistry = reg
 
-	// CommandRegistry is nil by default.
-	handler := listCommands(a)
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/commands", nil)
-	r = authedRequest(r, testUser())
-	w := httptest.NewRecorder()
+			r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/commands", http.NoBody)
+			r = authedRequest(r, testUser())
+			w := httptest.NewRecorder()
+			listCommands(a).ServeHTTP(w, r)
 
-	handler.ServeHTTP(w, r)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
-	}
-
-	var result []any
-	decodeJSON(t, w.Body, &result)
-	if len(result) != 0 {
-		t.Fatalf("expected empty array, got %d items", len(result))
-	}
-}
-
-func TestListCommands_EmptyRegistry(t *testing.T) {
-	a, _, cleanup := setupTestApp(t)
-	defer cleanup()
-
-	a.CommandRegistry = command.NewRegistry([]*command.Command{})
-
-	handler := listCommands(a)
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/commands", nil)
-	r = authedRequest(r, testUser())
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, r)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-
-	var result []any
-	decodeJSON(t, w.Body, &result)
-	if len(result) != 0 {
-		t.Fatalf("expected empty array, got %d items", len(result))
+			if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != "[]" {
+				t.Fatalf("got %d %s, want 200 []", w.Code, w.Body.String())
+			}
+		})
 	}
 }
 
-func TestCreatePost_SlashCommandIntercepted(t *testing.T) {
+// Without a command registry (commands disabled), slash text is not a
+// command: "/help" is posted like any other message.
+func TestCreatePost_WithoutARegistrySlashTextIsAPost(t *testing.T) {
 	a, _, cleanup := setupTestApp(t)
 	defer cleanup()
 
-	// Without a command registry, slash commands are NOT intercepted.
-	// Verify that /help goes through as a normal post.
 	handler := createPost(a)
 	body := `{"channel_id":"` + testChannelID + `","content":"/help"}`
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/posts", strings.NewReader(body))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/posts", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()

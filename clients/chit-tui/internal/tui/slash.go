@@ -17,7 +17,6 @@ var (
 	errUsernameSpaces = errors.New("a username cannot contain spaces — try /nick for a display name")
 	// Not a failure: setError is the only status-bar channel there is.
 	errProfileSaved = errors.New("profile updated")
-	errNoTeam       = errors.New("no team is active yet")
 )
 
 // clientCommands are handled entirely by this client and never reach the
@@ -30,7 +29,7 @@ func clientCommands() []*model.Command {
 		{Slug: "group", Description: "start a group conversation with three or more people"},
 		{Slug: "nick", Description: "change your display name"},
 		{Slug: "username", Description: "change your username (breaks existing @mentions)"},
-		{Slug: "threads", Description: "threads you follow in this team"},
+		{Slug: "threads", Description: "threads you follow, in this team and in DMs"},
 		{Slug: "leave", Description: "leave the current channel"},
 		{Slug: "logout", Description: "sign out and clear the stored session"},
 	}
@@ -81,13 +80,17 @@ func (m Model) handleSlash(msg input.SlashTriggerMsg) (tea.Model, tea.Cmd) {
 		m.dmPicker.OpenForMembers()
 		return m, cmd
 	case "/threads":
-		if m.activeTeam == nil {
-			return m, m.setError(errNoTeam)
+		// No team is no reason to refuse: DM and group threads belong
+		// to none, and are listed regardless.
+		teamID, teamName := "", ""
+		if m.activeTeam != nil {
+			teamID, teamName = m.activeTeam.ID, m.activeTeam.DisplayName
 		}
 		cmd := m.setFocus(FocusThreadInbox)
 		m.threadInbox.SetChannelNames(m.channelDisplayNames())
+		m.threadInbox.SetTeamName(teamName)
 		m.threadInbox.Open()
-		return m, tea.Batch(cmd, FetchMyThreads(m.reqCtx(), m.client, m.activeTeam.ID))
+		return m, tea.Batch(cmd, FetchMyThreads(m.reqCtx(), m.client, teamID))
 	case "/leave":
 		// Handled here rather than server-side: there is no leave command
 		// in the registry, and the REST endpoint already permits a member

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -54,7 +55,11 @@ func (s *ChitMCPServer) handleSummarizeChannel(ctx context.Context, req *mcp.Get
 
 	perPage := 50
 	if n := req.Params.Arguments["num_posts"]; n != "" {
-		fmt.Sscanf(n, "%d", &perPage)
+		parsed, err := strconv.Atoi(n)
+		if err != nil || parsed < 1 {
+			return nil, fmt.Errorf("num_posts must be a positive integer, got %q", n)
+		}
+		perPage = parsed
 	}
 
 	channel, err := s.client.GetChannel(ctx, channelID)

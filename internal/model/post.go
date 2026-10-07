@@ -5,19 +5,19 @@ import "net/http"
 const PostMaxContentSize = 65535
 
 type Post struct {
-	ID               string         `json:"id"`
-	ChannelID        string         `json:"channel_id"`
-	UserID           string         `json:"user_id"`
-	RootID           string         `json:"root_id,omitempty"`
-	Content          string         `json:"content"`
-	Type             string         `json:"type,omitempty"`
-	Props            map[string]any `json:"props,omitempty"`
-	Hashtags         string         `json:"hashtags,omitempty"`
-	IsPinned         bool           `json:"is_pinned"`
-	EditAt           int64          `json:"edit_at"`
-	CreateAt         int64          `json:"create_at"`
-	UpdateAt         int64          `json:"update_at"`
-	DeleteAt         int64          `json:"delete_at"`
+	ID        string         `json:"id"`
+	ChannelID string         `json:"channel_id"`
+	UserID    string         `json:"user_id"`
+	RootID    string         `json:"root_id,omitempty"`
+	Content   string         `json:"content"`
+	Type      string         `json:"type,omitempty"`
+	Props     map[string]any `json:"props,omitempty"`
+	Hashtags  string         `json:"hashtags,omitempty"`
+	IsPinned  bool           `json:"is_pinned"`
+	EditAt    int64          `json:"edit_at"`
+	CreateAt  int64          `json:"create_at"`
+	UpdateAt  int64          `json:"update_at"`
+	DeleteAt  int64          `json:"delete_at"`
 }
 
 func (p *Post) IsValid() *AppError {
@@ -33,7 +33,7 @@ func (p *Post) IsValid() *AppError {
 	if p.RootID != "" && !IsValidID(p.RootID) {
 		return NewAppError("Post.IsValid", "invalid root_id", "", http.StatusBadRequest)
 	}
-	if len(p.Content) == 0 {
+	if p.Content == "" {
 		return NewAppError("Post.IsValid", "content is required", "", http.StatusBadRequest)
 	}
 	if len(p.Content) > PostMaxContentSize {
@@ -61,6 +61,27 @@ func (p *Post) PreSave() {
 
 func (p *Post) PreUpdate() {
 	p.UpdateAt = GetMillis()
+}
+
+// PostCursor is a position in update order: the (update_at, id) of the last
+// post read. update_at alone is not a position, since many posts can share
+// one, and resuming from it either re-reads or skips them.
+type PostCursor struct {
+	UpdateAt int64
+	ID       string
+}
+
+// PostSearch is a scoped post search. ChannelIDs is the scope and is
+// required: an empty scope matches nothing. Terms is matched as a substring
+// of the content; every tag in TagIDs must be on a post; AuthorID, when set,
+// limits results to one author. Page is zero-based.
+type PostSearch struct {
+	Terms      string
+	TagIDs     []string
+	ChannelIDs []string
+	AuthorID   string
+	Page       int
+	PerPage    int
 }
 
 // PostList holds an ordered list of posts along with an ordering slice.

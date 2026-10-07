@@ -157,3 +157,44 @@ func TestUser_Sanitize(t *testing.T) {
 		t.Fatal("Sanitize should not modify Username")
 	}
 }
+
+// A MACHINE ACTOR IS A VALID USER, and until 2026-08-30 it was not: IsValid
+// demanded a kratos_id and an email of everything, so the only row
+// ResolveOAuthClient could ever have found was one belonging to a machine that
+// had been given a person's identity to get past this function.
+func TestUser_IsValid_MachineActor(t *testing.T) {
+	machine := func() *User {
+		u := &User{
+			ID:            NewID(),
+			Username:      "notifier",
+			DisplayName:   "Forge Notifier",
+			Roles:         "system_user system_admin",
+			ActorType:     ActorTypeBot,
+			OAuthClientID: "chit-notifier",
+		}
+		u.PreSave()
+		return u
+	}
+
+	if err := machine().IsValid(); err != nil {
+		t.Fatalf("a machine actor with no kratos_id and no email must be valid: %v", err)
+	}
+
+	// And the check it replaced still holds in the direction that matters:
+	// a user identified by NOTHING is still refused.
+	anonymous := machine()
+	anonymous.OAuthClientID = ""
+	if err := anonymous.IsValid(); err == nil {
+		t.Fatal("a user with neither a kratos_id nor an oauth_client_id must be refused")
+	}
+
+	// A person still needs an email; relaxing it for machines must not relax
+	// it for humans.
+	person := machine()
+	person.OAuthClientID = ""
+	person.KratosID = NewID()
+	person.Email = ""
+	if err := person.IsValid(); err == nil {
+		t.Fatal("a Kratos-backed user with no email must still be refused")
+	}
+}

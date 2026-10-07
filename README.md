@@ -21,10 +21,12 @@ users.
 - **AI agents & bots as first-class actors** — `actor_type` on every user,
   MCP server (`chit-mcp`) for agent access, with a WebSocket-fed event
   buffer agents can poll for new events
-- **Full-text search** — ZincSearch-backed indexing with per-channel and
-  per-team queries
-- **Zero-trust auth** — Ory Kratos (identity), Oathkeeper (auth proxy), and
-  Keto (ReBAC authorization)
+- **Full-text search** — per-channel and per-team queries in SQL, or in
+  ZincSearch when `CHIT_ZINCSEARCH_URL` is set (a background indexer keeps it
+  in sync)
+- **Zero-trust auth** — Ory Kratos (identity), Hydra (OAuth2 tokens for
+  machine actors), Oathkeeper (auth proxy), and Keto (slash-command
+  authorization)
 - **Real-time WebSocket** — 14 event types with per-user hub; channel-targeted
   events are delivered only to channel members. Fan-out is currently
   single-node (in-process); multi-node WebSocket fan-out is not yet
@@ -44,7 +46,8 @@ TUI Client ──► Ory Oathkeeper ──► REST API ──► App Layer ─�
                     │                              │                  Decorators
                     ▼                              ▼
                Ory Kratos                    PG LISTEN/NOTIFY
-               Ory Keto                      (or NATS)
+               Ory Hydra                     (or NATS)
+               Ory Keto
 ```
 
 Layered design inspired by Mattermost: **API → App → Store → PostgreSQL**.
@@ -73,15 +76,26 @@ The root module builds four binaries:
 
 ## Security Model
 
-Channel authorization is enforced server-side: reading or posting to a
-channel requires channel membership (checked against the `channel_members`
-table in PostgreSQL), editing or deleting a post requires being the author or
-a `system_admin`, and WebSocket events are delivered only to channel members.
-Ory Keto remains the authorization backend for slash commands (namespace
-`chit/command`). For production deployments, set `CHIT_ALLOWED_ORIGINS` to an
-explicit origin allowlist and `CHIT_TRUSTED_PROXY_SECRET` so the backend only
-trusts the `X-User-Id` header when Oathkeeper injects a matching
-`X-Proxy-Secret` header.
+chitd trusts identity headers set by Oathkeeper: `X-Client-Id` for a machine
+actor whose Hydra `client_credentials` token was introspected, checked first,
+or `X-User-Id` for a person's Kratos session. A person's user record is
+created on their first request; a machine actor must be declared in
+`CHIT_MACHINE_ACTORS`, and an unknown client gets 401.
+
+Authorization is enforced server-side. Reading or posting to a channel
+requires channel membership (the `channel_members` table in PostgreSQL);
+team members may see and join the open channels on their team. Editing or deleting a post
+requires being the author or a `system_admin`; renaming or deleting a team
+requires `team_admin` (granted to its creator) or `system_admin`. Leaving a
+team removes you from its channels. WebSocket events are delivered only to
+channel members. Ory Keto authorizes slash commands (namespace
+`chit/command`); channel tuples are mirrored into it but never consulted for
+access. Each user may make 10 requests a second (bursts of 50), and request
+bodies over 1 MiB are refused.
+
+For production deployments, set `CHIT_ALLOWED_ORIGINS` to an explicit origin
+allowlist and `CHIT_TRUSTED_PROXY_SECRET` so the backend only trusts the
+identity headers when Oathkeeper injects a matching `X-Proxy-Secret` header.
 
 ## Quick Start
 
@@ -90,30 +104,49 @@ trusts the `X-User-Id` header when Oathkeeper injects a matching
 git clone https://github.com/infrashift/chit.git
 cd chit
 
-# Start infrastructure (PostgreSQL, Ory stack, ZincSearch)
-# Kratos, Keto, and Chit schema migrations run automatically via
-# init/migrate containers.
+# Build the chitd image and start the stack: PostgreSQL, the Ory stack
+# (Kratos, Hydra, Oathkeeper, Keto), ZincSearch and chitd on :8065.
+# Kratos, Keto, Hydra, and Chit schema migrations run automatically in
+# init containers.
 make kube-up
+
+# Verify (direct to chitd; through Oathkeeper on :4455 every /api/v1
+# route needs a session or token)
+curl http://localhost:8065/api/v1/system/ping
 
 # (Later, only when new migration files are added) re-apply Chit
 # schema migrations against the running pod without restarting it
 make kube-migrate
+```
 
-# Configure environment
+To run your own build instead of the pod's, stop the pod's chitd so `:8065`
+is free, then run it locally; `make run` loads `.env`:
+
+```bash
+podman stop chit-app-chitd
 cp .env.example .env
-
-# Build and run
 make run
-
-# Verify
-curl http://localhost:8065/api/v1/system/ping
 ```
 
 ## Configuration
 
 All settings are configured via environment variables with the `CHIT_` prefix
-using [koanf](https://github.com/knadh/koanf). See
-[`.env.example`](.env.example) for the full list of variables.
+using [koanf](https://github.com/knadh/koanf). chitd reads only its
+environment and validates it at startup; `CHIT_DATABASE_URL` is required. See
+[`.env.example`](.env.example) for the variables and the
+[configuration reference](docs/src/content/docs/reference/configuration.mdx)
+for defaults and validation rules.
+
+## Development
+
+```bash
+make test               # unit tests (-race)
+make test-integration   # store/pub-sub tests against a throwaway PostgreSQL in Podman
+make lint               # golangci-lint
+make vuln               # govulncheck
+```
+
+Requires Go 1.25.14 or later and Podman.
 
 ## API Documentation
 

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -13,15 +12,18 @@ import (
 
 func createTag(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var tag model.Tag
-		if err := json.NewDecoder(r.Body).Decode(&tag); err != nil {
-			WriteError(w, model.NewBadRequestError("createTag", "invalid request body"))
+		var body struct {
+			Name string `json:"name"`
+		}
+		if !decodeBody(w, r, &body, "createTag") {
 			return
 		}
 
-		saved, err := a.CreateTag(r.Context(), &tag)
+		// Creating a tag that exists returns the existing one: the store
+		// upserts by name, so this is idempotent rather than a 409.
+		saved, err := a.CreateTag(r.Context(), &model.Tag{Name: body.Name})
 		if err != nil {
-			WriteError(w, model.NewInternalError("createTag", err))
+			WriteAppError(w, "createTag", err)
 			return
 		}
 
@@ -33,10 +35,10 @@ func getAllTags(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tags, err := a.GetAllTags(r.Context())
 		if err != nil {
-			WriteError(w, model.NewInternalError("getAllTags", err))
+			WriteAppError(w, "getAllTags", err)
 			return
 		}
-		WriteJSON(w, http.StatusOK, tags)
+		writeList(w, tags)
 	}
 }
 
@@ -47,8 +49,7 @@ func addTagToPost(a *app.App) http.HandlerFunc {
 		var body struct {
 			TagID string `json:"tag_id"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			WriteError(w, model.NewBadRequestError("addTagToPost", "invalid request body"))
+		if !decodeBody(w, r, &body, "addTagToPost") {
 			return
 		}
 
@@ -57,7 +58,7 @@ func addTagToPost(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
+		writeOK(w)
 	}
 }
 
@@ -72,7 +73,7 @@ func removeTagFromPost(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
+		writeOK(w)
 	}
 }
 
@@ -85,7 +86,7 @@ func getTagsForPost(a *app.App) http.HandlerFunc {
 			WriteAppError(w, "getTagsForPost", err)
 			return
 		}
-		WriteJSON(w, http.StatusOK, tags)
+		writeList(w, tags)
 	}
 }
 
@@ -98,8 +99,7 @@ func getTagsForPosts(a *app.App) http.HandlerFunc {
 		var body struct {
 			PostIDs []string `json:"post_ids"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			WriteError(w, model.NewBadRequestError("getTagsForPosts", "invalid request body"))
+		if !decodeBody(w, r, &body, "getTagsForPosts") {
 			return
 		}
 

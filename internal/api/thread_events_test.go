@@ -129,7 +129,7 @@ func tagNames(t *testing.T, evt model.WebSocketEvent) []string {
 func TestTaggingAPostBroadcastsItsTags(t *testing.T) {
 	a, ms, cleanup := setupTestApp(t)
 	defer cleanup()
-	ms.tag.seed(&model.Tag{ID: "019421a0-0000-7000-8000-000000000071", Name: "deploy"})
+	ms.Tags.Seed(&model.Tag{ID: "019421a0-0000-7000-8000-000000000071", Name: "deploy"})
 	srv := httptest.NewServer(New(a))
 	defer srv.Close()
 	conn := dialAs(t, srv)

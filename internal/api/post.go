@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -14,14 +13,29 @@ import (
 func createPost(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
-		var post model.Post
-		if err := json.NewDecoder(r.Body).Decode(&post); err != nil {
-			WriteError(w, model.NewBadRequestError("createPost", "invalid request body"))
+		// Only the fields a client may choose. Decoding into model.Post let a
+		// caller set id, create_at (backdating, or pinning a post to the top
+		// of history), delete_at, is_pinned, or a "system" type.
+		var body struct {
+			ChannelID string         `json:"channel_id"`
+			RootID    string         `json:"root_id"`
+			Content   string         `json:"content"`
+			Props     map[string]any `json:"props"`
+		}
+		if !decodeBody(w, r, &body, "createPost") {
 			return
 		}
-		post.UserID = user.ID
+		// mentions is computed by the server; a client-supplied list would be
+		// stored as-is whenever the content mentions nobody.
+		delete(body.Props, "mentions")
 
-		saved, err := a.CreatePost(r.Context(), &post)
+		saved, err := a.CreatePost(r.Context(), &model.Post{
+			ChannelID: body.ChannelID,
+			RootID:    body.RootID,
+			Content:   body.Content,
+			Props:     body.Props,
+			UserID:    user.ID,
+		})
 		if err != nil {
 			WriteAppError(w, "createPost", err)
 			return
@@ -48,14 +62,15 @@ func updatePost(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
 		id := chi.URLParam(r, "id")
-		var post model.Post
-		if err := json.NewDecoder(r.Body).Decode(&post); err != nil {
-			WriteError(w, model.NewBadRequestError("updatePost", "invalid request body"))
+		var body struct {
+			Content *string        `json:"content"`
+			Props   map[string]any `json:"props"`
+		}
+		if !decodeBody(w, r, &body, "updatePost") {
 			return
 		}
-		post.ID = id
 
-		updated, err := a.UpdatePost(r.Context(), &post, user.ID)
+		updated, err := a.UpdatePost(r.Context(), id, app.PostPatch{Content: body.Content, Props: body.Props}, user.ID)
 		if err != nil {
 			WriteAppError(w, "updatePost", err)
 			return
@@ -73,7 +88,7 @@ func deletePost(a *app.App) http.HandlerFunc {
 			WriteAppError(w, "deletePost", err)
 			return
 		}
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
+		writeOK(w)
 	}
 }
 
@@ -85,7 +100,7 @@ func pinPost(a *app.App) http.HandlerFunc {
 			WriteAppError(w, "pinPost", err)
 			return
 		}
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
+		writeOK(w)
 	}
 }
 
@@ -97,7 +112,7 @@ func unpinPost(a *app.App) http.HandlerFunc {
 			WriteAppError(w, "unpinPost", err)
 			return
 		}
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
+		writeOK(w)
 	}
 }
 

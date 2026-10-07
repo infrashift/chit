@@ -1,6 +1,7 @@
 // Package threadinbox implements the overlay listing the threads the signed-in
-// user follows in the active team. The server has served this list since the
-// beginning; nothing in the client ever asked for it.
+// user follows: those in the active team, then those in direct and group
+// channels. The two come from separate server lists, because a DM belongs to
+// no team and so never appears in a team's.
 package threadinbox
 
 import (
@@ -32,7 +33,11 @@ type ClosedMsg struct{}
 
 // Model is the thread-inbox overlay.
 type Model struct {
-	threads []*model.ThreadResponse
+	// threads is the team's threads followed by the direct ones; the cursor
+	// moves over both as one list. teamCount is where the direct ones start.
+	threads   []*model.ThreadResponse
+	teamCount int
+	teamName  string
 	// channelNames labels each thread with where it lives; a root message on
 	// its own rarely says which channel it is in.
 	channelNames map[string]string
@@ -85,12 +90,20 @@ func (m *Model) SetSize(w, h int) {
 	m.height = h
 }
 
-// SetThreads replaces the list and ends the loading state.
-func (m *Model) SetThreads(threads []*model.ThreadResponse) {
-	m.threads = threads
+// SetThreads replaces both lists, the active team's threads and those in
+// direct and group channels, and ends the loading state.
+func (m *Model) SetThreads(team, direct []*model.ThreadResponse) {
+	m.threads = append(append([]*model.ThreadResponse{}, team...), direct...)
+	m.teamCount = len(team)
 	m.loading = false
 	m.cursor = 0
 }
+
+// SetTeamName names the team whose threads head the list.
+func (m *Model) SetTeamName(name string) { m.teamName = name }
+
+// isDirect reports whether row i is in the direct-message section.
+func (m Model) isDirect(i int) bool { return i >= m.teamCount }
 
 // SetChannelNames supplies display names keyed by channel ID.
 func (m *Model) SetChannelNames(names map[string]string) { m.channelNames = names }
@@ -139,6 +152,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		id := t.Thread.PostID
+		if !m.isDirect(m.cursor) {
+			m.teamCount--
+		}
 		m.threads = append(m.threads[:m.cursor], m.threads[m.cursor+1:]...)
 		if m.cursor >= len(m.threads) {
 			m.cursor = max(len(m.threads)-1, 0)
@@ -177,12 +193,23 @@ func (m Model) View() string {
 		items = append(items, "", m.styles.Timestamp.Render("  Loading…"))
 	case len(m.threads) == 0:
 		items = append(items, "",
-			m.styles.Timestamp.Render("  You are not following any threads in this team."),
+			m.styles.Timestamp.Render("  You are not following any threads."),
 			m.styles.Timestamp.Render("  Reply to a message to start following its thread."))
 	default:
-		items = append(items, "")
-		start, end := listwin.Window(m.cursor, len(m.threads), listwin.Rows(m.height))
+		// Two rows go to the section headings, so the window leaves room.
+		start, end := listwin.Window(m.cursor, len(m.threads), max(listwin.Rows(m.height)-2, 3))
+		// Scrolled into a section, its heading is out of view; keep the gap.
+		if (start > 0 || m.teamCount == 0) && start != m.teamCount {
+			items = append(items, "")
+		}
 		for i := start; i < end; i++ {
+			// A heading starts each non-empty section.
+			if i == 0 && m.teamCount > 0 {
+				items = append(items, "", m.styles.Timestamp.Render("  "+m.teamHeading()))
+			}
+			if i == m.teamCount {
+				items = append(items, "", m.styles.Timestamp.Render("  Direct messages"))
+			}
 			items = append(items, m.renderRow(i, m.threads[i]))
 		}
 		items = append(items, "",
@@ -199,7 +226,7 @@ func (m Model) renderRow(i int, t *model.ThreadResponse) string {
 		marker = "● "
 	}
 
-	label := marker + m.channelLabel(t) + "  " + m.summary(t)
+	label := marker + m.channelLabel(i, t) + "  " + m.summary(t)
 	if n := t.UnreadMentions; n > 0 {
 		label += fmt.Sprintf("  (%d mention%s)", n, plural(n))
 	}
@@ -210,14 +237,28 @@ func (m Model) renderRow(i int, t *model.ThreadResponse) string {
 	return m.styles.ListItem.Render("  " + label)
 }
 
-func (m Model) channelLabel(t *model.ThreadResponse) string {
+func (m Model) teamHeading() string {
+	if m.teamName == "" {
+		return "In this team"
+	}
+	return "In " + m.teamName
+}
+
+// channelLabel says where row i's thread lives: #channel in the team section,
+// and who the conversation is with in the direct section, where a # would
+// suggest a channel that does not exist.
+func (m Model) channelLabel(i int, t *model.ThreadResponse) string {
+	prefix := "#"
+	if m.isDirect(i) {
+		prefix = ""
+	}
 	if t.Thread == nil {
-		return "#?"
+		return prefix + "?"
 	}
 	if name, ok := m.channelNames[t.Thread.ChannelID]; ok && name != "" {
-		return "#" + name
+		return prefix + name
 	}
-	return "#?"
+	return prefix + "?"
 }
 
 // summary is the root message on one line. Without it the row identifies a

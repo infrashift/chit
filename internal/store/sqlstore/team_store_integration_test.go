@@ -43,7 +43,7 @@ func TestTeamStoreIntegration_CRUDAndMembers(t *testing.T) {
 	}
 
 	// Membership
-	if _, err := ss.Team().SaveMember(t.Context(), &model.TeamMember{
+	if _, err = ss.Team().SaveMember(t.Context(), &model.TeamMember{
 		TeamID: team.ID,
 		UserID: user.ID,
 		Roles:  "team_admin",
@@ -84,5 +84,95 @@ func TestTeamStoreIntegration_CRUDAndMembers(t *testing.T) {
 	}
 	if _, err := ss.Team().Get(t.Context(), team.ID); err == nil {
 		t.Error("Get after soft delete: expected error, got nil")
+	}
+}
+
+// GetAll with a viewer lists open teams and the viewer's own invite-only
+// teams, never someone else's; "" lists everything.
+func TestTeamStoreIntegration_GetAllVisibility(t *testing.T) {
+	ss := testStore(t)
+
+	owner, err := ss.User().Save(t.Context(), newTestUser("visowner"))
+	if err != nil {
+		t.Fatalf("save user: %v", err)
+	}
+	outsider, err := ss.User().Save(t.Context(), newTestUser("visoutsider"))
+	if err != nil {
+		t.Fatalf("save user: %v", err)
+	}
+	open, err := ss.Team().Save(t.Context(), &model.Team{
+		Name: "vis-open", DisplayName: "Open", Type: model.TeamOpen, CreatorID: owner.ID,
+	})
+	if err != nil {
+		t.Fatalf("save open team: %v", err)
+	}
+	invite, err := ss.Team().Save(t.Context(), &model.Team{
+		Name: "vis-invite", DisplayName: "Invite", Type: model.TeamInviteOnly, CreatorID: owner.ID,
+	})
+	if err != nil {
+		t.Fatalf("save invite team: %v", err)
+	}
+	if _, err = ss.Team().SaveMember(t.Context(), &model.TeamMember{TeamID: invite.ID, UserID: owner.ID}); err != nil {
+		t.Fatalf("SaveMember: %v", err)
+	}
+
+	ids := func(visibleTo string) map[string]bool {
+		t.Helper()
+		teams, err := ss.Team().GetAll(t.Context(), visibleTo, 0, 100)
+		if err != nil {
+			t.Fatalf("GetAll(%q): %v", visibleTo, err)
+		}
+		got := map[string]bool{}
+		for _, tm := range teams {
+			got[tm.ID] = true
+		}
+		return got
+	}
+
+	if got := ids(outsider.ID); !got[open.ID] || got[invite.ID] {
+		t.Errorf("outsider: got %v, want the open team only", got)
+	}
+	if got := ids(owner.ID); !got[open.ID] || !got[invite.ID] {
+		t.Errorf("member: got %v, want both teams", got)
+	}
+	if got := ids(""); !got[open.ID] || !got[invite.ID] {
+		t.Errorf("unfiltered: got %v, want both teams", got)
+	}
+}
+
+// Re-saving an existing member must keep their roles. The upsert used to
+// overwrite them, so any member could demote the team admin by re-adding them.
+func TestTeamStoreIntegration_SaveMemberKeepsRoles(t *testing.T) {
+	ss := testStore(t)
+
+	user, err := ss.User().Save(t.Context(), newTestUser("roleskeeper"))
+	if err != nil {
+		t.Fatalf("save user: %v", err)
+	}
+	team, err := ss.Team().Save(t.Context(), &model.Team{
+		Name: "roles-team", DisplayName: "Roles", Type: model.TeamOpen, CreatorID: user.ID,
+	})
+	if err != nil {
+		t.Fatalf("save team: %v", err)
+	}
+	if _, err = ss.Team().SaveMember(t.Context(), &model.TeamMember{
+		TeamID: team.ID, UserID: user.ID, Roles: "team_admin team_user",
+	}); err != nil {
+		t.Fatalf("SaveMember (admin): %v", err)
+	}
+
+	again, err := ss.Team().SaveMember(t.Context(), &model.TeamMember{TeamID: team.ID, UserID: user.ID})
+	if err != nil {
+		t.Fatalf("SaveMember (re-add): %v", err)
+	}
+	if !again.IsTeamAdmin() {
+		t.Errorf("re-add returned roles %q, want team_admin kept", again.Roles)
+	}
+	stored, err := ss.Team().GetMember(t.Context(), team.ID, user.ID)
+	if err != nil {
+		t.Fatalf("GetMember: %v", err)
+	}
+	if !stored.IsTeamAdmin() {
+		t.Errorf("stored roles %q, want team_admin kept", stored.Roles)
 	}
 }

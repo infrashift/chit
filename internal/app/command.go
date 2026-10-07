@@ -1,12 +1,9 @@
 package app
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net/http"
 
 	"github.com/infrashift/chit/internal/command"
 	"github.com/infrashift/chit/internal/model"
@@ -19,39 +16,8 @@ type CommandResponse struct {
 
 // CheckCommandPermission verifies an actor can execute a command via Keto.
 func (a *App) CheckCommandPermission(ctx context.Context, actorID, commandID string) (bool, error) {
-	url := fmt.Sprintf("%s/relation-tuples/check", a.ketoReadURL)
-
-	body := map[string]string{
-		"namespace":  model.KetoNamespaceCommand,
-		"object":     fmt.Sprintf("Command:%s", commandID),
-		"relation":   model.KetoRelationExecute,
-		"subject_id": fmt.Sprintf("Actor:%s", actorID),
-	}
-	jsonBody, err := json.Marshal(body)
-	if err != nil {
-		return false, fmt.Errorf("marshal keto check: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBody))
-	if err != nil {
-		return false, fmt.Errorf("create keto request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := a.httpClient.Do(req)
-	if err != nil {
-		return false, fmt.Errorf("keto check command: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Allowed bool `json:"allowed"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return false, fmt.Errorf("decode keto response: %w", err)
-	}
-
-	return result.Allowed, nil
+	return a.keto.Check(ctx, model.KetoNamespaceCommand,
+		"Command:"+commandID, model.KetoRelationExecute, "Actor:"+actorID)
 }
 
 // InterceptSlashCommand checks whether content is a slash command, authorizes

@@ -16,7 +16,7 @@ func TestCreateChannel(t *testing.T) {
 
 	handler := createChannel(a)
 	body := `{"team_id":"` + testTeamID + `","name":"newchan","display_name":"New Channel","type":"O"}`
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/channels", strings.NewReader(body))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/channels", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	r = authedRequest(r, testUser())
 
@@ -39,7 +39,7 @@ func TestCreateChannel_InvalidBody(t *testing.T) {
 	defer cleanup()
 
 	handler := createChannel(a)
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/channels", strings.NewReader("{bad"))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/channels", strings.NewReader("{bad"))
 	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()
 
@@ -55,7 +55,7 @@ func TestGetChannel(t *testing.T) {
 	defer cleanup()
 
 	handler := getChannel(a)
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r = withChiParam(r, "id", testChannelID)
 	w := httptest.NewRecorder()
 
@@ -72,7 +72,7 @@ func TestGetChannel_NotFound(t *testing.T) {
 	defer cleanup()
 
 	handler := getChannel(a)
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r = withChiParam(r, "id", "nonexistent")
 	w := httptest.NewRecorder()
 
@@ -90,7 +90,7 @@ func TestUpdateChannel(t *testing.T) {
 
 	handler := updateChannel(a)
 	body := `{"display_name":"Updated Channel"}`
-	r := httptest.NewRequest(http.MethodPut, "/", strings.NewReader(body))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	r = withChiParam(r, "id", testChannelID)
 	w := httptest.NewRecorder()
@@ -108,7 +108,7 @@ func TestDeleteChannel(t *testing.T) {
 	defer cleanup()
 
 	handler := deleteChannel(a)
-	r := httptest.NewRequest(http.MethodDelete, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/", http.NoBody)
 	r = withChiParam(r, "id", testChannelID)
 	w := httptest.NewRecorder()
 
@@ -125,7 +125,7 @@ func TestGetChannelsForTeam(t *testing.T) {
 	defer cleanup()
 
 	handler := getChannelsForTeam(a)
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r = withChiParam(r, "id", testTeamID)
 	w := httptest.NewRecorder()
 
@@ -142,7 +142,7 @@ func TestGetMyChannels(t *testing.T) {
 	defer cleanup()
 
 	handler := getMyChannels(a)
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r = withChiParam(r, "id", testTeamID)
 	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()
@@ -160,7 +160,7 @@ func TestCreateDirectChannel(t *testing.T) {
 
 	handler := createDirectChannel(a)
 	body := `["` + testUserID + `","` + extraUserID + `"]`
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/channels/direct", strings.NewReader(body))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/channels/direct", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -180,7 +180,7 @@ func TestCreateDirectChannel_Idempotent(t *testing.T) {
 	body := `["` + testUserID + `","` + extraUserID + `"]`
 
 	// First call — creates the DM
-	r1 := httptest.NewRequest(http.MethodPost, "/api/v1/channels/direct", strings.NewReader(body))
+	r1 := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/channels/direct", strings.NewReader(body))
 	r1.Header.Set("Content-Type", "application/json")
 	w1 := httptest.NewRecorder()
 	r1 = authedRequest(r1, testUser())
@@ -193,7 +193,7 @@ func TestCreateDirectChannel_Idempotent(t *testing.T) {
 	decodeJSON(t, w1.Body, &ch1)
 
 	// Second call — should return same channel, no 500
-	r2 := httptest.NewRequest(http.MethodPost, "/api/v1/channels/direct", strings.NewReader(body))
+	r2 := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/channels/direct", strings.NewReader(body))
 	r2.Header.Set("Content-Type", "application/json")
 	w2 := httptest.NewRecorder()
 	r2 = authedRequest(r2, testUser())
@@ -216,7 +216,7 @@ func TestCreateDirectChannel_WrongCount(t *testing.T) {
 
 	handler := createDirectChannel(a)
 	body := `["` + testUserID + `"]`
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/channels/direct", strings.NewReader(body))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/channels/direct", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -234,7 +234,7 @@ func TestAddChannelMember(t *testing.T) {
 
 	handler := addChannelMember(a)
 	body := `{"user_id":"` + extraUserID + `"}`
-	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	r = withChiParam(r, "id", testChannelID)
 	w := httptest.NewRecorder()
@@ -252,7 +252,7 @@ func TestRemoveChannelMember(t *testing.T) {
 	defer cleanup()
 
 	handler := removeChannelMember(a)
-	r := httptest.NewRequest(http.MethodDelete, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/", http.NoBody)
 	r = withChiParams(r, map[string]string{"id": testChannelID, "user_id": testUserID})
 	w := httptest.NewRecorder()
 
@@ -269,7 +269,7 @@ func TestGetChannelMembers(t *testing.T) {
 	defer cleanup()
 
 	handler := getChannelMembers(a)
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r = withChiParam(r, "id", testChannelID)
 	w := httptest.NewRecorder()
 
@@ -294,20 +294,20 @@ func TestGetMyDirectChannels(t *testing.T) {
 		CreateAt:    1000,
 		UpdateAt:    1000,
 	}
-	ms.channel.seed(dmChannel)
-	ms.channel.seedMember(&model.ChannelMember{
+	ms.Channels.Seed(dmChannel)
+	ms.Channels.SeedMember(&model.ChannelMember{
 		ChannelID: dmChannel.ID,
 		UserID:    testUserID,
 		CreateAt:  1000,
 	})
-	ms.channel.seedMember(&model.ChannelMember{
+	ms.Channels.SeedMember(&model.ChannelMember{
 		ChannelID: dmChannel.ID,
 		UserID:    extraUserID,
 		CreateAt:  1000,
 	})
 
 	handler := getMyDirectChannels(a)
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/users/me/channels/direct", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/users/me/channels/direct", http.NoBody)
 	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()
 
@@ -333,7 +333,7 @@ func TestGetMyDirectChannels_Empty(t *testing.T) {
 	defer cleanup()
 
 	handler := getMyDirectChannels(a)
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/users/me/channels/direct", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/users/me/channels/direct", http.NoBody)
 	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()
 
@@ -359,7 +359,7 @@ func TestCreateGroupChannel_Idempotent(t *testing.T) {
 	body := `["` + testUserID + `","` + extraUserID + `","` + thirdUserID + `"]`
 
 	// First call — creates the GM
-	r1 := httptest.NewRequest(http.MethodPost, "/api/v1/channels/group", strings.NewReader(body))
+	r1 := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/channels/group", strings.NewReader(body))
 	r1.Header.Set("Content-Type", "application/json")
 	w1 := httptest.NewRecorder()
 	r1 = authedRequest(r1, testUser())
@@ -372,7 +372,7 @@ func TestCreateGroupChannel_Idempotent(t *testing.T) {
 	decodeJSON(t, w1.Body, &ch1)
 
 	// Second call — should return same channel, no 500
-	r2 := httptest.NewRequest(http.MethodPost, "/api/v1/channels/group", strings.NewReader(body))
+	r2 := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/channels/group", strings.NewReader(body))
 	r2.Header.Set("Content-Type", "application/json")
 	w2 := httptest.NewRecorder()
 	r2 = authedRequest(r2, testUser())
@@ -394,7 +394,7 @@ func TestViewChannel(t *testing.T) {
 	defer cleanup()
 
 	handler := viewChannel(a)
-	r := httptest.NewRequest(http.MethodPost, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", http.NoBody)
 	r = withChiParam(r, "id", testChannelID)
 	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()
@@ -411,14 +411,14 @@ func TestViewChannel(t *testing.T) {
 func TestGetMyChannelMembers(t *testing.T) {
 	a, ms, cleanup := setupTestApp(t)
 	defer cleanup()
-	ms.channel.seedMember(&model.ChannelMember{ChannelID: testChannelID, UserID: extraUserID, MentionCount: 9})
-	ms.channel.seed(&model.Channel{ID: "chan-other-team", TeamID: "other-team", Name: "x", Type: "O"})
-	ms.channel.seedMember(&model.ChannelMember{ChannelID: "chan-other-team", UserID: testUserID})
-	for _, m := range ms.channel.members[testChannelID] {
-		if m.UserID == testUserID {
-			m.MentionCount = 2
-		}
+	ms.Channels.SeedMember(&model.ChannelMember{ChannelID: testChannelID, UserID: extraUserID, MentionCount: 9})
+	ms.Channels.Seed(&model.Channel{ID: "chan-other-team", TeamID: "other-team", Name: "x", Type: "O"})
+	ms.Channels.SeedMember(&model.ChannelMember{ChannelID: "chan-other-team", UserID: testUserID})
+	// The caller's own row in the team's channel, with mentions waiting.
+	if err := ms.Channels.RemoveMember(t.Context(), testChannelID, testUserID); err != nil {
+		t.Fatal(err)
 	}
+	ms.Channels.SeedMember(&model.ChannelMember{ChannelID: testChannelID, UserID: testUserID, MentionCount: 2})
 
 	handler := getMyChannelMembers(a)
 	r := httptest.NewRequest(http.MethodGet, "/", nil)

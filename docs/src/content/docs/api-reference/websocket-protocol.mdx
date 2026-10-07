@@ -11,47 +11,49 @@ Chit provides real-time event delivery over WebSocket connections.
 GET /api/v1/websocket
 ```
 
-Upgrade a standard HTTP connection to WebSocket. Authentication is required —
-the request must pass through Oathkeeper with a valid session.
+Upgrade a standard HTTP connection to WebSocket. The endpoint sits behind the
+same authentication as the REST API: the request must arrive through
+Oathkeeper carrying the trusted `X-User-Id` (Kratos session) or `X-Client-Id`
+(OAuth2 client credentials) header. An unauthenticated request gets the API's
+JSON `401` error instead of an upgrade.
+
+The browser `Origin` header is checked against `CHIT_ALLOWED_ORIGINS`. A
+request with no `Origin` (a non-browser client such as `chit-tui` or
+`chit-mcp`) is accepted; `*` accepts any origin; an empty value accepts no
+browser origin. A rejected origin fails the upgrade.
 
 ## Wire Format
 
 ### Server → Client Events
 
+Every event has the same envelope:
+
 ```json
 {
-  "event": "posted",
+  "event": "post_deleted",
   "data": {
-    "post": {
-      "id": "01912345-...",
-      "channel_id": "01912345-...",
-      "user_id": "01912345-...",
-      "content": "Hello, world!",
-      "create_at": 1700000000000
-    }
+    "post_id": "01912345-...",
+    "channel_id": "01912345-..."
   },
   "broadcast": {
-    "channel_id": "01912345-...",
-    "team_id": "",
-    "user_id": ""
+    "channel_id": "01912345-..."
   },
-  "seq": 42
+  "seq": 0
 }
 ```
 
 | Field | Type | Description |
 |---|---|---|
 | `event` | string | Event type identifier |
-| `data` | object | Event payload (varies by event type) |
-| `broadcast` | object | Delivery targeting scope |
-| `seq` | int64 | Monotonically increasing sequence number |
+| `data` | object | Event payload (varies by event type, see below) |
+| `broadcast` | object | Who the event was addressed to: `channel_id`, `team_id` or `user_id`. Empty fields are omitted. |
+| `seq` | int64 | Always `0` from chitd. chitd does not number events; only `chit-mcp`'s event buffer assigns sequence numbers, for its `get_new_events` tool. |
 
 ### Client → Server Messages
 
 ```json
 {
   "action": "typing",
-  "seq": 1,
   "data": {
     "channel_id": "01912345-..."
   }
@@ -60,63 +62,110 @@ the request must pass through Oathkeeper with a valid session.
 
 | Field | Type | Description |
 |---|---|---|
-| `action` | string | Action identifier |
-| `seq` | int64 | Client-assigned sequence number |
+| `action` | string | Action identifier. Only `typing` is accepted; anything else is ignored. |
+| `seq` | int64 | Accepted for compatibility and ignored |
 | `data` | object | Action payload |
+
+A message that is not valid JSON is logged and ignored. A message larger than
+**4096 bytes** closes the connection.
 
 ## Server → Client Event Types
 
-| Event | Data Fields | Description |
-|---|---|---|
-| `posted` | `post` | A new post was created |
-| `post_edited` | `post` | A post's content was updated |
-| `post_deleted` | `post.id`, `channel_id` | A post was deleted |
-| `post_pinned` | `post` | A post was pinned |
-| `post_unpinned` | `post` | A post was unpinned |
-| `typing` | `user_id`, `channel_id` | A user is typing |
-| `channel_created` | `channel` | A new channel was created |
-| `channel_updated` | `channel` | Channel metadata was updated |
-| `channel_deleted` | `channel.id`, `team_id` | A channel was deleted |
-| `user_added` | `user_id`, `channel_id` | A user joined a channel |
-| `user_removed` | `user_id`, `channel_id` | A user left a channel |
-| `thread_updated` | `thread` | A thread's counters changed (a reply was added); the reply itself arrives as `posted` |
-| `post_tags_updated` | `post_id`, `channel_id`, `tags` | A tag was added to or removed from a post; `tags` is the post's whole list |
-| `status_change` | `user_id`, `status` | A user's status changed |
-| `mentioned` | `post_id`, `channel_id`, `user_id` | The connected user was @mentioned (`user_id` is the author) |
+chitd sends 15 event types.
+
+| Event | `data` | `broadcast` | Sent when |
+|---|---|---|---|
+| `posted` | The full post object (`id`, `channel_id`, `user_id`, `root_id`, `content`, `type`, `props`, `is_pinned`, `create_at`, …) | `channel_id` | A post or reply is created |
+| `post_edited` | The full post object, as stored after the edit | `channel_id` | A post is edited |
+| `post_deleted` | `post_id`, `channel_id` | `channel_id` | A post is deleted |
+| `post_pinned` | `post_id`, `channel_id` | `channel_id` | A post is pinned |
+| `post_unpinned` | `post_id`, `channel_id` | `channel_id` | A post is unpinned |
+| `typing` | `user_id` | `channel_id` | A member sends the `typing` action |
+| `channel_created` | The full channel object | `team_id` for an open channel; `channel_id` for private, direct and group channels | A channel, DM or group channel is created |
+| `channel_updated` | The full channel object | As for `channel_created` | A channel's display name, header or purpose changes (including via `/topic`) |
+| `channel_deleted` | `channel_id` | `channel_id` | A channel is deleted, or its team is deleted |
+| `user_added` | `channel_id`, `user_id` (the user added) | `channel_id` | A user joins or is added through `POST /channels/{id}/members` or `/invite`. Members added when a channel is created are announced by `channel_created` instead. |
+| `user_removed` | `channel_id`, `user_id` (the user removed) | `channel_id`, and separately `user_id` (the user removed) | A user leaves or is removed from a channel, including by leaving or being removed from its team |
+| `thread_updated` | `thread`: `{post_id, channel_id, reply_count, last_reply_at, participants}` | `channel_id` | After every reply, and after every reply deletion |
+| `post_tags_updated` | `post_id`, `channel_id`, `tags` (the post's whole tag list) | `channel_id` | A tag is added to or removed from a post |
+| `mentioned` | `post_id`, `channel_id`, `user_id` (the post's **author**) | `user_id` (the mentioned user) | A post mentions the user, by `@username` or `@all` |
+| `command_response` | `text`, `command_slug`, `channel_id` | `user_id` (the invoker) | A slash command handler ran. See [MCP and Slash Commands](/chit/reference/mcp-and-commands/). |
+
+Notes:
+
+- `posted` and `post_edited` carry the post's fields directly in `data`; there
+  is no `post` wrapper.
+- `thread_updated` deliberately does not carry the reply. The reply itself
+  arrives as `posted`.
+- `user_removed` is sent twice: to the channel's remaining members, and
+  addressed to the removed user, who is no longer in the channel's audience
+  by the time the channel copy is delivered. Each connection receives it
+  once.
+- A `command_response` is sent only when a handler executed, whatever text it
+  returned. An unknown command, a permission denial, a command with no
+  handler, or a handler error answers only through the `POST /posts`
+  response.
+- There is no presence or `status_change` event.
 
 ## Client → Server Actions
 
 | Action | Data Fields | Description |
 |---|---|---|
-| `typing` | `channel_id` | Notify that the user is typing in a channel |
+| `typing` | `channel_id` | Notify the channel that the user is typing |
+
+A `typing` action is relayed only if the sender is a member of `channel_id`
+(per the hub's membership cache). It is delivered to every connected member of
+the channel, including the sender's own connections.
 
 ## Broadcast Targeting
 
-The `broadcast` object controls which connected clients receive an event:
+The hub decides who receives each event from its `broadcast` object:
 
-| Field | Behavior |
-|---|---|
-| `channel_id` | Deliver to all members of the channel |
-| `team_id` | Deliver to all members of the team |
-| `user_id` | Deliver only to the specific user |
+1. **`user_id` set:** delivered only to that user's connections. Any
+   `channel_id` or `team_id` is ignored.
+2. **Otherwise `channel_id` set:** delivered only to connected members of that
+   channel.
+3. **Otherwise `team_id` set:** delivered only to connected members of that
+   team.
+4. **All empty:** delivered to every connected client. chitd does not
+   currently send such an event.
 
-Multiple fields can be set. If all fields are empty, the event is broadcast to
-every connected client.
+An event with no `broadcast` object at all is dropped.
+
+Channel and team membership come from a per-user cache that the hub loads from
+the database when the user's first connection registers (with a 10-second
+timeout). Until that load finishes, channel- and team-targeted events are not
+delivered to that user. If the load fails it is retried on the user's next
+connection. Membership changes that happen while the load is in flight are
+queued and applied on top of it, so they are not lost. The cache is dropped
+when the user's last connection closes.
 
 ## Connection Lifecycle
 
-1. **Connect** — client upgrades to WebSocket at `/api/v1/websocket`
-2. **Register** — hub registers the client and starts read/write pumps
-3. **Receive events** — server pushes events matching the client's
-   subscriptions
-4. **Send actions** — client sends actions (e.g., typing indicators)
-5. **Ping/Pong** — server sends periodic ping frames to detect stale
-   connections (configurable via `CHIT_WS_PING_INTERVAL`)
-6. **Disconnect** — client closes the connection or ping times out; hub
-   unregisters the client
+1. **Connect:** the client upgrades at `/api/v1/websocket`.
+2. **Register:** the hub registers the connection, then starts its read and
+   write pumps. The first connection for a user triggers the membership load.
+3. **Receive events:** events addressed to the user, their channels or their
+   teams are written to the connection.
+4. **Send actions:** the client may send `typing` actions.
+5. **Ping/Pong:** the server sends a ping every `CHIT_WS_PING_INTERVAL`
+   (default `30s`). The read deadline is twice that interval and is extended
+   only by a pong, so a client that does not answer pings is disconnected.
+   Each write has a deadline of `CHIT_WS_WRITE_TIMEOUT` (default `10s`).
+6. **Disconnect:** the client closes the connection, a ping times out, a
+   write fails, or the server drops a slow consumer (below). The hub then
+   unregisters the connection.
+
+### Slow consumers
+
+Each connection has a send buffer of **256 events**. If an event arrives while
+the buffer is full, the hub disconnects that connection rather than block or
+silently drop events. Other connections, including the same user's other
+connections, are unaffected.
 
 ## Reconnection
 
-Clients should implement automatic reconnection with exponential backoff. The
-`seq` field on events can be used to detect gaps and request missed events
-(when supported by the server).
+Events are not replayed and `seq` cannot be used to detect gaps. A client that
+reconnects, or is disconnected as a slow consumer, should reconnect with
+backoff and refetch what it shows, for example with
+`GET /channels/{id}/posts?since=<last create_at>`.

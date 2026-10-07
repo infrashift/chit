@@ -48,8 +48,8 @@ func Defaults() *Config {
 func (c *Config) UseOAuth() bool { return c.OAuthClientID != "" }
 
 // OAuth returns the client-credentials configuration for chitclient.
-func (c *Config) OAuth() chitclient.OAuthConfig {
-	return chitclient.OAuthConfig{
+func (c *Config) OAuth() *chitclient.OAuthConfig {
+	return &chitclient.OAuthConfig{
 		TokenURL:     c.OAuthTokenURL,
 		ClientID:     c.OAuthClientID,
 		ClientSecret: c.OAuthClientSecret,
@@ -86,6 +86,12 @@ func LoadConfig() (*Config, error) {
 	// weaker one by accident would be worse than refusing to start.
 	switch {
 	case cfg.UseOAuth():
+		// Both set used to mean OAuth, silently: an operator who thought the
+		// agent ran as its Kratos identity would find it acting as another
+		// user, with other roles.
+		if cfg.AgentKratosID != "" {
+			return nil, fmt.Errorf("set CHIT_MCP_OAUTH_CLIENT_ID or CHIT_MCP_AGENT_KRATOS_ID, not both")
+		}
 		if cfg.OAuthClientSecret == "" {
 			return nil, fmt.Errorf("CHIT_MCP_OAUTH_CLIENT_SECRET is required when OAUTH_CLIENT_ID is set")
 		}

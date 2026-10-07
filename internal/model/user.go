@@ -37,17 +37,32 @@ func (u *User) IsValid() *AppError {
 	if !IsValidID(u.ID) {
 		return NewAppError("User.IsValid", "invalid user id", "", http.StatusBadRequest)
 	}
-	if u.KratosID == "" {
-		return NewAppError("User.IsValid", "kratos_id is required", "", http.StatusBadRequest)
+	// A user is identified by a PERSON'S Kratos identity or by a MACHINE'S
+	// OAuth2 client, and needs at least one. Requiring kratos_id of everything
+	// made the machine half of this model unreachable: OAuthClientID,
+	// GetByOAuthClientID, ResolveOAuthClient and the oauth cache key all
+	// existed and no code path could produce a row for them to find, because
+	// the only way to satisfy this check was to give a machine a Kratos
+	// identity it does not have and should not be handed.
+	if u.KratosID == "" && u.OAuthClientID == "" {
+		return NewAppError("User.IsValid",
+			"a user needs either a kratos_id (a person) or an oauth_client_id (a machine)",
+			"", http.StatusBadRequest)
 	}
 	if !validUsernameRe.MatchString(u.Username) {
 		return NewAppError("User.IsValid", "invalid username", "", http.StatusBadRequest)
 	}
-	if len(u.DisplayName) == 0 || len(u.DisplayName) > 100 {
+	if u.DisplayName == "" || len(u.DisplayName) > 100 {
 		return NewAppError("User.IsValid", "display_name must be 1–100 characters", "", http.StatusBadRequest)
 	}
-	if len(u.Email) == 0 || len(u.Email) > 128 || !strings.Contains(u.Email, "@") {
-		return NewAppError("User.IsValid", "invalid email", "", http.StatusBadRequest)
+	// EMAIL BELONGS TO A PERSON. It is required for a Kratos-backed user, where
+	// it comes from the identity and is how the notifier addresses somebody. A
+	// machine actor has no mailbox, and inventing one to pass a validator is
+	// the same move as inventing a Kratos identity for it.
+	if u.KratosID != "" {
+		if u.Email == "" || len(u.Email) > 128 || !strings.Contains(u.Email, "@") {
+			return NewAppError("User.IsValid", "invalid email", "", http.StatusBadRequest)
+		}
 	}
 	if u.CreateAt == 0 {
 		return NewAppError("User.IsValid", "create_at is required", "", http.StatusBadRequest)
@@ -96,8 +111,13 @@ func (u *User) IsSystemAdmin() bool {
 	return false
 }
 
+// Sanitize strips what one user must not learn about another before the user
+// is returned to an API consumer.
 func (u *User) Sanitize() {
 	u.Email = ""
+	// The Kratos identity ID is the key the trusted proxy header carries;
+	// it identifies the person to the auth stack, not to other users.
+	u.KratosID = ""
 	// The OAuth2 client binding is a credential identifier and is of no use to
 	// API consumers; only the provisioning path (which returns the unsanitized
 	// saved user) needs to see it.

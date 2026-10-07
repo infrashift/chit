@@ -1,9 +1,13 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/infrashift/chit/internal/model"
 )
@@ -33,7 +37,7 @@ func TestAuthExtract_Success(t *testing.T) {
 
 	handler := AuthExtract(a)(next)
 
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r.Header.Set("X-User-Id", testKratosID) // matches TrustedProxyHeader default
 	w := httptest.NewRecorder()
 
@@ -50,7 +54,7 @@ func TestAuthExtract_OAuthClientResolvesToUser(t *testing.T) {
 	a, ms, cleanup := setupTestApp(t)
 	defer cleanup()
 
-	ms.user.seed(&model.User{
+	ms.Users.Seed(&model.User{
 		ID:            agentUserID,
 		KratosID:      "kratos-agent-001",
 		Username:      "claude-architect",
@@ -69,7 +73,7 @@ func TestAuthExtract_OAuthClientResolvesToUser(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r.Header.Set("X-Client-Id", testOAuthClientID)
 	w := httptest.NewRecorder()
 	AuthExtract(a)(next).ServeHTTP(w, r)
@@ -92,7 +96,7 @@ func TestAuthExtract_UnknownOAuthClientRejected(t *testing.T) {
 		t.Error("next handler should not be called for an unknown client")
 	})
 
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r.Header.Set("X-Client-Id", "client-that-was-never-bound")
 	w := httptest.NewRecorder()
 	AuthExtract(a)(next).ServeHTTP(w, r)
@@ -108,7 +112,7 @@ func TestAuthExtract_ClientHeaderBeatsForgedUserHeader(t *testing.T) {
 	a, ms, cleanup := setupTestApp(t)
 	defer cleanup()
 
-	ms.user.seed(&model.User{
+	ms.Users.Seed(&model.User{
 		ID:            agentUserID,
 		KratosID:      "kratos-agent-001",
 		Username:      "claude-architect",
@@ -127,7 +131,7 @@ func TestAuthExtract_ClientHeaderBeatsForgedUserHeader(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r.Header.Set("X-Client-Id", testOAuthClientID)
 	r.Header.Set("X-User-Id", testKratosID) // would be a different, human user
 	w := httptest.NewRecorder()
@@ -148,7 +152,7 @@ func TestAuthExtract_MissingHeader(t *testing.T) {
 
 	handler := AuthExtract(a)(next)
 
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	// No X-User-Id header
 	w := httptest.NewRecorder()
 
@@ -159,26 +163,34 @@ func TestAuthExtract_MissingHeader(t *testing.T) {
 	}
 }
 
+// The request log line records method, path, status, and both the peer and
+// the unverified X-Forwarded-For, as separate fields.
 func TestStructuredLogger(t *testing.T) {
-	var called bool
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
-	})
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
 
-	handler := StructuredLogger(next)
-
-	r := httptest.NewRequest(http.MethodGet, "/test", nil)
+	handler := StructuredLogger(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/test", http.NoBody)
+	r.Header.Set("X-Forwarded-For", "203.0.113.9")
 	w := httptest.NewRecorder()
-
 	handler.ServeHTTP(w, r)
 
-	if !called {
-		t.Fatal("expected next handler to be called")
+	var line map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &line); err != nil {
+		t.Fatalf("log line is not JSON: %q", buf.String())
 	}
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
+	want := map[string]any{
+		"method": "GET", "path": "/test", "status": float64(http.StatusTeapot),
+		"remote_addr": r.RemoteAddr, "forwarded_for": "203.0.113.9",
+	}
+	for k, v := range want {
+		if line[k] != v {
+			t.Errorf("%s = %v, want %v", k, line[k], v)
+		}
 	}
 }
 
@@ -201,7 +213,7 @@ func TestRateLimit_Allows(t *testing.T) {
 
 	handler := RateLimit(100, 100)(next)
 
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r.RemoteAddr = "1.2.3.4:5678"
 	w := httptest.NewRecorder()
 
@@ -221,7 +233,7 @@ func TestRateLimit_Blocks(t *testing.T) {
 	handler := RateLimit(1, 1)(next)
 
 	// First request should pass
-	r1 := httptest.NewRequest(http.MethodGet, "/", nil)
+	r1 := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r1.RemoteAddr = "10.0.0.1:9999"
 	w1 := httptest.NewRecorder()
 	handler.ServeHTTP(w1, r1)
@@ -230,7 +242,7 @@ func TestRateLimit_Blocks(t *testing.T) {
 	}
 
 	// Second request should be rate limited
-	r2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	r2 := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r2.RemoteAddr = "10.0.0.1:9999"
 	w2 := httptest.NewRecorder()
 	handler.ServeHTTP(w2, r2)
@@ -250,7 +262,7 @@ func TestAuthExtract_ProxySecretRequired(t *testing.T) {
 	})
 
 	// Correct user header but missing proxy secret → 401.
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r.Header.Set("X-User-Id", testKratosID)
 	w := httptest.NewRecorder()
 	mw(next).ServeHTTP(w, r)
@@ -259,7 +271,7 @@ func TestAuthExtract_ProxySecretRequired(t *testing.T) {
 	}
 
 	// Wrong secret → 401.
-	r = httptest.NewRequest(http.MethodGet, "/", nil)
+	r = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r.Header.Set("X-User-Id", testKratosID)
 	r.Header.Set("X-Proxy-Secret", "wrong")
 	w = httptest.NewRecorder()
@@ -269,12 +281,46 @@ func TestAuthExtract_ProxySecretRequired(t *testing.T) {
 	}
 
 	// Correct secret → passes through.
-	r = httptest.NewRequest(http.MethodGet, "/", nil)
+	r = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r.Header.Set("X-User-Id", testKratosID)
 	r.Header.Set("X-Proxy-Secret", "s3cret")
 	w = httptest.NewRecorder()
 	mw(next).ServeHTTP(w, r)
 	if w.Code != http.StatusOK {
 		t.Fatalf("correct secret: expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// Idle buckets are evicted once they would have refilled anyway; a busy
+// caller's bucket is never reset (the old janitor wiped every bucket every
+// ten minutes, refilling the burst of whoever was active).
+func TestUserLimiters_EvictsOnlyIdleBuckets(t *testing.T) {
+	now := time.Unix(0, 0)
+	clock := func() time.Time { return now }
+	u := newUserLimiters(1, 2, clock)
+
+	for i := range 2 {
+		if !u.allow("busy") {
+			t.Fatalf("request %d of a burst of 2 refused", i+1)
+		}
+	}
+	if !u.allow("idle") {
+		t.Fatal("first request refused")
+	}
+	if u.allow("busy") {
+		t.Fatal("a third request inside a second was allowed with a burst of 2")
+	}
+
+	// Long enough for "idle" to be evicted; "busy" keeps calling.
+	for range 3 {
+		now = now.Add(u.idleAfter / 2)
+		u.allow("busy")
+	}
+	u.mu.Lock()
+	_, idleKept := u.entries["idle"]
+	_, busyKept := u.entries["busy"]
+	u.mu.Unlock()
+	if idleKept || !busyKept {
+		t.Fatalf("idle kept=%v busy kept=%v, want only the busy bucket", idleKept, busyKept)
 	}
 }

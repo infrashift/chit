@@ -44,6 +44,40 @@ func (a *App) requireTeamMember(ctx context.Context, teamID, userID string) erro
 	return err
 }
 
+// requireTeamAdmin returns a 403 error unless actor is a team_admin of the
+// team or a system_admin. Team admin is the role CreateTeam grants the
+// creator; until this check existed nothing read it, and anyone could rename or
+// delete any team.
+func (a *App) requireTeamAdmin(ctx context.Context, teamID string, actor *model.User, op string) error {
+	if actor.IsSystemAdmin() {
+		return nil
+	}
+	member, err := a.Store.Team().GetMember(ctx, teamID, actor.ID)
+	if err != nil && !isNotFound(err) {
+		return err
+	}
+	if err == nil && member.IsTeamAdmin() {
+		return nil
+	}
+	return model.NewForbiddenError(op, "requires team_admin")
+}
+
+// requireTeamVisible returns a 403 error unless actor may see the team: open
+// teams are visible to everyone, invite-only teams to their members and to
+// system admins.
+func (a *App) requireTeamVisible(ctx context.Context, team *model.Team, actor *model.User) error {
+	if team.Type == model.TeamOpen || actor.IsSystemAdmin() {
+		return nil
+	}
+	return a.requireTeamMember(ctx, team.ID, actor.ID)
+}
+
+// isNotFound reports whether err is an AppError carrying 404.
+func isNotFound(err error) bool {
+	var appErr *model.AppError
+	return errors.As(err, &appErr) && appErr.StatusCode == http.StatusNotFound
+}
+
 // requireSystemAdmin returns a 403 error unless the actor holds system_admin.
 //
 // A failed user lookup is a DENIAL, not an error, matching requirePostOwner

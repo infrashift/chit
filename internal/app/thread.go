@@ -30,13 +30,39 @@ func (a *App) GetThreadsForUser(ctx context.Context, userID, teamID string, page
 	return a.Store.Thread().GetThreadsForUser(ctx, userID, teamID, page, perPage)
 }
 
+// GetDirectThreadsForUser retrieves the threads a user follows in direct and
+// group channels.
+func (a *App) GetDirectThreadsForUser(ctx context.Context, userID string, page, perPage int) (*model.UserThreadList, error) {
+	return a.Store.Thread().GetDirectThreadsForUser(ctx, userID, page, perPage)
+}
+
+// requireThreadReadable returns an error unless postID is a thread root in a
+// channel userID belongs to. Following a thread puts its root post in the
+// follower's inbox, so without this anyone who knew a post ID could read it.
+func (a *App) requireThreadReadable(ctx context.Context, postID, userID string) error {
+	root, err := a.Store.Post().Get(ctx, postID)
+	if err != nil {
+		return err
+	}
+	if root.RootID != "" {
+		return model.NewBadRequestError("App.requireThreadReadable", "not a thread root")
+	}
+	return a.requireChannelMember(ctx, root.ChannelID, userID)
+}
+
 // MarkThreadAsRead marks a thread as read for a user.
 func (a *App) MarkThreadAsRead(ctx context.Context, postID, userID string) error {
+	if err := a.requireThreadReadable(ctx, postID, userID); err != nil {
+		return err
+	}
 	return a.Store.Thread().MarkAsRead(ctx, postID, userID, model.GetMillis())
 }
 
 // UpdateThreadFollowing updates a user's follow status for a thread.
 func (a *App) UpdateThreadFollowing(ctx context.Context, postID, userID string, following bool) error {
+	if err := a.requireThreadReadable(ctx, postID, userID); err != nil {
+		return err
+	}
 	membership, err := a.Store.Thread().GetMembership(ctx, postID, userID)
 	if err != nil {
 		// Create membership if it doesn't exist

@@ -55,13 +55,3 @@ func (c *LRU[K, V]) Set(key K, value V) {
 func (c *LRU[K, V]) Remove(key K) {
 	c.cache.Remove(key)
 }
-
-// Len returns the number of entries in the cache.
-func (c *LRU[K, V]) Len() int {
-	return c.cache.Len()
-}
-
-// Purge clears all entries from the cache.
-func (c *LRU[K, V]) Purge() {
-	c.cache.Purge()
-}

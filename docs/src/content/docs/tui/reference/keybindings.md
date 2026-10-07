@@ -153,7 +153,7 @@ These commands are handled by chit-tui itself and never reach the server:
 | `/group` | Start a group conversation with three or more people |
 | `/nick <display name>` | Change your display name |
 | `/username <handle>` | Change your username (breaks existing @mentions) |
-| `/threads` | Threads you follow in this team |
+| `/threads` | Threads you follow, in this team and in DMs |
 | `/leave` | Leave the current channel |
 | `/logout` | Sign out and clear the stored session |
 

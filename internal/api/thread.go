@@ -1,13 +1,11 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/infrashift/chit/internal/app"
-	"github.com/infrashift/chit/internal/model"
 )
 
 func getThread(a *app.App) http.HandlerFunc {
@@ -31,10 +29,24 @@ func getMyThreads(a *app.App) http.HandlerFunc {
 
 		threads, err := a.GetThreadsForUser(r.Context(), user.ID, teamID, page, perPage)
 		if err != nil {
-			WriteError(w, model.NewInternalError("getMyThreads", err))
+			WriteAppError(w, "getMyThreads", err)
 			return
 		}
 
+		WriteJSON(w, http.StatusOK, threads)
+	}
+}
+
+// getMyDirectThreads lists the followed threads in direct and group channels,
+// which have no team and so never appear in a team's thread list.
+func getMyDirectThreads(a *app.App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		page, perPage := parsePagination(r, 25)
+		threads, err := a.GetDirectThreadsForUser(r.Context(), ContextGetUser(r).ID, page, perPage)
+		if err != nil {
+			WriteAppError(w, "getMyDirectThreads", err)
+			return
+		}
 		WriteJSON(w, http.StatusOK, threads)
 	}
 }
@@ -45,11 +57,11 @@ func markThreadAsRead(a *app.App) http.HandlerFunc {
 		threadID := chi.URLParam(r, "id")
 
 		if err := a.MarkThreadAsRead(r.Context(), threadID, user.ID); err != nil {
-			WriteError(w, model.NewInternalError("markThreadAsRead", err))
+			WriteAppError(w, "markThreadAsRead", err)
 			return
 		}
 
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
+		writeOK(w)
 	}
 }
 
@@ -61,16 +73,15 @@ func updateThreadFollowing(a *app.App) http.HandlerFunc {
 		var body struct {
 			Following bool `json:"following"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			WriteError(w, model.NewBadRequestError("updateThreadFollowing", "invalid request body"))
+		if !decodeBody(w, r, &body, "updateThreadFollowing") {
 			return
 		}
 
 		if err := a.UpdateThreadFollowing(r.Context(), threadID, user.ID, body.Following); err != nil {
-			WriteError(w, model.NewInternalError("updateThreadFollowing", err))
+			WriteAppError(w, "updateThreadFollowing", err)
 			return
 		}
 
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
+		writeOK(w)
 	}
 }

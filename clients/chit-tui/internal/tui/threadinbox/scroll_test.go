@@ -39,7 +39,7 @@ func TestThreadInbox_FitsTheScreenAndScrolls(t *testing.T) {
 			Posts:  []*model.Post{{ID: fmt.Sprint(i), Content: fmt.Sprintf("topic %02d", i)}},
 		}
 	}
-	m.SetThreads(threads)
+	m.SetThreads(threads, nil)
 
 	if h := strings.Count(m.View(), "\n") + 1; h > 20 {
 		t.Errorf("inbox is %d rows tall on a 20-row terminal", h)

@@ -1,0 +1,234 @@
+---
+title: MCP and Slash Commands
+description: The chit-mcp tools, resources and prompts, the server's slash commands, and the command webhook wire format.
+---
+
+This page covers the two ways a program other than a chat client acts on
+Chit: the `chit-mcp` MCP server, which gives an AI agent tools over the REST
+API, and the server's slash commands, with the CloudEvents webhook they can
+emit.
+
+## MCP server (`chit-mcp`)
+
+`chit-mcp` (`cmd/chit-mcp`, `internal/mcp`) is an MCP server that speaks
+JSON-RPC over **stdio**, so an MCP host launches it as a subprocess. It holds
+no database connection: every tool is a call to chitd's REST API made as the
+agent's user, so chitd applies the same authorization as for any other user.
+It also keeps a WebSocket connection to chitd open and buffers the agent's
+events for the `get_new_events` tool. Logs go to stderr.
+
+### Authentication
+
+`chit-mcp` reads `CHIT_MCP_`-prefixed environment variables and authenticates
+in one of two modes:
+
+| Mode | Selected when | Variables | How chitd sees it |
+|---|---|---|---|
+| OAuth2 client credentials (preferred) | `CHIT_MCP_OAUTH_CLIENT_ID` is set | `CHIT_MCP_OAUTH_CLIENT_ID`, `CHIT_MCP_OAUTH_CLIENT_SECRET` and `CHIT_MCP_OAUTH_TOKEN_URL` (all required); `CHIT_MCP_OAUTH_SCOPES` (default `chit:read chit:write`); `CHIT_MCP_OAUTH_AUDIENCE` (default `chit`) | Hydra issues a token; Oathkeeper introspects it and forwards `X-Client-Id`; chitd resolves the client to its machine actor. `CHIT_MCP_SERVER_URL` points at Oathkeeper. |
+| Trusted header (local development) | `CHIT_MCP_AGENT_KRATOS_ID` is set | `CHIT_MCP_AGENT_KRATOS_ID` (required); `CHIT_MCP_PROXY_SECRET` (must match `CHIT_TRUSTED_PROXY_SECRET` when chitd sets one) | `chit-mcp` sends the agent's Kratos identity ID as `X-User-Id` directly to chitd. |
+
+`CHIT_MCP_SERVER_URL` defaults to `http://localhost:8065`. Exactly one
+mode may be configured: with both `CHIT_MCP_OAUTH_CLIENT_ID` and
+`CHIT_MCP_AGENT_KRATOS_ID` set, with neither, or with OAuth missing its secret
+or token URL, `chit-mcp` refuses to start. At
+startup it warns when the user it acts as is not `actor_type=agent`.
+
+### Tools
+
+Every tool returns JSON text from chitd, or an error result (`error: ...`)
+that carries chitd's error. `page` and `per_page` are optional everywhere:
+`page` defaults to `0`, `per_page` to `60` (`25` for `get_my_threads`) and is
+capped at 200.
+
+| Tool | Purpose | Arguments | REST call |
+|---|---|---|---|
+| `list_teams` | Teams the agent can see (open teams plus its own) | `page`, `per_page` | `GET /teams` |
+| `get_team` | One team | `team_id` | `GET /teams/{id}` |
+| `list_channels` | A team's **open** channels | `team_id`, `page`, `per_page` | `GET /teams/{id}/channels` |
+| `get_channel` | One channel | `channel_id` | `GET /channels/{id}` |
+| `get_channel_members` | A channel's members | `channel_id`, `page`, `per_page` | `GET /channels/{id}/members` |
+| `get_channel_posts` | Posts, newest first; with `since` (Unix ms), only newer posts, oldest first | `channel_id`, `page`, `per_page`, `since` | `GET /channels/{id}/posts` |
+| `get_post` | One post | `post_id` | `GET /posts/{id}` |
+| `get_pinned_posts` | A channel's pinned posts | `channel_id` | `GET /channels/{id}/pinned` |
+| `create_post` | Post a message as the agent | `channel_id`, `content` | `POST /posts` |
+| `reply_to_thread` | Reply in a thread | `channel_id`, `root_id`, `content` | `POST /posts` |
+| `get_thread` | A root post and its replies | `post_id` (the root) | `GET /posts/{id}/thread` |
+| `get_my_threads` | The agent's thread inbox for a team | `team_id`, `page`, `per_page` | `GET /users/me/teams/{id}/threads` |
+| `mark_thread_read` | Mark a thread read | `team_id`, `post_id` | `PUT /users/me/teams/{team_id}/threads/{id}/read` |
+| `follow_thread` | Follow or unfollow a thread | `team_id`, `post_id`, `following` (bool) | `PUT /users/me/teams/{team_id}/threads/{id}/following` |
+| `search_posts` | Search every channel the agent belongs to | `terms` and/or `tag_ids`, `page`, `per_page` | `POST /posts/search` |
+| `list_tags` | All tags | none | `GET /tags` |
+| `add_tag_to_post` | Tag a post | `post_id`, `tag_id` | `POST /posts/{id}/tags` |
+| `get_tags_for_post` | A post's tags | `post_id` | `GET /posts/{id}/tags` |
+| `get_user` | A user's profile | `user_id` | `GET /users/{id}` |
+| `get_user_by_username` | A user by username | `username` | `GET /users/username/{username}` |
+| `get_my_info` | The agent's own profile | none | `GET /users/me` |
+| `mark_channel_viewed` | Mark a channel read | `channel_id` | `POST /channels/{id}/members/me/view` |
+| `get_new_events` | Drain buffered real-time events | `since_seq` (optional) | none (local buffer) |
+
+Because `create_post` and `reply_to_thread` go through `POST /posts`, content
+starting with a slash command is executed as one, not posted.
+
+### The event buffer
+
+`chit-mcp` connects to chitd's `/api/v1/websocket` as the agent and
+reconnects with backoff (from 1 s, doubling to about 30 s). chitd's hub already limits
+what arrives to the agent's channels, teams and user-targeted events (see
+[WebSocket Protocol](/chit/api-reference/websocket-protocol/)).
+`command_response` events are discarded; everything else is buffered with its
+full payload.
+
+The buffer holds the newest **1,000** events; older ones are evicted. Each
+event gets a sequence number (`seq`) as it enters the buffer: this is the only
+place Chit numbers events. `get_new_events` returns the buffered events with
+`seq` greater than `since_seq` (all of them for `0` or no argument) and
+removes everything up to the last one returned. With nothing new it returns
+`No new events`.
+
+### Resources
+
+| URI | Contents |
+|---|---|
+| `chit://agent/identity` | The agent's own user (`GET /users/me`) |
+| `chit://channels/{channel_id}` | Channel metadata |
+| `chit://channels/{channel_id}/recent` | The 20 most recent posts in the channel |
+| `chit://threads/{post_id}` | A thread: the root post and all replies, as `{"order": [...]}` |
+| `chit://teams/{team_id}/channels` | The team's open channels (first 200) |
+
+All resources are `application/json`. The last four are resource templates.
+
+### Prompts
+
+| Prompt | Arguments | Produces |
+|---|---|---|
+| `summarize_channel` | `channel_id` (required); `num_posts` (optional, default 50) | A user message containing the channel's name and purpose and its most recent `num_posts` posts as JSON, asking for key topics, decisions and action items. `num_posts` must be a positive integer, or the prompt fails; chitd caps it at 200. |
+| `draft_reply` | `post_id` (required, the thread root); `instructions` (optional) | A user message containing the whole thread as JSON, plus the instructions, asking for the reply text only. |
+
+## Slash commands
+
+A slash command is a post whose content matches `^/([a-z0-9-]+)(\s+.*)?$`.
+The first word after the slash is the command; the rest of the line is its
+argument string. Content that does not match, such as `/usr/local/bin`, is an
+ordinary post.
+
+### Where commands run
+
+Commands are intercepted **only by `POST /api/v1/posts`**, which the
+`chit-tui` input, `chit-mcp`'s `create_post`, and any API client use. The
+request needs channel membership first, like any post. Then:
+
+1. An unknown command answers ``Unknown command `/x`. Type `/help` for
+   available commands.``
+2. Ory Keto is asked whether `Actor:<users.id>` has `execute` on
+   `Command:<id>` in the `chit/command` namespace. A denial answers ``You do
+   not have permission to use `/x`.``; a Keto failure denies too (``Permission
+   check failed for `/x`.``). Both are written to the audit log.
+3. The command's handler runs. A command with no handler answers ``/x` is
+   registered but has no handler.``
+
+The command is **never stored**. `POST /posts` answers `201` with a stand-in
+post that has a fresh ID, `type: "command_response"`,
+`props: {"ephemeral": true}`, and the response text as `content`. When a
+handler ran, chitd also sends the invoker (only) a `command_response`
+WebSocket event: `{"text", "command_slug", "channel_id"}`, addressed to their
+`user_id`.
+
+If the CUE definitions under `CHIT_COMMANDS_CUE_DIR` (default `auth`) fail to
+load, chitd starts with commands disabled: slash text is then posted as an
+ordinary message, and `GET /api/v1/commands` returns `[]`.
+
+### Commands
+
+Who may run a command is decided by Keto, from the roles in `auth/roles/` and
+the actor bindings in `auth/actors/`, pushed into Keto by `chit-reconcile`
+(see [SPECS-SLASH-COMMANDS.md](https://github.com/infrashift/chit/blob/main/SPECS-SLASH-COMMANDS.md)).
+No actors are bound by default, so until some are, every command is denied.
+
+| Command | What it does | Roles granted it (shipped CUE) | Further checks |
+|---|---|---|---|
+| `/help` | Lists every registered command with its description. | `admin`, `user`, `agent` | None |
+| `/invite <user>` | Adds the user to this channel. Takes the first word; a leading `@` is optional. | `admin`, `user`, `agent` | The rules of `POST /channels/{id}/members`: open channel, any team member; private, any channel member; never a DM or group. The user must be on the channel's team. |
+| `/kick <user>` | Removes the user from this channel. | `admin` | Removing anyone but yourself also needs `system_admin`. |
+| `/topic [text]` | With text, sets the channel header (sending `channel_updated`). Without, replies with the current header. | `admin`, `user` | Channel membership |
+| `/summarize` | Registered (category `agent`), but **has no handler**: it replies that it is registered but has no handler. | `admin`, `agent` | — |
+
+A handler's own failure (an unknown user, a refused change) comes back as the
+response text, for example ``Could not add `bob`: ...``.
+
+`GET /api/v1/commands` lists the registered commands as
+`[{id, slug, description, category}]`, regardless of who may run them.
+
+### Audit log
+
+Each command that reaches the permission check, allowed or denied, writes one
+JSON line to `CHIT_AUDIT_LOG_PATH` (default `/var/log/chit/audit.log`; empty
+or `-` means stderr):
+
+```json
+{"time":"...","level":"INFO","msg":"command_attempt","event_id":"...","actor_id":"<users.id>","actor_type":"user","command_slug":"invite","authorized":true}
+```
+
+## Command webhook
+
+When `CHIT_WEBHOOK_ENABLED=true`, chitd posts a CloudEvent to
+`CHIT_WEBHOOK_URL` after a command that changed something: a successful
+`/invite`, `/kick`, or `/topic <text>`. `/help`, reading the topic, denials and
+failures send nothing. The switch is global; there is no per-channel opt-in.
+
+### Wire format
+
+```http
+POST <CHIT_WEBHOOK_URL>
+Content-Type: application/cloudevents+json
+ce-specversion: 1.0
+ce-type: com.chit.command.executed
+ce-source: /chit/commands
+ce-id: <event id>
+X-Chit-Signature: <hex HMAC-SHA256 of the body>
+```
+
+```json
+{
+  "specversion": "1.0",
+  "type": "com.chit.command.executed",
+  "source": "/chit/commands",
+  "id": "01912345-...",
+  "time": "2026-10-07T12:00:00Z",
+  "datacontenttype": "application/json",
+  "data": {
+    "actor_id": "01912345-...",
+    "command_slug": "invite",
+    "args": "bob",
+    "channel_id": "01912345-...",
+    "status": "executed"
+  }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `id` | The audit log's `event_id` for the same command, so the two can be correlated |
+| `time` | When the event was built, UTC |
+| `data.actor_id` | The invoker's chit `users.id` |
+| `data.command_slug` | The command, without the slash |
+| `data.args` | The raw argument string; omitted when empty |
+| `data.channel_id` | The channel the command ran in |
+| `data.status` | Always `executed` |
+
+### Signature
+
+When `CHIT_WEBHOOK_SECRET` is set, `X-Chit-Signature` is the lowercase hex
+HMAC-SHA256 of the exact request body, keyed with the secret, with no prefix.
+Verify it over the raw bytes before parsing. Without a secret, the header is
+not sent.
+
+### Delivery
+
+- `CHIT_WEBHOOK_WORKER_COUNT` workers (default `4`) take events from a queue
+  of `CHIT_WEBHOOK_QUEUE_SIZE` (default `1024`). If the queue is full, the
+  event is dropped and a warning logged.
+- Each request times out after `CHIT_WEBHOOK_TIMEOUT_SEC` seconds (default
+  `10`). Any 2xx is success.
+- Delivery is **best-effort with no retry**: a network error or a status of
+  300 or above is logged and the event is gone. Use the audit log as the
+  durable record.

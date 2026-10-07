@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
@@ -95,9 +96,13 @@ func TestRoutes_MatchTheOpenAPISpec(t *testing.T) {
 
 	// method+path pairs the spec declares, normalized for comparison.
 	declared := map[string]bool{}
+	httpMethods := map[string]bool{"get": true, "put": true, "post": true, "delete": true, "patch": true, "head": true, "options": true}
 	for path, ops := range spec.Paths {
 		for method := range ops {
-			declared[strings.ToUpper(method)+" "+normalizePath(path)] = true
+			// A path item may also hold parameters, summary and the like.
+			if httpMethods[method] {
+				declared[strings.ToUpper(method)+" "+normalizePath(path)] = true
+			}
 		}
 	}
 
@@ -109,6 +114,7 @@ func TestRoutes_MatchTheOpenAPISpec(t *testing.T) {
 		"GET /docs":         true,
 	}
 
+	served := map[string]bool{}
 	for _, r := range registeredRoutes(t, New(a)) {
 		method, route, ok := strings.Cut(r, " ")
 		if !ok {
@@ -122,9 +128,33 @@ func TestRoutes_MatchTheOpenAPISpec(t *testing.T) {
 		if method == "" || p == "" {
 			continue
 		}
+		served[method+" "+normalizePath(p)] = true
 		if !declared[method+" "+normalizePath(p)] {
 			t.Errorf("route %s %s is served but absent from api/openapi.yaml, "+
 				"so the request validator will reject it", method, p)
 		}
+	}
+
+	// And the other way: an operation the spec documents must exist.
+	for op := range declared {
+		if !served[op] {
+			t.Errorf("api/openapi.yaml documents %s, which the router does not serve", op)
+		}
+	}
+}
+
+// An empty origin allowlist admits no browser origin. CORS used to fall back
+// to "*" for it while the WebSocket check refused everything.
+func TestRouter_EmptyOriginListSendsNoCORSHeaders(t *testing.T) {
+	a, _, cleanup := setupTestApp(t)
+	defer cleanup()
+	a.Config.AllowedOrigins = nil
+
+	r, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/system/ping", http.NoBody)
+	r.Header.Set("Origin", "https://elsewhere.example")
+	w := httptest.NewRecorder()
+	New(a).ServeHTTP(w, r)
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("Access-Control-Allow-Origin = %q with an empty allowlist", got)
 	}
 }

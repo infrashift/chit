@@ -4,44 +4,49 @@ description: Cross-node event coordination with PG LISTEN/NOTIFY and NATS.
 ---
 
 Chit uses a pub/sub abstraction to distribute events beyond the chitd
-process. chitd publishes a thin event envelope on the `chit_events` topic
-for each broadcast event. Its intended consumer is future multi-node
-WebSocket fan-out; `chit-mcp` consumed it historically but now receives
-events over chitd's public WebSocket instead (richer payloads, server-side
-membership filtering).
+process. chitd publishes a thin event envelope on the `chit_events` topic for
+most events it broadcasts. **Nothing in this repository subscribes to that
+topic.** `chit-mcp`, `chit-claude` and `chit-tui` receive events over chitd's
+WebSocket instead, which carries full payloads and is filtered by membership
+in the hub.
 
 :::note[Single-node WebSocket fan-out]
-chitd does **not** yet consume the `chit_events` topic itself, so WebSocket
-delivery is in-process (single-node). Multi-node fan-out — where a post
-created on node A reaches clients connected to nodes B and C — is a planned
-use of this same abstraction but is not yet implemented.
+chitd does **not** consume the `chit_events` topic itself, so WebSocket
+delivery is in-process (single-node). Multi-node fan-out, where a post
+created on node A reaches clients connected to nodes B and C, is a planned
+use of this abstraction but is not implemented.
 :::
 
 ## Interface
 
-The pub/sub system is defined as a Go interface, allowing backend
-implementations to be swapped without changing application code:
+The pub/sub system is a Go interface (`internal/pubsub/pubsub.go`), so the
+backend can be swapped without changing application code:
 
 ```go
 type PubSub interface {
-    Publish(channel string, msg []byte) error
-    Subscribe(channel string) (<-chan []byte, error)
-    Unsubscribe(channel string) error
+    Publish(ctx context.Context, topic string, data []byte) error
+    Subscribe(ctx context.Context, topic string, handler func(data []byte)) error
     Close() error
 }
 ```
+
+`Subscribe` registers a callback that is invoked for each message on the
+topic. There is no `Unsubscribe`; subscriptions end when the backend is
+closed.
 
 ## Backends
 
 ### PG LISTEN/NOTIFY (Default)
 
-The default backend uses PostgreSQL's built-in `LISTEN/NOTIFY` mechanism.
-No additional infrastructure is required — the existing database connection
-handles event delivery.
+The default backend uses PostgreSQL's built-in `LISTEN/NOTIFY` (`pg_notify`).
+No additional infrastructure is required; it uses the existing database pool.
+Topic names must be valid PostgreSQL identifiers
+(`^[a-zA-Z_][a-zA-Z0-9_]{0,62}$`). The listener reconnects and re-`LISTEN`s
+after a connection failure.
 
-- **Pros:** Zero additional dependencies, transactional consistency
-- **Cons:** Limited to ~8KB payload per notification, single PostgreSQL
-  instance is the bottleneck
+- **Pros:** Zero additional dependencies
+- **Cons:** Payloads limited to about 8KB per notification; the single
+  PostgreSQL instance is the bottleneck
 
 ### NATS (Optional)
 
@@ -60,7 +65,8 @@ Set the `CHIT_PUBSUB_BACKEND` environment variable:
 | `pgnotify` | PG LISTEN/NOTIFY (default) |
 | `nats` | NATS |
 
-When using NATS, also set `CHIT_NATS_URL`:
+Any other value is refused at startup. When using NATS, `CHIT_NATS_URL` is
+required:
 
 ```bash
 CHIT_PUBSUB_BACKEND=nats
@@ -69,16 +75,37 @@ CHIT_NATS_URL=nats://localhost:4222
 
 ## The `chit_events` Topic
 
-All events are published on a single topic, `chit_events`. Because PostgreSQL
-`NOTIFY` payloads are limited to roughly 8KB, the envelopes are deliberately
-**thin** — they carry event type, IDs (post, channel, user, and similar), and
-timestamps rather than full message content. Consumers fetch full objects
-through the REST API using those IDs.
+Events are published on a single topic, `chit_events`. Because PostgreSQL
+`NOTIFY` payloads are limited to roughly 8KB, the envelopes
+(`internal/pubsub/events.go`) are deliberately **thin**: an event type and
+identifiers, with no content and no timestamp.
+
+```json
+{
+  "event": "mentioned",
+  "post_id": "01912345-...",
+  "channel_id": "01912345-...",
+  "team_id": "",
+  "target_user_id": "01912345-..."
+}
+```
+
+| Field | Set for |
+|---|---|
+| `event` | Always: the WebSocket event name |
+| `post_id` | Post events and `mentioned` |
+| `channel_id` | Every published event |
+| `team_id` | `channel_created`, `channel_updated` (empty for DMs and groups) |
+| `target_user_id` | `mentioned` only: the mentioned user |
+
+Empty fields are omitted. Envelopes are published for `posted`,
+`post_edited`, `post_deleted`, `post_pinned`, `post_unpinned`,
+`channel_created`, `channel_updated`, `channel_deleted`, `user_added`,
+`user_removed` and `mentioned`. `typing`, `thread_updated` and
+`command_response` go to the WebSocket hub only.
+
+A publish failure is logged at Warn and does not fail the request.
 
 | Producer | Consumer | Purpose |
 |---|---|---|
-| chitd | chitd (planned) | Multi-node WebSocket fan-out — not yet implemented |
-
-The MCP agent event feed formerly consumed this topic; `chit-mcp` now
-listens on chitd's WebSocket (full event payloads, filtered server-side by
-the hub) and buffers events for the `get_new_events` MCP tool.
+| chitd | none | Reserved for multi-node WebSocket fan-out, which is not implemented |

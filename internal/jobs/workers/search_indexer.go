@@ -9,10 +9,27 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/infrashift/chit/internal/store"
+	"github.com/infrashift/chit/internal/model"
 )
 
-const indexBatchSize = 200
+const (
+	indexBatchSize = 200
+	// indexSettleLag holds back posts updated in the last few seconds.
+	// update_at is stamped in Go before the INSERT commits, so a transaction
+	// that commits late can appear behind posts already indexed; reading
+	// only settled rows keeps the cursor from passing it.
+	indexSettleLag = 3 * time.Second
+	// indexMaxAttempts is how many times one post is retried before the
+	// indexer gives up on it and moves on. Without a limit one document the
+	// index refuses stopped indexing for everything after it, forever.
+	indexMaxAttempts = 3
+)
+
+// PostSource is what the indexer reads posts from: the one PostStore method
+// it uses, so tests and callers need not supply the rest.
+type PostSource interface {
+	GetPostsSince(ctx context.Context, after model.PostCursor, until int64, limit int) ([]*model.Post, error)
+}
 
 // SearchIndexer is a background worker that syncs posts to ZincSearch.
 // It is also used as a plain ZincSearch client by the search path (posts nil).
@@ -23,8 +40,10 @@ type SearchIndexer struct {
 	client   *http.Client
 	stop     chan struct{}
 
-	posts     store.PostStore
-	watermark int64 // update_at of the last indexed post
+	posts    PostSource
+	cursor   model.PostCursor // the last post synced
+	failures map[string]int   // post ID → consecutive failed attempts
+	now      func() time.Time
 }
 
 // NewSearchIndexer creates a new search indexer worker.
@@ -35,17 +54,19 @@ func NewSearchIndexer(zincURL, zincUser, zincPass string) *SearchIndexer {
 		zincPass: zincPass,
 		client:   &http.Client{Timeout: 10 * time.Second},
 		stop:     make(chan struct{}),
+		failures: map[string]int{},
+		now:      time.Now,
 	}
 }
 
 // WithPostStore enables the background indexing loop by giving the worker a
 // source of posts to poll.
-func (si *SearchIndexer) WithPostStore(ps store.PostStore) *SearchIndexer {
+func (si *SearchIndexer) WithPostStore(ps PostSource) *SearchIndexer {
 	si.posts = ps
 	return si
 }
 
-// Start begins the indexing loop. The watermark is in-memory only: a restart
+// Start begins the indexing loop. The cursor is in-memory only: a restart
 // re-indexes from the beginning, which is safe because documents are written
 // by post ID (upserts).
 func (si *SearchIndexer) Start(ctx context.Context) error {
@@ -70,41 +91,49 @@ func (si *SearchIndexer) Start(ctx context.Context) error {
 	}
 }
 
-// runOnce drains all posts updated since the watermark. On any indexing error
-// the batch stops and the watermark stays put, so the next tick retries.
+// runOnce syncs every settled post after the cursor. A post that fails is
+// retried on the next tick; after indexMaxAttempts it is logged and skipped.
 func (si *SearchIndexer) runOnce(ctx context.Context) {
+	until := si.now().Add(-indexSettleLag).UnixMilli()
 	for {
-		posts, err := si.posts.GetPostsSince(ctx, si.watermark, indexBatchSize)
+		posts, err := si.posts.GetPostsSince(ctx, si.cursor, until, indexBatchSize)
 		if err != nil {
 			slog.Warn("search indexer: failed to fetch posts", "error", err)
 			return
 		}
-		if len(posts) == 0 {
-			return
-		}
 
 		for _, p := range posts {
-			if p.DeleteAt > 0 {
-				err = si.DeletePost(ctx, p.ID)
-			} else {
-				err = si.IndexPost(ctx, p.ID, map[string]any{
-					"channel_id": p.ChannelID,
-					"user_id":    p.UserID,
-					"content":    p.Content,
-					"create_at":  p.CreateAt,
-				})
+			if err := si.sync(ctx, p); err != nil {
+				si.failures[p.ID]++
+				if si.failures[p.ID] < indexMaxAttempts {
+					slog.Warn("search indexer: failed to sync post; will retry",
+						"post_id", p.ID, "attempt", si.failures[p.ID], "error", err)
+					return
+				}
+				slog.Error("search indexer: giving up on post; it will be missing from search",
+					"post_id", p.ID, "attempts", si.failures[p.ID], "error", err)
 			}
-			if err != nil {
-				slog.Warn("search indexer: failed to sync post", "post_id", p.ID, "error", err)
-				return
-			}
-			si.watermark = p.UpdateAt
+			delete(si.failures, p.ID)
+			si.cursor = model.PostCursor{UpdateAt: p.UpdateAt, ID: p.ID}
 		}
 
 		if len(posts) < indexBatchSize {
 			return
 		}
 	}
+}
+
+// sync writes one post's current state to the index.
+func (si *SearchIndexer) sync(ctx context.Context, p *model.Post) error {
+	if p.DeleteAt > 0 {
+		return si.DeletePost(ctx, p.ID)
+	}
+	return si.IndexPost(ctx, p.ID, map[string]any{
+		"channel_id": p.ChannelID,
+		"user_id":    p.UserID,
+		"content":    p.Content,
+		"create_at":  p.CreateAt,
+	})
 }
 
 // Stop signals the indexer to shut down.
@@ -132,7 +161,7 @@ func (si *SearchIndexer) IndexPost(ctx context.Context, id string, doc map[strin
 	if err != nil {
 		return fmt.Errorf("index post: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("index post: status %d", resp.StatusCode)
@@ -156,7 +185,7 @@ func (si *SearchIndexer) DeletePost(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("delete post from index: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 300 && resp.StatusCode != http.StatusNotFound && resp.StatusCode != http.StatusBadRequest {
 		return fmt.Errorf("delete post from index: status %d", resp.StatusCode)
@@ -172,9 +201,9 @@ func (si *SearchIndexer) Search(ctx context.Context, query string, from, size in
 		"query": map[string]any{
 			"term": query,
 		},
-		"from": from,
+		"from":        from,
 		"max_results": size,
-		"_source": []string{"_id"},
+		"_source":     []string{"_id"},
 	}
 
 	body, err := json.Marshal(searchReq)
@@ -194,7 +223,13 @@ func (si *SearchIndexer) Search(ctx context.Context, query string, from, size in
 	if err != nil {
 		return nil, fmt.Errorf("search: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
+
+	// Without this a 401 or 500 decoded as an empty hit list: search said
+	// "nothing found" when it had not looked.
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("search: status %d", resp.StatusCode)
+	}
 
 	var result struct {
 		Hits struct {

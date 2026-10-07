@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 
 	"github.com/infrashift/chit/internal/model"
 )
@@ -153,8 +154,38 @@ func (a *App) GetUserByUsername(ctx context.Context, username string) (*model.Us
 	return a.Store.User().GetByUsername(ctx, username)
 }
 
-// UpdateUser updates a user's profile.
-func (a *App) UpdateUser(ctx context.Context, user *model.User) (*model.User, error) {
+// UserPatch is a change to the caller's own profile. A nil field is left
+// unchanged.
+type UserPatch struct {
+	Username    *string
+	DisplayName *string
+}
+
+// UpdateMe applies patch to userID's own profile.
+//
+// It edits a fresh copy read from the store. The handler used to mutate the
+// *model.User from the request context, which is the very pointer held in the
+// user cache: a rejected update (a taken username) stayed visible to every
+// request until the entry expired, and concurrent requests for the same user
+// raced on the struct.
+func (a *App) UpdateMe(ctx context.Context, userID string, patch UserPatch) (*model.User, error) {
+	user, err := a.Store.User().Get(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if patch.Username != nil {
+		// Usernames are stored lowercase (PreSave), and mention lookup
+		// lowercases what it parses; a mixed-case name could never be
+		// mentioned.
+		user.Username = strings.ToLower(*patch.Username)
+	}
+	if patch.DisplayName != nil {
+		user.DisplayName = *patch.DisplayName
+	}
+	if err := user.IsValid(); err != nil {
+		return nil, err
+	}
+
 	updated, err := a.Store.User().Update(ctx, user)
 	if err != nil {
 		return nil, err

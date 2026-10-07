@@ -1,10 +1,11 @@
 ---
 title: REST API
-description: Endpoint overview, authentication, pagination, and error format.
+description: Endpoint overview, authentication, authorization, limits, pagination, and error format.
 ---
 
 The Chit REST API is defined in [`api/openapi.yaml`](https://github.com/infrashift/chit/blob/main/api/openapi.yaml)
-as an OpenAPI 3.1 specification.
+as an OpenAPI 3.1 specification. A running chitd serves the same spec at
+`GET /api/v1/openapi.yaml` and a Swagger UI at `/api/v1/docs/`.
 
 ## Base URL
 
@@ -14,11 +15,36 @@ as an OpenAPI 3.1 specification.
 
 ## Authentication
 
-All endpoints except `/system/ping` and `/system/config/client` require
-authentication via Ory Oathkeeper. The authenticated user's Kratos identity ID
-is forwarded in the `X-User-Id` header.
+These endpoints need no authentication: `/system/ping`,
+`/system/config/client`, `/openapi.yaml`, and `/docs/`. Every other endpoint
+requires one of two headers, which only the auth proxy (Ory Oathkeeper) may
+set:
+
+| Header | Caller | Resolution |
+|---|---|---|
+| `X-Client-Id` | A machine actor holding a Hydra `client_credentials` token | Matched against `users.oauth_client_id`. An unknown client is a `401`; there is no automatic provisioning. Takes precedence over `X-User-Id`. |
+| `X-User-Id` | A person with a Kratos session | The Kratos identity ID. On first sight chitd provisions a local user from the identity's Kratos traits. |
+
+chitd validates no session or token itself; it trusts these headers. When
+`CHIT_TRUSTED_PROXY_SECRET` is set, every authenticated request must also carry
+a matching `X-Proxy-Secret` header, or it is refused with `401`. Header names
+are configurable (`CHIT_TRUSTED_PROXY_HEADER`, `CHIT_TRUSTED_CLIENT_HEADER`).
 
 See [Ory Stack](/chit/deployment/ory-stack/) for the full authentication flow.
+
+## Limits
+
+| Limit | Value | Response |
+|---|---|---|
+| Rate limit | 10 requests/s per authenticated user, burst 50 | `429` |
+| Request body | 1 MiB | `413` |
+| Malformed JSON body | | `400` |
+| Post content | 65,535 bytes | `400` |
+| `POST /users/ids`, `POST /tags/posts` | 200 IDs per request | `400` |
+
+Requests are validated against the OpenAPI spec by default
+(`CHIT_ENABLE_OPENAPI_VALIDATION`), and a request the spec does not allow is
+rejected before it reaches a handler.
 
 ## Pagination
 
@@ -27,10 +53,14 @@ List endpoints accept query parameters:
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `page` | int | `0` | Page number (0-indexed) |
-| `per_page` | int | `60` | Results per page |
+| `per_page` | int | `60` (`25` for the thread inbox) | Results per page |
 
-Values are clamped server-side: `page` is forced to `>= 0` and `per_page` to
-between 1 and 200.
+Values are clamped server-side: `page` is at least `0`, `per_page` is between
+1 and 200, and `page` is lowered so that `page * per_page` does not exceed
+100,000. Search takes the same two fields in its JSON body, clamped the same
+way.
+
+List endpoints return `[]`, never `null`, when there is nothing to list.
 
 ## ID Format
 
@@ -43,119 +73,180 @@ All `*_at` fields are **Unix millisecond timestamps** (int64).
 
 ## Endpoints
 
-### System
+### System and documentation
 
 | Method | Path | Summary |
 |---|---|---|
-| GET | `/system/ping` | Health check |
-| GET | `/system/config/client` | Client configuration |
+| GET | `/system/ping` | Health check (`{"status":"OK"}`) |
+| GET | `/system/config/client` | Client configuration (`{"version": ...}`) |
+| GET | `/openapi.yaml` | The OpenAPI spec |
+| GET | `/docs/` | Swagger UI |
 
 ### Users
 
-| Method | Path | Summary |
-|---|---|---|
-| POST | `/users` | Create a user |
-| GET | `/users` | Search users |
-| GET | `/users/me` | Get current user |
-| PUT | `/users/me` | Update current user |
-| GET | `/users/{id}` | Get user by ID |
-| GET | `/users/username/{username}` | Get user by username |
-| POST | `/users/ids` | Get users by IDs |
+| Method | Path | Summary | Who may call |
+|---|---|---|---|
+| POST | `/users` | Create a user, including a machine actor bound to an OAuth2 client | `system_admin` |
+| GET | `/users?term=` | Search users by username or display name (substring; `%` and `_` are literal) | Any user |
+| GET | `/users/me` | Get the caller | Any user |
+| PUT | `/users/me` | Change the caller's `username` and/or `display_name`; a taken username is `409` | Any user |
+| GET | `/users/{id}` | Get user by ID | Any user |
+| GET | `/users/username/{username}` | Get user by username | Any user |
+| POST | `/users/ids` | Get users by IDs (JSON array of IDs) | Any user |
+
+Users returned by the lookup and search endpoints have `email`, `kratos_id`
+and `oauth_client_id` removed. Only `GET /users/me` (and the `POST /users`
+response) include them.
 
 ### Teams
 
-| Method | Path | Summary |
-|---|---|---|
-| POST | `/teams` | Create a team |
-| GET | `/teams` | List all teams |
-| GET | `/teams/{id}` | Get team by ID |
-| PUT | `/teams/{id}` | Update a team |
-| DELETE | `/teams/{id}` | Delete a team |
-| GET | `/users/me/teams` | Get current user's teams |
-| POST | `/teams/{id}/members` | Add a team member |
-| GET | `/teams/{id}/members` | Get team members |
-| DELETE | `/teams/{id}/members/{user_id}` | Remove a team member |
+| Method | Path | Summary | Who may call |
+|---|---|---|---|
+| POST | `/teams` | Create a team; the creator becomes `team_admin` | Any user |
+| GET | `/teams` | List open teams plus the caller's teams (all teams for `system_admin`) | Any user |
+| GET | `/teams/{id}` | Get a team | Anyone for open teams; members or `system_admin` for invite-only |
+| PUT | `/teams/{id}` | Update `display_name`, `description`, `type`. `name` cannot change (`400`). | `team_admin` of the team, or `system_admin` |
+| DELETE | `/teams/{id}` | Soft-delete the team and all its channels | `team_admin` of the team, or `system_admin` |
+| GET | `/users/me/teams` | The caller's teams | Any user |
+| POST | `/teams/{id}/members` | Add a user (`{"user_id": ...}`) | Anyone, to join an open team themselves; otherwise team members |
+| GET | `/teams/{id}/members` | List members | Team members or `system_admin` |
+| DELETE | `/teams/{id}/members/{user_id}` | Remove a member, and remove them from every channel on the team | The member themselves; `system_admin` for anyone else |
 
 ### Channels
 
-| Method | Path | Summary |
-|---|---|---|
-| POST | `/channels` | Create a channel |
-| GET | `/channels/{id}` | Get channel by ID |
-| PUT | `/channels/{id}` | Update a channel |
-| DELETE | `/channels/{id}` | Delete a channel |
-| GET | `/teams/{id}/channels` | Get channels for a team |
-| GET | `/users/me/teams/{id}/channels` | Get my channels in a team |
-| POST | `/channels/direct` | Create a direct message channel |
-| POST | `/channels/group` | Create a group message channel |
-| POST | `/channels/{id}/members` | Add a channel member |
-| GET | `/channels/{id}/members` | Get channel members |
-| DELETE | `/channels/{id}/members/{user_id}` | Remove a channel member |
-| POST | `/channels/{id}/members/me/view` | Mark channel as viewed |
+| Method | Path | Summary | Who may call |
+|---|---|---|---|
+| POST | `/channels` | Create an open (`O`) or private (`P`) channel. `team_id` is required. For an open channel every team member is added. | Team members |
+| GET | `/channels/{id}` | Get a channel | Members; also team members for an open channel |
+| PUT | `/channels/{id}` | Update `display_name`, `header`, `purpose`. `name` cannot change (`400`). | Channel members |
+| DELETE | `/channels/{id}` | Soft-delete a channel | Its creator, or `system_admin` |
+| GET | `/teams/{id}/channels` | The team's **open** channels, to browse and join | Team members |
+| GET | `/users/me/teams/{id}/channels` | The caller's channels in a team, private ones included | Any user (own channels only) |
+| GET | `/users/me/channels/direct` | The caller's direct and group channels | Any user |
+| POST | `/channels/direct` | Open the DM between two users (JSON array of exactly 2 IDs); returns the existing one if there is one | One of the two users |
+| POST | `/channels/group` | Open a group channel (JSON array of 3 to 8 distinct IDs); returns the existing one if there is one | One of the members |
+| POST | `/channels/{id}/members` | Add a user (`{"user_id": ...}`) who must be on the channel's team. Re-adding is a no-op. | Open: team members. Private: channel members. Direct and group: nobody (`403`) |
+| GET | `/channels/{id}/members` | List members | Channel members |
+| DELETE | `/channels/{id}/members/{user_id}` | Remove a member | The member themselves; `system_admin` for anyone else |
+| POST | `/channels/{id}/members/me/view` | Mark the channel read | Channel members |
+
+Direct and group channels can only be created through `/channels/direct` and
+`/channels/group`, and their membership is fixed.
 
 ### Posts
 
-| Method | Path | Summary |
-|---|---|---|
-| POST | `/posts` | Create a post |
-| GET | `/posts/{id}` | Get post by ID |
-| PUT | `/posts/{id}` | Update a post |
-| DELETE | `/posts/{id}` | Delete a post |
-| PUT | `/posts/{id}/pin` | Pin a post |
-| DELETE | `/posts/{id}/unpin` | Unpin a post |
-| GET | `/channels/{id}/posts` | Get posts in a channel |
-| GET | `/channels/{id}/pinned` | Get pinned posts in a channel |
+| Method | Path | Summary | Who may call |
+|---|---|---|---|
+| POST | `/posts` | Create a post or reply (`channel_id`, `content`, optional `root_id`, `props`). Slash commands are intercepted here. | Channel members |
+| GET | `/posts/{id}` | Get a post | Channel members |
+| PUT | `/posts/{id}` | Edit `content` and/or merge `props` (a `null` value deletes a key); returns the whole post | The author, or `system_admin` |
+| DELETE | `/posts/{id}` | Soft-delete a post | The author, or `system_admin` |
+| POST | `/posts/{id}/pin` | Pin a post | Channel members |
+| POST | `/posts/{id}/unpin` | Unpin a post | Channel members |
+| GET | `/channels/{id}/posts` | Posts in a channel, newest first | Channel members |
+| GET | `/channels/{id}/pinned` | Pinned posts in a channel | Channel members |
+
+A reply's `root_id` must name a root post (not a reply) in the same channel,
+or the request is a `400`. The server computes `props.mentions` from the
+content; a client-supplied value is discarded.
 
 `GET /channels/{id}/posts` also accepts a `since` query parameter (Unix
 milliseconds). When set, it returns posts created after that timestamp,
-ordered oldest-first — useful for incremental polling.
+ordered oldest-first, for incremental polling.
+
+A slash command (content matching `^/[a-z0-9-]+`) is executed rather than
+stored; the response is a stand-in post that is not persisted. See
+[MCP and Slash Commands](/chit/reference/mcp-and-commands/#slash-commands).
 
 ### Threads
 
-| Method | Path | Summary |
-|---|---|---|
-| GET | `/posts/{id}/thread` | Get a thread |
-| GET | `/users/me/teams/{id}/threads` | Get my threads in a team |
-| PUT | `/users/me/teams/{team_id}/threads/{id}/read` | Mark thread as read |
-| PUT | `/users/me/teams/{team_id}/threads/{id}/following` | Follow or unfollow a thread |
+| Method | Path | Summary | Who may call |
+|---|---|---|---|
+| GET | `/posts/{id}/thread` | A root post and all its replies | Channel members |
+| GET | `/users/me/teams/{id}/threads` | The caller's thread inbox for a team: followed threads in channels they still belong to, newest reply first, each with its root post, `last_viewed_at` and `unread_mentions` | Any user (own inbox only) |
+| PUT | `/users/me/teams/{team_id}/threads/{id}/read` | Mark a thread read | Members of the root's channel |
+| PUT | `/users/me/teams/{team_id}/threads/{id}/following` | Follow or unfollow (`{"following": bool}`) | Members of the root's channel |
+| GET | `/users/me/threads/direct` | The caller's thread inbox for direct and group channels, which belong to no team and so never appear in a team's inbox. Same shape and filtering as the team inbox | Any user (own inbox only) |
+| PUT | `/users/me/threads/{id}/read` | As the team-scoped route, without a `team_id` (which that route ignores); use it for DM and group threads | Members of the root's channel |
+| PUT | `/users/me/threads/{id}/following` | As the team-scoped route, without a `team_id` | Members of the root's channel |
+
+Replying follows a thread. The root's author starts following it at its first
+reply, unless they already have a membership (for example, they unfollowed).
 
 ### Tags
 
-| Method | Path | Summary |
-|---|---|---|
-| POST | `/tags` | Create a tag |
-| GET | `/tags` | List all tags |
-| POST | `/posts/{id}/tags` | Add a tag to a post |
-| GET | `/posts/{id}/tags` | Get tags for a post |
-| DELETE | `/posts/{id}/tags/{tag_id}` | Remove a tag from a post |
+| Method | Path | Summary | Who may call |
+|---|---|---|---|
+| POST | `/tags` | Create a tag (`{"name": ...}`, 1–50 characters). Idempotent: an existing name returns the existing tag. | Any user |
+| GET | `/tags` | List all tags | Any user |
+| POST | `/posts/{id}/tags` | Tag a post (`{"tag_id": ...}`) | Members of the post's channel |
+| GET | `/posts/{id}/tags` | Tags on a post | Members of the post's channel |
+| DELETE | `/posts/{id}/tags/{tag_id}` | Remove a tag from a post | Members of the post's channel |
+| POST | `/tags/posts` | Tags for many posts (`{"post_ids": [...]}`, at most 200), as an object keyed by post ID. Posts the caller cannot read are omitted. | Any user |
 
 ### Search
 
-| Method | Path | Summary |
+| Method | Path | Searches |
 |---|---|---|
-| POST | `/teams/{id}/posts/search` | Search posts in a team |
-| POST | `/channels/{id}/posts/search` | Search posts in a channel |
+| POST | `/posts/search` | Every channel the caller belongs to |
+| POST | `/teams/{id}/posts/search` | The caller's channels in team `{id}`; requires team membership (`403`) |
+| POST | `/channels/{id}/posts/search` | Channel `{id}`; requires channel membership (`403`) |
+
+Request body:
+
+| Field | Type | Description |
+|---|---|---|
+| `terms` | string | Text to find. Optional if `tag_ids` is given. |
+| `tag_ids` | string[] | Tag UUIDs; a post must carry **all** of them. Optional if `terms` is given. |
+| `from` | string | Author username; a leading `@` is accepted. An unknown author matches nothing. |
+| `page` | int | Page number, default `0` |
+| `per_page` | int | Page size, default `60` |
+
+At least one of `terms` and `tag_ids` is required (`400`). The response is
+`{"order": [posts]}`. Scope, author and tags are applied before the page is
+cut, so a page is short only at the end of the results.
+
+With `CHIT_ZINCSEARCH_URL` unset (the default), search runs in PostgreSQL: a
+case-insensitive substring match on content (`%` and `_` are literal), newest
+first. With it set, term searches go to ZincSearch in relevance order; chitd
+filters the hits to the caller's scope and reads at most 1,000 hits per
+search. If ZincSearch fails, the search falls back to SQL.
 
 ### Commands
 
 | Method | Path | Summary |
 |---|---|---|
-| GET | `/commands` | List available slash commands |
+| GET | `/commands` | The registered slash commands (`id`, `slug`, `description`, `category`); `[]` when commands are disabled |
 
 ### WebSocket
 
 | Method | Path | Summary |
 |---|---|---|
-| GET | `/websocket` | WebSocket connection |
+| GET | `/websocket` | WebSocket upgrade. See [WebSocket Protocol](/chit/api-reference/websocket-protocol/). |
+
+## Responses
+
+Endpoints with nothing to return answer `200` with `{"status":"OK"}`.
+Creation endpoints answer `201` with the created resource.
 
 ## Error Format
 
-All error responses use a consistent JSON format:
+All error responses use the same JSON shape (`model.AppError`):
 
 ```json
 {
-  "id": "error.id",
-  "message": "Human-readable error description",
-  "status_code": 400
+  "id": "App.requireChannelMember",
+  "message": "not a member of this channel",
+  "status_code": 403
 }
 ```
+
+| Field | Description |
+|---|---|
+| `id` | Where the error was raised (e.g. `App.requireChannelMember`) |
+| `message` | Human-readable description |
+| `detailed_error` | Extra detail for a 4xx, when there is any. Omitted when empty, and **never sent with a 5xx**: a server error's cause is logged, not returned. |
+| `status_code` | The HTTP status, repeated |
+
+Authorization failures are `403`; a missing or unknown resource is `404`;
+a conflict (such as a taken username) is `409`.

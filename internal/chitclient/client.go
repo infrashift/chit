@@ -71,7 +71,7 @@ func New(baseURL, kratosID, proxySecret string) *Client {
 //
 // The returned token source caches the token and fetches a new one when it
 // expires, so callers never deal with refresh.
-func NewOAuth(baseURL string, cfg OAuthConfig) *Client {
+func NewOAuth(baseURL string, cfg *OAuthConfig) *Client {
 	ccfg := &clientcredentials.Config{
 		ClientID:     cfg.ClientID,
 		ClientSecret: cfg.ClientSecret,

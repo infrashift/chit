@@ -3,6 +3,8 @@
 package sqlstore
 
 import (
+	"errors"
+	"net/http"
 	"testing"
 
 	"github.com/infrashift/chit/internal/model"
@@ -179,5 +181,142 @@ func TestUserStoreIntegration_ActorTypeRoundTrip(t *testing.T) {
 	}
 	if got.ActorType != model.ActorTypeUser {
 		t.Errorf("default ActorType: got %q, want %q", got.ActorType, model.ActorTypeUser)
+	}
+}
+
+// TWO machine actors, because one proves nothing about the constraint that
+// matters. kratos_id and email are UNIQUE and were NOT NULL until 000006; a
+// store that wrote ” instead of NULL would save the first machine and fail
+// the second with a unique violation naming a column the caller never set.
+//
+// It also pins the CAST. NULLIF($2, ”) makes Postgres infer text, and
+// assigning text to a uuid column fails with "column kratos_id is of type uuid
+// but expression is of type text" — which the mock-backed unit tests cannot
+// see, and which crash-looped chitd on first deploy.
+func TestUserStoreIntegration_MachineActorsHaveNoIdentity(t *testing.T) {
+	ss := testStore(t)
+	store := ss.User()
+
+	machine := func(username, clientID string) *model.User {
+		u := &model.User{
+			Username:      username,
+			DisplayName:   "Machine " + username,
+			ActorType:     model.ActorTypeBot,
+			Roles:         "system_user",
+			OAuthClientID: clientID,
+		}
+		u.PreSave()
+		return u
+	}
+
+	for _, m := range []*model.User{
+		machine("notifier", "chit-notifier"),
+		machine("tui", "chit-tui"),
+	} {
+		if _, err := store.Save(t.Context(), m); err != nil {
+			t.Fatalf("save %s: %v", m.Username, err)
+		}
+	}
+
+	got, err := store.GetByOAuthClientID(t.Context(), "chit-notifier")
+	if err != nil {
+		t.Fatalf("GetByOAuthClientID: %v", err)
+	}
+	if got.KratosID != "" || got.Email != "" {
+		t.Fatalf("kratos_id=%q email=%q — a machine has neither, and NULL must read back as empty", got.KratosID, got.Email)
+	}
+	if got.OAuthClientID != "chit-notifier" || got.ActorType != model.ActorTypeBot {
+		t.Fatalf("round trip lost the machine's identity: %+v", got)
+	}
+
+	// And a person still round-trips with both columns populated.
+	p := newTestUser("alice")
+	if _, err = store.Save(t.Context(), p); err != nil {
+		t.Fatalf("save person: %v", err)
+	}
+	back, err := store.GetByKratosID(t.Context(), p.KratosID)
+	if err != nil {
+		t.Fatalf("GetByKratosID: %v", err)
+	}
+	if back.KratosID != p.KratosID || back.Email != p.Email {
+		t.Fatalf("person round trip: got kratos_id=%q email=%q", back.KratosID, back.Email)
+	}
+}
+
+func TestUserStoreIntegration_GetByNonUUIDIsNotFound(t *testing.T) {
+	store := testStore(t).User()
+	for name, get := range map[string]func() error{
+		"id":        func() error { _, err := store.Get(t.Context(), "not-a-uuid"); return err },
+		"kratos_id": func() error { _, err := store.GetByKratosID(t.Context(), "not-a-uuid"); return err },
+	} {
+		var appErr *model.AppError
+		if err := get(); !errors.As(err, &appErr) || appErr.StatusCode != http.StatusNotFound {
+			t.Errorf("%s: got %v, want a 404 AppError rather than a uuid cast failure", name, err)
+		}
+	}
+}
+
+// Search must not match on email, and must treat % and _ in the term as
+// literal characters rather than wildcards.
+func TestUserStoreIntegration_SearchScopeAndEscaping(t *testing.T) {
+	store := testStore(t).User()
+	for _, u := range []*model.User{newTestUser("searchable"), newTestUser("under_score")} {
+		if _, err := store.Save(t.Context(), u); err != nil {
+			t.Fatalf("save: %v", err)
+		}
+	}
+
+	count := func(term string) int {
+		t.Helper()
+		got, err := store.Search(t.Context(), term, 0, 50)
+		if err != nil {
+			t.Fatalf("Search(%q): %v", term, err)
+		}
+		return len(got)
+	}
+	if n := count("test.local"); n != 0 {
+		t.Errorf("a term found only in email matched %d users", n)
+	}
+	if n := count("%"); n != 0 {
+		t.Errorf("%%%% matched %d users; it must be literal, not a wildcard", n)
+	}
+	if n := count("e_r"); n != 0 {
+		t.Errorf("_ acted as a wildcard and matched %d users", n)
+	}
+	if n := count("under_score"); n != 1 {
+		t.Errorf("a literal underscore matched %d users, want 1", n)
+	}
+}
+
+func TestUserStoreIntegration_UpdateTakenUsernameIsConflict(t *testing.T) {
+	store := testStore(t).User()
+	a, err := store.Save(t.Context(), newTestUser("first"))
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if _, err = store.Save(t.Context(), newTestUser("second")); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	a.Username = "second"
+	var appErr *model.AppError
+	if _, err = store.Update(t.Context(), a); !errors.As(err, &appErr) || appErr.StatusCode != http.StatusConflict {
+		t.Fatalf("got %v, want a 409 AppError", err)
+	}
+}
+
+// GetByIDs and Search read through the shared column list, so a machine
+// actor's client binding comes back from them as it does from Get.
+func TestUserStoreIntegration_ListReadersIncludeOAuthClient(t *testing.T) {
+	store := testStore(t).User()
+	m := &model.User{Username: "listbot", DisplayName: "List Bot", ActorType: model.ActorTypeBot, OAuthClientID: "list-client"}
+	if _, err := store.Save(t.Context(), m); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := store.GetByIDs(t.Context(), []string{m.ID})
+	if err != nil || len(got) != 1 {
+		t.Fatalf("GetByIDs: %v, %v", got, err)
+	}
+	if got[0].OAuthClientID != "list-client" {
+		t.Errorf("GetByIDs OAuthClientID = %q", got[0].OAuthClientID)
 	}
 }

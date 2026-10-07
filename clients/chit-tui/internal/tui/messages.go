@@ -110,9 +110,11 @@ type ProfileUpdatedMsg struct {
 	Err  error
 }
 
-// ThreadsLoadedMsg is sent when the followed-thread list is fetched.
+// ThreadsLoadedMsg is sent when the followed-thread lists are fetched:
+// Threads in the active team, Direct in direct and group channels.
 type ThreadsLoadedMsg struct {
 	Threads []*model.ThreadResponse
+	Direct  []*model.ThreadResponse
 	Err     error
 }
 

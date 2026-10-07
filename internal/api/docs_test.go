@@ -17,7 +17,7 @@ func TestDocsRoute_RawSpec(t *testing.T) {
 	r := chi.NewRouter()
 	MountDocs(r, chitapi.OpenAPISpec)
 
-	req := httptest.NewRequest(http.MethodGet, "/openapi.yaml", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/openapi.yaml", http.NoBody)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -43,7 +43,7 @@ func TestDocsRoute_SwaggerUI(t *testing.T) {
 		MountDocs(r, chitapi.OpenAPISpec)
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/docs/", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/docs/", http.NoBody)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 

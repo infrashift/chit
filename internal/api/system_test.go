@@ -8,7 +8,7 @@ import (
 )
 
 func TestSystemPing(t *testing.T) {
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/system/ping", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/system/ping", http.NoBody)
 	w := httptest.NewRecorder()
 
 	systemPing(w, r)
@@ -27,11 +27,8 @@ func TestSystemPing(t *testing.T) {
 }
 
 func TestSystemClientConfig(t *testing.T) {
-	a, _, cleanup := setupTestApp(t)
-	defer cleanup()
-
-	handler := systemClientConfig(a)
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/system/config/client", nil)
+	handler := systemClientConfig()
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/system/config/client", http.NoBody)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, r)

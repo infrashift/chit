@@ -6,8 +6,91 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Upgrade notes
+
+Behaviour changes an operator must act on or know about:
+
+- **`chit-reconcile` now revokes, and needs the Keto read API.** It makes
+  the `chit/command` namespace match the CUE, deleting any tuple there the CUE
+  does not declare (including grants added to Keto by hand). It lists through
+  `CHIT_KETO_READ_URL` (default `http://localhost:4466`); set it wherever the
+  job runs.
+- **`chit-mcp` and `chit-claude` take exactly one auth mode.** Setting both
+  `*_OAUTH_CLIENT_ID` and `*_AGENT_KRATOS_ID` now stops them at startup;
+  OAuth2 used to win silently. Unset the one you do not use.
+- **`actor_type` is required for machine actors.** Every entry in
+  `CHIT_MACHINE_ACTORS` must set `actor_type` to `agent` or `bot`; an entry
+  without it now fails boot, naming the client. Add it before upgrading.
+- **`CHIT_ZINCSEARCH_URL` defaults to empty.** ZincSearch is opt-in: without
+  a URL, search runs in PostgreSQL and no indexer runs. Set it explicitly to
+  keep using Zinc (both deploy manifests do).
+- **Configuration is validated at startup.** Invalid settings (non-positive
+  `CHIT_WS_PING_INTERVAL`, `CHIT_WS_WRITE_TIMEOUT`, `CHIT_CACHE_SIZE`,
+  `CHIT_CACHE_TTL` or DB pool sizes; an unknown `CHIT_PUBSUB_BACKEND`;
+  `nats` without `CHIT_NATS_URL`; `CHIT_WEBHOOK_ENABLED=true` without
+  `CHIT_WEBHOOK_URL`; a bad log level or format) now stop the server, all
+  reported at once. Some of these were silently ignored before.
+- **An empty `CHIT_ALLOWED_ORIGINS` allows no browser origin**, for CORS and
+  WebSockets alike. It used to mean "allow all" for CORS. Unset, it still
+  defaults to `*`.
+- **`POST /channels` creates only open (`O`) and private (`P`) channels** and
+  requires `team_id`. Use `POST /channels/direct` and `/channels/group` for
+  DMs and groups.
+- **Direct and group channel membership is fixed.** Adding a member to one is
+  a `403`.
+- **`POST /tags` is idempotent**: an existing name returns the existing tag
+  (`201`), never `409`.
+- **`GET /teams/{id}/channels` lists open channels only.** Private channels
+  are listed for their members by `GET /users/me/teams/{id}/channels`.
+- **Team reads are authorized.** `GET /teams` lists open teams plus the
+  caller's own; invite-only teams and every roster need membership (or
+  `system_admin`); `PUT`/`DELETE /teams/{id}` need `team_admin` or
+  `system_admin`.
+- **Migration `000007`** merges any duplicate direct or group channels into
+  the oldest copy before adding a unique index. It is not reversible for
+  merged channels.
+
 ### Added
 
+- `GET /users/me/threads/direct`: the thread inbox for direct and group
+  channels, whose threads never appeared in any team's inbox because they
+  have no team. `PUT /users/me/threads/{id}/read` and `/following` work
+  without a `team_id` for them (the team-scoped routes ignore it anyway).
+- OAuth2 authentication for agents and bots through Ory Hydra: Hydra is
+  deployed, Oathkeeper introspects `client_credentials` tokens (audience
+  `chit`; `chit:read` for GET, `chit:write` otherwise) and forwards the client
+  ID as `X-Client-Id`, which chitd resolves against the new
+  `users.oauth_client_id` column (migration `000005`). Unknown clients are
+  refused, never provisioned. `chit-mcp` and `chit-claude` gain an OAuth mode
+  (`*_OAUTH_CLIENT_ID`, `*_OAUTH_CLIENT_SECRET`, `*_OAUTH_TOKEN_URL`) and
+  refuse to start without a complete configuration for one of the two
+  modes.
+- Machine actors: `CHIT_MACHINE_ACTORS` declares agents and bots, which chitd
+  creates and reconciles (username, display name, roles, actor type) at boot,
+  failing startup on error. Migration `000006` makes `users.kratos_id` and
+  `users.email` nullable so such an actor needs no Kratos identity.
+- `chit-claude` personas: `CHIT_CLAUDE_MODEL` per bridge, and agent-to-agent
+  replies gated by `CHIT_CLAUDE_REPLY_TO_AGENTS` and
+  `CHIT_CLAUDE_MAX_AGENT_HOPS`.
+- Slash command handlers for `/invite`, `/kick` and `/topic` (`/help`
+  already existed). `/summarize` is registered but still has no handler.
+- `POST /tags/posts`: tags for up to 200 posts in one request, keyed by post
+  ID; posts the caller cannot read are omitted.
+- Post search `from` filter (author username, leading `@` accepted).
+- The thread inbox returns each thread's root post, `last_viewed_at` and
+  `unread_mentions`, and lists only threads in channels the caller still
+  belongs to.
+- `thread_updated` WebSocket event, sent to the channel after every reply and
+  reply deletion with the thread's counters.
+- Migration `000007`: indexes on `posts (update_at, id)` and
+  `threads (last_reply_at DESC)`, and a partial unique index on
+  `channels (name)` for team-less channels, so a DM or group exists once.
+- `make vuln` (govulncheck) and `make test-integration` (throwaway
+  `postgres:17` in Podman, every migration up/down/up, then the sqlstore and
+  pubsub integration suites).
+- `chit-tui`: `/group`, `/nick`, `/username`, `/threads` (thread inbox),
+  `/leave`, search across every channel (`??`), and a resync when the server
+  drops events.
 - `chit-tui` terminal client imported into the monorepo at `clients/chit-tui`
   as a nested Go module (own `go.mod`, own dependency tree) with a committed
   root `go.work` workspace. Server builds and images exclude it. New Makefile
@@ -40,13 +123,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   actors
 - MCP agent event feed: chit-mcp buffers real-time events for agents to
   poll via the `get_new_events` tool
-- Background search indexer: polls posts by `update_at` watermark every 5
-  seconds and upserts documents into ZincSearch (keyed by post ID);
-  soft-deleted posts are removed from the index; SQL ILIKE fallback when
-  ZincSearch is unavailable
+- Background search indexer: polls posts by an `(update_at, id)` cursor
+  every 5 seconds and upserts documents into ZincSearch (keyed by post ID);
+  soft-deleted posts are removed from the index; SQL fallback when ZincSearch
+  fails. Runs only when `CHIT_ZINCSEARCH_URL` is set.
 - GitHub Actions CI workflow: build + unit tests with race detector,
-  golangci-lint (new issues only), integration tests against a PostgreSQL
-  service container, OpenAPI + CUE validation
+  golangci-lint, govulncheck, integration tests against a PostgreSQL service
+  container (after a migration up/down/up round trip), OpenAPI + CUE
+  validation
 - `make kube-migrate` target to re-apply Chit schema migrations against the
   running pod (kube-up runs all migrations automatically)
 - Layered architecture scaffold: API → App → Store → PostgreSQL
@@ -60,7 +144,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   rules, Keto namespace configuration)
 - WebSocket hub with per-user connection map and single event loop goroutine
 - Pub/sub abstraction with PG LISTEN/NOTIFY backend (NATS optional)
-- LRU cache layer using hashicorp/golang-lru/v2
+- LRU user cache (Kratos ID or OAuth client → user) using
+  hashicorp/golang-lru/v2
 - MCP server for AI agent integration
 - Containerfile for building the server image
 - Makefile with build, test, lint, migrate, and kube targets
@@ -71,6 +156,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- `chit-mcp` and `chit-claude` refuse to start when both an OAuth2 client
+  (`*_OAUTH_CLIENT_ID`) and a Kratos identity (`*_AGENT_KRATOS_ID`) are set.
+  OAuth2 used to win silently. Remove the one you do not mean.
+- Anyone may join an open team themselves (`POST /teams/{id}/members` with
+  their own `user_id`). Adding someone else, or joining an invite-only team,
+  still requires membership. The user added must exist (`400` otherwise).
+- Lint is a hard CI gate: `only-new-issues` is gone, lint covers the
+  `integration` and `e2e` build tags, staticcheck runs every analyzer but
+  ST1000 and ST1003, and golangci-lint is pinned to v2.13.2. The 199
+  findings it had been hiding were fixed.
+- Go toolchain 1.25.14; chi v5.3.0, pgx v5.9.2, kin-openapi v0.144.0, MCP
+  go-sdk v1.4.1, x/net v0.55.0, x/text v0.39.0. govulncheck reports no
+  reachable vulnerabilities.
+- chi's `RealIP` middleware is removed (spoofable); the request log records
+  `X-Forwarded-For` separately as `forwarded_for`.
+- Search scope, author and tags are applied before pagination, in one SQL
+  query, so pages are full until the last. ZincSearch hits are filtered in
+  batches of 100, up to 1,000 per search. A Zinc failure, not an empty
+  result, triggers the SQL fallback.
+- `PUT /posts/{id}` merges `props` (`null` deletes a key), validates, and
+  returns the whole post; `post_edited` carries the whole post.
+- `PUT /channels/{id}` and `PUT /teams/{id}` reject a `name` change and can
+  clear `header`/`purpose`/`description`.
+- User search matches username and display name only, never email.
+- Command webhook CloudEvent `id` is the audit log's `event_id`.
+- List endpoints return `[]` instead of `null` when empty.
+- `chit-reconcile` no longer needs `CHIT_DATABASE_URL`.
+- `make run` reads `.env` when it exists.
+- The MCP `summarize_channel` prompt rejects a `num_posts` that is not a
+  positive integer instead of using 50.
 - `chit-mcp` is now an HTTP/WebSocket client of chitd (like `chit-claude`)
   instead of embedding the app/store/PostgreSQL stack in-process. Configure
   with `CHIT_MCP_SERVER_URL`, `CHIT_MCP_AGENT_KRATOS_ID`, and optional
@@ -85,15 +200,89 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Channel and post authorization enforced server-side: channel membership
   required to read/post/pin, author-or-admin required to edit/delete, team
   membership required to create/join channels, invite-by-member for
-  private/DM/group channels
+  private channels (direct and group membership is now fixed)
 - WebSocket events delivered only to channel members (hub membership cache)
 - `CHIT_ALLOWED_ORIGINS` origin allowlist for CORS/WebSocket (wildcard logs
   a warning) and `CHIT_TRUSTED_PROXY_SECRET` to gate trust in the
   `X-User-Id` header behind an Oathkeeper-injected `X-Proxy-Secret` header
-- Pagination clamped server-side (`page >= 0`, `per_page` between 1 and 200)
+- Pagination clamped server-side (`page >= 0`, `per_page` between 1 and 200,
+  `page * per_page` at most 100,000; a huge page used to overflow into a 500)
+- `POST /users` requires `system_admin`; any user could create an admin or
+  bind an OAuth client. Adding and removing team members require team
+  membership, and removing someone else requires `system_admin`.
+- `PUT`/`DELETE /teams/{id}` require `team_admin` or `system_admin`; any
+  user could rename or delete any team. Re-adding a team member no longer
+  overwrites their roles.
+- `GET /teams`, `GET /teams/{id}` and `GET /teams/{id}/members` hide
+  invite-only teams and rosters from non-members.
+- DM squatting closed: `POST /channels` refused `D`/`G`, DM and group
+  membership is fixed, and a member added to an open or private channel must
+  be on its team.
+- `GET /channels/{id}` requires channel membership (or team membership for an
+  open channel); it exposed private headers and DM participants.
+- `GET /teams/{id}/channels` no longer lists private channels.
+- Replies must target a root post in the same channel; following or marking a
+  thread read requires access to its channel; slash commands require channel
+  membership before they run. Each let a user read posts in channels they
+  were not in.
+- `POST /posts` accepts only `channel_id`, `root_id`, `content` and `props`
+  (and drops `props.mentions`), so clients cannot set ids, timestamps, pin
+  state or type.
+- Removing a user from a team removes them from its channels; deleting a
+  channel or team ends access to it (a deleted channel has no members).
+- Team search (`POST /teams/{id}/posts/search`) ignored the team and checked
+  no membership; it now searches the caller's channels in that team.
+- User search no longer answers "does an email contain X".
+- Request bodies are capped at 1 MiB (`413`); 5xx responses no longer include
+  `detailed_error`, which carried SQL and driver text.
+- Keto: a permission check that gets an error status is now an error, not a
+  silent denial; tuple deletes escape their query parameters.
+- Tag operations on a post require membership of its channel; any user could
+  tag or list tags on any post.
 
 ### Fixed
 
+- `chit-reconcile` revokes what the CUE no longer grants. It only ever wrote
+  tuples, so a command taken from a role, or a role taken from an actor,
+  stayed in force in Keto.
+- A user removed from a channel now receives `user_removed` themselves, so
+  their client can drop the channel; it went only to the remaining members.
+- A malformed (non-UUID) channel or team ID in a path or request body is a
+  `404`, not a `500` from a failed UUID cast.
+- Keto mirror failures when adding or removing channel members are logged,
+  not discarded.
+- WebSocket: a slow connection among several for one user could panic the
+  hub and kill the process; slow clients (full 256-event buffer) are now
+  disconnected after the broadcast. Calls after shutdown no longer block;
+  pumps start after registration; membership changes during a user's initial
+  load are queued instead of lost; membership loads time out after 10 s; an
+  unauthenticated upgrade gets a JSON `401`.
+- Threads: replying no longer marks the thread unread for the replier; the
+  root's author follows their thread from its first reply; deleting a reply
+  lowers `reply_count` and recomputes `last_reply_at`.
+- Search indexer: posts tied on `update_at` at a batch boundary, or committed
+  late, were skipped forever; one post Zinc refused stopped all indexing. The
+  cursor is `(update_at, id)` with a 3-second settle lag, and a post that
+  fails three times is logged and skipped.
+- Duplicate direct channels from concurrent requests (now a unique index, with
+  the loser returning the winner's channel).
+- `PUT /users/me` mutated the cached user, so a rejected change stayed visible;
+  it now validates, lowercases the username, and returns `409` on a taken
+  one.
+- A machine actor declared without roles lost them on every second boot;
+  username and actor type changes were never applied.
+- Startup: a listener failure now stops the scheduler, hub, pubsub and store.
+- Rate limiter: one goroutine leaked per limiter and every bucket was reset
+  every ten minutes; idle buckets are now evicted on access.
+- Creating an open channel did per-member work in the request; members
+  are added in one statement and Keto tuples are written in the background.
+- Mentions cost two queries per name; they are now resolved in one query (at
+  most 50 names per post), with counters updated in one statement per table.
+  Tags for a page of posts are read in one query.
+- Non-UUID user or post IDs return `404` instead of `500`.
+- Command authorization never worked: role grants are now written to Keto as
+  subject sets.
+- `POST /tags/posts` (formerly `/posts/tags`) was unreachable.
 - Thread reply counts
 - `since`-based post polling on `GET /channels/{id}/posts`
 - Store context propagation
@@ -104,3 +293,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   column (migration `000003_drop_content_encrypted`)
 - Committed `seed-uat` binary removed from git; the seeder is built from
   `scripts/seed-uat/main.go`
+- The `status_change` WebSocket event constant, which was never sent.
+- Unused `before`/`after` post cursors, which no query read.

@@ -67,7 +67,7 @@ func TestOAuthClientSendsBearerToken(t *testing.T) {
 	}))
 	t.Cleanup(chitd.Close)
 
-	c := NewOAuth(chitd.URL, OAuthConfig{
+	c := NewOAuth(chitd.URL, &OAuthConfig{
 		TokenURL:     hydraSrv.URL,
 		ClientID:     "generated-client-id",
 		ClientSecret: "s3cret",
@@ -138,7 +138,7 @@ func TestOAuthWorksWithPostOnlyTokenEndpoint(t *testing.T) {
 	}))
 	t.Cleanup(chitd.Close)
 
-	c := NewOAuth(chitd.URL, OAuthConfig{
+	c := NewOAuth(chitd.URL, &OAuthConfig{
 		TokenURL: tokenSrv.URL, ClientID: "cid", ClientSecret: "sec",
 		Scopes: []string{"chit:read"}, Audience: "chit",
 	})
@@ -164,7 +164,7 @@ func TestOAuthTokenIsReused(t *testing.T) {
 	}))
 	t.Cleanup(chitd.Close)
 
-	c := NewOAuth(chitd.URL, OAuthConfig{
+	c := NewOAuth(chitd.URL, &OAuthConfig{
 		TokenURL: hydraSrv.URL, ClientID: "cid", ClientSecret: "sec",
 		Scopes: []string{"chit:read"}, Audience: "chit",
 	})
@@ -194,7 +194,7 @@ func TestOAuthTokenFailureFailsRequest(t *testing.T) {
 	}))
 	t.Cleanup(chitd.Close)
 
-	c := NewOAuth(chitd.URL, OAuthConfig{
+	c := NewOAuth(chitd.URL, &OAuthConfig{
 		TokenURL: dead.URL, ClientID: "cid", ClientSecret: "sec",
 		Scopes: []string{"chit:read"}, Audience: "chit",
 	})

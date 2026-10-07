@@ -84,7 +84,7 @@ func (s *ChitMCPServer) handleChannelResource(ctx context.Context, req *mcp.Read
 }
 
 func (s *ChitMCPServer) handleChannelRecentResource(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
-	// URI: chit://channels/{channel_id}/recent
+	// The URI has the form chit://channels/{channel_id}/recent.
 	channelID := extractURIParam(req.Params.URI, "chit://channels/", "/recent")
 	if channelID == "" {
 		return nil, fmt.Errorf("invalid channel recent URI: %s", req.Params.URI)
@@ -119,7 +119,7 @@ func (s *ChitMCPServer) handleThreadResource(ctx context.Context, req *mcp.ReadR
 }
 
 func (s *ChitMCPServer) handleTeamChannelsResource(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
-	// URI: chit://teams/{team_id}/channels
+	// The URI has the form chit://teams/{team_id}/channels.
 	teamID := extractURIParam(req.Params.URI, "chit://teams/", "/channels")
 	if teamID == "" {
 		return nil, fmt.Errorf("invalid team channels URI: %s", req.Params.URI)

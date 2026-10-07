@@ -84,10 +84,10 @@ func TestThreadStoreIntegration_ReplyCountAccumulates(t *testing.T) {
 			LastReplyAt:  0,
 			Participants: []string{},
 		}
-		if err := ss.Thread().SaveOrUpdate(t.Context(), thread); err != nil {
+		if err = ss.Thread().SaveOrUpdate(t.Context(), thread); err != nil {
 			t.Fatalf("SaveOrUpdate (reply %d): %v", i+1, err)
 		}
-		if err := ss.Thread().IncrementReplyCount(t.Context(), root.ID, reply.CreateAt, ru.ID); err != nil {
+		if err = ss.Thread().IncrementReplyCount(t.Context(), root.ID, reply.CreateAt, ru.ID); err != nil {
 			t.Fatalf("IncrementReplyCount (reply %d): %v", i+1, err)
 		}
 	}
@@ -140,5 +140,165 @@ func TestThreadStoreIntegration_SaveOrUpdateIsIdempotent(t *testing.T) {
 	}
 	if len(got.Participants) != 1 {
 		t.Errorf("Participants after redundant SaveOrUpdate: got %v, want 1 entry", got.Participants)
+	}
+}
+
+// The thread inbox lists only threads the user can still read. Following is
+// not access: it used to keep showing a thread's root after the user left the
+// channel, and kept showing deleted roots.
+func TestThreadStoreIntegration_InboxRequiresAccess(t *testing.T) {
+	ss := testStore(t)
+	user, channel := newTestChannelFixture(t, ss)
+
+	if _, err := ss.Channel().SaveMember(t.Context(), &model.ChannelMember{ChannelID: channel.ID, UserID: user.ID}); err != nil {
+		t.Fatalf("SaveMember: %v", err)
+	}
+	follow := func(content string, at int64) *model.Post {
+		t.Helper()
+		root := savePost(t, ss, channel.ID, user.ID, "", content, at)
+		if err := ss.Thread().SaveOrUpdate(t.Context(), &model.Thread{PostID: root.ID, ChannelID: channel.ID, Participants: []string{}}); err != nil {
+			t.Fatalf("SaveOrUpdate: %v", err)
+		}
+		if err := ss.Thread().SaveMembership(t.Context(), &model.ThreadMembership{PostID: root.ID, UserID: user.ID, Following: true}); err != nil {
+			t.Fatalf("SaveMembership: %v", err)
+		}
+		return root
+	}
+	kept := follow("kept", 1000)
+	deleted := follow("deleted", 2000)
+	if err := ss.Post().Delete(t.Context(), deleted.ID, model.GetMillis()); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	inbox := func() []string {
+		t.Helper()
+		list, err := ss.Thread().GetThreadsForUser(t.Context(), user.ID, channel.TeamID, 0, 50)
+		if err != nil {
+			t.Fatalf("GetThreadsForUser: %v", err)
+		}
+		var ids []string
+		for _, tr := range list.Threads {
+			ids = append(ids, tr.Thread.PostID)
+		}
+		if int(list.Total) != len(ids) {
+			t.Errorf("Total = %d but %d threads listed", list.Total, len(ids))
+		}
+		return ids
+	}
+
+	if got := inbox(); len(got) != 1 || got[0] != kept.ID {
+		t.Fatalf("member inbox = %v, want only %s (deleted root hidden)", got, kept.ID)
+	}
+
+	if err := ss.Channel().RemoveMember(t.Context(), channel.ID, user.ID); err != nil {
+		t.Fatalf("RemoveMember: %v", err)
+	}
+	if got := inbox(); len(got) != 0 {
+		t.Fatalf("inbox after leaving the channel = %v, want empty", got)
+	}
+}
+
+// Re-saving a membership keeps the later read mark, and DecrementReplyCount
+// recomputes last_reply_at from the replies left.
+func TestThreadStoreIntegration_MembershipAndDecrement(t *testing.T) {
+	ss := testStore(t)
+	user, channel := newTestChannelFixture(t, ss)
+	root := savePost(t, ss, channel.ID, user.ID, "", "root", 1000)
+	if err := ss.Thread().SaveOrUpdate(t.Context(), &model.Thread{PostID: root.ID, ChannelID: channel.ID, Participants: []string{}}); err != nil {
+		t.Fatalf("SaveOrUpdate: %v", err)
+	}
+	r1 := savePost(t, ss, channel.ID, user.ID, root.ID, "one", 2000)
+	r2 := savePost(t, ss, channel.ID, user.ID, root.ID, "two", 3000)
+	for _, r := range []*model.Post{r1, r2} {
+		if err := ss.Thread().IncrementReplyCount(t.Context(), root.ID, r.CreateAt, user.ID); err != nil {
+			t.Fatalf("IncrementReplyCount: %v", err)
+		}
+	}
+
+	save := func(at int64) {
+		t.Helper()
+		if err := ss.Thread().SaveMembership(t.Context(), &model.ThreadMembership{
+			PostID: root.ID, UserID: user.ID, Following: true, LastViewedAt: at,
+		}); err != nil {
+			t.Fatalf("SaveMembership: %v", err)
+		}
+	}
+	save(3000)
+	save(0)
+	m, err := ss.Thread().GetMembership(t.Context(), root.ID, user.ID)
+	if err != nil {
+		t.Fatalf("GetMembership: %v", err)
+	}
+	if m.LastViewedAt != 3000 {
+		t.Errorf("last_viewed_at = %d, want 3000 kept", m.LastViewedAt)
+	}
+
+	if err = ss.Post().Delete(t.Context(), r2.ID, model.GetMillis()); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if err = ss.Thread().DecrementReplyCount(t.Context(), root.ID); err != nil {
+		t.Fatalf("DecrementReplyCount: %v", err)
+	}
+	th, err := ss.Thread().Get(t.Context(), root.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if th.ReplyCount != 1 || th.LastReplyAt != 2000 {
+		t.Errorf("thread = %d replies, last at %d; want 1 and 2000", th.ReplyCount, th.LastReplyAt)
+	}
+}
+
+// Threads in direct and group channels have no team, so a team's inbox never
+// listed them; they have their own list, and it holds only them.
+func TestThreadStoreIntegration_DirectThreadsHaveTheirOwnInbox(t *testing.T) {
+	ss := testStore(t)
+	user, teamChannel := newTestChannelFixture(t, ss)
+	peer, err := ss.User().Save(t.Context(), newTestUser("dmpeerthreads"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = ss.Channel().SaveMember(t.Context(), &model.ChannelMember{ChannelID: teamChannel.ID, UserID: user.ID}); err != nil {
+		t.Fatal(err)
+	}
+	dm, err := ss.Channel().SaveDirectChannel(t.Context(), &model.Channel{
+		Name: user.ID + "__" + peer.ID, DisplayName: "dm", Type: model.ChannelDirect, CreatorID: user.ID,
+	}, []string{user.ID, peer.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	follow := func(channelID, content string, at int64) *model.Post {
+		t.Helper()
+		root := savePost(t, ss, channelID, user.ID, "", content, at)
+		if err := ss.Thread().SaveOrUpdate(t.Context(), &model.Thread{PostID: root.ID, ChannelID: channelID, Participants: []string{}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := ss.Thread().SaveMembership(t.Context(), &model.ThreadMembership{PostID: root.ID, UserID: user.ID, Following: true}); err != nil {
+			t.Fatal(err)
+		}
+		return root
+	}
+	inTeam := follow(teamChannel.ID, "team thread", 1000)
+	inDM := follow(dm.ID, "dm thread", 2000)
+
+	ids := func(list *model.UserThreadList, err error) []string {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, tr := range list.Threads {
+			out = append(out, tr.Thread.PostID)
+		}
+		if int(list.Total) != len(out) {
+			t.Errorf("Total = %d for %d threads", list.Total, len(out))
+		}
+		return out
+	}
+	if got := ids(ss.Thread().GetThreadsForUser(t.Context(), user.ID, teamChannel.TeamID, 0, 50)); len(got) != 1 || got[0] != inTeam.ID {
+		t.Errorf("team inbox = %v, want only the team thread", got)
+	}
+	if got := ids(ss.Thread().GetDirectThreadsForUser(t.Context(), user.ID, 0, 50)); len(got) != 1 || got[0] != inDM.ID {
+		t.Errorf("direct inbox = %v, want only the DM thread", got)
 	}
 }

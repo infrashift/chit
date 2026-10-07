@@ -4,54 +4,65 @@
 
 - [x] Layered architecture scaffold (API → App → Store)
 - [x] PostgreSQL schema with UUIDv7 PKs and bigint timestamps
-- [x] OpenAPI 3.1 specification (40+ endpoints)
+- [x] OpenAPI 3.1 specification (40+ endpoints), served with a Swagger UI
 - [x] Podman Kube deployment manifest
-- [x] Ory stack configuration (Kratos, Oathkeeper, Keto)
+- [x] Ory stack configuration (Kratos, Oathkeeper, Keto, Hydra)
 - [x] WebSocket hub skeleton
 - [x] Pub/sub abstraction (PG LISTEN/NOTIFY + NATS)
-- [x] LRU cache layer
+- [x] LRU user cache
 - [x] Search indexer skeleton
 - [x] MCP server
 - [x] Containerfile and Makefile
-- [x] Environment-based configuration (koanf)
+- [x] Environment-based configuration (koanf), validated at startup
 - [x] Documentation site (Astro + Starlight)
 - [x] Containerized Ory stack + UAT environment (pre-seeded Podman pod)
 - [x] Unit tests
 - [x] Integration tests
 - [x] End-to-end (system) tests
 - [x] Search indexer worker (poll for new posts)
-- [x] Hub channel filtering (broadcast scoping to channel members)
+- [x] Hub channel filtering (broadcast scoping to channel and team members)
 
 ## Phase 2 — Core Messaging
 
 - [x] End-to-end message flow (create → store → broadcast → deliver)
-- [x] Thread reply tracking and participant updates
+- [x] Thread reply tracking and participant updates (`thread_updated` events)
+- [x] Thread inbox (followed threads with unread state and root post)
 - [x] Unread counts and channel view tracking
 - [x] @mention detection and notification events
 - [x] Message pinning flow
-- [x] Tag CRUD and post-tag association flow
+- [x] Tag CRUD, post-tag association, and batch tag lookup
+- [x] Profile editing (`PUT /users/me`)
 - [x] Slash commands framework (CUE-defined, Keto-authorized, audited)
+- [x] Slash command handlers: `/help`, `/invite`, `/kick`, `/topic`
+- [ ] `/summarize` handler (registered in CUE, no handler yet)
 - [x] Webhook dispatcher (CloudEvents)
-- [x] MCP agent event feed (pub/sub envelopes polled via `get_new_events`)
-- [x] Headless Claude Code bridge (`chit-claude`: thread-per-session, subscription OAuth)
+- [ ] Per-channel webhook opt-in (only a global switch exists)
+- [x] MCP agent event feed (chitd WebSocket events buffered by `chit-mcp`, polled via `get_new_events`)
+- [x] Headless Claude Code bridge (`chit-claude`: thread-per-session, subscription OAuth, multiple personas per channel)
 
 ## Phase 3 — Auth & Security
 
-- [x] Oathkeeper JWT/session validation in middleware
-- [x] Channel authorization checks (Postgres membership source of truth, Keto dual-write)
+- [x] Oathkeeper in front of chitd (Kratos sessions, Hydra token introspection); chitd trusts its headers, optionally gated by `X-Proxy-Secret`
+- [x] OAuth2 agent authentication via Ory Hydra client credentials (`X-Client-Id`)
+- [x] Machine actors declared in `CHIT_MACHINE_ACTORS` (no Kratos identity)
+- [x] Channel authorization checks (Postgres membership source of truth, Keto best-effort mirror)
+- [x] Team authorization (`team_admin` to update or delete, invite-only teams hidden from non-members)
 - [x] User auto-provisioning from Kratos identity on first request
+- [x] Bounded request bodies and pagination; 5xx responses carry no internal detail
+- [x] Lint as a hard CI gate, and `govulncheck` in CI
 
 ## Phase 4 — Search & Performance
 
-- [x] ZincSearch indexer worker (async from PG)
-- [x] Filtered search (per-team, per-channel; results scoped to member channels)
-- [x] Store decorator chain (Timer → Retry → Cache → SqlStore)
-- [ ] Connection pool tuning and query optimization
+- [x] ZincSearch indexer worker (async from PG, optional)
+- [x] Filtered search (everywhere, per-team, per-channel; author and tag filters; scoped to member channels before pagination)
+- [x] Indexes for the search indexer and thread inbox; batched mention and tag queries
+- [ ] Store query timing and retry decorators (not implemented; the only cache is the app-layer user LRU)
+- [ ] Connection pool tuning
 
 ## Phase 5 — Testing & Benchmarks
 
 - [x] Complete test dataset with seed data
-- [x] CI pipeline (GitHub Actions: build, lint, unit + integration tests)
+- [x] CI pipeline (GitHub Actions: build, lint, govulncheck, unit + integration tests, migration up/down/up round trip)
 - [ ] Load tests with k6 or vegeta
 - [ ] Published benchmark results
 
@@ -65,6 +76,6 @@
 
 ## Phase 7 — TUI Client
 
-- [ ] Separate repository for terminal UI client
-- [ ] Real-time channel view with WebSocket integration
-- [ ] Thread navigation and reply composition
+- [x] Terminal UI client in this repository (`clients/chit-tui`, its own Go module)
+- [x] Real-time channel view with WebSocket integration
+- [x] Thread navigation and reply composition

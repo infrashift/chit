@@ -1,17 +1,18 @@
 package app
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/infrashift/chit/internal/jobs/workers"
+	"github.com/infrashift/chit/internal/keto"
 
 	"github.com/infrashift/chit/internal/cache"
 	"github.com/infrashift/chit/internal/command"
@@ -35,9 +36,8 @@ type App struct {
 	AuditLogger     *command.AuditLogger
 	WebhookCh       chan *command.WebhookEvent
 
-	ketoReadURL  string
-	ketoWriteURL string
-	httpClient   *http.Client
+	keto       *keto.Client
+	httpClient *http.Client
 
 	zincOnce   sync.Once
 	zincClient *workers.SearchIndexer
@@ -45,6 +45,56 @@ type App struct {
 	// userCache caches ProvisionUser lookups (kratos ID → user) so every
 	// authenticated request does not hit the database.
 	userCache *cache.LRU[string, *model.User]
+
+	// background tracks work started off the request path, so shutdown can
+	// let it finish.
+	background sync.WaitGroup
+}
+
+// ketoAsyncTimeout bounds one background batch of Keto writes.
+const ketoAsyncTimeout = 30 * time.Second
+
+// writeKetoMembersAsync records channel membership tuples in Keto off the
+// request path. channel_members is the access check and Keto a best-effort
+// mirror of it, and writing inline cost one synchronous HTTP round trip (up
+// to five seconds when Keto is slow) per member: for an open channel on a
+// large team, longer than the request's write timeout.
+func (a *App) writeKetoMembersAsync(channelID string, userIDs []string) {
+	if len(userIDs) == 0 {
+		return
+	}
+	ids := slices.Clone(userIDs)
+	a.background.Add(1)
+	go func() {
+		defer a.background.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), ketoAsyncTimeout)
+		defer cancel()
+		for _, uid := range ids {
+			if err := a.keto.WriteRelation(ctx, model.KetoNamespaceChannel, channelID, model.KetoRelationMember, uid); err != nil {
+				slog.Warn("keto: failed to record channel membership",
+					"channel_id", channelID, "user_id", uid, "error", err)
+				if ctx.Err() != nil {
+					return
+				}
+			}
+		}
+	}()
+}
+
+// logKeto records a failed Keto membership write. Keto mirrors
+// channel_members best-effort and a failure does not fail the request, but a
+// silent one lets the mirror drift unnoticed.
+func (a *App) logKeto(err error, channelID, userID string) {
+	if err != nil {
+		slog.Warn("keto: failed to mirror channel membership",
+			"channel_id", channelID, "user_id", userID, "error", err)
+	}
+}
+
+// WaitBackground blocks until background work started by the App, such as
+// Keto writes, has finished.
+func (a *App) WaitBackground() {
+	a.background.Wait()
 }
 
 // searchClient returns a shared ZincSearch client (the SearchIndexer type
@@ -70,116 +120,21 @@ func New(s store.Store, hub *websocket.Hub, ps pubsub.PubSub, cfg *config.Config
 	}
 
 	return &App{
-		Store:        s,
-		Hub:          hub,
-		PubSub:       ps,
-		Config:       cfg,
-		ketoReadURL:  cfg.KetoReadURL,
-		ketoWriteURL: cfg.KetoWriteURL,
-		httpClient:   &http.Client{Timeout: 5 * time.Second},
-		userCache:    userCache,
+		Store:      s,
+		Hub:        hub,
+		PubSub:     ps,
+		Config:     cfg,
+		keto:       keto.New(cfg.KetoReadURL, cfg.KetoWriteURL, &http.Client{Timeout: 5 * time.Second}),
+		httpClient: &http.Client{Timeout: 5 * time.Second},
+		userCache:  userCache,
 	}
-}
-
-// CheckChannelPermission verifies a user has a specific relation on a channel via Keto.
-func (a *App) CheckChannelPermission(ctx context.Context, channelID, userID, relation string) (bool, error) {
-	url := fmt.Sprintf("%s/relation-tuples/check", a.ketoReadURL)
-
-	body := map[string]string{
-		"namespace":  "chit/channel",
-		"object":     channelID,
-		"relation":   relation,
-		"subject_id": userID,
-	}
-	jsonBody, err := json.Marshal(body)
-	if err != nil {
-		return false, fmt.Errorf("marshal keto check: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBody))
-	if err != nil {
-		return false, fmt.Errorf("create keto request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := a.httpClient.Do(req)
-	if err != nil {
-		return false, fmt.Errorf("keto check: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Allowed bool `json:"allowed"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return false, fmt.Errorf("decode keto response: %w", err)
-	}
-
-	return result.Allowed, nil
-}
-
-// WriteKetoRelation writes a relation tuple to Keto.
-func (a *App) WriteKetoRelation(ctx context.Context, namespace, object, relation, subjectID string) error {
-	url := fmt.Sprintf("%s/admin/relation-tuples", a.ketoWriteURL)
-
-	body := map[string]string{
-		"namespace":  namespace,
-		"object":     object,
-		"relation":   relation,
-		"subject_id": subjectID,
-	}
-	jsonBody, err := json.Marshal(body)
-	if err != nil {
-		return fmt.Errorf("marshal keto write: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(jsonBody))
-	if err != nil {
-		return fmt.Errorf("create keto write request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := a.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("keto write: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("keto write: status %d", resp.StatusCode)
-	}
-
-	return nil
-}
-
-// DeleteKetoRelation removes a relation tuple from Keto.
-func (a *App) DeleteKetoRelation(ctx context.Context, namespace, object, relation, subjectID string) error {
-	url := fmt.Sprintf("%s/admin/relation-tuples?namespace=%s&object=%s&relation=%s&subject_id=%s",
-		a.ketoWriteURL, namespace, object, relation, subjectID)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
-	if err != nil {
-		return fmt.Errorf("create keto delete request: %w", err)
-	}
-
-	resp, err := a.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("keto delete: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("keto delete: status %d", resp.StatusCode)
-	}
-
-	return nil
 }
 
 // FetchKratosIdentity retrieves identity traits from Kratos Admin API.
 func (a *App) FetchKratosIdentity(ctx context.Context, kratosID string) (username, displayName, email string, err error) {
 	url := fmt.Sprintf("%s/admin/identities/%s", a.Config.KratosAdminURL, kratosID)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return "", "", "", fmt.Errorf("create kratos request: %w", err)
 	}
@@ -188,7 +143,7 @@ func (a *App) FetchKratosIdentity(ctx context.Context, kratosID string) (usernam
 	if err != nil {
 		return "", "", "", fmt.Errorf("fetch kratos identity: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)

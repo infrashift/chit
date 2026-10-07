@@ -6,14 +6,35 @@ info:
     REST API for Chit, a stripped-down team messaging server.
 
     ## Authentication
-    All endpoints except `/system/ping` and `/system/config/client` require
-    authentication via Ory Oathkeeper. The authenticated user's Kratos identity
-    ID is forwarded in the `X-User-Id` header. On first request the server
-    auto-provisions a local User record from the Kratos identity.
+    chitd sits behind Ory Oathkeeper and trusts the identity headers it sets;
+    it validates no session or token itself. Every endpoint except
+    `/system/ping`, `/system/config/client`, `/openapi.yaml` and `/docs/`
+    needs one of:
+
+    - `X-Client-Id`: the OAuth2 client of a machine actor (an agent or bot),
+      set by Oathkeeper after introspecting a Hydra client-credentials token.
+      It wins over `X-User-Id`. The client must be bound to a user, declared
+      with `CHIT_MACHINE_ACTORS`; an unknown client is a 401, never created.
+    - `X-User-Id`: a person's Ory Kratos identity ID. The first request from
+      an identity provisions its user record from Kratos.
+
+    When `CHIT_TRUSTED_PROXY_SECRET` is set, the proxy must also send it in
+    `X-Proxy-Secret`. (Through the Oathkeeper gateway, every `/api/v1` route,
+    the public ones included, needs a session or token.)
+
+    ## Authorization
+    Channel membership is the access check for everything in a channel.
+    Operations a caller may not perform answer 403.
 
     ## Pagination
-    List endpoints accept `page` (0-indexed) and `per_page` (default 60)
-    query parameters.
+    List endpoints accept `page` (0-indexed) and `per_page` (default 60,
+    at most 200). `page * per_page` is capped at 100,000.
+
+    ## Errors and limits
+    Failures return an `AppError`. A 5xx carries no `detailed_error`; the
+    cause is logged server-side. Request bodies over 1 MiB are refused with
+    413. Each user may make 10 requests a second, in bursts of up to 50;
+    beyond that requests are refused with 429.
 
     ## IDs
     All resource IDs are UUIDv7 strings.
@@ -24,6 +45,10 @@ info:
 servers:
   - url: /api/v1
     description: Default API prefix
+
+security:
+  - clientId: []
+  - userId: []
 
 tags:
   - name: System
@@ -41,7 +66,7 @@ tags:
   - name: Tags
     description: Tag CRUD and post-tag associations
   - name: Search
-    description: Full-text search across posts via ZincSearch
+    description: Post search, by SQL or by ZincSearch when it is configured
   - name: Commands
     description: Slash command registry and discovery
   - name: WebSocket
@@ -55,6 +80,7 @@ paths:
       summary: Health check
       description: Returns OK if the server is running. No authentication required.
       tags: [System]
+      security: []
       responses:
         "200":
           description: Server is healthy
@@ -73,6 +99,7 @@ paths:
         Returns public configuration values that clients need at startup,
         such as the server version. No authentication required.
       tags: [System]
+      security: []
       responses:
         "200":
           description: Client configuration
@@ -91,9 +118,11 @@ paths:
       operationId: create_user
       summary: Create a user
       description: |
-        Creates a new local user record. Typically called internally during
-        auto-provisioning from Kratos identity. The request body should
-        contain kratos_id, username, display_name, and email.
+        Creates a user record. System admins only. People are normally
+        provisioned automatically on their first request, and machine actors
+        are declared with `CHIT_MACHINE_ACTORS`, which the server reconciles at
+        every boot; this endpoint covers what neither does, such as addressing
+        a person who has never signed in.
       tags: [Users]
       requestBody:
         required: true
@@ -112,12 +141,18 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
     get:
       operationId: search_users
       summary: Search users
       description: |
-        Search users by username or display name. Returns a paginated list
-        of users matching the search term. Email is redacted from results.
+        Search users by username or display name (case-insensitive
+        substring; `%` and `_` match literally). Email is not searched.
+        Returns a paginated list ordered by username, with email and
+        kratos_id redacted.
       tags: [Users]
       parameters:
         - name: term
@@ -159,7 +194,9 @@ paths:
       summary: Update current user
       description: |
         Updates the authenticated user's profile. Only `display_name` and
-        `username` can be changed. Other fields are ignored.
+        `username` can be changed; other fields are ignored. A field left out
+        is unchanged. The username is lowercased and validated, and must not
+        be taken by another user.
       tags: [Users]
       requestBody:
         required: true
@@ -185,12 +222,14 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /users/{id}:
     get:
       operationId: get_user
       summary: Get user by ID
-      description: Returns a user's public profile. Email is redacted.
+      description: Returns a user's public profile, with email and kratos_id redacted.
       tags: [Users]
       parameters:
         - $ref: "#/components/parameters/UserIdParam"
@@ -236,8 +275,9 @@ paths:
       operationId: get_users_by_ids
       summary: Get users by IDs
       description: |
-        Batch-fetch multiple users by their IDs. Useful for resolving user
-        references in posts and channel members. Email is redacted.
+        Batch-fetch up to 200 users by their IDs. Useful for resolving user
+        references in posts and channel members. Unknown IDs are skipped;
+        email and kratos_id are redacted.
       tags: [Users]
       requestBody:
         required: true
@@ -248,6 +288,7 @@ paths:
               items:
                 type: string
                 format: uuid
+              maxItems: 200
               example:
                 - "0192d4c1-7e2a-7000-8000-000000000001"
                 - "0192d4c1-7e2a-7000-8000-000000000002"
@@ -294,8 +335,10 @@ paths:
           $ref: "#/components/responses/Unauthorized"
     get:
       operationId: get_all_teams
-      summary: List all teams
-      description: Returns a paginated list of all teams.
+      summary: List teams
+      description: |
+        Returns the teams the caller can see: open teams, plus the
+        invite-only teams they belong to. System admins see every team.
       tags: [Teams]
       parameters:
         - $ref: "#/components/parameters/PageParam"
@@ -316,6 +359,9 @@ paths:
     get:
       operationId: get_team
       summary: Get team by ID
+      description: |
+        Open teams are visible to everyone; invite-only teams only to their
+        members and to system admins.
       tags: [Teams]
       parameters:
         - $ref: "#/components/parameters/TeamIdParam"
@@ -328,14 +374,18 @@ paths:
                 $ref: "#/components/schemas/Team"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
     put:
       operationId: update_team
       summary: Update a team
       description: |
-        Updates a team's display_name, description, or type.
-        The team name (URL slug) cannot be changed after creation.
+        Updates a team's display_name, description, or type. Requires
+        team_admin (granted to the team's creator) or system_admin. A field
+        left out is unchanged; an empty description clears it. The team name
+        (URL slug) cannot be changed: sending `name` is a 400.
       tags: [Teams]
       parameters:
         - $ref: "#/components/parameters/TeamIdParam"
@@ -356,12 +406,16 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
     delete:
       operationId: delete_team
       summary: Delete a team
-      description: Soft-deletes a team by setting delete_at.
+      description: |
+        Soft-deletes a team and every channel on it. Requires team_admin or
+        system_admin. A `channel_deleted` event is sent for each channel.
       tags: [Teams]
       parameters:
         - $ref: "#/components/parameters/TeamIdParam"
@@ -374,6 +428,8 @@ paths:
                 $ref: "#/components/schemas/StatusResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -399,7 +455,12 @@ paths:
     post:
       operationId: add_team_member
       summary: Add a team member
-      description: Adds a user to a team with default `team_user` role.
+      description: |
+        Adds a user to a team with the `team_user` role. Anyone may join an
+        open team themselves (`user_id` is their own); adding someone else,
+        or joining an invite-only team, requires the caller to be a member.
+        The user must exist. Adding an existing member changes nothing; in
+        particular their roles are kept.
       tags: [Teams]
       parameters:
         - $ref: "#/components/parameters/TeamIdParam"
@@ -425,10 +486,14 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
     get:
       operationId: get_team_members
       summary: Get team members
-      description: Returns a paginated list of members for a team.
+      description: Returns a paginated list of a team's members. Members and system admins only.
       tags: [Teams]
       parameters:
         - $ref: "#/components/parameters/TeamIdParam"
@@ -445,11 +510,16 @@ paths:
                   $ref: "#/components/schemas/TeamMember"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /teams/{id}/members/{user_id}:
     delete:
       operationId: remove_team_member
       summary: Remove a team member
+      description: |
+        Removes a user from a team, and from every channel on it. A member may
+        remove themselves; removing anyone else requires system_admin.
       tags: [Teams]
       parameters:
         - $ref: "#/components/parameters/TeamIdParam"
@@ -469,6 +539,8 @@ paths:
                 $ref: "#/components/schemas/StatusResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -478,10 +550,12 @@ paths:
       operationId: create_channel
       summary: Create a channel
       description: |
-        Creates a new Open or Private channel within a team. The creator is
-        automatically added as a channel member and granted Keto `member`
-        relation for authorization. A `channel_created` WebSocket event is
-        broadcast to team members.
+        Creates an Open or Private channel within a team; the caller must be a
+        member of the team. The creator becomes a member, and an Open channel
+        also gets every team member. Direct and group channels are created with
+        `/channels/direct` and `/channels/group`, not here. A
+        `channel_created` WebSocket event is broadcast (to the team for an
+        Open channel, otherwise to the channel).
       tags: [Channels]
       requestBody:
         required: true
@@ -500,11 +574,17 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /channels/{id}:
     get:
       operationId: get_channel
       summary: Get channel by ID
+      description: |
+        Members may read any channel; members of the team may read an Open
+        channel. Private, direct and group channels are not visible to
+        non-members.
       tags: [Channels]
       parameters:
         - $ref: "#/components/parameters/ChannelIdParam"
@@ -517,13 +597,17 @@ paths:
                 $ref: "#/components/schemas/Channel"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
     put:
       operationId: update_channel
       summary: Update a channel
       description: |
-        Updates a channel's display_name, header, or purpose.
+        Updates a channel's display_name, header, or purpose; the caller must
+        be a member. A field left out is unchanged; an empty header or purpose
+        clears it. The name cannot be changed: sending `name` is a 400.
         Broadcasts a `channel_updated` WebSocket event.
       tags: [Channels]
       parameters:
@@ -545,12 +629,17 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
     delete:
       operationId: delete_channel
       summary: Delete a channel
-      description: Soft-deletes a channel. Broadcasts a `channel_deleted` WebSocket event.
+      description: |
+        Soft-deletes a channel. Only its creator or a system admin may. Once
+        deleted, a channel has no members for any access check. Broadcasts a
+        `channel_deleted` WebSocket event.
       tags: [Channels]
       parameters:
         - $ref: "#/components/parameters/ChannelIdParam"
@@ -563,6 +652,8 @@ paths:
                 $ref: "#/components/schemas/StatusResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -570,7 +661,10 @@ paths:
     get:
       operationId: get_channels_for_team
       summary: Get channels for a team
-      description: Returns all channels (Open and Private) belonging to a team.
+      description: |
+        Returns a team's Open channels, the ones any member may browse and
+        join. Team members only. Private channels are listed to their members
+        by `/users/me/teams/{id}/channels`.
       tags: [Channels]
       parameters:
         - $ref: "#/components/parameters/TeamIdParam"
@@ -587,6 +681,8 @@ paths:
                   $ref: "#/components/schemas/Channel"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /users/me/teams/{id}/channels:
     get:
@@ -655,10 +751,10 @@ paths:
       operationId: create_direct_channel
       summary: Create a direct message channel
       description: |
-        Creates a 1:1 DM channel between exactly two users. The channel name
-        is deterministically generated from the sorted user IDs. Both users
-        are added as members and granted Keto relations. If the DM already
-        exists, the existing channel is returned.
+        Creates a 1:1 DM channel between two different users, one of whom
+        must be the caller. The channel name is the sorted user IDs joined by
+        `__`. If the DM already exists (including one created concurrently),
+        the existing channel is returned. A DM's membership is fixed.
       tags: [Channels]
       requestBody:
         required: true
@@ -686,14 +782,18 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /channels/group:
     post:
       operationId: create_group_channel
       summary: Create a group message channel
       description: |
-        Creates a group message channel with 3-8 members. All provided users
-        are added as members with Keto relations.
+        Creates a group message channel with 3-8 distinct members, one of whom
+        must be the caller. Repeated IDs count once; every ID must name an
+        existing user. If a group with exactly these members exists, it is
+        returned. A group's membership is fixed.
       tags: [Channels]
       requestBody:
         required: true
@@ -718,14 +818,19 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /channels/{id}/members:
     post:
       operationId: add_channel_member
       summary: Add a channel member
       description: |
-        Adds a user to a channel. Creates a Keto `member` relation and
-        broadcasts a `user_added` WebSocket event to the channel.
+        Adds a user to an Open or Private channel. For an Open channel any
+        team member may add; for a Private one only its members. The user
+        added must be on the channel's team. Direct and group channels have a
+        fixed membership (403). Adding an existing member changes nothing.
+        Broadcasts a `user_added` WebSocket event to the channel.
       tags: [Channels]
       parameters:
         - $ref: "#/components/parameters/ChannelIdParam"
@@ -751,9 +856,12 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
     get:
       operationId: get_channel_members
       summary: Get channel members
+      description: Channel members only.
       tags: [Channels]
       parameters:
         - $ref: "#/components/parameters/ChannelIdParam"
@@ -770,14 +878,17 @@ paths:
                   $ref: "#/components/schemas/ChannelMember"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /channels/{id}/members/{user_id}:
     delete:
       operationId: remove_channel_member
       summary: Remove a channel member
       description: |
-        Removes a user from a channel. Deletes the Keto relation and
-        broadcasts a `user_removed` WebSocket event.
+        Removes a user from a channel. A member may remove themselves;
+        removing anyone else requires system_admin. Broadcasts a
+        `user_removed` WebSocket event.
       tags: [Channels]
       parameters:
         - $ref: "#/components/parameters/ChannelIdParam"
@@ -797,6 +908,8 @@ paths:
                 $ref: "#/components/schemas/StatusResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -806,7 +919,8 @@ paths:
       summary: Mark channel as viewed
       description: |
         Updates the authenticated user's `last_viewed_at` timestamp for a
-        channel, clearing the unread indicator in the client.
+        channel, clearing the unread indicator and mention count. Members
+        only.
       tags: [Channels]
       parameters:
         - $ref: "#/components/parameters/ChannelIdParam"
@@ -819,6 +933,8 @@ paths:
                 $ref: "#/components/schemas/StatusResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   # ──────────────────────────── Posts ─────────────────────────────
   /posts:
@@ -826,12 +942,23 @@ paths:
       operationId: create_post
       summary: Create a post
       description: |
-        Creates a new message in a channel. If `root_id` is set, the post
-        is a thread reply and the parent thread metadata is updated
-        automatically (reply count, participants, last reply time). The
-        replying user is auto-followed on the thread.
+        Creates a message in a channel the caller is a member of. Only
+        `channel_id`, `root_id`, `content` and `props` are read; `props.mentions`
+        is computed by the server.
 
-        A `posted` WebSocket event is broadcast to the channel.
+        If `root_id` is set the post is a thread reply. The root must exist,
+        be in the same channel, and be a root rather than a reply. The thread's
+        counters are updated, the replier follows the thread (read up to their
+        reply), and the root's author follows it from its first reply unless
+        they have unfollowed. A `thread_updated` event carries the counters.
+
+        A message that is a registered slash command (e.g. `/help`) is run, not
+        stored: the response is a stand-in post of type `command_response`
+        with `props.ephemeral` true, and a `command_response` WebSocket event
+        is sent to the caller.
+
+        A `posted` WebSocket event is broadcast to the channel, and each user
+        mentioned gets a `mentioned` event.
       tags: [Posts]
       requestBody:
         required: true
@@ -850,12 +977,14 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /posts/{id}:
     get:
       operationId: get_post
       summary: Get post by ID
-      description: Returns a single post by ID.
+      description: Returns a single post by ID. Members of its channel only.
       tags: [Posts]
       parameters:
         - $ref: "#/components/parameters/PostIdParam"
@@ -868,14 +997,19 @@ paths:
                 $ref: "#/components/schemas/Post"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
     put:
       operationId: update_post
       summary: Update a post
       description: |
-        Updates a post's content. Sets edit_at timestamp. Broadcasts a
-        `post_edited` WebSocket event.
+        Edits a post; its author or a system admin only. `content`, when
+        present, replaces the text. `props` are merged key by key into the
+        existing props, and a null value removes its key. Sets `edit_at`,
+        re-parses mentions, and returns the whole post. Broadcasts a
+        `post_edited` WebSocket event carrying the whole post.
       tags: [Posts]
       parameters:
         - $ref: "#/components/parameters/PostIdParam"
@@ -885,12 +1019,16 @@ paths:
           application/json:
             schema:
               type: object
-              required: [content]
               properties:
                 content:
                   type: string
+                  minLength: 1
                   maxLength: 65535
                   description: Updated message content (markdown)
+                props:
+                  type: object
+                  additionalProperties: true
+                  description: Props to set; a null value removes the key
       responses:
         "200":
           description: Updated post
@@ -902,12 +1040,17 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
     delete:
       operationId: delete_post
       summary: Delete a post
-      description: Soft-deletes a post. Broadcasts a `post_deleted` WebSocket event.
+      description: |
+        Soft-deletes a post; its author or a system admin only. Deleting a
+        reply updates its thread's counters (and sends `thread_updated`).
+        Broadcasts a `post_deleted` WebSocket event.
       tags: [Posts]
       parameters:
         - $ref: "#/components/parameters/PostIdParam"
@@ -920,6 +1063,8 @@ paths:
                 $ref: "#/components/schemas/StatusResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -927,7 +1072,7 @@ paths:
     post:
       operationId: pin_post
       summary: Pin a post
-      description: Pins a post in its channel. Broadcasts a `post_pinned` WebSocket event.
+      description: Pins a post in its channel; channel members only. Broadcasts a `post_pinned` WebSocket event.
       tags: [Posts]
       parameters:
         - $ref: "#/components/parameters/PostIdParam"
@@ -940,6 +1085,8 @@ paths:
                 $ref: "#/components/schemas/StatusResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -947,7 +1094,7 @@ paths:
     post:
       operationId: unpin_post
       summary: Unpin a post
-      description: Unpins a post. Broadcasts a `post_unpinned` WebSocket event.
+      description: Unpins a post; channel members only. Broadcasts a `post_unpinned` WebSocket event.
       tags: [Posts]
       parameters:
         - $ref: "#/components/parameters/PostIdParam"
@@ -960,6 +1107,8 @@ paths:
                 $ref: "#/components/schemas/StatusResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -968,26 +1117,15 @@ paths:
       operationId: get_channel_posts
       summary: Get posts in a channel
       description: |
-        Returns a paginated list of posts in a channel, ordered by creation
-        time (newest first). Supports cursor-based pagination via `before`, `after`, and `since`
-        query parameters in addition to page/per_page.
+        Returns a page of a channel's posts; members only. Without `since`
+        posts come newest first (history); with `since` only posts created
+        after it are returned, oldest first, for clients polling for new
+        messages.
       tags: [Posts]
       parameters:
         - $ref: "#/components/parameters/ChannelIdParam"
         - $ref: "#/components/parameters/PageParam"
         - $ref: "#/components/parameters/PerPageParam"
-        - name: before
-          in: query
-          description: Return posts before this post ID (cursor)
-          schema:
-            type: string
-            format: uuid
-        - name: after
-          in: query
-          description: Return posts after this post ID (cursor)
-          schema:
-            type: string
-            format: uuid
         - name: since
           in: query
           description: Return posts created after this Unix millisecond timestamp
@@ -1003,12 +1141,14 @@ paths:
                 $ref: "#/components/schemas/PostList"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /channels/{id}/pinned:
     get:
       operationId: get_pinned_posts
       summary: Get pinned posts in a channel
-      description: Returns all pinned posts in a channel.
+      description: Returns all pinned posts in a channel, newest first; members only.
       tags: [Posts]
       parameters:
         - $ref: "#/components/parameters/ChannelIdParam"
@@ -1021,6 +1161,8 @@ paths:
                 $ref: "#/components/schemas/PostList"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   # ──────────────────────────── Threads ───────────────────────────
   /posts/{id}/thread:
@@ -1028,21 +1170,22 @@ paths:
       operationId: get_thread
       summary: Get a thread
       description: |
-        Returns the root post and all replies in a thread. Includes thread
-        metadata (reply count, participants, last reply time) and all post
-        content decrypted.
+        Returns the root post followed by every reply, oldest first, as a
+        `PostList`. Members of the thread's channel only.
       tags: [Threads]
       parameters:
         - $ref: "#/components/parameters/PostIdParam"
       responses:
         "200":
-          description: Thread with all posts
+          description: The root and its replies
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ThreadResponse"
+                $ref: "#/components/schemas/PostList"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -1051,8 +1194,10 @@ paths:
       operationId: get_my_threads
       summary: Get my threads in a team
       description: |
-        Returns threads the authenticated user is following within a team,
-        including unread status. Paginated, defaulting to 25 per page.
+        Returns threads the authenticated user follows within a team, newest
+        reply first, with unread status. Only threads in channels the user is
+        still a member of, whose root and channel are not deleted, are listed.
+        Paginated, defaulting to 25 per page.
       tags: [Threads]
       parameters:
         - $ref: "#/components/parameters/TeamIdParam"
@@ -1080,8 +1225,10 @@ paths:
       operationId: mark_thread_as_read
       summary: Mark thread as read
       description: |
-        Updates the user's `last_viewed_at` for a thread, clearing the
-        unread indicator.
+        Updates the user's `last_viewed_at` for a thread and clears its
+        unread mentions. `id` must be a thread root (400 otherwise) in a
+        channel the caller is a member of; 404 if the caller has no
+        membership of the thread. `team_id` is not checked.
       tags: [Threads]
       parameters:
         - name: team_id
@@ -1107,6 +1254,8 @@ paths:
                 $ref: "#/components/schemas/StatusResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -1115,9 +1264,9 @@ paths:
       operationId: update_thread_following
       summary: Follow or unfollow a thread
       description: |
-        Sets whether the authenticated user is following a thread. Following
-        a thread means the user will see it in their "My Threads" view and
-        receive notifications for new replies.
+        Sets whether the authenticated user follows a thread. A followed
+        thread appears in their thread list and counts mentions. `id` must be
+        a thread root (400 otherwise) in a channel the caller is a member of.
       tags: [Threads]
       parameters:
         - name: team_id
@@ -1156,15 +1305,113 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /users/me/threads/direct:
+    get:
+      operationId: get_my_direct_threads
+      summary: Get my threads in direct and group channels
+      description: |
+        Returns the threads the authenticated user follows in direct and
+        group channels, newest reply first, with unread status. Those
+        channels belong to no team, so these threads never appear in a team's
+        thread list. Same filtering as the team list: only channels the user
+        is still a member of, whose root and channel are not deleted.
+        Paginated, defaulting to 25 per page.
+      tags: [Threads]
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - name: per_page
+          in: query
+          description: Number of items per page (default 25)
+          schema:
+            type: integer
+            default: 25
+            minimum: 1
+            maximum: 200
+      responses:
+        "200":
+          description: List of followed threads
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserThreadList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /users/me/threads/{id}/read:
+    put:
+      operationId: mark_thread_as_read_without_team
+      summary: Mark thread as read (any channel)
+      description: |
+        As `/users/me/teams/{team_id}/threads/{id}/read`, which ignores its
+        `team_id`; this form needs none, for threads in direct and group
+        channels.
+      tags: [Threads]
+      parameters:
+        - $ref: "#/components/parameters/PostIdParam"
+      responses:
+        "200":
+          description: Thread marked as read
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /users/me/threads/{id}/following:
+    put:
+      operationId: update_thread_following_without_team
+      summary: Follow or unfollow a thread (any channel)
+      description: |
+        As `/users/me/teams/{team_id}/threads/{id}/following`, which ignores
+        its `team_id`; this form needs none, for threads in direct and group
+        channels.
+      tags: [Threads]
+      parameters:
+        - $ref: "#/components/parameters/PostIdParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [following]
+              properties:
+                following:
+                  type: boolean
+      responses:
+        "200":
+          description: Thread following updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   # ──────────────────────────── Tags ──────────────────────────────
   /tags:
     post:
       operationId: create_tag
       summary: Create a tag
-      description: Creates a new tag that can be applied to posts.
+      description: |
+        Creates a tag that can be applied to posts. Idempotent by name:
+        creating a name that exists returns the existing tag.
       tags: [Tags]
       requestBody:
         required: true
@@ -1190,8 +1437,6 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
-        "409":
-          $ref: "#/components/responses/Conflict"
     get:
       operationId: get_all_tags
       summary: List all tags
@@ -1230,6 +1475,7 @@ paths:
               properties:
                 post_ids:
                   type: array
+                  maxItems: 200
                   items:
                     type: string
                     format: uuid
@@ -1253,7 +1499,7 @@ paths:
     post:
       operationId: add_tag_to_post
       summary: Add a tag to a post
-      description: Associates an existing tag with a post (message).
+      description: Associates an existing tag with a post; members of its channel only.
       tags: [Tags]
       parameters:
         - $ref: "#/components/parameters/PostIdParam"
@@ -1279,6 +1525,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
     get:
       operationId: get_tags_for_post
       summary: Get tags for a post
@@ -1296,6 +1544,8 @@ paths:
                   $ref: "#/components/schemas/Tag"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /posts/{id}/tags/{tag_id}:
     delete:
@@ -1320,6 +1570,8 @@ paths:
                 $ref: "#/components/schemas/StatusResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -1329,9 +1581,12 @@ paths:
       operationId: search_posts
       summary: Search posts globally
       description: |
-        Full-text search across posts in every channel the requesting user
-        is a member of (no team or channel scope). Used by headless agents
-        such as chit-mcp.
+        Searches posts in every channel the caller is a member of. Every
+        filter, scope included, is applied before the page is cut, so a page
+        is never short because unreadable hits were dropped. With
+        `CHIT_ZINCSEARCH_URL` set, terms are matched by ZincSearch (in its
+        relevance order; SQL is used only if Zinc fails); otherwise by a
+        case-insensitive substring match, newest first.
       tags: [Search]
       requestBody:
         required: true
@@ -1356,8 +1611,8 @@ paths:
       operationId: search_posts_in_team
       summary: Search posts in a team
       description: |
-        Full-text search across posts within a team using ZincSearch.
-        Returns matching posts with content decrypted.
+        As `/posts/search`, limited to the caller's channels on this team.
+        Team members only.
       tags: [Search]
       parameters:
         - $ref: "#/components/parameters/TeamIdParam"
@@ -1378,12 +1633,14 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /channels/{id}/posts/search:
     post:
       operationId: search_posts_in_channel
       summary: Search posts in a channel
-      description: Full-text search across posts within a specific channel.
+      description: As `/posts/search`, limited to one channel. Channel members only.
       tags: [Search]
       parameters:
         - $ref: "#/components/parameters/ChannelIdParam"
@@ -1404,6 +1661,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   # ──────────────────────────── Commands ──────────────────────────
   /commands:
@@ -1433,15 +1692,17 @@ paths:
       operationId: handle_web_socket
       summary: WebSocket connection
       description: |
-        Upgrades the HTTP connection to a WebSocket for real-time event
-        streaming. Events include: posted, post_edited, post_deleted,
-        post_pinned, post_unpinned, typing, channel_created,
-        channel_updated, channel_deleted, user_added, user_removed,
-        thread_updated, post_tags_updated, mentioned, command_response,
-        status_change.
+        Upgrades the HTTP connection to a WebSocket for real-time events:
+        posted, post_edited, post_deleted, post_pinned, post_unpinned,
+        typing, channel_created, channel_updated, channel_deleted,
+        user_added, user_removed, thread_updated, post_tags_updated,
+        mentioned, command_response. Channel and team events reach only
+        members.
 
-        Clients can send `typing` actions via the WebSocket.
-        The server sends periodic ping frames for keepalive.
+        Clients may send one action, `typing`, for a channel they belong to;
+        inbound messages are limited to 4096 bytes. The server sends ping
+        frames for keepalive, and disconnects a client whose 256-event send
+        buffer is full. Browser origins must be in `CHIT_ALLOWED_ORIGINS`.
       tags: [WebSocket]
       responses:
         "101":
@@ -1453,6 +1714,18 @@ paths:
 # Components
 # ═══════════════════════════════════════════════════════════════════
 components:
+  securitySchemes:
+    clientId:
+      type: apiKey
+      in: header
+      name: X-Client-Id
+      description: A machine actor's OAuth2 client ID, set by Oathkeeper.
+    userId:
+      type: apiKey
+      in: header
+      name: X-User-Id
+      description: A person's Kratos identity ID, set by Oathkeeper.
+
   # ──────── Reusable Parameters ───────
   parameters:
     PageParam:
@@ -1577,8 +1850,9 @@ components:
           format: uuid
         kratos_id:
           type: string
-          format: uuid
-          description: Ory Kratos identity ID
+          description: |
+            A person's Ory Kratos identity ID. Empty for machine actors, and
+            redacted when one user reads another.
         username:
           type: string
           pattern: "^[a-z0-9][a-z0-9._-]{0,62}[a-z0-9]$"
@@ -1587,11 +1861,21 @@ components:
           maxLength: 100
         email:
           type: string
-          format: email
-          description: Only visible to the user themselves; redacted for other users
+          description: |
+            Only visible to the user themselves; redacted for other users.
+            Empty for machine actors.
         roles:
           type: string
-          description: Space-separated role list (e.g. "system_user")
+          description: Space-separated role list (e.g. "system_user system_admin")
+        actor_type:
+          type: string
+          enum: [user, agent, bot]
+          description: "user for people; agent or bot for machine actors"
+        oauth_client_id:
+          type: string
+          description: |
+            A machine actor's OAuth2 client ID. Omitted for people, and
+            redacted when one user reads another.
         create_at:
           type: integer
           format: int64
@@ -1610,13 +1894,17 @@ components:
         display_name: "Jane Doe"
         email: ""
         roles: "system_user"
+        actor_type: "user"
         create_at: 1700000000000
         update_at: 1700000000000
         delete_at: 0
 
     CreateUserRequest:
       type: object
-      required: [kratos_id, username, display_name, email]
+      description: |
+        A person needs `kratos_id` and `email`; a machine actor needs
+        `oauth_client_id` instead, and an `actor_type` of agent or bot.
+      required: [username, display_name]
       properties:
         kratos_id:
           type: string
@@ -1630,6 +1918,15 @@ components:
         email:
           type: string
           format: email
+        roles:
+          type: string
+          description: Space-separated; defaults to "system_user"
+        actor_type:
+          type: string
+          enum: [user, agent, bot]
+          default: user
+        oauth_client_id:
+          type: string
 
     Team:
       type: object
@@ -1883,7 +2180,7 @@ components:
           description: Arbitrary key-value metadata
         hashtags:
           type: string
-          description: Space-separated hashtags extracted from content
+          description: Reserved; not currently populated
         is_pinned:
           type: boolean
         edit_at:
@@ -1984,10 +2281,8 @@ components:
     ThreadResponse:
       type: object
       description: |
-        A thread with its metadata and posts. `GET /posts/{id}/thread` returns
-        the root and every reply; a user's thread list returns the root alone,
-        which is enough to show what the thread is about without a request per
-        thread.
+        A thread in a user's thread list: its metadata, its root post (alone,
+        enough to show what the thread is about), and the user's read state.
       properties:
         thread:
           $ref: "#/components/schemas/Thread"
@@ -2066,17 +2361,29 @@ components:
 
     SearchRequest:
       type: object
-      required: [terms]
+      description: At least one of `terms` and `tag_ids` is required.
       properties:
         terms:
           type: string
-          description: Search query
+          description: Text to find in post content
+        tag_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Only posts carrying every one of these tags
+        from:
+          type: string
+          description: Only posts by this username (a leading @ is accepted)
         page:
           type: integer
           default: 0
+          minimum: 0
         per_page:
           type: integer
           default: 60
+          minimum: 1
+          maximum: 200
 
     WebSocketEvent:
       type: object
@@ -2100,7 +2407,6 @@ components:
             - post_tags_updated
             - mentioned
             - command_response
-            - status_change
         data:
           type: object
           additionalProperties: true
@@ -2109,6 +2415,9 @@ components:
         seq:
           type: integer
           format: int64
+          description: |
+            Not set by chitd. chit-mcp numbers the events it buffers for
+            agents, and only there is it meaningful.
 
     WebSocketBroadcast:
       type: object

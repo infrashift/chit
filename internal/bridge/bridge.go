@@ -193,7 +193,7 @@ func (b *Bridge) warnOffAllowlist(channelID string) {
 // loop. Posts by humans (and by authors whose type could not be resolved) are
 // always run; posts by other agents or bots are dropped unless ReplyToAgents
 // is on, this agent is named directly, and the thread is under the hop cap.
-func (b *Bridge) shouldRun(ctx context.Context, post *model.Post) (bool, string) {
+func (b *Bridge) shouldRun(ctx context.Context, post *model.Post) (run bool, authorActor string) {
 	actor := b.actorType(ctx, post.UserID)
 	if actor != model.ActorTypeAgent && actor != model.ActorTypeBot {
 		return true, actor
@@ -256,7 +256,7 @@ func mentionsUsernameDirectly(content, username string) bool {
 		return false
 	}
 	for _, m := range mentionRe.FindAllStringSubmatch(content, -1) {
-		if strings.ToLower(m[1]) == want {
+		if strings.EqualFold(m[1], want) {
 			return true
 		}
 	}

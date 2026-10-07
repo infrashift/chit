@@ -58,7 +58,7 @@ func AuthExtract(a *app.App) func(http.Handler) http.Handler {
 			user, err := a.ProvisionUser(r.Context(), kratosID)
 			if err != nil {
 				slog.Error("auth: failed to provision user", "kratos_id", kratosID, "error", err)
-				WriteError(w, model.NewInternalError("AuthExtract", err))
+				WriteAppError(w, "AuthExtract", err)
 				return
 			}
 
@@ -82,6 +82,7 @@ func StructuredLogger(next http.Handler) http.Handler {
 			"status", wrapped.statusCode,
 			"duration_ms", time.Since(start).Milliseconds(),
 			"remote_addr", r.RemoteAddr,
+			"forwarded_for", r.Header.Get("X-Forwarded-For"),
 		)
 	})
 }
@@ -106,40 +107,77 @@ func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return h.Hijack()
 }
 
-// RateLimit applies per-user rate limiting.
+// RateLimit applies per-user rate limiting: requestsPerSecond sustained,
+// with bursts up to burst.
 func RateLimit(requestsPerSecond float64, burst int) func(http.Handler) http.Handler {
-	var (
-		limiters = &sync.Map{}
-	)
-
-	// Periodic cleanup of stale limiters
-	go func() {
-		for {
-			time.Sleep(10 * time.Minute)
-			limiters.Range(func(key, _ any) bool {
-				limiters.Delete(key)
-				return true
-			})
-		}
-	}()
+	limiters := newUserLimiters(rate.Limit(requestsPerSecond), burst, time.Now)
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			user := ContextGetUser(r)
 			key := r.RemoteAddr
-			if user != nil {
+			if user := ContextGetUser(r); user != nil {
 				key = user.ID
 			}
-
-			limiterVal, _ := limiters.LoadOrStore(key, rate.NewLimiter(rate.Limit(requestsPerSecond), burst))
-			limiter := limiterVal.(*rate.Limiter)
-
-			if !limiter.Allow() {
+			if !limiters.allow(key) {
 				WriteError(w, model.NewAppError("RateLimit", "rate limit exceeded", "", http.StatusTooManyRequests))
 				return
 			}
-
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// userLimiters holds one token bucket per caller.
+//
+// Idle buckets are evicted as requests arrive, not by a background goroutine.
+// The old janitor was started once per RateLimit call and never stopped, and
+// it wiped every bucket every ten minutes, which refilled the burst of
+// whoever was busy at that moment. A bucket idle for idleAfter has refilled
+// completely, so evicting it changes nothing.
+type userLimiters struct {
+	mu        sync.Mutex
+	limit     rate.Limit
+	burst     int
+	idleAfter time.Duration
+	now       func() time.Time
+	lastSweep time.Time
+	entries   map[string]*limiterEntry
+}
+
+type limiterEntry struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
+}
+
+func newUserLimiters(limit rate.Limit, burst int, now func() time.Time) *userLimiters {
+	// Time for an empty bucket to refill, with margin; at least a minute.
+	idle := time.Minute
+	if limit > 0 {
+		idle = max(idle, 2*time.Duration(float64(burst)/float64(limit)*float64(time.Second)))
+	}
+	return &userLimiters{
+		limit: limit, burst: burst, idleAfter: idle, now: now,
+		lastSweep: now(), entries: map[string]*limiterEntry{},
+	}
+}
+
+func (u *userLimiters) allow(key string) bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	now := u.now()
+	if now.Sub(u.lastSweep) > u.idleAfter {
+		for k, e := range u.entries {
+			if now.Sub(e.lastSeen) > u.idleAfter {
+				delete(u.entries, k)
+			}
+		}
+		u.lastSweep = now
+	}
+	e, ok := u.entries[key]
+	if !ok {
+		e = &limiterEntry{limiter: rate.NewLimiter(u.limit, u.burst)}
+		u.entries[key] = e
+	}
+	e.lastSeen = now
+	return e.limiter.AllowN(now, 1)
 }

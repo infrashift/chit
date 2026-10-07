@@ -52,6 +52,15 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 
 	s.initApp()
+
+	// After initApp, because it needs the App and its store; before initHTTP,
+	// because a request that arrives first would be refused as an unknown
+	// client and the caller would see a 401 that later becomes a 200 for no
+	// reason it can observe.
+	if err := s.ensureMachineActors(); err != nil {
+		return nil, fmt.Errorf("ensure machine actors: %w", err)
+	}
+
 	s.initCommands()
 	s.initJobs()
 	s.initHTTP()
@@ -103,13 +112,21 @@ type hubMembershipAdapter struct {
 	store *sqlstore.SqlStore
 }
 
+// membershipLoadTimeout bounds a hub membership load. The loads are not tied
+// to a request, and without a deadline a hung query left the user marked as
+// loading forever, so their load was never retried.
+const membershipLoadTimeout = 10 * time.Second
+
 func (a hubMembershipAdapter) GetChannelIDsForUser(userID string) ([]string, error) {
-	// Hub membership loads are server-internal work, not tied to a request.
-	return a.store.Channel().GetChannelIDsForUser(context.Background(), userID)
+	ctx, cancel := context.WithTimeout(context.Background(), membershipLoadTimeout)
+	defer cancel()
+	return a.store.Channel().GetChannelIDsForUser(ctx, userID)
 }
 
 func (a hubMembershipAdapter) GetTeamIDsForUser(userID string) ([]string, error) {
-	teams, err := a.store.Team().GetTeamsForUser(context.Background(), userID)
+	ctx, cancel := context.WithTimeout(context.Background(), membershipLoadTimeout)
+	defer cancel()
+	teams, err := a.store.Team().GetTeamsForUser(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +145,7 @@ func (s *Server) initPubSub() error {
 			return err
 		}
 		s.pubsub = ps
-	default:
+	default: // "pgnotify"; config validation refuses anything else
 		ps, err := pubsub.NewPGNotify(s.store.Pool())
 		if err != nil {
 			return err
@@ -186,8 +203,8 @@ func (s *Server) initCommands() {
 	}
 	s.app.AuditLogger = al
 
-	// Webhook channel.
-	if s.config.WebhookEnabled && s.config.WebhookURL != "" {
+	// Webhook channel. Config validation requires a URL when enabled.
+	if s.config.WebhookEnabled {
 		ch := make(chan *command.WebhookEvent, s.config.WebhookQueueSize)
 		s.webhookCh = ch
 		s.app.WebhookCh = ch
@@ -201,12 +218,16 @@ func (s *Server) initCommands() {
 
 func (s *Server) initJobs() {
 	s.scheduler = jobs.NewScheduler()
-	indexer := workers.NewSearchIndexer(
-		s.config.ZincSearchURL,
-		s.config.ZincSearchUser,
-		s.config.ZincSearchPassword,
-	).WithPostStore(s.store.Post())
-	s.scheduler.AddWorker(indexer)
+	// Without ZincSearch there is nothing to index into, and an indexer
+	// left running would fail and log every five seconds.
+	if s.config.ZincSearchURL != "" {
+		indexer := workers.NewSearchIndexer(
+			s.config.ZincSearchURL,
+			s.config.ZincSearchUser,
+			s.config.ZincSearchPassword,
+		).WithPostStore(s.store.Post())
+		s.scheduler.AddWorker(indexer)
+	}
 
 	if s.webhookCh != nil {
 		dispatcher := workers.NewWebhookDispatcher(
@@ -231,7 +252,27 @@ func (s *Server) initHTTP() {
 	}
 }
 
-// Start begins serving and blocks until a shutdown signal is received.
+// ensureMachineActors reconciles the declared non-human callers at boot.
+//
+// FATAL ON FAILURE, deliberately. These rows are the difference between a
+// machine actor being authorized and being a 401, and a server that starts
+// without them looks entirely healthy while refusing every client_credentials
+// token — which is a much longer debugging session than a refusal to start.
+func (s *Server) ensureMachineActors() error {
+	actors, err := app.ParseMachineActors(s.config.MachineActors)
+	if err != nil {
+		return err
+	}
+	if len(actors) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return s.app.EnsureMachineActors(ctx, actors)
+}
+
+// Start begins serving and blocks until a shutdown signal is received or the
+// listener fails. Either way it shuts down every component before returning.
 func (s *Server) Start() error {
 	s.scheduler.Start()
 
@@ -249,6 +290,9 @@ func (s *Server) Start() error {
 
 	select {
 	case err := <-errCh:
+		// The listener failed (a port in use, say). The scheduler, hub,
+		// pubsub and store are already running and must still be stopped.
+		_ = s.Shutdown()
 		return fmt.Errorf("server error: %w", err)
 	case sig := <-quit:
 		slog.Info("shutdown signal received", "signal", sig)
@@ -270,6 +314,7 @@ func (s *Server) Shutdown() error {
 
 	s.hub.Stop()
 	s.scheduler.Stop()
+	s.app.WaitBackground()
 
 	if s.pubsub != nil {
 		if err := s.pubsub.Close(); err != nil {

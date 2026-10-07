@@ -5,71 +5,96 @@ description: Per-user hub design, client lifecycle, and event types.
 
 Chit uses WebSocket connections for real-time event delivery. The design
 centers on a per-user hub with a single event loop goroutine for thread-safe
-broadcast.
+broadcast. The wire format is described in
+[WebSocket Protocol](/chit/api-reference/websocket-protocol/).
 
 ## Hub Design
 
-The WebSocket hub maintains a map of connected users to their client
-connections. A single goroutine processes all hub operations (register,
-unregister, broadcast) to avoid lock contention.
+The WebSocket hub (`internal/websocket`) maintains a map of connected users to
+their client connections, plus each connected user's channel and team
+memberships. A single goroutine processes all hub operations (register,
+unregister, broadcast, membership changes) so no locks are needed.
 
 ```
-                    ┌──────────────────────────┐
-                    │          Hub             │
-                    │                          │
-  register ──────►  │  map[userID]*Client      │
-  unregister ────►  │                          │
-  broadcast ─────►  │  Single event loop       │
-                    │  goroutine               │
-                    └──────────────────────────┘
+                    ┌──────────────────────────────┐
+                    │             Hub              │
+  register ──────►  │  map[userID][]*Client        │
+  unregister ────►  │  map[userID]memberships      │
+  broadcast ─────►  │  (256-slot queue)            │
+  membership ────►  │  Single event loop goroutine │
+                    └──────────────────────────────┘
                               │
               ┌───────────────┼───────────────┐
               ▼               ▼               ▼
          ┌─────────┐    ┌─────────┐    ┌─────────┐
          │ Client  │    │ Client  │    │ Client  │
-         │ User A  │    │ User B  │    │ User C  │
+         │ User A  │    │ User A  │    │ User B  │
          └─────────┘    └─────────┘    └─────────┘
 ```
 
+A user may hold several connections; each receives every event addressed to
+that user.
+
+Broadcasts are queued on a 256-slot channel. Once the hub has stopped (during
+shutdown), broadcasts, registrations and membership notifications return
+immediately instead of blocking the request that produced them; a connection
+registered after stop is closed at once.
+
 ## Client Lifecycle
 
-Each WebSocket connection spawns two goroutines:
+Each WebSocket connection runs two goroutines:
 
 | Goroutine | Responsibility |
 |---|---|
-| **Read pump** | Reads incoming messages from the client, dispatches actions |
-| **Write pump** | Writes outgoing events to the client, sends ping frames |
+| **Read pump** | Reads client messages (at most 4096 bytes each), handles `typing`, extends the read deadline on each pong |
+| **Write pump** | Writes queued events with a per-write deadline, sends ping frames |
 
 Connection lifecycle:
 
-1. Client connects to `/api/v1/websocket`
-2. Hub registers the client
-3. Read and write pump goroutines start
-4. Client receives events matching their subscriptions
-5. On disconnect, hub unregisters the client and goroutines exit
+1. Client connects to `/api/v1/websocket` and is authenticated like any API
+   request.
+2. Hub registers the client. Registration happens **before** the pumps
+   start, so a peer that hangs up immediately cannot be unregistered before it
+   was registered.
+3. On the user's first connection, the hub loads their channel and team IDs
+   in the background (10-second timeout). Channel- and team-targeted events
+   are held back from that user until the load completes; membership changes
+   that arrive meanwhile are queued and replayed on top of the load.
+4. The client receives events addressed to it, its channels or its teams.
+5. On disconnect, the hub unregisters the client. When a user's last
+   connection goes, their membership cache is dropped.
+
+### Slow consumers
+
+Each client has a 256-event send buffer. A client whose buffer is full when an
+event is broadcast is disconnected: the hub collects such clients during the
+broadcast and closes them after it, so the remaining connections still receive
+the event.
 
 ## Event Types
 
-The server emits 16 event types to connected clients:
+The server emits 15 event types:
 
 | Event | Description |
 |---|---|
-| `posted` | A new post was created in a channel |
-| `post_edited` | A post's content was updated |
+| `posted` | A post or reply was created |
+| `post_edited` | A post was edited |
 | `post_deleted` | A post was deleted |
-| `post_pinned` | A post was pinned to a channel |
-| `post_unpinned` | A post was unpinned from a channel |
-| `typing` | A user is typing in a channel |
-| `channel_created` | A new channel was created |
-| `channel_updated` | A channel's metadata was updated |
-| `channel_deleted` | A channel was deleted |
+| `post_pinned` | A post was pinned |
+| `post_unpinned` | A post was unpinned |
+| `typing` | A channel member is typing |
+| `channel_created` | A channel, DM or group channel was created |
+| `channel_updated` | A channel's display name, header or purpose changed |
+| `channel_deleted` | A channel was deleted (directly, or with its team) |
 | `user_added` | A user was added to a channel |
-| `user_removed` | A user was removed from a channel |
-| `thread_updated` | A thread's counters changed |
+| `user_removed` | A user left or was removed from a channel |
+| `thread_updated` | A thread's counters changed (reply added or deleted) |
 | `post_tags_updated` | A post's tags changed |
-| `status_change` | A user's online status changed |
 | `mentioned` | The connected user was @mentioned |
-| `command_response` | A slash command's reply, for the user who ran it |
+| `command_response` | Ephemeral reply to the connected user's slash command |
+
+Each event's payload is listed in the
+[protocol reference](/chit/api-reference/websocket-protocol/#server--client-event-types).
 
 ## Broadcast Targeting
 
@@ -77,44 +102,43 @@ Each event includes a `broadcast` object that controls delivery scope:
 
 ```json
 {
-  "event": "posted",
-  "data": { "post": { ... } },
-  "broadcast": {
-    "channel_id": "01912345-...",
-    "team_id": "",
-    "user_id": ""
-  },
-  "seq": 42
+  "event": "post_pinned",
+  "data": { "post_id": "01912345-...", "channel_id": "01912345-..." },
+  "broadcast": { "channel_id": "01912345-..." },
+  "seq": 0
 }
 ```
 
-| Field | Behavior |
+The hub applies the first rule that matches:
+
+| Field set | Delivered to |
 |---|---|
-| `channel_id` | Deliver to all members of the specified channel |
-| `team_id` | Deliver to all members of the specified team |
-| `user_id` | Deliver only to the specified user |
+| `user_id` | Only that user (other fields are ignored) |
+| `channel_id` | Connected members of the channel |
+| `team_id` | Connected members of the team |
+| none | Every connected client |
 
-Fields can be combined. If all fields are empty, the event is broadcast to all
-connected clients.
+An event with no `broadcast` object is dropped. Membership is enforced
+server-side from the hub's cache, so non-members never receive a channel's
+events. `seq` is always `0`: chitd does not number events.
 
-Channel-targeted events are enforced server-side: the hub maintains a channel
-membership cache and delivers `channel_id`-scoped events **only to connected
-clients who are members of that channel**. Non-members never receive the
-event.
+Client-originated events (`typing`) go through `BroadcastFromUser`, which
+drops them unless the sender is a member of the target channel.
 
 ## Single-Node Limitation
 
-WebSocket broadcast is currently **in-process only**: events reach clients
-connected to the same chitd instance. Multi-node WebSocket fan-out (chitd
-consuming the pub/sub event topic to relay events across nodes) is not yet
-implemented. The pub/sub layer publishes thin event envelopes intended for
-that future fan-out — see [Pub/Sub](/chit/architecture/pubsub/). Headless
-agent processes (`chit-mcp`, `chit-claude`) consume events as ordinary
+WebSocket broadcast is **in-process only**: events reach clients connected to
+the same chitd instance. Multi-node fan-out (chitd consuming the pub/sub event
+topic to relay events across nodes) is not implemented. chitd does publish a
+thin envelope for most events on the pub/sub `chit_events` topic, but nothing
+subscribes to it; see [Pub/Sub](/chit/architecture/pubsub/). Headless agent
+processes (`chit-mcp`, `chit-claude`) and `chit-tui` receive events as ordinary
 WebSocket clients of this endpoint.
 
 ## Configuration
 
 | Variable | Default | Description |
 |---|---|---|
-| `CHIT_WS_PING_INTERVAL` | `30s` | Interval between ping frames |
-| `CHIT_WS_WRITE_TIMEOUT` | `10s` | Write deadline for outgoing messages |
+| `CHIT_WS_PING_INTERVAL` | `30s` | Interval between ping frames; the read deadline is twice this. Must be positive. |
+| `CHIT_WS_WRITE_TIMEOUT` | `10s` | Write deadline for outgoing messages. Must be positive. |
+| `CHIT_ALLOWED_ORIGINS` | `*` | Allowed browser origins, shared with CORS. Empty allows none. |

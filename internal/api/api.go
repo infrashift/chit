@@ -3,6 +3,7 @@ package api
 import (
 	"log/slog"
 	"net/http"
+	"slices"
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
@@ -17,36 +18,39 @@ func New(a *app.App) http.Handler {
 	r := chi.NewRouter()
 
 	// Global middleware
-	r.Use(chimiddleware.RealIP)
+	// No RealIP: chitd only ever sees Oathkeeper, and RealIP would let any
+	// caller rewrite RemoteAddr with a forged X-Forwarded-For. The logger
+	// records the header separately, as the unverified value it is.
 	r.Use(chimiddleware.RequestID)
 	r.Use(StructuredLogger)
 	r.Use(chimiddleware.Recoverer)
 
+	// The same allowlist governs CORS and WebSocket origins. An empty list
+	// allows no browser origin: no CORS handler is installed, as the
+	// WebSocket check refuses every Origin. It used to mean "*" for CORS
+	// only, since go-chi/cors treats an empty list as allow-all.
 	allowedOrigins := a.Config.AllowedOrigins
-	if len(allowedOrigins) == 0 {
-		allowedOrigins = []string{"*"}
+	if slices.Contains(allowedOrigins, "*") {
+		slog.Warn("CORS and WebSocket origins are open to all sites; set CHIT_ALLOWED_ORIGINS in production")
 	}
-	for _, origin := range allowedOrigins {
-		if origin == "*" {
-			slog.Warn("CORS is configured to allow all origins; set CHIT_ALLOWED_ORIGINS in production")
-		}
+	if len(allowedOrigins) > 0 {
+		// Note: the trusted proxy header (X-User-Id) is intentionally NOT an
+		// allowed CORS header — only the auth proxy may set it, server-side.
+		r.Use(cors.Handler(cors.Options{
+			AllowedOrigins:   allowedOrigins,
+			AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+			AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
+			ExposedHeaders:   []string{"Link"},
+			AllowCredentials: false,
+			MaxAge:           300,
+		}))
 	}
-	// Note: the trusted proxy header (X-User-Id) is intentionally NOT an
-	// allowed CORS header — only the auth proxy may set it, server-side.
-	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   allowedOrigins,
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
-		ExposedHeaders:   []string{"Link"},
-		AllowCredentials: false,
-		MaxAge:           300,
-	}))
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// Public endpoints (no auth required)
 		r.Group(func(r chi.Router) {
 			r.Get("/system/ping", systemPing)
-			r.Get("/system/config/client", systemClientConfig(a))
+			r.Get("/system/config/client", systemClientConfig())
 
 			// OpenAPI spec + Swagger UI
 			MountDocs(r, chitapi.OpenAPISpec)
@@ -69,7 +73,7 @@ func New(a *app.App) http.Handler {
 
 			// Users
 			r.Post("/users", createUser(a))
-			r.Get("/users/me", getMe(a))
+			r.Get("/users/me", getMe())
 			r.Put("/users/me", updateMe(a))
 			r.Get("/users/{id}", getUser(a))
 			r.Get("/users/username/{username}", getUserByUsername(a))
@@ -118,6 +122,12 @@ func New(a *app.App) http.Handler {
 			r.Get("/users/me/teams/{id}/threads", getMyThreads(a))
 			r.Put("/users/me/teams/{team_id}/threads/{id}/read", markThreadAsRead(a))
 			r.Put("/users/me/teams/{team_id}/threads/{id}/following", updateThreadFollowing(a))
+			// Threads in direct and group channels belong to no team. The
+			// read and follow routes ignore team_id, so they also exist
+			// without it, rather than make a client invent one for a DM.
+			r.Get("/users/me/threads/direct", getMyDirectThreads(a))
+			r.Put("/users/me/threads/{id}/read", markThreadAsRead(a))
+			r.Put("/users/me/threads/{id}/following", updateThreadFollowing(a))
 
 			// Tags
 			r.Post("/tags", createTag(a))
@@ -134,9 +144,9 @@ func New(a *app.App) http.Handler {
 			r.Get("/commands", listCommands(a))
 
 			// Search
-			r.Post("/posts/search", searchPostsGlobal(a))
-			r.Post("/teams/{id}/posts/search", searchPostsInTeam(a))
-			r.Post("/channels/{id}/posts/search", searchPostsInChannel(a))
+			r.Post("/posts/search", searchPosts(a, searchEverywhere))
+			r.Post("/teams/{id}/posts/search", searchPosts(a, searchTeam))
+			r.Post("/channels/{id}/posts/search", searchPosts(a, searchChannel))
 
 			// WebSocket
 			r.Get("/websocket", handleWebSocket(a))

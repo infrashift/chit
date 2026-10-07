@@ -11,6 +11,13 @@ import (
 
 // CreatePost creates a new post and handles threading, channel stats, mentions, and WebSocket broadcast.
 func (a *App) CreatePost(ctx context.Context, post *model.Post) (*model.Post, error) {
+	// Membership comes first, before slash commands are intercepted: a command
+	// runs in the context of the channel it was typed in, and `/topic` with no
+	// argument reads the channel header back to whoever asked.
+	if err := a.requireChannelMember(ctx, post.ChannelID, post.UserID); err != nil {
+		return nil, err
+	}
+
 	// Intercept slash commands — they are NOT persisted.
 	if a.CommandRegistry != nil {
 		resp, handled, err := a.InterceptSlashCommand(ctx, post.UserID, post.ChannelID, post.Content)
@@ -30,8 +37,12 @@ func (a *App) CreatePost(ctx context.Context, post *model.Post) (*model.Post, er
 		}
 	}
 
-	if err := a.requireChannelMember(ctx, post.ChannelID, post.UserID); err != nil {
-		return nil, err
+	var root *model.Post
+	if post.RootID != "" {
+		var err error
+		if root, err = a.requireReplyableRoot(ctx, post); err != nil {
+			return nil, err
+		}
 	}
 
 	// Process mentions
@@ -55,7 +66,7 @@ func (a *App) CreatePost(ctx context.Context, post *model.Post) (*model.Post, er
 
 	// Handle threading
 	if saved.RootID != "" {
-		if err := a.handleThreadReply(ctx, saved); err != nil {
+		if err := a.handleThreadReply(ctx, saved, root); err != nil {
 			// Don't fail the post creation, but the thread metadata is now stale.
 			slog.Error("failed to update thread for reply", "post_id", saved.ID, "root_id", saved.RootID, "error", err)
 		}
@@ -69,6 +80,28 @@ func (a *App) CreatePost(ctx context.Context, post *model.Post) (*model.Post, er
 	}
 
 	return saved, nil
+}
+
+// requireReplyableRoot returns a 400 unless post.RootID names a live root post
+// in post's own channel. Membership was only ever checked on the reply's
+// channel, so a reply could name a root in a channel the author could not
+// read: the thread row was then created under the author's channel and the
+// author auto-followed it, which put the private root into their thread inbox.
+func (a *App) requireReplyableRoot(ctx context.Context, post *model.Post) (*model.Post, error) {
+	root, err := a.Store.Post().Get(ctx, post.RootID)
+	if err != nil {
+		if isNotFound(err) {
+			return nil, model.NewBadRequestError("App.CreatePost", "root_id does not name a post")
+		}
+		return nil, err
+	}
+	if root.ChannelID != post.ChannelID {
+		return nil, model.NewBadRequestError("App.CreatePost", "a reply must be in its root post's channel")
+	}
+	if root.RootID != "" {
+		return nil, model.NewBadRequestError("App.CreatePost", "root_id names a reply; reply to its root instead")
+	}
+	return root, nil
 }
 
 // GetPost retrieves a post by ID, requiring the caller to be a member of its channel.
@@ -85,27 +118,49 @@ func (a *App) GetPost(ctx context.Context, id, userID string) (*model.Post, erro
 	return post, nil
 }
 
-// UpdatePost updates a post's content on behalf of actorID, who must be the
-// author or a system admin. Re-parses mentions for Props but does not
-// re-increment counters.
-func (a *App) UpdatePost(ctx context.Context, post *model.Post, actorID string) (*model.Post, error) {
-	// Fetch original post to carry forward immutable fields (ChannelID, UserID)
-	// needed for mention resolution when the update payload omits them.
-	existing, err := a.Store.Post().Get(ctx, post.ID)
+// PostPatch is an edit to a post. A nil Content leaves the text unchanged.
+// Props are merged key by key into the existing props, and a null value
+// removes its key; props the edit does not mention are kept. The server-owned
+// "mentions" prop is always recomputed from the content.
+type PostPatch struct {
+	Content *string
+	Props   map[string]any
+}
+
+// UpdatePost edits a post on behalf of actorID, who must be the author or a
+// system admin. Re-parses mentions for Props but does not re-increment
+// counters. It returns, and broadcasts, the whole post: the edit used to be
+// echoed back with only the fields the client sent, so post_edited carried
+// create_at 0 and an empty root_id, and clients moved the post out of its
+// thread.
+func (a *App) UpdatePost(ctx context.Context, id string, patch PostPatch, actorID string) (*model.Post, error) {
+	post, err := a.Store.Post().Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if authErr := a.requirePostOwner(ctx, existing, actorID); authErr != nil {
+	if authErr := a.requirePostOwner(ctx, post, actorID); authErr != nil {
 		return nil, authErr
 	}
-	post.ChannelID = existing.ChannelID
-	post.UserID = existing.UserID
 
-	// Re-parse mentions on plaintext for correct client rendering
-	mentionedUserIDs, _ := a.processMentions(ctx, post)
+	if patch.Content != nil {
+		post.Content = *patch.Content
+	}
 	if post.Props == nil {
 		post.Props = make(map[string]any)
 	}
+	for k, v := range patch.Props {
+		if v == nil {
+			delete(post.Props, k)
+		} else {
+			post.Props[k] = v
+		}
+	}
+	if err := post.IsValid(); err != nil {
+		return nil, err
+	}
+
+	// Re-parse mentions on plaintext for correct client rendering
+	mentionedUserIDs, _ := a.processMentions(ctx, post)
 	if len(mentionedUserIDs) > 0 {
 		post.Props["mentions"] = mentionedUserIDs
 	} else {
@@ -135,6 +190,13 @@ func (a *App) DeletePost(ctx context.Context, id, actorID string) error {
 	if err := a.Store.Post().Delete(ctx, id, model.GetMillis()); err != nil {
 		return err
 	}
+	if post.RootID != "" {
+		if err := a.Store.Thread().DecrementReplyCount(ctx, post.RootID); err != nil {
+			slog.Error("failed to update thread after reply deletion", "post_id", id, "root_id", post.RootID, "error", err)
+		} else {
+			a.broadcastThreadUpdated(ctx, post.RootID)
+		}
+	}
 
 	a.publishEvent(ctx, &model.WebSocketEvent{
 		Event: model.WebSocketEventPostDeleted,
@@ -142,7 +204,7 @@ func (a *App) DeletePost(ctx context.Context, id, actorID string) error {
 		Broadcast: &model.WebSocketBroadcast{
 			ChannelID: post.ChannelID,
 		},
-	}, pubsub.EventEnvelope{Event: model.WebSocketEventPostDeleted, PostID: id, ChannelID: post.ChannelID})
+	}, &pubsub.EventEnvelope{Event: model.WebSocketEventPostDeleted, PostID: id, ChannelID: post.ChannelID})
 
 	return nil
 }
@@ -154,7 +216,6 @@ func (a *App) GetPostsForChannel(ctx context.Context, channelID, userID string, 
 		return nil, err
 	}
 
-	opts.ChannelID = channelID
 	list, err := a.Store.Post().GetPostsForChannel(ctx, channelID, opts)
 	if err != nil {
 		return nil, err
@@ -192,7 +253,7 @@ func (a *App) setPostPinned(ctx context.Context, id, userID string, pinned bool,
 		Broadcast: &model.WebSocketBroadcast{
 			ChannelID: post.ChannelID,
 		},
-	}, pubsub.EventEnvelope{Event: event, PostID: id, ChannelID: post.ChannelID})
+	}, &pubsub.EventEnvelope{Event: event, PostID: id, ChannelID: post.ChannelID})
 
 	return nil
 }
@@ -211,34 +272,47 @@ func (a *App) GetPinnedPosts(ctx context.Context, channelID, userID string) (*mo
 	return list, nil
 }
 
-func (a *App) handleThreadReply(ctx context.Context, post *model.Post) error {
-	// Ensure thread record exists, then increment atomically
+// handleThreadReply updates root's thread for the reply post: it creates the
+// thread row if needed, advances its counters, and keeps the participants'
+// memberships current.
+func (a *App) handleThreadReply(ctx context.Context, post, root *model.Post) error {
 	thread := &model.Thread{
-		PostID:       post.RootID,
-		ChannelID:    post.ChannelID,
-		ReplyCount:   0,
-		LastReplyAt:  0,
+		PostID:       root.ID,
+		ChannelID:    root.ChannelID,
 		Participants: []string{},
 	}
 	if err := a.Store.Thread().SaveOrUpdate(ctx, thread); err != nil {
 		return err
 	}
-
-	if err := a.Store.Thread().IncrementReplyCount(ctx, post.RootID, post.CreateAt, post.UserID); err != nil {
+	if err := a.Store.Thread().IncrementReplyCount(ctx, root.ID, post.CreateAt, post.UserID); err != nil {
 		return err
 	}
 
-	// Auto-follow the thread
-	membership := &model.ThreadMembership{
-		PostID:    post.RootID,
-		UserID:    post.UserID,
-		Following: true,
-	}
-	if err := a.Store.Thread().SaveMembership(ctx, membership); err != nil {
+	// Replying follows the thread, and the replier has read it up to their
+	// own reply. The upsert never moves last_viewed_at backwards: it used to
+	// reset it to 0 on every reply, leaving the thread permanently unread for
+	// whoever was most active in it.
+	if err := a.Store.Thread().SaveMembership(ctx, &model.ThreadMembership{
+		PostID: root.ID, UserID: post.UserID, Following: true, LastViewedAt: post.CreateAt,
+	}); err != nil {
 		return err
 	}
 
-	a.broadcastThreadUpdated(ctx, post.RootID)
+	// The root's author follows their thread from its first reply, unless
+	// they already have a membership (and so may have unfollowed on purpose).
+	// Without one they never saw their own thread in the inbox, and thread
+	// mention counts had nowhere to land.
+	if root.UserID != post.UserID {
+		if _, err := a.Store.Thread().GetMembership(ctx, root.ID, root.UserID); isNotFound(err) {
+			if err := a.Store.Thread().SaveMembership(ctx, &model.ThreadMembership{
+				PostID: root.ID, UserID: root.UserID, Following: true, LastViewedAt: root.CreateAt,
+			}); err != nil {
+				return err
+			}
+		}
+	}
+
+	a.broadcastThreadUpdated(ctx, root.ID)
 	return nil
 }
 
@@ -276,5 +350,5 @@ func (a *App) broadcastPostEvent(ctx context.Context, event string, post *model.
 		Broadcast: &model.WebSocketBroadcast{
 			ChannelID: post.ChannelID,
 		},
-	}, pubsub.EventEnvelope{Event: event, PostID: post.ID, ChannelID: post.ChannelID})
+	}, &pubsub.EventEnvelope{Event: event, PostID: post.ID, ChannelID: post.ChannelID})
 }

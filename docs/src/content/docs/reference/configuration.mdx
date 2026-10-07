@@ -4,47 +4,174 @@ description: Complete list of all environment variables with types and defaults.
 ---
 
 All configuration is loaded from environment variables using
-[koanf](https://github.com/knadh/koanf) with the `CHIT_` prefix.
+[koanf](https://github.com/knadh/koanf) with the `CHIT_` prefix. chitd reads
+only its environment; `make run` sources `.env` into it first when that file
+exists.
 
-## Environment Variables
+## chitd
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
 | `CHIT_LISTEN_ADDRESS` | string | `:8065` | Address and port for the HTTP server |
-| `CHIT_ALLOWED_ORIGINS` | string | `*` | Comma-separated CORS/WebSocket origin allowlist; `*` allows any origin (dev only, logs a warning) |
-| `CHIT_LOG_LEVEL` | string | `info` | Log level: `debug`, `info`, `warn`, `error` |
-| `CHIT_LOG_FORMAT` | string | `json` | Log output format: `json` or `text` |
-| `CHIT_DATABASE_URL` | string | `postgres://chit:chit@localhost:5432/chit?sslmode=disable` | PostgreSQL connection string |
-| `CHIT_DB_MAX_OPEN_CONN` | int | `25` | Maximum number of open database connections |
-| `CHIT_DB_MAX_IDLE_CONN` | int | `10` | Maximum number of idle database connections |
-| `CHIT_PUBSUB_BACKEND` | string | `pgnotify` | Pub/sub backend: `pgnotify` or `nats` |
-| `CHIT_NATS_URL` | string | `nats://localhost:4222` | NATS server URL (when using NATS backend) |
-| `CHIT_TRUSTED_PROXY_HEADER` | string | `X-User-Id` | HTTP header containing the authenticated user's Kratos identity ID |
-| `CHIT_TRUSTED_PROXY_SECRET` | string | _(empty)_ | When set, requests must carry a matching `X-Proxy-Secret` header (injected by Oathkeeper's header mutator) before `X-User-Id` is trusted; recommended in production |
+| `CHIT_ALLOWED_ORIGINS` | string | `*` | Comma-separated origin allowlist for both CORS and WebSocket upgrades. `*` allows any origin and logs a warning at startup. An empty value allows no browser origin: no CORS handler is installed and every WebSocket request carrying an `Origin` header is refused. Requests with no `Origin` (non-browser clients) are always accepted. |
+| `CHIT_LOG_LEVEL` | string | `info` | `debug`, `info`, `warn` or `error` |
+| `CHIT_LOG_FORMAT` | string | `json` | `json` or `text` |
+| `CHIT_DATABASE_URL` | string | _(none, required)_ | PostgreSQL connection string. chitd refuses to start without it. |
+| `CHIT_DB_MAX_OPEN_CONN` | int | `25` | Maximum open database connections |
+| `CHIT_DB_MAX_IDLE_CONN` | int | `10` | Maximum idle database connections |
+| `CHIT_PUBSUB_BACKEND` | string | `pgnotify` | `pgnotify` or `nats` |
+| `CHIT_NATS_URL` | string | `nats://localhost:4222` | NATS server URL, used when the backend is `nats` |
+| `CHIT_TRUSTED_PROXY_HEADER` | string | `X-User-Id` | Header carrying a person's Kratos identity ID, set by Oathkeeper |
+| `CHIT_TRUSTED_CLIENT_HEADER` | string | `X-Client-Id` | Header carrying a machine actor's OAuth2 `client_id`, set by Oathkeeper after introspecting a Hydra token. Checked before `CHIT_TRUSTED_PROXY_HEADER`. The client must be bound to a user (see `CHIT_MACHINE_ACTORS`); an unknown client gets 401 and is never auto-created. |
+| `CHIT_TRUSTED_PROXY_SECRET` | string | _(empty)_ | When set, every authenticated request must carry a matching `X-Proxy-Secret` header before either identity header is trusted; recommended in production |
+| `CHIT_MACHINE_ACTORS` | JSON | _(empty)_ | Machine actors (agents and bots) to create or update at boot. See [Machine actors](#machine-actors). |
 | `CHIT_KRATOS_ADMIN_URL` | string | `http://localhost:4434` | Ory Kratos admin API base URL |
 | `CHIT_KETO_READ_URL` | string | `http://localhost:4466` | Ory Keto read API base URL |
 | `CHIT_KETO_WRITE_URL` | string | `http://localhost:4467` | Ory Keto write API base URL |
-| `CHIT_ZINCSEARCH_URL` | string | `http://localhost:4080` | ZincSearch server URL |
-| `CHIT_ZINCSEARCH_USER` | string | `admin` | ZincSearch authentication username |
-| `CHIT_ZINCSEARCH_PASSWORD` | string | `admin` | ZincSearch authentication password |
+| `CHIT_ZINCSEARCH_URL` | string | _(empty)_ | ZincSearch server URL. Empty disables ZincSearch: search runs as SQL and no indexer runs. When set, a background indexer syncs posts every 5 seconds and term searches go to ZincSearch, falling back to SQL if it errors. |
+| `CHIT_ZINCSEARCH_USER` | string | `admin` | ZincSearch username |
+| `CHIT_ZINCSEARCH_PASSWORD` | string | _(empty)_ | ZincSearch password |
 | `CHIT_WS_PING_INTERVAL` | duration | `30s` | Interval between WebSocket ping frames |
 | `CHIT_WS_WRITE_TIMEOUT` | duration | `10s` | Write deadline for WebSocket messages |
-| `CHIT_CACHE_SIZE` | int | `20000` | Maximum number of entries in the LRU cache |
+| `CHIT_CACHE_SIZE` | int | `20000` | Maximum entries in the user LRU cache |
 | `CHIT_CACHE_TTL` | duration | `5m` | Time-to-live for cache entries |
-| `CHIT_ENABLE_OPENAPI_VALIDATION` | bool | `true` | Enable request validation against the OpenAPI spec |
-| `CHIT_COMMANDS_CUE_DIR` | string | `auth` | Directory containing the CUE definitions for slash commands, roles, and actors |
-| `CHIT_AUDIT_LOG_PATH` | string | `/var/log/chit/audit.log` | File path for the slash-command audit log |
+| `CHIT_ENABLE_OPENAPI_VALIDATION` | bool | `true` | Validate requests against the OpenAPI spec |
+| `CHIT_COMMANDS_CUE_DIR` | string | `auth` | Directory containing the CUE definitions for slash commands, roles and actors. The container image sets `/etc/chit/auth`. |
+| `CHIT_AUDIT_LOG_PATH` | string | `/var/log/chit/audit.log` | Slash-command audit log file. Empty or `-` logs to stderr; so does a path chitd cannot create or open (with a warning). |
 | `CHIT_WEBHOOK_ENABLED` | bool | `false` | Enable the CloudEvents webhook dispatcher for slash commands |
 | `CHIT_WEBHOOK_URL` | string | _(empty)_ | Destination URL for webhook deliveries |
 | `CHIT_WEBHOOK_SECRET` | string | _(empty)_ | Shared secret used to sign webhook deliveries |
-| `CHIT_WEBHOOK_WORKER_COUNT` | int | `4` | Number of concurrent webhook delivery workers |
-| `CHIT_WEBHOOK_QUEUE_SIZE` | int | `1024` | Size of the in-memory webhook delivery queue |
+| `CHIT_WEBHOOK_WORKER_COUNT` | int | `4` | Concurrent webhook delivery workers |
+| `CHIT_WEBHOOK_QUEUE_SIZE` | int | `1024` | In-memory webhook delivery queue size |
 | `CHIT_WEBHOOK_TIMEOUT_SEC` | int | `10` | Per-delivery HTTP timeout in seconds |
+
+### Validation
+
+chitd checks its configuration before opening any connection and, if anything
+is wrong, exits with every problem listed at once. It refuses to start when:
+
+- `CHIT_DATABASE_URL` is empty;
+- `CHIT_WS_PING_INTERVAL`, `CHIT_WS_WRITE_TIMEOUT`, `CHIT_CACHE_SIZE`,
+  `CHIT_CACHE_TTL` or `CHIT_DB_MAX_OPEN_CONN` is not positive;
+- `CHIT_DB_MAX_IDLE_CONN` is negative or greater than `CHIT_DB_MAX_OPEN_CONN`;
+- `CHIT_PUBSUB_BACKEND` is not `pgnotify` or `nats`, or is `nats` with an
+  empty `CHIT_NATS_URL`;
+- `CHIT_TRUSTED_PROXY_HEADER` is empty;
+- `CHIT_LOG_LEVEL` is not `debug`, `info`, `warn` or `error`, or
+  `CHIT_LOG_FORMAT` is not `json` or `text`;
+- `CHIT_WEBHOOK_ENABLED=true` and `CHIT_WEBHOOK_URL` is empty, or the webhook
+  worker count, queue size or timeout is not positive;
+- `CHIT_MACHINE_ACTORS` is not valid JSON or declares an invalid actor (checked
+  just after the database connects).
+
+### Machine actors
+
+A machine actor is a non-human caller (an agent or a bot) that authenticates
+with an OAuth2 `client_credentials` token from Ory Hydra and has no Kratos
+identity or email. People are provisioned automatically on their first
+request; machines are not, so each one must be declared:
+
+```bash
+CHIT_MACHINE_ACTORS='[
+  {"client_id": "<hydra client id>", "username": "claude-architect",
+   "display_name": "Claude Architect", "roles": "system_user",
+   "actor_type": "agent"}
+]'
+```
+
+| Field | Required | Notes |
+|---|---|---|
+| `client_id` | yes | The Hydra client's `client_id`; stored as `users.oauth_client_id` |
+| `username` | yes | Same rules as any username: lowercase, `^[a-z0-9][a-z0-9._-]{0,62}[a-z0-9]$` |
+| `display_name` | yes | 1 to 100 characters |
+| `actor_type` | yes | `agent` or `bot` |
+| `roles` | no | Space-separated; defaults to `system_user`. `system_admin` is a real grant. |
+
+At every boot, before it accepts requests, chitd creates each declared actor
+that does not exist and updates `username`, `display_name`, `roles` and
+`actor_type` on any that differ from the declaration. Removing an actor from
+the list does not delete its user. An invalid declaration stops chitd from
+starting.
+
+## chit-reconcile
+
+`chit-reconcile` reads the same `CHIT_` variables but uses only three of
+them, and does not need `CHIT_DATABASE_URL`:
+
+| Variable | Default | Description |
+|---|---|---|
+| `CHIT_KETO_READ_URL` | `http://localhost:4466` | Keto read API, to list what is already granted |
+| `CHIT_KETO_WRITE_URL` | `http://localhost:4467` | Keto write API the tuples are written to and revoked from |
+| `CHIT_COMMANDS_CUE_DIR` | `auth` | CUE definitions to load |
+
+It makes the `chit/command` namespace match the CUE exactly: it writes every
+declared grant and role membership, then deletes every other tuple in that
+namespace, so a command taken from a role or a role taken from an actor is
+revoked. Nothing else writes `chit/command`. If the namespace cannot be
+listed, it exits with an error and deletes nothing.
+
+The other checks under [Validation](#validation), apart from the database URL,
+still apply to whatever values are set.
+
+## chit-mcp
+
+`chit-mcp` is an HTTP/WebSocket client of chitd, configured with the
+`CHIT_MCP_` prefix.
+
+| Variable | Default | Description |
+|---|---|---|
+| `CHIT_MCP_SERVER_URL` | `http://localhost:8065` | Oathkeeper (`:4455`) in OAuth2 mode, chitd in Kratos-ID mode |
+| `CHIT_MCP_OAUTH_TOKEN_URL` | _(empty)_ | Hydra token endpoint, e.g. `http://localhost:4444/oauth2/token` |
+| `CHIT_MCP_OAUTH_CLIENT_ID` | _(empty)_ | Hydra client ID. Setting it selects OAuth2 mode. |
+| `CHIT_MCP_OAUTH_CLIENT_SECRET` | _(empty)_ | Hydra client secret |
+| `CHIT_MCP_OAUTH_SCOPES` | `chit:read chit:write` | Space-separated scopes to request |
+| `CHIT_MCP_OAUTH_AUDIENCE` | `chit` | Audience to request; Oathkeeper requires `chit` |
+| `CHIT_MCP_AGENT_KRATOS_ID` | _(empty)_ | Kratos identity ID to act as, sent in `X-User-Id` (development) |
+| `CHIT_MCP_PROXY_SECRET` | _(empty)_ | Sent as `X-Proxy-Secret`; must match chitd's `CHIT_TRUSTED_PROXY_SECRET` |
+
+Exactly one authentication mode is required: `CHIT_MCP_OAUTH_CLIENT_ID`, with
+`CHIT_MCP_OAUTH_CLIENT_SECRET` and `CHIT_MCP_OAUTH_TOKEN_URL`, or
+`CHIT_MCP_AGENT_KRATOS_ID`. Setting both, or neither, stops chit-mcp at
+startup.
+
+## chit-claude
+
+The [headless Claude Code bridge](/chit/deployment/headless-claude/) uses the
+`CHIT_CLAUDE_` prefix.
+
+| Variable | Default | Description |
+|---|---|---|
+| `CHIT_CLAUDE_SERVER_URL` | `http://localhost:8065` | Oathkeeper (`:4455`) in OAuth2 mode, chitd in Kratos-ID mode |
+| `CHIT_CLAUDE_OAUTH_TOKEN_URL` | _(empty)_ | Hydra token endpoint |
+| `CHIT_CLAUDE_OAUTH_CLIENT_ID` | _(empty)_ | Hydra client ID. Setting it selects OAuth2 mode. |
+| `CHIT_CLAUDE_OAUTH_CLIENT_SECRET` | _(empty)_ | Hydra client secret |
+| `CHIT_CLAUDE_OAUTH_SCOPES` | `chit:read chit:write` | Space-separated scopes to request |
+| `CHIT_CLAUDE_OAUTH_AUDIENCE` | `chit` | Audience to request |
+| `CHIT_CLAUDE_AGENT_KRATOS_ID` | _(empty)_ | Kratos identity ID to act as (development) |
+| `CHIT_CLAUDE_PROXY_SECRET` | _(empty)_ | Sent as `X-Proxy-Secret` |
+| `CHIT_CLAUDE_CHANNELS` | _(none, required)_ | Comma-separated channel IDs the bridge serves |
+| `CHIT_CLAUDE_REQUIRE_MENTION` | `false` | Only respond when the agent is @mentioned |
+| `CHIT_CLAUDE_REPLY_TO_AGENTS` | `false` | Answer posts by other agents and bots (when they name this agent) |
+| `CHIT_CLAUDE_MAX_AGENT_HOPS` | `2` | Consecutive agent-to-agent turns before a chain stops |
+| `CHIT_CLAUDE_CLAUDE_BIN` | `claude` | Path to the `claude` CLI |
+| `CHIT_CLAUDE_WORKDIR` | _(none, required)_ | Directory `claude` runs in |
+| `CHIT_CLAUDE_MODEL` | _(empty)_ | Model to run; empty keeps the CLI's default |
+| `CHIT_CLAUDE_PERMISSION_MODE` | `dontAsk` | Passed to `claude --permission-mode` |
+| `CHIT_CLAUDE_ALLOWED_TOOLS` | `Read,Grep,Glob` | Tool allowlist passed to `claude` |
+| `CHIT_CLAUDE_APPEND_SYSTEM_PROMPT` | _(empty)_ | Extra system prompt text |
+| `CHIT_CLAUDE_RUN_TIMEOUT` | `30m` | Per-run timeout |
+| `CHIT_CLAUDE_CONTEXT_WINDOW` | `200000` | Context size assumed for the footer's `context ~N%` estimate |
+
+The authentication rule is the same as chit-mcp's: exactly one of
+`CHIT_CLAUDE_OAUTH_CLIENT_ID` (secret and token URL then required) and
+`CHIT_CLAUDE_AGENT_KRATOS_ID`.
 
 ## Notes
 
-- The pub/sub backend (`CHIT_PUBSUB_BACKEND`) currently serves the MCP agent
-  event feed: chitd publishes thin event envelopes on the `chit_events` topic,
-  which `chit-mcp` buffers for agents to poll. WebSocket fan-out is
-  single-node (in-process); chitd does not yet consume the topic for
-  multi-node delivery.
+- The pub/sub backend (`CHIT_PUBSUB_BACKEND`) carries thin event envelopes on
+  the `chit_events` topic. Nothing subscribes to that topic yet: WebSocket
+  fan-out is single-node and in-process, and `chit-mcp` gets its events from
+  chitd's WebSocket.
+- Limits that are not configurable: each authenticated user may make 10
+  requests a second with bursts of 50 (beyond that, 429), and request bodies
+  over 1 MiB are refused with 413.

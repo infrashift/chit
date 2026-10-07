@@ -2,6 +2,7 @@ package sqlstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -33,16 +34,15 @@ func (s *SqlTeamStore) Save(ctx context.Context, team *model.Team) (*model.Team,
 }
 
 func (s *SqlTeamStore) Get(ctx context.Context, id string) (*model.Team, error) {
-	query := `SELECT id, name, display_name, description, type, creator_id, create_at, update_at, delete_at
+	if !validIDs(id) {
+		return nil, model.NewNotFoundError("SqlTeamStore.Get", id)
+	}
+	query := `SELECT ` + teamColumns + `
 		FROM teams WHERE id = $1 AND delete_at = 0`
 
-	team := &model.Team{}
-	err := s.sqlStore.pool.QueryRow(ctx, query, id).Scan(
-		&team.ID, &team.Name, &team.DisplayName, &team.Description, &team.Type,
-		&team.CreatorID, &team.CreateAt, &team.UpdateAt, &team.DeleteAt,
-	)
+	team, err := scanTeam(s.sqlStore.pool.QueryRow(ctx, query, id))
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, model.NewNotFoundError("SqlTeamStore.Get", id)
 		}
 		return nil, fmt.Errorf("get team: %w", err)
@@ -52,16 +52,12 @@ func (s *SqlTeamStore) Get(ctx context.Context, id string) (*model.Team, error) 
 }
 
 func (s *SqlTeamStore) GetByName(ctx context.Context, name string) (*model.Team, error) {
-	query := `SELECT id, name, display_name, description, type, creator_id, create_at, update_at, delete_at
+	query := `SELECT ` + teamColumns + `
 		FROM teams WHERE name = $1 AND delete_at = 0`
 
-	team := &model.Team{}
-	err := s.sqlStore.pool.QueryRow(ctx, query, name).Scan(
-		&team.ID, &team.Name, &team.DisplayName, &team.Description, &team.Type,
-		&team.CreatorID, &team.CreateAt, &team.UpdateAt, &team.DeleteAt,
-	)
+	team, err := scanTeam(s.sqlStore.pool.QueryRow(ctx, query, name))
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, model.NewNotFoundError("SqlTeamStore.GetByName", name)
 		}
 		return nil, fmt.Errorf("get team by name: %w", err)
@@ -100,11 +96,15 @@ func (s *SqlTeamStore) Delete(ctx context.Context, id string, deleteAt int64) er
 	return nil
 }
 
-func (s *SqlTeamStore) GetAll(ctx context.Context, page, perPage int) ([]*model.Team, error) {
-	query := `SELECT id, name, display_name, description, type, creator_id, create_at, update_at, delete_at
-		FROM teams WHERE delete_at = 0 ORDER BY display_name LIMIT $1 OFFSET $2`
+func (s *SqlTeamStore) GetAll(ctx context.Context, visibleTo string, page, perPage int) ([]*model.Team, error) {
+	query := `SELECT ` + teamColumns + `
+		FROM teams t WHERE delete_at = 0
+		AND ($3 = '' OR t.type = 'O' OR EXISTS (
+			SELECT 1 FROM team_members tm
+			WHERE tm.team_id = t.id AND tm.user_id = NULLIF($3, '')::uuid AND tm.delete_at = 0))
+		ORDER BY display_name LIMIT $1 OFFSET $2`
 
-	rows, err := s.sqlStore.pool.Query(ctx, query, perPage, page*perPage)
+	rows, err := s.sqlStore.pool.Query(ctx, query, perPage, page*perPage, visibleTo)
 	if err != nil {
 		return nil, fmt.Errorf("get all teams: %w", err)
 	}
@@ -114,7 +114,7 @@ func (s *SqlTeamStore) GetAll(ctx context.Context, page, perPage int) ([]*model.
 }
 
 func (s *SqlTeamStore) GetTeamsForUser(ctx context.Context, userID string) ([]*model.Team, error) {
-	query := `SELECT t.id, t.name, t.display_name, t.description, t.type, t.creator_id, t.create_at, t.update_at, t.delete_at
+	query := `SELECT ` + teamColumnsT + `
 		FROM teams t
 		INNER JOIN team_members tm ON t.id = tm.team_id
 		WHERE tm.user_id = $1 AND t.delete_at = 0 AND tm.delete_at = 0
@@ -137,7 +137,7 @@ func (s *SqlTeamStore) SaveMember(ctx context.Context, member *model.TeamMember)
 
 	query := `INSERT INTO team_members (team_id, user_id, roles, create_at, delete_at)
 		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (team_id, user_id) DO UPDATE SET roles = EXCLUDED.roles
+		ON CONFLICT (team_id, user_id) DO UPDATE SET roles = team_members.roles
 		RETURNING team_id, user_id, roles, create_at, delete_at`
 	err := s.sqlStore.pool.QueryRow(ctx, query,
 		member.TeamID, member.UserID, member.Roles, member.CreateAt, member.DeleteAt,
@@ -181,6 +181,9 @@ func (s *SqlTeamStore) GetMembers(ctx context.Context, teamID string, page, perP
 }
 
 func (s *SqlTeamStore) GetMember(ctx context.Context, teamID, userID string) (*model.TeamMember, error) {
+	if !validIDs(teamID, userID) {
+		return nil, model.NewNotFoundError("SqlTeamStore.GetMember", teamID+"/"+userID)
+	}
 	query := `SELECT team_id, user_id, roles, create_at, delete_at
 		FROM team_members WHERE team_id = $1 AND user_id = $2 AND delete_at = 0`
 
@@ -189,7 +192,7 @@ func (s *SqlTeamStore) GetMember(ctx context.Context, teamID, userID string) (*m
 		&m.TeamID, &m.UserID, &m.Roles, &m.CreateAt, &m.DeleteAt,
 	)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, model.NewNotFoundError("SqlTeamStore.GetMember", teamID+"/"+userID)
 		}
 		return nil, fmt.Errorf("get team member: %w", err)
@@ -198,14 +201,27 @@ func (s *SqlTeamStore) GetMember(ctx context.Context, teamID, userID string) (*m
 	return m, nil
 }
 
+// teamColumns is the one SELECT list for teams (teamColumnsT the same,
+// qualified by "t" for joins), and scanTeam its one reader.
+const (
+	teamColumns  = `id, name, display_name, description, type, creator_id, create_at, update_at, delete_at`
+	teamColumnsT = `t.id, t.name, t.display_name, t.description, t.type, t.creator_id, t.create_at, t.update_at, t.delete_at`
+)
+
+func scanTeam(row pgx.Row) (*model.Team, error) {
+	t := &model.Team{}
+	err := row.Scan(
+		&t.ID, &t.Name, &t.DisplayName, &t.Description, &t.Type,
+		&t.CreatorID, &t.CreateAt, &t.UpdateAt, &t.DeleteAt,
+	)
+	return t, err
+}
+
 func scanTeams(rows pgx.Rows) ([]*model.Team, error) {
 	var teams []*model.Team
 	for rows.Next() {
-		t := &model.Team{}
-		if err := rows.Scan(
-			&t.ID, &t.Name, &t.DisplayName, &t.Description, &t.Type,
-			&t.CreatorID, &t.CreateAt, &t.UpdateAt, &t.DeleteAt,
-		); err != nil {
+		t, err := scanTeam(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan team: %w", err)
 		}
 		teams = append(teams, t)

@@ -15,12 +15,12 @@ func TestAuditLoggerWritesToFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAuditLogger: %v", err)
 	}
-	defer al.Close()
+	defer func() { _ = al.Close() }()
 
 	al.LogCommandAttempt("evt-1", "user-abc", "user", "help", true)
 	al.LogCommandAttempt("evt-2", "user-xyz", "agent", "kick", false)
 
-	if err := al.Close(); err != nil {
+	if err = al.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 
@@ -67,7 +67,7 @@ func TestAuditLoggerStderr(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAuditLogger stderr: %v", err)
 	}
-	defer al.Close()
+	defer func() { _ = al.Close() }()
 
 	// Should not panic writing to stderr.
 	al.LogCommandAttempt("evt-x", "u-1", "user", "topic", true)

@@ -2,7 +2,9 @@ package sqlstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
 
@@ -39,24 +41,61 @@ func (s *SqlPostStore) Save(ctx context.Context, post *model.Post) (*model.Post,
 	return post, nil
 }
 
-func (s *SqlPostStore) Get(ctx context.Context, id string) (*model.Post, error) {
-	query := `SELECT id, channel_id, user_id, COALESCE(root_id::text, ''), content, type, props, hashtags, is_pinned, edit_at, create_at, update_at, delete_at
-		FROM posts WHERE id = $1 AND delete_at = 0`
+// postColumns is the one SELECT list for posts, and scanPost its one reader.
+// root_id is nullable and comes back as ”. Prefix it with postsAlias when the
+// query joins posts under an alias.
+const postColumns = `id, channel_id, user_id, COALESCE(root_id::text, ''), content, type, props,
+	hashtags, is_pinned, edit_at, create_at, update_at, delete_at`
 
+// postColumnsAs is postColumns with every column qualified by alias.
+func postColumnsAs(alias string) string {
+	return alias + `.id, ` + alias + `.channel_id, ` + alias + `.user_id, COALESCE(` + alias + `.root_id::text, ''), ` +
+		alias + `.content, ` + alias + `.type, ` + alias + `.props, ` + alias + `.hashtags, ` + alias + `.is_pinned, ` +
+		alias + `.edit_at, ` + alias + `.create_at, ` + alias + `.update_at, ` + alias + `.delete_at`
+}
+
+func scanPost(row pgx.Row) (*model.Post, error) {
 	p := &model.Post{}
-	err := s.sqlStore.pool.QueryRow(ctx, query, id).Scan(
+	err := row.Scan(
 		&p.ID, &p.ChannelID, &p.UserID, &p.RootID, &p.Content,
 		&p.Type, &p.Props, &p.Hashtags, &p.IsPinned, &p.EditAt,
 		&p.CreateAt, &p.UpdateAt, &p.DeleteAt,
 	)
+	return p, err
+}
+
+func (s *SqlPostStore) Get(ctx context.Context, id string) (*model.Post, error) {
+	// A non-UUID matches nothing; sent as-is it fails the uuid cast as a 500.
+	if !model.IsValidID(id) {
+		return nil, model.NewNotFoundError("SqlPostStore.Get", id)
+	}
+	p, err := scanPost(s.sqlStore.pool.QueryRow(ctx, `SELECT `+postColumns+` FROM posts WHERE id = $1 AND delete_at = 0`, id))
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, model.NewNotFoundError("SqlPostStore.Get", id)
 		}
 		return nil, fmt.Errorf("get post: %w", err)
 	}
 
 	return p, nil
+}
+
+// GetByIDs returns the live posts among ids, in no particular order. Missing
+// and deleted posts are skipped.
+func (s *SqlPostStore) GetByIDs(ctx context.Context, ids []string) ([]*model.Post, error) {
+	// A non-UUID names no post, and in the array it would fail the whole
+	// query's cast.
+	ids = slices.DeleteFunc(slices.Clone(ids), func(id string) bool { return !model.IsValidID(id) })
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := s.sqlStore.pool.Query(ctx,
+		`SELECT `+postColumns+` FROM posts WHERE id = ANY($1::uuid[]) AND delete_at = 0`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("get posts by ids: %w", err)
+	}
+	defer rows.Close()
+	return scanPosts(rows)
 }
 
 func (s *SqlPostStore) Update(ctx context.Context, post *model.Post) (*model.Post, error) {
@@ -108,7 +147,7 @@ func (s *SqlPostStore) GetPostsForChannel(ctx context.Context, channelID string,
 		order = "ASC"
 	}
 
-	query := `SELECT id, channel_id, user_id, COALESCE(root_id::text, ''), content, type, props, hashtags, is_pinned, edit_at, create_at, update_at, delete_at
+	query := `SELECT ` + postColumns + `
 		FROM posts
 		WHERE channel_id = $1 AND delete_at = 0 AND ($2::bigint = 0 OR create_at > $2)
 		ORDER BY create_at ` + order + `
@@ -129,7 +168,7 @@ func (s *SqlPostStore) GetPostsForChannel(ctx context.Context, channelID string,
 }
 
 func (s *SqlPostStore) GetPostsForThread(ctx context.Context, rootID string) (*model.PostList, error) {
-	query := `SELECT id, channel_id, user_id, COALESCE(root_id::text, ''), content, type, props, hashtags, is_pinned, edit_at, create_at, update_at, delete_at
+	query := `SELECT ` + postColumns + `
 		FROM posts
 		WHERE (id = $1 OR root_id = $1) AND delete_at = 0
 		ORDER BY create_at ASC`
@@ -149,7 +188,7 @@ func (s *SqlPostStore) GetPostsForThread(ctx context.Context, rootID string) (*m
 }
 
 func (s *SqlPostStore) GetPinnedPosts(ctx context.Context, channelID string) (*model.PostList, error) {
-	query := `SELECT id, channel_id, user_id, COALESCE(root_id::text, ''), content, type, props, hashtags, is_pinned, edit_at, create_at, update_at, delete_at
+	query := `SELECT ` + postColumns + `
 		FROM posts
 		WHERE channel_id = $1 AND is_pinned = TRUE AND delete_at = 0
 		ORDER BY create_at DESC`
@@ -181,20 +220,24 @@ func (s *SqlPostStore) SetPinned(ctx context.Context, id string, pinned bool) er
 }
 
 // GetPostsSince returns posts (including soft-deleted ones, so callers can
-// remove them from derived indexes) whose update_at is strictly after the
-// given watermark, oldest first.
-func (s *SqlPostStore) GetPostsSince(ctx context.Context, sinceUpdateAt int64, limit int) ([]*model.Post, error) {
+// remove them from derived indexes) after the cursor in (update_at, id) order,
+// updated no later than until.
+func (s *SqlPostStore) GetPostsSince(ctx context.Context, after model.PostCursor, until int64, limit int) ([]*model.Post, error) {
 	if limit <= 0 {
 		limit = 100
 	}
+	afterID := after.ID
+	if afterID == "" {
+		afterID = "00000000-0000-0000-0000-000000000000"
+	}
 
-	query := `SELECT id, channel_id, user_id, COALESCE(root_id::text, ''), content, type, props, hashtags, is_pinned, edit_at, create_at, update_at, delete_at
+	query := `SELECT ` + postColumns + `
 		FROM posts
-		WHERE update_at > $1
-		ORDER BY update_at ASC
-		LIMIT $2`
+		WHERE (update_at, id) > ($1, $2::uuid) AND update_at <= $3
+		ORDER BY update_at ASC, id ASC
+		LIMIT $4`
 
-	rows, err := s.sqlStore.pool.Query(ctx, query, sinceUpdateAt, limit)
+	rows, err := s.sqlStore.pool.Query(ctx, query, after.UpdateAt, afterID, until, limit)
 	if err != nil {
 		return nil, fmt.Errorf("get posts since: %w", err)
 	}
@@ -203,29 +246,40 @@ func (s *SqlPostStore) GetPostsSince(ctx context.Context, sinceUpdateAt int64, l
 	return scanPosts(rows)
 }
 
-func (s *SqlPostStore) SearchByContent(ctx context.Context, channelID, query string, page, perPage int) ([]*model.Post, error) {
-	if channelID != "" {
-		q := `SELECT id, channel_id, user_id, COALESCE(root_id::text, ''), content, type, props, hashtags, is_pinned, edit_at, create_at, update_at, delete_at
-			FROM posts
-			WHERE content ILIKE '%' || $1 || '%' AND channel_id = $2 AND delete_at = 0
-			ORDER BY create_at DESC
-			LIMIT $3 OFFSET $4`
-		rows, err := s.sqlStore.pool.Query(ctx, q, query, channelID, perPage, page*perPage)
-		if err != nil {
-			return nil, fmt.Errorf("search posts by content: %w", err)
-		}
-		defer rows.Close()
-		return scanPosts(rows)
+// Search returns one page of live posts matching q, newest first. Every
+// filter, the channel scope included, is applied in the query before LIMIT,
+// so a page is never short because hits outside the scope were dropped after
+// the fact. An empty ChannelIDs matches nothing.
+func (s *SqlPostStore) Search(ctx context.Context, q *model.PostSearch) ([]*model.Post, error) {
+	if len(q.ChannelIDs) == 0 {
+		return nil, nil
 	}
-
-	q := `SELECT id, channel_id, user_id, COALESCE(root_id::text, ''), content, type, props, hashtags, is_pinned, edit_at, create_at, update_at, delete_at
+	pattern := ""
+	if q.Terms != "" {
+		pattern = likePattern(q.Terms)
+	}
+	query := `SELECT ` + postColumns + `
 		FROM posts
-		WHERE content ILIKE '%' || $1 || '%' AND delete_at = 0
-		ORDER BY create_at DESC
-		LIMIT $2 OFFSET $3`
-	rows, err := s.sqlStore.pool.Query(ctx, q, query, perPage, page*perPage)
+		WHERE delete_at = 0
+			AND channel_id = ANY($1::uuid[])
+			AND ($2 = '' OR content ILIKE $2 ESCAPE '\')
+			AND ($3 = '' OR user_id = NULLIF($3, '')::uuid)
+			AND (cardinality($4::uuid[]) = 0 OR id IN (
+				SELECT message_id FROM message_tags
+				WHERE tag_id = ANY($4::uuid[])
+				GROUP BY message_id
+				HAVING COUNT(DISTINCT tag_id) = cardinality($4::uuid[])))
+		ORDER BY create_at DESC, id DESC
+		LIMIT $5 OFFSET $6`
+
+	tagIDs := q.TagIDs
+	if tagIDs == nil {
+		tagIDs = []string{}
+	}
+	rows, err := s.sqlStore.pool.Query(ctx, query,
+		q.ChannelIDs, pattern, q.AuthorID, tagIDs, q.PerPage, q.Page*q.PerPage)
 	if err != nil {
-		return nil, fmt.Errorf("search posts by content: %w", err)
+		return nil, fmt.Errorf("search posts: %w", err)
 	}
 	defer rows.Close()
 	return scanPosts(rows)
@@ -234,12 +288,8 @@ func (s *SqlPostStore) SearchByContent(ctx context.Context, channelID, query str
 func scanPosts(rows pgx.Rows) ([]*model.Post, error) {
 	var posts []*model.Post
 	for rows.Next() {
-		p := &model.Post{}
-		if err := rows.Scan(
-			&p.ID, &p.ChannelID, &p.UserID, &p.RootID, &p.Content,
-			&p.Type, &p.Props, &p.Hashtags, &p.IsPinned, &p.EditAt,
-			&p.CreateAt, &p.UpdateAt, &p.DeleteAt,
-		); err != nil {
+		p, err := scanPost(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan post: %w", err)
 		}
 		posts = append(posts, p)

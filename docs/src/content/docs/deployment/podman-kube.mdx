@@ -1,34 +1,63 @@
 ---
 title: Podman Kube
-description: Deploying the Chit infrastructure stack with Podman Kube.
+description: Deploying the Chit stack with Podman Kube.
 ---
 
-Chit's infrastructure runs as a single Podman Kube pod defined in
-`deploy/chit.kube.yml`. This deploys all required services with a single
-command — no Docker Compose required.
+Chit's local stack, chitd included, is defined in `deploy/chit.kube.yml` and
+started with a single command, no Docker Compose required. The manifest
+defines two pods: `chit-db`, which runs PostgreSQL, and `chit-app`, which waits
+for it, runs the migrations and starts everything else.
 
 ## Pod Contents
 
-The pod runs 5 containers alongside the Chit server:
+### `chit-db`
 
 | Container | Image | Port(s) | Purpose |
 |---|---|---|---|
-| **postgres** | `postgres:17-alpine` | 5432 | Primary data store |
-| **kratos** | `oryd/kratos:v1.3` | 4433, 4434 | Identity management |
+| **postgres** | `postgres:17-alpine` | 5432 | Primary data store; also holds the `kratos`, `keto` and `hydra` databases |
+
+### `chit-app`
+
+Init containers run in order before the services start:
+
+| Init container | Image | Purpose |
+|---|---|---|
+| **wait-postgres** | `postgres:17-alpine` | Waits until PostgreSQL accepts connections |
+| **ensure-databases** | `postgres:17-alpine` | Creates the `kratos`, `keto` and `hydra` databases if missing (the init SQL only runs on a fresh volume) |
+| **migrate-kratos** | `oryd/kratos:v1.3` | Kratos schema migrations |
+| **migrate-keto** | `oryd/keto:v0.12` | Keto schema migrations |
+| **migrate-hydra** | `oryd/hydra:v2.2` | Hydra schema migrations |
+| **migrate-chit** | `migrate/migrate:v4.15.0` | Chit schema migrations from `migrations/` (mounted from the checkout) |
+
+Then the services:
+
+| Container | Image | Port(s) | Purpose |
+|---|---|---|---|
+| **kratos** | `oryd/kratos:v1.3` | 4433, 4434 | Identity management (people) |
+| **keto** | `oryd/keto:v0.12` | 4466, 4467 | Slash-command authorization |
+| **hydra** | `oryd/hydra:v2.2` | 4444, 4445 | OAuth2 tokens for machine actors (`--dev`: plain HTTP) |
 | **oathkeeper** | `oryd/oathkeeper:v0.40` | 4455, 4456 | Authentication proxy |
-| **keto** | `oryd/keto:v0.12` | 4466, 4467 | Authorization (ReBAC) |
-| **zincsearch** | `zincsearch:latest` | 4080 | Full-text search indexing |
+| **zincsearch** | `zincsearch:latest` | 4080 | Full-text search index |
+| **chitd** | `localhost/chit:latest` | 8065 | The Chit server |
+
+The chitd container is configured in the manifest with the database URL, the
+Kratos and Keto URLs, and the ZincSearch URL and credentials; everything else
+takes chitd's defaults. To set more (for example `CHIT_MACHINE_ACTORS` or
+`CHIT_TRUSTED_PROXY_SECRET`), add it to the `chitd` container's `env` and run
+`make kube-restart`, or run chitd locally with `.env` (see
+[Startup Order](#startup-order)).
+
+Podman names each container `<pod>-<container>`, e.g. `chit-app-chitd`.
 
 ## ConfigMaps
 
-The Kube manifest includes ConfigMaps for service configuration:
-
 | ConfigMap | Contents |
 |---|---|
-| `chit-postgres-init` | SQL script to create `kratos` and `keto` databases |
+| `chit-postgres-init` | SQL that creates the `kratos`, `keto` and `hydra` databases on a fresh volume |
 | `chit-kratos-config` | Kratos server config + identity schema |
+| `chit-hydra-config` | Hydra server config (issuer, opaque 1-hour access tokens, placeholder system secret) |
 | `chit-oathkeeper-config` | Oathkeeper access rules and server config |
-| `chit-keto-config` | Keto namespace and relationship definitions |
+| `chit-keto-config` | Keto server config and namespaces |
 
 ## Persistent Volumes
 
@@ -39,37 +68,74 @@ The Kube manifest includes ConfigMaps for service configuration:
 
 ## Networking
 
-The pod runs with `--network host`, so all containers share the host network
-namespace. This simplifies container-to-container communication — each service
-is reachable at `localhost` on its configured port.
+The pods run with `--network host`, so all containers share the host network
+namespace. Each service is reachable at `localhost` on its configured port,
+and Oathkeeper forwards `/api/v1/**` to whatever listens on `localhost:8065`.
 
 ## Makefile Targets
 
-| Target | Command | Description |
-|---|---|---|
-| `make kube-up` | `podman kube play --network host deploy/chit.kube.yml` | Start the pod (Kratos, Keto, and Chit migrations run automatically via init/migrate containers) |
-| `make kube-down` | `podman kube down deploy/chit.kube.yml` | Stop and remove the pod |
-| `make kube-migrate` | Runs a one-shot `migrate/migrate` container against the pod's PostgreSQL | Re-apply Chit schema migrations (only needed to apply new migration files without restarting the pod) |
-| `make migrate-up` | `migrate -database ... -path migrations up` | Apply Chit schema migrations (host-installed `migrate`) |
-| `make migrate-down` | `migrate -database ... -path migrations down` | Roll back Chit migrations |
-| `make test-container` | Build `chit-test:latest` and run all unit tests | Run tests in a UBI9 container |
+### Stack
+
+| Target | Description |
+|---|---|
+| `make kube-build` | Build the chitd image `localhost/chit:latest` from `deploy/Containerfile` |
+| `make kube-up` | `kube-build`, then `podman kube play --network host` on `deploy/chit.kube.yml` (migrations run automatically in init containers) |
+| `make kube-down` | Stop and remove the pods (volumes are kept) |
+| `make kube-restart` | `kube-down` then `kube-up`; rebuilds the image |
+| `make kube-logs` | Follow the logs of every container in `chit-app` |
+| `make kube-log-<container>` | Follow one container's logs, e.g. `make kube-log-chitd` |
+| `make kube-clean` | `kube-down`, then delete the `chit-pgdata` and `chit-zincdata` volumes |
+| `make kube-migrate` | Re-apply Chit schema migrations against the pod's PostgreSQL with a one-shot `migrate/migrate` container (only needed for new migration files without restarting the pod) |
+| `make migrate-up` | Apply Chit schema migrations with a host-installed `migrate` (`MIGRATE_URL` overrides the target) |
+| `make migrate-down` | Roll back one Chit migration with a host-installed `migrate` |
+| `make reconcile` | Build and run `chit-reconcile`, which pushes the CUE roles, commands and actors in `auth/` into Keto and revokes any `chit/command` tuple they no longer declare (reads `CHIT_KETO_READ_URL`, `CHIT_KETO_WRITE_URL`, `CHIT_COMMANDS_CUE_DIR`) |
+
+### UAT environment
+
+| Target | Description |
+|---|---|
+| `make uat-up` | Build the images and start `deploy/chit-uat.kube.yml` with seeded test data |
+| `make uat-seed-kratos` | Create Kratos identities for the seeded users |
+| `make uat-down` | Stop and remove the UAT pods |
+| `make uat-clean` | `uat-down`, then delete the UAT volumes |
+
+See [Manual Acceptance Testing](/chit/getting-started/manual-acceptance-testing/).
+
+### Build, test and checks
+
+| Target | Description |
+|---|---|
+| `make build`, `build-mcp`, `build-reconcile`, `build-claude`, `build-tui`, `build-all` | Build the binaries into `bin/` |
+| `make run` | Build chitd and run it, loading `.env` when present |
+| `make test` | Unit tests with `-race` |
+| `make test-integration` | Store and pub/sub tests against a throwaway PostgreSQL in Podman on port `55432`; migrations are run up, down and up again first |
+| `make test-container` | Build `chit-test:latest` and run the unit tests in a UBI9 container |
+| `make test-e2e` | Build `Containerfiles/Containerfile.e2e` and run the integration-tagged store and pub/sub tests in a pod with PostgreSQL |
+| `make lint` | golangci-lint with the `integration` and `e2e` build tags |
+| `make vuln` | govulncheck |
+| `make check-deps` | Check that client binaries do not link server-side dependencies, and that TUI dependencies stay out of the server module |
+| `make validate-spec` | Validate `api/openapi.yaml` |
+| `make cue-validate` | Evaluate the CUE definitions in `auth/` |
 
 ## Containerfile
 
 The server image is built from `deploy/Containerfile`:
 
 ```bash
-podman build -t chit:latest -f deploy/Containerfile .
+make kube-build
 ```
 
-The Containerfile uses a multi-stage build: Go compilation in a builder stage,
-then copies the binary into a minimal UBI-based runtime image.
+The Containerfile uses a multi-stage build: Go compilation of `chitd` and
+`chit-reconcile` in a `golang:1.25-alpine` builder stage, then a
+`ubi9-minimal` runtime image that runs as a non-root `chit` user, carries the
+CUE definitions at `/etc/chit/auth` (`CHIT_COMMANDS_CUE_DIR`), and starts
+`chitd`.
 
 ## Test Containerfile
 
 A separate Containerfile at `Containerfiles/Containerfile.test` builds a UBI9
-image with the full Go toolchain for running unit tests. All tests use in-memory
-mocks — no PostgreSQL or Ory services are needed.
+image with the full Go toolchain for running unit tests. The unit tests use
+in-memory fakes; no PostgreSQL or Ory services are needed.
 
 ```bash
 make test-container
@@ -84,9 +150,20 @@ podman run --rm chit-test:latest go test -run TestSpecific ./internal/model/...
 
 ## Startup Order
 
-1. `make kube-up` — start all infrastructure containers; Kratos, Keto, and
-   Chit schema migrations run automatically via init/migrate containers
-2. `make run` — build and start the Chit server
+1. `make kube-up` builds the image and starts both pods. The init containers
+   create the databases and run the Kratos, Keto, Hydra and Chit migrations,
+   then the services, chitd included, start.
+2. Check chitd: `curl http://localhost:8065/api/v1/system/ping`.
 
-If you later add new migration files, apply them to the running pod with
-`make kube-migrate` — no pod restart required.
+To work on chitd itself, stop the pod's copy so `:8065` is free and run your
+build in its place:
+
+```bash
+podman stop chit-app-chitd
+cp .env.example .env
+make run
+```
+
+`podman start chit-app-chitd` brings the containerized one back. If you later
+add new migration files, apply them to the running pod with
+`make kube-migrate`; no pod restart required.

@@ -228,10 +228,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ThreadsLoadedMsg:
 		if msg.Err != nil {
-			m.threadInbox.SetThreads(nil)
+			m.threadInbox.SetThreads(nil, nil)
 			return m, m.setError(msg.Err)
 		}
-		m.threadInbox.SetThreads(msg.Threads)
+		m.threadInbox.SetThreads(msg.Threads, msg.Direct)
 		return m, nil
 
 	case ThreadFollowChangedMsg:
@@ -244,10 +244,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleThreadChosen(msg)
 
 	case threadinbox.FollowToggledMsg:
-		if m.activeTeam == nil {
-			return m, nil
-		}
-		return m, SetThreadFollowing(m.reqCtx(), m.client, m.activeTeam.ID, msg.RootID, msg.Following)
+		return m, SetThreadFollowing(m.reqCtx(), m.client, msg.RootID, msg.Following)
 
 	case threadinbox.ClosedMsg:
 		return m, m.setFocus(FocusInput)

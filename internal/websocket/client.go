@@ -21,9 +21,10 @@ type Client struct {
 	writeTimeout time.Duration
 }
 
-// NewClient creates a new WebSocket Client and starts its read/write pumps.
+// NewClient creates a WebSocket Client. Register it with the hub, then call
+// Start.
 func NewClient(hub *Hub, conn *websocket.Conn, userID string, pingInterval, writeTimeout time.Duration) *Client {
-	c := &Client{
+	return &Client{
 		UserID:       userID,
 		conn:         conn,
 		hub:          hub,
@@ -31,22 +32,29 @@ func NewClient(hub *Hub, conn *websocket.Conn, userID string, pingInterval, writ
 		pingInterval: pingInterval,
 		writeTimeout: writeTimeout,
 	}
+}
+
+// Start runs the client's read and write pumps. Call it after Hub.Register:
+// if the pumps started first and the peer hung up at once, the readPump's
+// Unregister would land before the Register, and the hub would then keep a
+// dead client until its send buffer filled.
+func (c *Client) Start() {
 	go c.writePump()
 	go c.readPump()
-	return c
 }
 
 func (c *Client) readPump() {
 	defer func() {
 		c.hub.Unregister(c)
-		c.conn.Close()
+		_ = c.conn.Close()
 	}()
 
 	c.conn.SetReadLimit(4096)
-	c.conn.SetReadDeadline(time.Now().Add(c.pingInterval * 2))
+	// A failed deadline means the conn is already broken; the next read
+	// returns that error and ends the pump.
+	_ = c.conn.SetReadDeadline(time.Now().Add(c.pingInterval * 2))
 	c.conn.SetPongHandler(func(string) error {
-		c.conn.SetReadDeadline(time.Now().Add(c.pingInterval * 2))
-		return nil
+		return c.conn.SetReadDeadline(time.Now().Add(c.pingInterval * 2))
 	})
 
 	for {
@@ -73,15 +81,18 @@ func (c *Client) writePump() {
 	ticker := time.NewTicker(c.pingInterval)
 	defer func() {
 		ticker.Stop()
-		c.conn.Close()
+		_ = c.conn.Close()
 	}()
 
 	for {
 		select {
 		case event, ok := <-c.send:
-			c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
+			if err := c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout)); err != nil {
+				return
+			}
 			if !ok {
-				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				// The hub closed send; tell the peer, best effort.
+				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
 
@@ -91,7 +102,9 @@ func (c *Client) writePump() {
 			}
 
 		case <-ticker.C:
-			c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
+			if err := c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout)); err != nil {
+				return
+			}
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
@@ -100,20 +113,21 @@ func (c *Client) writePump() {
 }
 
 func (c *Client) handleMessage(msg *model.WebSocketMessage) {
-	switch msg.Action {
-	case "typing":
-		channelID, ok := msg.Data["channel_id"].(string)
-		if !ok {
-			return
-		}
-		c.hub.BroadcastFromUser(c.UserID, &model.WebSocketEvent{
-			Event: model.WebSocketEventTyping,
-			Data: map[string]any{
-				"user_id": c.UserID,
-			},
-			Broadcast: &model.WebSocketBroadcast{
-				ChannelID: channelID,
-			},
-		})
+	// Typing is the only action a client may send; anything else is ignored.
+	if msg.Action != "typing" {
+		return
 	}
+	channelID, ok := msg.Data["channel_id"].(string)
+	if !ok {
+		return
+	}
+	c.hub.BroadcastFromUser(c.UserID, &model.WebSocketEvent{
+		Event: model.WebSocketEventTyping,
+		Data: map[string]any{
+			"user_id": c.UserID,
+		},
+		Broadcast: &model.WebSocketBroadcast{
+			ChannelID: channelID,
+		},
+	})
 }

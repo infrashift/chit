@@ -48,8 +48,6 @@ func (m Model) handleThreadChosen(msg threadinbox.ThreadChosenMsg) (tea.Model, t
 	m.threadRootID = msg.RootID
 	cmds = append(cmds, m.setFocus(FocusThread))
 	m.resizeComponents()
-	if m.activeTeam != nil {
-		cmds = append(cmds, MarkThreadRead(m.reqCtx(), m.client, m.activeTeam.ID, msg.RootID))
-	}
+	cmds = append(cmds, MarkThreadRead(m.reqCtx(), m.client, msg.RootID))
 	return m, tea.Batch(cmds...)
 }
