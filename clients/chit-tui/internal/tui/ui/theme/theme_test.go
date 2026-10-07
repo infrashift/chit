@@ -252,7 +252,7 @@ func TestLoadNamed_BuiltinTokyoNight(t *testing.T) {
 }
 
 func TestListAvailable_IncludesBuiltins(t *testing.T) {
-	names := theme.ListAvailable()
+	names := theme.ListAvailable(t.TempDir())
 
 	builtins := []string{"catppuccin", "kanagawa", "nightfox", "tokyo-night"}
 	for _, b := range builtins {
@@ -298,7 +298,7 @@ func TestListAvailable_IncludesCustomSkins(t *testing.T) {
 
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
-	names := theme.ListAvailable()
+	names := theme.ListAvailable(t.TempDir())
 	found := false
 	for _, n := range names {
 		if n == "dracula" {

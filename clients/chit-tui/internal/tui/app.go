@@ -142,6 +142,9 @@ type Model struct {
 	// searchTerm is the last submitted search, kept so a chosen result can
 	// be highlighted in the history.
 	searchTerm string
+	// themeSetting is the config key a theme picked in the client is saved
+	// under; see config.Config.ThemeSettingKey.
+	themeSetting string
 	// usersRequested marks user IDs already looked up.
 	usersRequested map[string]bool
 	// commandAuthors names the pseudo-author of each command's output, by
@@ -232,6 +235,7 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 		postTags:       make(map[string][]*model.Tag),
 		commandAuthors: make(map[string]string),
 		usersRequested: make(map[string]bool),
+		themeSetting:   "theme",
 		appState:       state,
 		tokenStore:     tokenStore,
 		kratosClient:   kratosClient,
@@ -251,6 +255,10 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 	_ = m.input.Focus()
 	return m
 }
+
+// SetThemeSetting sets the config key a theme picked with /theme is saved
+// under, which depends on the appearance resolved at startup.
+func (m *Model) SetThemeSetting(key string) { m.themeSetting = key }
 
 // clientCommands are handled entirely by this client and never reach the
 // server, so the server's registry does not list them. Typing one directly has
@@ -796,7 +804,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// These act on this client alone; the server knows nothing about them.
 		switch verb {
 		case "/skin", "/theme":
-			m.skinPicker.SetSkins(theme.ListAvailable())
+			m.skinPicker.SetSkins(theme.ListAvailable(config.ThemesDir()))
 			cmd := m.setFocus(FocusSkinPicker)
 			m.skinPicker.Open()
 			return m, cmd
@@ -1249,7 +1257,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Persist so the choice survives a restart. Failing to write is worth
 		// surfacing but must not undo the theme change for this session.
 		var saveCmd tea.Cmd
-		if err := config.SaveTheme(msg.Name); err != nil {
+		if err := config.SaveThemeSetting(m.themeSetting, msg.Name); err != nil {
 			saveCmd = m.setError(fmt.Errorf("theme applied but not saved: %w", err))
 		}
 

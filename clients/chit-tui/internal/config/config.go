@@ -88,6 +88,20 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// ThemeSettingKey names the setting a theme chosen in the client is saved
+// under. With themes configured per appearance and no fixed theme, it is the
+// one for the current appearance: saving "theme" would outrank both and turn
+// appearance switching off for good. Otherwise it is "theme".
+func (c *Config) ThemeSettingKey(dark bool) string {
+	if c.ThemeName != "" || (c.ThemeDark == "" && c.ThemeLight == "") {
+		return "theme"
+	}
+	if dark {
+		return "theme_dark"
+	}
+	return "theme_light"
+}
+
 // HasToken returns true if a session token is configured.
 func (c *Config) HasToken() bool {
 	return c.SessionToken != ""

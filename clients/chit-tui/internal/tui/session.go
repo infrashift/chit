@@ -140,6 +140,7 @@ func (m Model) newSession() Model {
 	fresh := NewModel(m.cfg, m.client, m.wsClient, m.styles, m.tokenStore, m.kratosClient, m.sessionStore)
 	fresh.appState = m.appState
 	fresh.wsListening = m.wsListening
+	fresh.themeSetting = m.themeSetting
 	fresh.err, fresh.errSeq = m.err, m.errSeq
 	fresh.width, fresh.height = m.width, m.height
 	fresh.loginModel.SetSize(m.width, m.height)

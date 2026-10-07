@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **TOML themes missing from the theme list** — themes in `~/.config/chit/themes/` loaded by name but never appeared in `/theme` or `--list-themes`. Names that cannot load (not lowercase, or shadowed by a bundled theme) are no longer listed
+- **`/theme` turned off appearance switching** — picking a theme saved `theme = …`, which outranks `theme_dark` and `theme_light`. With those configured, the pick is now saved for the current appearance
+- **Invisible selection with named-color themes** — a theme using terminal color names got a selection and search highlight the same color as the background
 - **@-mentions after accented text** — completing a mention on a line with a non-ASCII character before the `@` cut the line in the wrong place. An email address no longer opens the mention popup, and `@bob.` at the end of a sentence is highlighted as a mention of bob
 - **Pickers lost the cursor** — the theme, tag and member pickers drew only their first few rows, so moving down past them moved the cursor out of sight, and the thread inbox ran off the bottom of the screen. All of them now scroll to keep the cursor visible
 - **Palette chose the wrong row** — after moving down and then typing, Enter picked whatever landed at the old cursor index rather than the top match

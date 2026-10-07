@@ -79,6 +79,7 @@ func main() {
 
 	s := styles.New(activeTheme)
 	m := tui.NewModel(cfg, client, wsClient, s, tokenStore, kratosClient, sessionStore)
+	m.SetThemeSetting(themeSetting(opts, cfg))
 
 	// Filter out terminal response sequences (OSC replies, cursor position
 	// reports) that can leak into the textarea as garbage text.

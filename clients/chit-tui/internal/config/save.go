@@ -8,23 +8,35 @@ import (
 	"strings"
 )
 
-// themeLineRe matches an existing top-level theme assignment. Only the theme
-// key is ever rewritten, so the pattern can stay this narrow.
-var themeLineRe = regexp.MustCompile(`(?m)^\s*theme\s*=.*$`)
+// themeSettingRe matches an existing top-level assignment of each theme
+// setting. Only these keys are ever rewritten.
+var themeSettingRe = map[string]*regexp.Regexp{
+	"theme":       regexp.MustCompile(`(?m)^\s*theme\s*=.*$`),
+	"theme_dark":  regexp.MustCompile(`(?m)^\s*theme_dark\s*=.*$`),
+	"theme_light": regexp.MustCompile(`(?m)^\s*theme_light\s*=.*$`),
+}
 
 // SaveTheme records a theme choice in the config file so it survives a restart.
+func SaveTheme(name string) error { return SaveThemeSetting("theme", name) }
+
+// SaveThemeSetting records a theme choice under key: "theme", or
+// "theme_dark" or "theme_light" to choose for one appearance only.
 //
 // The file is edited line by line rather than decoded and re-encoded: a
 // round-trip through the TOML encoder would silently discard the user's
 // comments and key ordering, which is a poor trade for persisting one setting.
-func SaveTheme(name string) error {
+func SaveThemeSetting(key, name string) error {
+	themeLineRe, ok := themeSettingRe[key]
+	if !ok {
+		return fmt.Errorf("%q is not a theme setting", key)
+	}
 	path := FilePath()
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create config directory: %w", err)
 	}
 
-	line := fmt.Sprintf("theme = %q", name)
+	line := fmt.Sprintf("%s = %q", key, name)
 
 	existing, err := os.ReadFile(path)
 	if err != nil {

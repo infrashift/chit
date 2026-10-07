@@ -106,28 +106,39 @@ func ParseJSON(data []byte) (Theme, error) {
 	return tf.toTheme(), nil
 }
 
-// ListAvailable returns sorted names of all available themes.
-// It includes built-in theme keys plus basenames (without .json) of any
-// files found in ~/.config/chit/skins/.
-func ListAvailable() []string {
-	names := make([]string, 0, len(builtinThemes))
-	for k := range builtinThemes {
-		names = append(names, k)
+// ListAvailable returns the names a theme can be chosen by: the bundled
+// themes, sorted, then the user's TOML themes in themesDir and legacy JSON
+// skins, sorted. Each name appears once, in the form ResolveNamed takes, and
+// only if it would load: a local file named like a bundled theme is shadowed
+// by it, and one whose name is not lowercase is never found, since names
+// are lowercased to load.
+func ListAvailable(themesDir string) []string {
+	names := BuiltinNames()
+	seen := make(map[string]bool, len(names))
+	for _, n := range names {
+		seen[n] = true
 	}
-	sort.Strings(names)
 
-	dir := skinsDir()
-	entries, err := os.ReadDir(dir)
-	if err == nil {
+	var local []string
+	for _, src := range []struct{ dir, ext string }{{themesDir, ".toml"}, {skinsDir(), ".json"}} {
+		entries, err := os.ReadDir(src.dir)
+		if err != nil {
+			continue
+		}
 		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			name, ok := strings.CutSuffix(e.Name(), src.ext)
+			if e.IsDir() || !ok || name != strings.ToLower(name) || seen[name] {
 				continue
 			}
-			name := strings.TrimSuffix(e.Name(), ".json")
-			names = append(names, name)
+			if _, err := normalizeLocalThemeName(name); err != nil {
+				continue
+			}
+			seen[name] = true
+			local = append(local, name)
 		}
 	}
-	return names
+	sort.Strings(local)
+	return append(names, local...)
 }
 
 // LoadNamed resolves a theme by name. It checks built-in themes first,

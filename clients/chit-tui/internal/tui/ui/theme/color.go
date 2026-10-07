@@ -93,10 +93,13 @@ func Blend(base, accent color.Color, accentPercent int) color.Color {
 	br, bg, bb, baseOK := rgbComponents(base)
 	ar, ag, ab, accentOK := rgbComponents(accent)
 
+	// A terminal color name has no RGB value to mix. Falling back to the
+	// base made a derived highlight the background color itself, so it was
+	// invisible; the accent at least stays visible.
 	switch {
-	case !accentOK:
+	case accent == nil:
 		return base
-	case !baseOK:
+	case !accentOK || !baseOK:
 		return accent
 	}
 

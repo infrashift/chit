@@ -2,13 +2,16 @@ package tui_test
 
 import (
 	"errors"
+	"os"
 	"slices"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/infrashift/chit/clients/chit-tui/internal/config"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/skinpicker"
 )
 
 // feed runs cmd and passes every message it produces back into the model,
@@ -122,5 +125,25 @@ func TestModel_TagCreatedInThePickerAppearsInIt(t *testing.T) {
 
 	if !strings.Contains(viewOf(m), "[x] #fresh") {
 		t.Errorf("the new tag is not listed as applied:\n%s", viewOf(m))
+	}
+}
+
+// With per-appearance themes configured, a pick is saved for the current
+// appearance rather than as a fixed theme that overrides both.
+func TestModel_ThemePickSavesToTheConfiguredSetting(t *testing.T) {
+	path := config.FilePath()
+	_ = os.Remove(path)
+	t.Cleanup(func() { _ = os.Remove(path) })
+
+	m := setupModel(t)
+	m.SetThemeSetting("theme_dark")
+	m, _ = step(t, m, skinpicker.SkinSelectedMsg{Name: "kanagawa"})
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "theme_dark = \"kanagawa\"\n" {
+		t.Errorf("config = %q, want only theme_dark set", got)
 	}
 }

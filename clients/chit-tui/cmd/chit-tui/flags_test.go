@@ -163,3 +163,18 @@ func TestDetectSystemDarkWithoutTerminal(t *testing.T) {
 		t.Error("want dark when stdin/stdout are not terminals")
 	}
 }
+
+// With themes configured per appearance, a theme picked in the client is
+// saved for the appearance in effect, not as a fixed theme over both.
+func TestThemeSetting(t *testing.T) {
+	perAppearance := &config.Config{ThemeDark: "nightfox", ThemeLight: "dayfox"}
+	if got := themeSetting(options{appearance: "light"}, perAppearance); got != "theme_light" {
+		t.Errorf("light: got %q, want theme_light", got)
+	}
+	if got := themeSetting(options{appearance: "dark"}, perAppearance); got != "theme_dark" {
+		t.Errorf("dark: got %q, want theme_dark", got)
+	}
+	if got := themeSetting(options{}, &config.Config{}); got != "theme" {
+		t.Errorf("unconfigured: got %q, want theme", got)
+	}
+}

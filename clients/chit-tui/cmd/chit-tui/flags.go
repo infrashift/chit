@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
@@ -54,7 +55,7 @@ func listThemes(out io.Writer) {
 		bundled[n] = true
 	}
 
-	for _, name := range theme.ListAvailable() {
+	for _, name := range theme.ListAvailable(config.ThemesDir()) {
 		if bundled[name] {
 			_, _ = fmt.Fprintf(out, "%s\n", name)
 			continue
@@ -65,16 +66,34 @@ func listThemes(out io.Writer) {
 
 // resolveTheme turns the command line and configuration into a theme.
 func resolveTheme(opts options, cfg *config.Config) (theme.Theme, []string, error) {
-	flagAppearance, err := theme.ParseAppearance(opts.appearance)
+	req, err := themeRequest(opts, cfg)
 	if err != nil {
 		return theme.Theme{}, nil, err
+	}
+	return theme.Resolve(req)
+}
+
+// themeSetting is the config key a theme picked in the client is saved under,
+// which depends on the appearance in effect.
+func themeSetting(opts options, cfg *config.Config) string {
+	req, err := themeRequest(opts, cfg)
+	if err != nil {
+		return "theme"
+	}
+	return cfg.ThemeSettingKey(req.Dark())
+}
+
+func themeRequest(opts options, cfg *config.Config) (theme.Request, error) {
+	flagAppearance, err := theme.ParseAppearance(opts.appearance)
+	if err != nil {
+		return theme.Request{}, err
 	}
 
 	// A bad appearance in the config file is a warning, not a failure, so it
 	// is parsed leniently here and simply left unset when invalid.
 	cfgAppearance, _ := theme.ParseAppearance(cfg.Appearance)
 
-	return theme.Resolve(theme.Request{
+	return theme.Request{
 		FlagTheme:        opts.theme,
 		ConfigTheme:      cfg.ThemeName,
 		ConfigThemeDark:  cfg.ThemeDark,
@@ -83,7 +102,7 @@ func resolveTheme(opts options, cfg *config.Config) (theme.Theme, []string, erro
 		ConfigAppearance: cfgAppearance,
 		ThemesDir:        config.ThemesDir(),
 		SystemIsDark:     detectSystemDark,
-	})
+	}, nil
 }
 
 // detectSystemDark asks the terminal whether it has a dark background.
@@ -92,9 +111,12 @@ func resolveTheme(opts options, cfg *config.Config) (theme.Theme, []string, erro
 // escape sequence and its reply would otherwise arrive as input, which is the
 // same class of leakage termResponseRe exists to filter. When stdin or stdout
 // is not a terminal there is nobody to ask, and dark is the safer assumption.
-func detectSystemDark() bool {
+//
+// It asks once: both the theme and where a picked theme is saved depend on
+// the answer.
+var detectSystemDark = sync.OnceValue(func() bool {
 	if !isatty.IsTerminal(os.Stdin.Fd()) || !isatty.IsTerminal(os.Stdout.Fd()) {
 		return true
 	}
 	return lipgloss.HasDarkBackground()
-}
+})

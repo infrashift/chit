@@ -223,3 +223,19 @@ func TestLip(t *testing.T) {
 		}
 	})
 }
+
+// A theme declared in terminal color names cannot be blended. Returning the
+// base made Selection and SearchMatch the background color itself, so
+// selections and search hits were invisible.
+func TestBlend_NamedColorsStayVisible(t *testing.T) {
+	base, accent := parseThemeColor("black"), parseThemeColor("yellow")
+	if base == nil || accent == nil {
+		t.Fatal("setup: named colors did not parse")
+	}
+	if got := Blend(base, accent, 25); got != accent {
+		t.Errorf("Blend(named, named) = %v, want the accent %v", got, accent)
+	}
+	if got := Blend(hexColor("#000000"), accent, 25); got != accent {
+		t.Errorf("Blend(hex, named) = %v, want the accent %v", got, accent)
+	}
+}
