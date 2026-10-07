@@ -144,6 +144,9 @@ Behaviour changes an operator must act on or know about:
 
 ### Changed
 
+- Anyone may join an open team themselves (`POST /teams/{id}/members` with
+  their own `user_id`). Adding someone else, or joining an invite-only team,
+  still requires membership. The user added must exist (`400` otherwise).
 - Lint is a hard CI gate: `only-new-issues` is gone, lint covers the
   `integration` and `e2e` build tags, staticcheck runs every analyzer but
   ST1000 and ST1003, and golangci-lint is pinned to v2.13.2. The 199

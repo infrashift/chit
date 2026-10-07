@@ -254,7 +254,8 @@ Team and channel access is decided by chitd from the `team_members` and
   deletes its channels. Invite-only teams are visible only to their members
   and to system admins, and `GET /api/v1/teams` lists open teams plus the
   caller's own. Only members (and system admins) may list a team's members.
-  Adding a member requires being a member; removing anyone but yourself
+  Anyone may join an open team themselves; adding someone else, or joining
+  an invite-only team, requires being a member. Removing anyone but yourself
   requires `system_admin`. A user removed from a team is removed from all of
   that team's channels.
 - **Channels.** `POST /api/v1/channels` creates open (`O`) or private (`P`)
@@ -368,9 +369,10 @@ curl -s -H "X-Session-Token: $TOKEN" \
   http://localhost:4455/api/v1/teams | jq .
 ```
 
-After step 3, the user exists in Chit's database. A member of a team can then
-add them to it (`POST /api/v1/teams/{id}/members`), after which they can see
-and join that team's open channels.
+After step 3, the user exists in Chit's database. They can join an open team
+themselves (`POST /api/v1/teams/{id}/members` with their own `user_id`); a
+member of an invite-only team must add them. On the team, they can see and
+join its open channels.
 
 ## See also
 

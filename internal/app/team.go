@@ -116,14 +116,24 @@ func (a *App) GetTeamsForUser(ctx context.Context, userID string) ([]*model.Team
 
 // AddTeamMember adds userID to a team on actorID's behalf.
 //
-// The actor must already be a member, mirroring AddChannelMember. Until this
-// check existed the handler took no actor at all, so ANY authenticated caller
-// could add ANYONE to ANY team — and team membership is what
-// AddChannelMember consults to authorize joining an open channel, so this was
-// also the way into every open channel on that team.
+// Anyone may join an OPEN team themselves; that is what open means. Adding
+// somebody else, or joining an invite-only team, requires the actor to be a
+// member already, mirroring AddChannelMember. Until that check existed the
+// handler took no actor at all, so ANY authenticated caller could add ANYONE
+// to ANY team, and team membership is what AddChannelMember consults to
+// authorize joining an open channel.
 func (a *App) AddTeamMember(ctx context.Context, teamID, userID, actorID string) (*model.TeamMember, error) {
-	if err := a.requireTeamMember(ctx, teamID, actorID); err != nil {
+	team, err := a.Store.Team().Get(ctx, teamID)
+	if err != nil {
 		return nil, err
+	}
+	if userID != actorID || team.Type != model.TeamOpen {
+		if authErr := a.requireTeamMember(ctx, teamID, actorID); authErr != nil {
+			return nil, authErr
+		}
+	}
+	if userErr := a.requireUsersExist(ctx, "App.AddTeamMember", []string{userID}); userErr != nil {
+		return nil, userErr
 	}
 
 	member := &model.TeamMember{

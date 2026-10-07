@@ -346,3 +346,31 @@ func TestListEndpoints_EmptyIsAnArray(t *testing.T) {
 		t.Fatalf("body = %s, want []", body)
 	}
 }
+
+func TestAddTeamMember_Rules(t *testing.T) {
+	cases := []struct {
+		name   string
+		teamID string
+		actor  *model.User
+		userID string
+		want   int
+	}{
+		{"join an open team yourself", testTeamID, charlieUser(), thirdUserID, http.StatusCreated},
+		{"add someone else to a team you are not on", testTeamID, charlieUser(), extraUserID, http.StatusForbidden},
+		{"join an invite-only team yourself", inviteTeamID, charlieUser(), thirdUserID, http.StatusForbidden},
+		{"a member adds someone to an invite-only team", inviteTeamID, aliceUser(), thirdUserID, http.StatusCreated},
+		{"add a user who does not exist", testTeamID, testUser(), "019421a0-0000-7000-8000-0000000000ff", http.StatusBadRequest},
+		{"join a team that does not exist", "019421a0-0000-7000-8000-0000000000fe", charlieUser(), thirdUserID, http.StatusNotFound},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a, ms, cleanup := setupTestApp(t)
+			defer cleanup()
+			seedInviteOnlyTeam(ms)
+			w := serveTeamRoute(t, addTeamMember(a), http.MethodPost, tc.teamID, `{"user_id":"`+tc.userID+`"}`, tc.actor)
+			if w.Code != tc.want {
+				t.Fatalf("expected %d, got %d; body: %s", tc.want, w.Code, w.Body.String())
+			}
+		})
+	}
+}

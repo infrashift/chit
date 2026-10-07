@@ -108,7 +108,7 @@ response) include them.
 | PUT | `/teams/{id}` | Update `display_name`, `description`, `type`. `name` cannot change (`400`). | `team_admin` of the team, or `system_admin` |
 | DELETE | `/teams/{id}` | Soft-delete the team and all its channels | `team_admin` of the team, or `system_admin` |
 | GET | `/users/me/teams` | The caller's teams | Any user |
-| POST | `/teams/{id}/members` | Add a user (`{"user_id": ...}`) | Team members |
+| POST | `/teams/{id}/members` | Add a user (`{"user_id": ...}`) | Anyone, to join an open team themselves; otherwise team members |
 | GET | `/teams/{id}/members` | List members | Team members or `system_admin` |
 | DELETE | `/teams/{id}/members/{user_id}` | Remove a member, and remove them from every channel on the team | The member themselves; `system_admin` for anyone else |
 

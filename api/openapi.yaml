@@ -456,8 +456,10 @@ paths:
       operationId: add_team_member
       summary: Add a team member
       description: |
-        Adds a user to a team with the `team_user` role. The caller must be a
-        member of the team. Adding an existing member changes nothing; in
+        Adds a user to a team with the `team_user` role. Anyone may join an
+        open team themselves (`user_id` is their own); adding someone else,
+        or joining an invite-only team, requires the caller to be a member.
+        The user must exist. Adding an existing member changes nothing; in
         particular their roles are kept.
       tags: [Teams]
       parameters:
@@ -486,6 +488,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
     get:
       operationId: get_team_members
       summary: Get team members
