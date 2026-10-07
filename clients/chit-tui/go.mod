@@ -14,6 +14,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.6
 	github.com/gorilla/websocket v1.5.3
 	github.com/mattn/go-isatty v0.0.20
+	github.com/muesli/termenv v0.16.0
 )
 
 require (
@@ -41,7 +42,6 @@ require (
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/reflow v0.3.0 // indirect
-	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/protocolbuffers/txtpbfmt v0.0.0-20260217160748-a481f6a22f94 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect

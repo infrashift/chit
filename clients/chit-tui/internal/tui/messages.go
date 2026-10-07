@@ -52,7 +52,10 @@ type CommandsLoadedMsg struct {
 // UsersLoadedMsg is sent when users are batch-fetched.
 type UsersLoadedMsg struct {
 	Users []*model.User
-	Err   error
+	// Requested are the IDs asked for. Those missing from Users do not
+	// exist as far as the server is concerned and are not asked for again.
+	Requested []string
+	Err       error
 }
 
 // WebSocketEventMsg wraps a WebSocket event for the TUI.
@@ -174,6 +177,9 @@ type PostsTagsLoadedMsg struct {
 type TagAddedToPostMsg struct {
 	PostID string
 	TagID  string
+	// NewTag is set when the tag was created to be applied, so the known
+	// tags can be extended without fetching them all again.
+	NewTag *model.Tag
 	Err    error
 }
 

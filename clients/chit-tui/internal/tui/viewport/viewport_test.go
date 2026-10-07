@@ -489,7 +489,8 @@ func TestSearchTermHighlighting(t *testing.T) {
 		{ID: "p1", UserID: "u1", Content: "the quick brown fox", CreateAt: 1700000000000},
 	})
 
-	plain := testutil.StripANSI(m.View())
+	before := m.View()
+	plain := testutil.StripANSI(before)
 	m.SetSearchTerm("quick")
 
 	if m.SearchTerm() != "quick" {
@@ -499,8 +500,10 @@ func TestSearchTermHighlighting(t *testing.T) {
 	if got := testutil.StripANSI(m.View()); got != plain {
 		t.Errorf("highlighting altered the text:\n%s\nwant:\n%s", got, plain)
 	}
-	// And the styled output must actually differ.
-	if m.View() == plain {
+	// And the styled output must actually differ. This compared against the
+	// stripped text, which glamour's own colors always differ from, so it
+	// could not fail.
+	if m.View() == before {
 		t.Error("no styling was applied for the search term")
 	}
 }
@@ -815,5 +818,43 @@ func TestViewport_PrependPostsSkipsPostsAlreadyShown(t *testing.T) {
 	}
 	if got := strings.Join(ids, ","); got != "p1,p2,p3" {
 		t.Errorf("posts = %s, want p1,p2,p3", got)
+	}
+}
+
+// Matching scanned a lowercased copy with the original's byte offsets. Some
+// characters change byte length when lowercased (the Kelvin sign becomes a
+// plain k), so the offsets drifted and could run past the end.
+func TestSearchHighlightSurvivesLowercasingThatChangesLength(t *testing.T) {
+	m := viewport.New(styles.New(theme.TokyoNight()))
+	m.SetSize(80, 20)
+	m.SetPosts([]*model.Post{
+		{ID: "p1", UserID: "u1", Content: "KKKK then abc", CreateAt: 1700000000000},
+	})
+	before := m.View()
+	plain := testutil.StripANSI(before)
+
+	m.SetSearchTerm("abc")
+
+	if got := testutil.StripANSI(m.View()); got != plain {
+		t.Errorf("highlighting altered the text:\n%s\nwant:\n%s", got, plain)
+	}
+	if m.View() == before {
+		t.Error("the term was not highlighted")
+	}
+}
+
+// The post under the cursor was drawn without the highlight whenever it had
+// just been rendered, which a search always caused.
+func TestSearchHighlightShowsOnTheSelectedPost(t *testing.T) {
+	m := viewport.New(styles.New(theme.TokyoNight()))
+	m.SetSize(80, 20)
+	m.SetPosts([]*model.Post{{ID: "p1", UserID: "u1", Content: "hello world", CreateAt: 1700000000000}})
+	m.Focus()
+	before := m.View()
+
+	m.SetSearchTerm("hello")
+
+	if m.View() == before {
+		t.Error("the selected post lost the highlight")
 	}
 }

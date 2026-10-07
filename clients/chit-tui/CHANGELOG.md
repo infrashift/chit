@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Slow channel switches and thread opens** — every channel switch and thread open or close re-rendered the whole loaded history through glamour, though the pane size had not changed. Opening and closing a thread with 300 posts loaded took 113ms; it now takes about 4ms. Tags for a page of history are applied in one redraw instead of one per post, and moving the cursor no longer re-strips the whole history
+- **Crash when searching** — a search highlight could crash the client on text containing characters that change length when lowercased (such as the Kelvin sign), and the post under the cursor was drawn without the highlight
+- **Repeated requests** — authors the server does not return (deleted users) were asked for on every post and page load; DM member rows were refetched for every conversation on each DM event; the whole tag list was refetched after every tagging
 - **Late responses overwrote the screen** — a slow history load for the channel just left replaced the one opened; likewise an earlier thread, search or user search. Each response is now dropped unless it is for what is on screen
 - **Replies typed while a thread loads** went to the channel as top-level posts; they are now replies. A failed thread load returns to the channel instead of leaving an empty pane
 - **Forgotten edits** — an edit started and abandoned was applied to the next message sent anywhere. Switching channel, opening a thread or `Esc` now cancels it, and the action bar shows "editing" while one is open

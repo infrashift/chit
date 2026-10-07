@@ -117,12 +117,20 @@ func (m *Model) SetStyles(s styles.Styles) {
 	m.updateContent()
 }
 
-// SetSize sets the pane dimensions.
+// SetSize sets the pane dimensions. Posts are wrapped to the width, so only
+// a width change re-renders them.
 func (m *Model) SetSize(w, h int) {
+	if w == m.width && h == m.height {
+		return
+	}
+	widthChanged := w != m.width
 	m.width = w
 	m.height = h
 	m.viewport.Width = w - 4
 	m.viewport.Height = max(h-2, 3)
+	if !widthChanged {
+		return
+	}
 	m.renderer = nil
 	m.cache = make(map[string]string)
 	m.updateContent()

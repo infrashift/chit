@@ -78,7 +78,7 @@ func FetchCommands(client api.ChitClient) tea.Cmd {
 func FetchUsersByIDs(client api.ChitClient, ids []string) tea.Cmd {
 	return func() tea.Msg {
 		users, err := client.GetUsersByIDs(context.Background(), ids)
-		return UsersLoadedMsg{Users: users, Err: err}
+		return UsersLoadedMsg{Users: users, Requested: ids, Err: err}
 	}
 }
 
@@ -321,10 +321,7 @@ func CreateTagAndApplyCmd(client api.ChitClient, name, postID string) tea.Cmd {
 		if err != nil {
 			return TagCreatedMsg{Tag: nil, Err: err}
 		}
-		applyErr := client.AddTagToPost(context.Background(), postID, tag.ID)
-		if applyErr != nil {
-			return TagAddedToPostMsg{PostID: postID, TagID: tag.ID, Err: applyErr}
-		}
-		return TagAddedToPostMsg{PostID: postID, TagID: tag.ID, Err: nil}
+		err = client.AddTagToPost(context.Background(), postID, tag.ID)
+		return TagAddedToPostMsg{PostID: postID, TagID: tag.ID, NewTag: tag, Err: err}
 	}
 }

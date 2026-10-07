@@ -142,6 +142,8 @@ type Model struct {
 	// searchTerm is the last submitted search, kept so a chosen result can
 	// be highlighted in the history.
 	searchTerm string
+	// usersRequested marks user IDs already looked up.
+	usersRequested map[string]bool
 	// commandAuthors names the pseudo-author of each command's output, by
 	// user ID; commandResponses numbers the outputs so each has its own ID.
 	commandAuthors   map[string]string
@@ -229,6 +231,7 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 		threadCounts:   make(map[string]int),
 		postTags:       make(map[string][]*model.Tag),
 		commandAuthors: make(map[string]string),
+		usersRequested: make(map[string]bool),
 		appState:       state,
 		tokenStore:     tokenStore,
 		kratosClient:   kratosClient,
@@ -632,6 +635,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case UsersLoadedMsg:
 		if msg.Err != nil {
+			// Worth asking again next time, unlike IDs the server answered.
+			for _, id := range msg.Requested {
+				delete(m.usersRequested, id)
+			}
 			return m, m.setError(msg.Err)
 		}
 		for _, u := range msg.Users {
@@ -961,8 +968,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// DM channels need their members for unread counts. This is still one
 		// request each, but the DM list is small and bounded by conversations
 		// the user actually has, unlike the channel list.
+		// Every DM event reloads this list, so only conversations not seen
+		// before are fetched.
 		for _, ch := range msg.Channels {
-			cmds = append(cmds, FetchChannelMembers(m.client, ch.ID))
+			if _, have := m.channelMembers[ch.ID]; !have {
+				cmds = append(cmds, FetchChannelMembers(m.client, ch.ID))
+			}
 		}
 		if fetchCmd := m.fetchMissingUsers(); fetchCmd != nil {
 			cmds = append(cmds, fetchCmd)
@@ -1212,8 +1223,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			return m, m.setError(msg.Err)
 		}
+		if msg.NewTag != nil && m.tagByName(msg.NewTag.Name) == nil {
+			m.allTags = append(m.allTags, msg.NewTag)
+		}
 		cmds = append(cmds, FetchPostTags(m.client, msg.PostID))
-		cmds = append(cmds, FetchAllTags(m.client))
 		return m, tea.Batch(cmds...)
 
 	case TagRemovedFromPostMsg:
@@ -1331,14 +1344,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// channel, but it should not vanish silently either.
 			return m, m.setError(msg.Err)
 		}
+		byPost := make(map[string][]string, len(msg.Tags))
 		for postID, tags := range msg.Tags {
 			m.postTags[postID] = tags
 			names := make([]string, 0, len(tags))
 			for _, t := range tags {
 				names = append(names, t.Name)
 			}
-			m.viewport.SetPostTags(postID, names)
+			byPost[postID] = names
 		}
+		m.viewport.SetPostsTags(byPost)
 		m.thread.SetPostTags(m.postTags)
 		return m, nil
 
@@ -1561,9 +1576,17 @@ func (m *Model) syncActionBar() {
 }
 
 func (m *Model) setFocus(area FocusArea) tea.Cmd {
-	m.viewport.Blur()
-	m.input.Blur()
-	m.thread.Blur()
+	// Blurring the pane about to be focused again would redraw it twice for
+	// nothing; the history pane redraws its whole content to do it.
+	if area != FocusViewport {
+		m.viewport.Blur()
+	}
+	if area != FocusInput {
+		m.input.Blur()
+	}
+	if area != FocusThread {
+		m.thread.Blur()
+	}
 	for _, o := range m.overlays() {
 		o.blur()
 	}
@@ -2125,10 +2148,14 @@ func (m *Model) resolvePostUsers(posts []*model.Post) {
 	}
 }
 
+// fetchMissingUsers looks up the authors still unknown. Each is asked for
+// once: one the server does not return (a deleted user) stays unknown,
+// rather than being asked for again on every post, page and DM load.
 func (m Model) fetchMissingUsers() tea.Cmd {
 	var missing []string
 	for id, u := range m.users {
-		if u == nil {
+		if u == nil && !m.usersRequested[id] {
+			m.usersRequested[id] = true
 			missing = append(missing, id)
 		}
 	}
