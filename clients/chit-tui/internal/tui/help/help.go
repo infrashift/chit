@@ -72,7 +72,7 @@ var keyBindings = []binding{
 	{"d d", "delete your own post, pressing d twice (history pane)"},
 	{"p", "pin or unpin a post (history pane)"},
 	{"esc", "close overlay / leave thread / back to history"},
-	{"?", "this help (history pane)"},
+	{"?", "this help (history or thread pane)"},
 	{"ctrl+c", "quit"},
 }
 

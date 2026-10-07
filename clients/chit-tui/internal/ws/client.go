@@ -57,7 +57,7 @@ type wsClient struct {
 	mu    sync.Mutex
 	token string
 	// conn is the live connection, if any. Only the session's run loop
-	// reads from it; Close and Send reach it through mu.
+	// reads from it; Close reaches it through mu.
 	conn *websocket.Conn
 	// stop is closed to end the current session. It is nil while closed,
 	// which is what lets Close be called twice and Connect be called again.
