@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Signing out kept the session** — whoever signed in next saw the previous user's channel and history. Signing out now starts from nothing; after an expiry, the same user keeps their place and the open channel is re-read, while anyone else starts fresh
+- **Crash on command output** — a slash command's response crashed the client when a post's author had not loaded (a deleted user, or a failed lookup)
+- **Repeated command output** — a second `/help` showed the first one's text, and output lost its `/slug` author whenever users loaded
+- **Tests touched the real config** — the suite saved a theme to `~/.config/chit/config.toml` and deleted `~/.config/chit-tui/session.json`; it now runs against a temporary home
 - **Real-time updates after signing back in** — signing out closed the WebSocket client for good: the next session showed "connected" but received nothing, and a second sign-out crashed the client. Each sign-in now starts a fresh session on the same listeners
 - **Dead links that looked alive** — a connection left half-open by sleep or a NAT timeout stayed "connected" forever. The client now pings, treats a minute of silence as a drop, and reconnects
 - **Busy redial after a long outage** — the reconnect delay overflowed to a negative wait after about 15 minutes and the client redialed in a tight loop. The delay now stays capped at 30s, with jitter

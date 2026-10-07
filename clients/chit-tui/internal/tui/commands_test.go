@@ -30,6 +30,7 @@ type mockClient struct {
 	postTags        []*model.Tag
 	lastCreatedPost *model.Post
 	channelsFetched []string // team IDs passed to GetMyChannels
+	postsFetched    []string // channel IDs passed to GetChannelPosts
 	threads         []*model.ThreadResponse
 	// followCalls records (rootID, following) so tests can tell an unfollow
 	// that reached the server from one that only left the list.
@@ -88,7 +89,8 @@ func (m *mockClient) GetMyChannels(_ context.Context, teamID string) ([]*model.C
 	m.channelsFetched = append(m.channelsFetched, teamID)
 	return m.channels, m.err
 }
-func (m *mockClient) GetChannelPosts(_ context.Context, _ string, _, _ int) (*model.PostList, error) {
+func (m *mockClient) GetChannelPosts(_ context.Context, channelID string, _, _ int) (*model.PostList, error) {
+	m.postsFetched = append(m.postsFetched, channelID)
 	return m.posts, m.err
 }
 func (m *mockClient) CreatePost(_ context.Context, p *model.Post) (*model.Post, error) {

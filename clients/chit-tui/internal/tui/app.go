@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 	"time"
 
@@ -142,6 +143,13 @@ type Model struct {
 	// searchTerm is the last submitted search, kept so a chosen result can
 	// be highlighted in the history.
 	searchTerm string
+	// commandAuthors names the pseudo-author of each command's output, by
+	// user ID; commandResponses numbers the outputs so each has its own ID.
+	commandAuthors   map[string]string
+	commandResponses int
+	// expiredUserID is who was signed in when the session expired. Their
+	// state is kept for the re-login, which may not be theirs.
+	expiredUserID string
 }
 
 // Connection-state notices. They travel through the same transient status
@@ -212,6 +220,7 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 		channelMembers: make(map[string][]*model.ChannelMember),
 		threadCounts:   make(map[string]int),
 		postTags:       make(map[string][]*model.Tag),
+		commandAuthors: make(map[string]string),
 		appState:       state,
 		tokenStore:     tokenStore,
 		kratosClient:   kratosClient,
@@ -468,6 +477,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case UserLoadedMsg:
 		if msg.Err != nil {
 			return m, m.setError(msg.Err)
+		}
+		if m.expiredUserID != "" {
+			return m.resumeAfterReLogin(msg.User)
 		}
 		m.me = msg.User
 		m.users[msg.User.ID] = msg.User
@@ -1812,14 +1824,18 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 		slug, _ := evt.Data["command_slug"].(string)
 
 		if text != "" && m.activeChan != nil && channelID == m.activeChan.ID {
+			author := m.commandAuthor(slug)
+			// Each response needs its own ID: the render cache is keyed by
+			// it, so a reused one showed the first output again.
+			m.commandResponses++
 			m.viewport.AppendPost(&model.Post{
-				ID:        commandResponseUserID + ":" + slug,
+				ID:        fmt.Sprintf("%s:%d", author, m.commandResponses),
 				ChannelID: channelID,
-				UserID:    commandResponseUserID,
+				UserID:    author,
 				Content:   text,
 				CreateAt:  time.Now().UnixMilli(),
 			})
-			m.registerCommandResponseAuthor(slug)
+			m.viewport.SetUsernames(m.usernameMap())
 		}
 
 	case model.WebSocketEventThreadUpdated:
@@ -2025,108 +2041,17 @@ func (m Model) fetchMissingUsers() tea.Cmd {
 	return FetchUsersByIDs(m.client, missing)
 }
 
+// usernameMap names every author known so far: real users that have loaded
+// (lookups still in flight are nil and skipped) and command pseudo-authors.
 func (m Model) usernameMap() map[string]string {
-	names := make(map[string]string)
+	names := make(map[string]string, len(m.users)+len(m.commandAuthors))
 	for id, u := range m.users {
 		if u != nil {
 			names[id] = u.Username
 		}
 	}
+	maps.Copy(names, m.commandAuthors)
 	return names
-}
-
-func (m Model) updateLogin(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// The listeners are one chain each, re-armed by every message they
-	// deliver. Whatever arrives while signed out is stale, but dropping it
-	// without re-arming would leave the next session deaf.
-	switch msg.(type) {
-	case WebSocketEventMsg:
-		return m, ListenWebSocket(m.wsClient)
-	case WSStateMsg:
-		return m, ListenWSState(m.wsClient)
-	}
-
-	// Ctrl+C quits from login screen too.
-	if keyMsg, ok := msg.(tea.KeyMsg); ok && key.Matches(keyMsg, m.keys.Quit) {
-		return m, tea.Quit
-	}
-
-	// Handle login success from async command.
-	if successMsg, ok := msg.(login.LoginSuccessMsg); ok {
-		return m.handleLoginSuccess(successMsg)
-	}
-
-	var cmd tea.Cmd
-	m.loginModel, cmd = m.loginModel.Update(msg)
-	return m, cmd
-}
-
-func (m Model) handleLoginSuccess(msg login.LoginSuccessMsg) (tea.Model, tea.Cmd) {
-	if m.tokenStore != nil {
-		m.tokenStore.Set(msg.Token)
-	}
-	if m.wsClient != nil {
-		m.wsClient.SetToken(msg.Token)
-	}
-
-	// Persist session to disk.
-	serverURL := ""
-	if m.cfg != nil {
-		serverURL = m.cfg.ServerURL
-	}
-	// A failed save means this login will not survive a restart. It does not
-	// stop the session working now, so it is a warning rather than a failure.
-	var saveCmd tea.Cmd
-	if err := m.sessionStore.Save(auth.StoredSession{
-		ServerURL: serverURL,
-		Token:     msg.Token,
-		ExpiresAt: msg.ExpiresAt,
-	}); err != nil {
-		saveCmd = m.setError(fmt.Errorf("signed in, but the session could not be saved: %w", err))
-	}
-
-	m.appState = AppStateRunning
-	return m, tea.Batch(m.initRunning(), saveCmd)
-}
-
-func (m Model) handleAuthExpired() (tea.Model, tea.Cmd) {
-	m.appState = AppStateReLogin
-	m.wsConnected = false
-	m.loginModel.Reset()
-	// A stored token that cannot be cleared would be retried on next start
-	// and fail the same way, so this is worth knowing about.
-	if err := m.sessionStore.Clear(); err != nil {
-		slog.Warn("could not clear the stored session", "error", err)
-	}
-
-	// Close existing WS connection.
-	if m.wsClient != nil {
-		_ = m.wsClient.Close()
-	}
-
-	return m, nil
-}
-
-func (m Model) handleLogout() (tea.Model, tea.Cmd) {
-	if m.tokenStore != nil {
-		m.tokenStore.Set("")
-	}
-	// Logging out and leaving the token on disk would sign the user straight
-	// back in on next start, which is the opposite of what they asked for.
-	var clearCmd tea.Cmd
-	if err := m.sessionStore.Clear(); err != nil {
-		clearCmd = m.setError(fmt.Errorf("signed out, but the stored session remains: %w", err))
-	}
-
-	m.appState = AppStateLogin
-	m.wsConnected = false
-	m.loginModel.Reset()
-
-	if m.wsClient != nil {
-		_ = m.wsClient.Close()
-	}
-
-	return m, clearCmd
 }
 
 // activeChannelDisplayName resolves the human-readable name of the active
@@ -2211,24 +2136,22 @@ func splitLines(s string) []string {
 	return lines
 }
 
-// commandResponseUserID labels ephemeral command output. It is not a real
-// user, so it can never collide with one: user IDs are UUIDs.
+// commandResponseUserID prefixes the pseudo-authors of ephemeral command
+// output. It is not a real user and is never looked up.
 const commandResponseUserID = "chit:command-response"
 
-// registerCommandResponseAuthor names the pseudo-author after the command that
-// produced the output, so a reply reads as coming from "/help" rather than
-// from whoever happened to type it.
-func (m *Model) registerCommandResponseAuthor(slug string) {
+// commandAuthor registers the pseudo-author for a command's output and
+// returns its user ID. The author is named after the command, so a reply
+// reads as coming from "/help" rather than from whoever typed it, and each
+// command gets its own so earlier output keeps its name.
+func (m *Model) commandAuthor(slug string) string {
 	name := "/" + slug
 	if slug == "" {
 		name = "command"
 	}
-	names := make(map[string]string, len(m.users)+1)
-	for id, u := range m.users {
-		names[id] = u.Username
-	}
-	names[commandResponseUserID] = name
-	m.viewport.SetUsernames(names)
+	id := commandResponseUserID + ":" + name
+	m.commandAuthors[id] = name
+	return id
 }
 
 // errorCarrier is implemented by every message that reports a failed request.
