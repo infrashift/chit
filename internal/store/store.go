@@ -67,6 +67,11 @@ type ChannelStore interface {
 	GetDirectChannelsForUser(ctx context.Context, userID string) ([]*model.Channel, error)
 	IncrementMsgCount(ctx context.Context, channelID string, timestamp int64) error
 	IncrementMentionCount(ctx context.Context, channelID, userID string) error
+	// DeleteForTeam soft-deletes every channel on a team, returning their IDs.
+	DeleteForTeam(ctx context.Context, teamID string, deleteAt int64) ([]string, error)
+	// RemoveMemberFromTeam removes a user from every channel on a team,
+	// returning the channels they were removed from.
+	RemoveMemberFromTeam(ctx context.Context, teamID, userID string) ([]string, error)
 }
 
 // PostStore handles persistence for posts (messages).

@@ -155,15 +155,16 @@ func (a *App) DeleteChannel(ctx context.Context, id, actorID string) error {
 	if err := a.Store.Channel().Delete(ctx, id, model.GetMillis()); err != nil {
 		return err
 	}
-
-	a.publishEvent(ctx, &model.WebSocketEvent{
-		Event: model.WebSocketEventChannelDeleted,
-		Data:  map[string]any{"channel_id": id},
-		Broadcast: &model.WebSocketBroadcast{
-			ChannelID: id,
-		},
-	}, &pubsub.EventEnvelope{Event: model.WebSocketEventChannelDeleted, ChannelID: id})
+	a.publishChannelDeleted(ctx, id)
 	return nil
+}
+
+func (a *App) publishChannelDeleted(ctx context.Context, channelID string) {
+	a.publishEvent(ctx, &model.WebSocketEvent{
+		Event:     model.WebSocketEventChannelDeleted,
+		Data:      map[string]any{"channel_id": channelID},
+		Broadcast: &model.WebSocketBroadcast{ChannelID: channelID},
+	}, &pubsub.EventEnvelope{Event: model.WebSocketEventChannelDeleted, ChannelID: channelID})
 }
 
 // GetChannelsForTeam retrieves channels for a team, requiring the caller to be
@@ -376,17 +377,16 @@ func (a *App) RemoveChannelMember(ctx context.Context, channelID, userID, actorI
 	a.Hub.NotifyMembershipChanged(userID, channelID, false)
 
 	_ = a.DeleteKetoRelation(ctx, model.KetoNamespaceChannel, channelID, model.KetoRelationMember, userID)
+	a.publishUserRemoved(ctx, channelID, userID)
+	return nil
+}
 
+func (a *App) publishUserRemoved(ctx context.Context, channelID, userID string) {
 	a.publishEvent(ctx, &model.WebSocketEvent{
-		Event: model.WebSocketEventUserRemoved,
-		Data: map[string]any{
-			"channel_id": channelID,
-			"user_id":    userID,
-		},
+		Event:     model.WebSocketEventUserRemoved,
+		Data:      map[string]any{"channel_id": channelID, "user_id": userID},
 		Broadcast: &model.WebSocketBroadcast{ChannelID: channelID},
 	}, &pubsub.EventEnvelope{Event: model.WebSocketEventUserRemoved, ChannelID: channelID})
-
-	return nil
 }
 
 // GetChannelMembers retrieves members of a channel, requiring the caller to be

@@ -472,6 +472,9 @@ func (s *ChannelStore) GetMembers(_ context.Context, channelID string, page, per
 func (s *ChannelStore) GetMember(_ context.Context, channelID, userID string) (*model.ChannelMember, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if _, ok := s.live(channelID); !ok {
+		return nil, notFound("ChannelStore.GetMember", channelID+"/"+userID)
+	}
 	for _, m := range s.members[channelID] {
 		if m.UserID == userID {
 			return cp(m), nil
@@ -485,7 +488,7 @@ func (s *ChannelStore) GetChannelIDsForUser(_ context.Context, userID string) ([
 	defer s.mu.RUnlock()
 	var ids []string
 	for channelID := range s.members {
-		if s.isMember(channelID, userID) {
+		if _, ok := s.live(channelID); ok && s.isMember(channelID, userID) {
 			ids = append(ids, channelID)
 		}
 	}
@@ -553,6 +556,32 @@ func (s *ChannelStore) GetDirectChannelsForUser(_ context.Context, userID string
 		}
 	}
 	return out, nil
+}
+
+func (s *ChannelStore) DeleteForTeam(_ context.Context, teamID string, deleteAt int64) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var ids []string
+	for _, c := range s.byID {
+		if c.TeamID == teamID && c.DeleteAt == 0 {
+			c.DeleteAt = deleteAt
+			ids = append(ids, c.ID)
+		}
+	}
+	return ids, nil
+}
+
+func (s *ChannelStore) RemoveMemberFromTeam(_ context.Context, teamID, userID string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var ids []string
+	for _, c := range s.byID {
+		if c.TeamID == teamID && s.isMember(c.ID, userID) {
+			s.members[c.ID] = slices.DeleteFunc(s.members[c.ID], func(m *model.ChannelMember) bool { return m.UserID == userID })
+			ids = append(ids, c.ID)
+		}
+	}
+	return ids, nil
 }
 
 func (s *ChannelStore) IncrementMsgCount(_ context.Context, channelID string, at int64) error {

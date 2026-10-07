@@ -173,3 +173,68 @@ func TestChannelStoreIntegration_GetChannelsForTeamListsOnlyOpen(t *testing.T) {
 		t.Errorf("got %d channels, want only the open one", len(channels))
 	}
 }
+
+// A deleted channel has no members, as far as access checks are concerned.
+func TestChannelStoreIntegration_DeletedChannelHasNoMembers(t *testing.T) {
+	ss := testStore(t)
+	user, channel := newTestChannelFixture(t, ss)
+	if _, err := ss.Channel().SaveMember(t.Context(), &model.ChannelMember{ChannelID: channel.ID, UserID: user.ID}); err != nil {
+		t.Fatalf("SaveMember: %v", err)
+	}
+	if err := ss.Channel().Delete(t.Context(), channel.ID, model.GetMillis()); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	if _, err := ss.Channel().GetMember(t.Context(), channel.ID, user.ID); err == nil {
+		t.Error("GetMember found a member of a deleted channel")
+	}
+	ids, err := ss.Channel().GetChannelIDsForUser(t.Context(), user.ID)
+	if err != nil {
+		t.Fatalf("GetChannelIDsForUser: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Errorf("GetChannelIDsForUser listed a deleted channel: %v", ids)
+	}
+}
+
+func TestChannelStoreIntegration_TeamWideMembershipAndDeletion(t *testing.T) {
+	ss := testStore(t)
+	user, channel := newTestChannelFixture(t, ss)
+	otherTeam, err := ss.Team().Save(t.Context(), &model.Team{Name: "other-team", DisplayName: "Other", Type: model.TeamOpen, CreatorID: user.ID})
+	if err != nil {
+		t.Fatalf("save team: %v", err)
+	}
+	elsewhere, err := ss.Channel().Save(t.Context(), &model.Channel{
+		TeamID: otherTeam.ID, Name: "elsewhere", DisplayName: "Elsewhere", Type: model.ChannelOpen, CreatorID: user.ID,
+	})
+	if err != nil {
+		t.Fatalf("save channel: %v", err)
+	}
+	for _, id := range []string{channel.ID, elsewhere.ID} {
+		if _, err = ss.Channel().SaveMember(t.Context(), &model.ChannelMember{ChannelID: id, UserID: user.ID}); err != nil {
+			t.Fatalf("SaveMember: %v", err)
+		}
+	}
+
+	removed, err := ss.Channel().RemoveMemberFromTeam(t.Context(), channel.TeamID, user.ID)
+	if err != nil {
+		t.Fatalf("RemoveMemberFromTeam: %v", err)
+	}
+	if len(removed) != 1 || removed[0] != channel.ID {
+		t.Errorf("removed from %v, want only %s", removed, channel.ID)
+	}
+	if _, err = ss.Channel().GetMember(t.Context(), elsewhere.ID, user.ID); err != nil {
+		t.Errorf("membership on another team was removed: %v", err)
+	}
+
+	deleted, err := ss.Channel().DeleteForTeam(t.Context(), otherTeam.ID, model.GetMillis())
+	if err != nil {
+		t.Fatalf("DeleteForTeam: %v", err)
+	}
+	if len(deleted) != 1 || deleted[0] != elsewhere.ID {
+		t.Errorf("deleted %v, want only %s", deleted, elsewhere.ID)
+	}
+	if _, err = ss.Channel().Get(t.Context(), channel.ID); err != nil {
+		t.Errorf("a channel on another team was deleted: %v", err)
+	}
+}

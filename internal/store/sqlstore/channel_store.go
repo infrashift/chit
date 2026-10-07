@@ -109,6 +109,31 @@ func (s *SqlChannelStore) Delete(ctx context.Context, id string, deleteAt int64)
 	return nil
 }
 
+// DeleteForTeam soft-deletes every channel on a team, returning their IDs.
+func (s *SqlChannelStore) DeleteForTeam(ctx context.Context, teamID string, deleteAt int64) ([]string, error) {
+	rows, err := s.sqlStore.pool.Query(ctx,
+		`UPDATE channels SET delete_at = $1, update_at = $1 WHERE team_id = $2 AND delete_at = 0 RETURNING id`,
+		deleteAt, teamID)
+	if err != nil {
+		return nil, fmt.Errorf("delete team channels: %w", err)
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
+// RemoveMemberFromTeam removes userID from every channel on teamID, returning
+// the channels they were removed from.
+func (s *SqlChannelStore) RemoveMemberFromTeam(ctx context.Context, teamID, userID string) ([]string, error) {
+	rows, err := s.sqlStore.pool.Query(ctx,
+		`DELETE FROM channel_members cm USING channels c
+		WHERE c.id = cm.channel_id AND c.team_id = $1 AND cm.user_id = $2
+		RETURNING cm.channel_id`,
+		teamID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("remove team channel memberships: %w", err)
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
 // GetChannelsForTeam lists a team's open channels: the ones any team member
 // may browse and join. Private channels are listed only to their members, by
 // GetChannelsForUser.
@@ -193,7 +218,9 @@ func (s *SqlChannelStore) GetMembers(ctx context.Context, channelID string, page
 }
 
 func (s *SqlChannelStore) GetChannelIDsForUser(ctx context.Context, userID string) ([]string, error) {
-	query := `SELECT channel_id FROM channel_members WHERE user_id = $1`
+	query := `SELECT cm.channel_id FROM channel_members cm
+		INNER JOIN channels c ON c.id = cm.channel_id AND c.delete_at = 0
+		WHERE cm.user_id = $1`
 
 	rows, err := s.sqlStore.pool.Query(ctx, query, userID)
 	if err != nil {
@@ -212,9 +239,14 @@ func (s *SqlChannelStore) GetChannelIDsForUser(ctx context.Context, userID strin
 	return channelIDs, rows.Err()
 }
 
+// GetMember returns userID's membership of channelID. A deleted channel has
+// no members: this is the access check, and a member of a deleted channel
+// could otherwise keep posting to it and reading its history.
 func (s *SqlChannelStore) GetMember(ctx context.Context, channelID, userID string) (*model.ChannelMember, error) {
-	query := `SELECT channel_id, user_id, roles, last_viewed_at, msg_count, mention_count, notify_props, create_at
-		FROM channel_members WHERE channel_id = $1 AND user_id = $2`
+	query := `SELECT cm.channel_id, cm.user_id, cm.roles, cm.last_viewed_at, cm.msg_count, cm.mention_count, cm.notify_props, cm.create_at
+		FROM channel_members cm
+		INNER JOIN channels c ON c.id = cm.channel_id AND c.delete_at = 0
+		WHERE cm.channel_id = $1 AND cm.user_id = $2`
 
 	m := &model.ChannelMember{}
 	err := s.sqlStore.pool.QueryRow(ctx, query, channelID, userID).Scan(

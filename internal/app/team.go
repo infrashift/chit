@@ -82,7 +82,21 @@ func (a *App) DeleteTeam(ctx context.Context, id string, actor *model.User) erro
 	if err := a.requireTeamAdmin(ctx, id, actor, "App.DeleteTeam"); err != nil {
 		return err
 	}
-	return a.Store.Team().Delete(ctx, id, model.GetMillis())
+	now := model.GetMillis()
+	if err := a.Store.Team().Delete(ctx, id, now); err != nil {
+		return err
+	}
+	// A deleted team's channels go with it. Left alone they stayed fully
+	// usable by their members, reachable by ID, on a team that no longer
+	// existed.
+	channelIDs, err := a.Store.Channel().DeleteForTeam(ctx, id, now)
+	if err != nil {
+		return err
+	}
+	for _, channelID := range channelIDs {
+		a.publishChannelDeleted(ctx, channelID)
+	}
+	return nil
 }
 
 // GetAllTeams lists the teams actor can see: every team for a system admin,
@@ -143,6 +157,19 @@ func (a *App) RemoveTeamMember(ctx context.Context, teamID, userID, actorID stri
 		return err
 	}
 	a.Hub.NotifyTeamMembershipChanged(userID, teamID, false)
+
+	// Channel membership is the access check, so leaving the team must
+	// leave its channels too. It did not: a user removed from a team kept
+	// reading and posting in every channel they had been in.
+	channelIDs, err := a.Store.Channel().RemoveMemberFromTeam(ctx, teamID, userID)
+	if err != nil {
+		return err
+	}
+	for _, channelID := range channelIDs {
+		a.Hub.NotifyMembershipChanged(userID, channelID, false)
+		_ = a.DeleteKetoRelation(ctx, model.KetoNamespaceChannel, channelID, model.KetoRelationMember, userID)
+		a.publishUserRemoved(ctx, channelID, userID)
+	}
 	return nil
 }
 
