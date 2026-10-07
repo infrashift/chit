@@ -34,6 +34,9 @@ func NewValidationMiddleware(specBytes []byte) (func(http.Handler) http.Handler,
 			AuthenticationFunc: openapi3filter.NoopAuthenticationFunc,
 		},
 		ErrorHandler: validationErrorHandler,
+		// The spec's only server is the relative "/api/v1", so there is no
+		// host to validate; the warning about it was printed on every start.
+		SilenceServersWarning: true,
 	})
 
 	return mw, nil
