@@ -282,7 +282,12 @@ func (c *httpClient) SearchPosts(ctx context.Context, channelID, term string, ta
 
 func (c *httpClient) SearchPostsEverywhere(ctx context.Context, term string, tagIDs []string) (*model.PostList, error) {
 	var pl model.PostList
-	body := map[string]any{"terms": term, "tag_ids": tagIDs}
+	// Like SearchPosts, tag_ids is sent only when there are some; nil
+	// marshals as null.
+	body := map[string]any{"terms": term}
+	if len(tagIDs) > 0 {
+		body["tag_ids"] = tagIDs
+	}
 	err := c.post(ctx, "/posts/search", body, &pl)
 	return &pl, err
 }
