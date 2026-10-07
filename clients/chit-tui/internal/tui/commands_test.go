@@ -2,6 +2,7 @@ package tui_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
@@ -31,6 +32,9 @@ type mockClient struct {
 	lastCreatedPost *model.Post
 	channelsFetched []string // team IDs passed to GetMyChannels
 	threads         []*model.ThreadResponse
+	directThreads   []*model.ThreadResponse
+	// teamThreadFetches records the team IDs the team inbox was fetched for.
+	teamThreadFetches []string
 	// followCalls records (rootID, following) so tests can tell an unfollow
 	// that reached the server from one that only left the list.
 	followCalls []followCall
@@ -64,19 +68,27 @@ func (m *mockClient) UpdateMe(_ context.Context, patch *model.User) (*model.User
 	m.me = &updated
 	return m.me, nil
 }
-func (m *mockClient) GetMyThreads(_ context.Context, _ string, _, _ int) (*model.UserThreadList, error) {
+func (m *mockClient) GetMyThreads(_ context.Context, teamID string, _, _ int) (*model.UserThreadList, error) {
+	m.teamThreadFetches = append(m.teamThreadFetches, teamID)
 	if m.err != nil {
 		return nil, m.err
 	}
 	return &model.UserThreadList{Threads: m.threads, Total: int64(len(m.threads))}, nil
 }
 
-func (m *mockClient) MarkThreadRead(_ context.Context, _, threadID string) error {
+func (m *mockClient) GetMyDirectThreads(_ context.Context, _, _ int) (*model.UserThreadList, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &model.UserThreadList{Threads: m.directThreads, Total: int64(len(m.directThreads))}, nil
+}
+
+func (m *mockClient) MarkThreadRead(_ context.Context, threadID string) error {
 	m.readThreads = append(m.readThreads, threadID)
 	return m.err
 }
 
-func (m *mockClient) SetThreadFollowing(_ context.Context, _, threadID string, following bool) error {
+func (m *mockClient) SetThreadFollowing(_ context.Context, threadID string, following bool) error {
 	m.followCalls = append(m.followCalls, followCall{RootID: threadID, Following: following})
 	return m.err
 }
@@ -470,5 +482,45 @@ func TestAddChannelMembersCmd_ReturnsAllMembersAddedMsg(t *testing.T) {
 	}
 	if loaded.ChannelID != "c1" {
 		t.Errorf("channelID = %q, want c1", loaded.ChannelID)
+	}
+}
+
+// The inbox is two lists: the active team's threads, and those in direct and
+// group channels, which belong to no team and so are never in the first.
+func TestFetchMyThreads_LoadsTeamAndDirectThreads(t *testing.T) {
+	client := &mockClient{
+		threads:       []*model.ThreadResponse{{Thread: &model.Thread{PostID: "team"}}},
+		directThreads: []*model.ThreadResponse{{Thread: &model.Thread{PostID: "dm"}}},
+	}
+	msg, ok := tui.FetchMyThreads(client, "t1")().(tui.ThreadsLoadedMsg)
+	if !ok || msg.Err != nil {
+		t.Fatalf("got %+v", msg)
+	}
+	if len(msg.Threads) != 1 || msg.Threads[0].Thread.PostID != "team" ||
+		len(msg.Direct) != 1 || msg.Direct[0].Thread.PostID != "dm" {
+		t.Errorf("team=%+v direct=%+v", msg.Threads, msg.Direct)
+	}
+}
+
+// With no team there is no team inbox to ask for, but DM threads still are.
+func TestFetchMyThreads_WithoutATeamLoadsOnlyDirectThreads(t *testing.T) {
+	client := &mockClient{directThreads: []*model.ThreadResponse{{Thread: &model.Thread{PostID: "dm"}}}}
+	msg := tui.FetchMyThreads(client, "")().(tui.ThreadsLoadedMsg)
+	if len(client.teamThreadFetches) != 0 {
+		t.Errorf("fetched a team inbox with no team: %v", client.teamThreadFetches)
+	}
+	if msg.Err != nil || len(msg.Direct) != 1 {
+		t.Errorf("got %+v", msg)
+	}
+}
+
+// Either list failing fails the load, so the overlay reports it rather than
+// showing half an inbox as if it were all of it.
+func TestFetchMyThreads_ReportsAFailure(t *testing.T) {
+	for _, teamID := range []string{"t1", ""} {
+		client := &mockClient{err: errors.New("boom")}
+		if msg := tui.FetchMyThreads(client, teamID)().(tui.ThreadsLoadedMsg); msg.Err == nil {
+			t.Errorf("team %q: the failure was not reported", teamID)
+		}
 	}
 }

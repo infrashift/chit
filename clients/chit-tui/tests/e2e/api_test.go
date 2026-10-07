@@ -408,3 +408,46 @@ func mustGetTownSquareID(t *testing.T, client api.ChitClient) string {
 	t.Fatal("town-square not found")
 	return ""
 }
+
+// A reply in a DM puts the thread in the direct-thread inbox of whoever
+// replied, and never in a team's.
+func TestDirectThreadInbox(t *testing.T) {
+	alice := newTestClient(aliceKratosID)
+	bob := newTestClient(bobKratosID)
+	ctx := context.Background()
+
+	aliceUser, err := alice.GetMe(ctx)
+	if err != nil {
+		t.Fatalf("GetMe (alice): %v", err)
+	}
+	bobUser, err := bob.GetMe(ctx)
+	if err != nil {
+		t.Fatalf("GetMe (bob): %v", err)
+	}
+	dm, err := alice.CreateDirectChannel(ctx, aliceUser.ID, bobUser.ID)
+	if err != nil {
+		t.Fatalf("CreateDirectChannel: %v", err)
+	}
+	root, err := alice.CreatePost(ctx, &model.Post{ChannelID: dm.ID, Content: "dm thread " + fmt.Sprint(time.Now().UnixNano())})
+	if err != nil {
+		t.Fatalf("CreatePost (root): %v", err)
+	}
+	if _, err = bob.CreatePost(ctx, &model.Post{ChannelID: dm.ID, RootID: root.ID, Content: "reply"}); err != nil {
+		t.Fatalf("CreatePost (reply): %v", err)
+	}
+
+	list, err := bob.GetMyDirectThreads(ctx, 0, 50)
+	if err != nil {
+		t.Fatalf("GetMyDirectThreads: %v", err)
+	}
+	found := false
+	for _, tr := range list.Threads {
+		found = found || (tr.Thread != nil && tr.Thread.PostID == root.ID)
+	}
+	if !found {
+		t.Fatal("the DM thread bob replied to is not in his direct-thread inbox")
+	}
+	if err := bob.MarkThreadRead(ctx, root.ID); err != nil {
+		t.Fatalf("MarkThreadRead without a team: %v", err)
+	}
+}

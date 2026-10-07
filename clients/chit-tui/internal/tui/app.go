@@ -168,7 +168,6 @@ var (
 	errUsernameSpaces = errors.New("a username cannot contain spaces — try /nick for a display name")
 	// Not a failure: setError is the only status-bar channel there is.
 	errProfileSaved = errors.New("profile updated")
-	errNoTeam       = errors.New("no team is active yet")
 )
 
 // errSearchHitNotLoaded reports a result that is outside the loaded history.
@@ -240,7 +239,7 @@ func clientCommands() []*model.Command {
 		{Slug: "group", Description: "start a group conversation with three or more people"},
 		{Slug: "nick", Description: "change your display name"},
 		{Slug: "username", Description: "change your username (breaks existing @mentions)"},
-		{Slug: "threads", Description: "threads you follow in this team"},
+		{Slug: "threads", Description: "threads you follow, in this team and in DMs"},
 		{Slug: "leave", Description: "leave the current channel"},
 		{Slug: "logout", Description: "sign out and clear the stored session"},
 	}
@@ -743,13 +742,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.dmPicker.OpenForMembers()
 			return m, cmd
 		case "/threads":
-			if m.activeTeam == nil {
-				return m, m.setError(errNoTeam)
+			// No team is no reason to refuse: DM and group threads belong
+			// to none, and are listed regardless.
+			teamID, teamName := "", ""
+			if m.activeTeam != nil {
+				teamID, teamName = m.activeTeam.ID, m.activeTeam.DisplayName
 			}
 			cmd := m.setFocus(FocusThreadInbox)
 			m.threadInbox.SetChannelNames(m.channelDisplayNames())
+			m.threadInbox.SetTeamName(teamName)
 			m.threadInbox.Open()
-			return m, tea.Batch(cmd, FetchMyThreads(m.client, m.activeTeam.ID))
+			return m, tea.Batch(cmd, FetchMyThreads(m.client, teamID))
 		case "/leave":
 			// Handled here rather than server-side: there is no leave command
 			// in the registry, and the REST endpoint already permits a member
@@ -935,10 +938,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ThreadsLoadedMsg:
 		if msg.Err != nil {
-			m.threadInbox.SetThreads(nil)
+			m.threadInbox.SetThreads(nil, nil)
 			return m, m.setError(msg.Err)
 		}
-		m.threadInbox.SetThreads(msg.Threads)
+		m.threadInbox.SetThreads(msg.Threads, msg.Direct)
 		return m, nil
 
 	case ThreadFollowChangedMsg:
@@ -958,16 +961,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mainPane = paneThread
 		cmds = append(cmds, m.setFocus(FocusThread))
 		m.resizeComponents()
-		if m.activeTeam != nil {
-			cmds = append(cmds, MarkThreadRead(m.client, m.activeTeam.ID, msg.RootID))
-		}
+		cmds = append(cmds, MarkThreadRead(m.client, msg.RootID))
 		return m, tea.Batch(cmds...)
 
 	case threadinbox.FollowToggledMsg:
-		if m.activeTeam == nil {
-			return m, nil
-		}
-		return m, SetThreadFollowing(m.client, m.activeTeam.ID, msg.RootID, msg.Following)
+		return m, SetThreadFollowing(m.client, msg.RootID, msg.Following)
 
 	case threadinbox.ClosedMsg:
 		return m, m.setFocus(FocusInput)

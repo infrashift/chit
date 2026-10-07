@@ -593,3 +593,57 @@ func TestUpdateMe_ErrorResponse(t *testing.T) {
 		t.Fatal("expected an error for a taken username")
 	}
 }
+
+// Threads in direct and group channels have their own inbox: they belong to
+// no team, so the team list never includes them.
+func TestGetMyDirectThreads(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/users/me/threads/direct", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("page") != "0" || r.URL.Query().Get("per_page") != "50" {
+			writeError(w, 400, "bad paging "+r.URL.RawQuery)
+			return
+		}
+		writeJSON(w, model.UserThreadList{Threads: []*model.ThreadResponse{{Thread: &model.Thread{PostID: "p1"}}}, Total: 1})
+	})
+	client, _ := setupTestClient(t, mux)
+
+	list, err := client.GetMyDirectThreads(context.Background(), 0, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Threads) != 1 || list.Threads[0].Thread.PostID != "p1" {
+		t.Errorf("unexpected list: %+v", list)
+	}
+}
+
+// Read and follow use the routes without a team: they work for every thread,
+// including one in a DM, which has no team to name.
+func TestThreadReadAndFollowNeedNoTeam(t *testing.T) {
+	var read, follow string
+	var following *bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("PUT /api/v1/users/me/threads/{id}/read", func(w http.ResponseWriter, r *http.Request) {
+		read = r.PathValue("id")
+		writeJSON(w, map[string]string{"status": "OK"})
+	})
+	mux.HandleFunc("PUT /api/v1/users/me/threads/{id}/following", func(w http.ResponseWriter, r *http.Request) {
+		follow = r.PathValue("id")
+		var body struct {
+			Following bool `json:"following"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		following = &body.Following
+		writeJSON(w, map[string]string{"status": "OK"})
+	})
+	client, _ := setupTestClient(t, mux)
+
+	if err := client.MarkThreadRead(context.Background(), "p1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.SetThreadFollowing(context.Background(), "p2", false); err != nil {
+		t.Fatal(err)
+	}
+	if read != "p1" || follow != "p2" || following == nil || *following {
+		t.Errorf("read=%q follow=%q following=%v", read, follow, following)
+	}
+}

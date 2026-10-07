@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Threads in DMs were never in the inbox** — `/threads` listed only the active team's threads, and DMs belong to no team. It now also shows a **Direct messages** section (from `GET /users/me/threads/direct`), works with no team selected, and marks DM threads read and unfollows them through the team-less routes
+
 - **No post selection in channels that started empty** — the history cursor stayed unset when posts only ever arrived via WebSocket appends, so `Enter` (open thread) and `t` (tag picker) silently did nothing until the channel was reloaded; the first appended post is now selected
 - **Focus loss after closing overlays** — Esc-closing the tag picker, channel creator, member picker, or skin picker left keyboard focus on the closed overlay (keys went nowhere until `Tab`/`Ctrl+K`); every overlay now restores focus to a live component on close
 - **Member picker Esc abandoned the pending channel** — dismissing the member picker after submitting a private channel silently dropped it; the channel is now created without extra members (Esc only skips member selection)

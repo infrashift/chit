@@ -3116,6 +3116,62 @@ func TestModel_UnfollowFromTheInboxReachesTheServer(t *testing.T) {
 	}
 }
 
+// DM and group threads are listed in their own section of the same inbox.
+func TestModel_ThreadsInboxShowsDirectThreads(t *testing.T) {
+	m := setupModel(t)
+
+	updated, _ := m.Update(input.SlashTriggerMsg{Input: "/threads"})
+	m = updated.(tui.Model)
+	updated, _ = m.Update(tui.ThreadsLoadedMsg{
+		Threads: []*model.ThreadResponse{inboxThread("p1", "c1", "team thread", 300, 100)},
+		Direct:  []*model.ThreadResponse{inboxThread("p2", "dm1", "dm thread", 300, 100)},
+	})
+	m = updated.(tui.Model)
+
+	view := testutil.StripANSI(m.View())
+	for _, want := range []string{"In Engineering", "team thread", "Direct messages", "dm thread"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("inbox is missing %q:\n%s", want, view)
+		}
+	}
+}
+
+// /threads used to refuse without an active team. DM threads need none.
+func TestModel_ThreadsWithoutATeamStillOpens(t *testing.T) {
+	client := &mockClient{me: &model.User{ID: "u1", Username: "alice"}}
+	m := modelWithClient(t, client)
+
+	updated, cmd := m.Update(input.SlashTriggerMsg{Input: "/threads"})
+	m = updated.(tui.Model)
+	if cmd == nil {
+		t.Fatal("/threads produced no command")
+	}
+	if view := testutil.StripANSI(m.View()); !strings.Contains(view, "Threads you follow") {
+		t.Errorf("the inbox did not open without a team:\n%s", view)
+	}
+}
+
+// Reading and unfollowing a thread need no team: a DM thread has none.
+func TestModel_DirectThreadReadAndUnfollowWithoutATeam(t *testing.T) {
+	client := &mockClient{
+		me: &model.User{ID: "u1", Username: "alice"}, posts: &model.PostList{}, thread: &model.PostList{},
+	}
+	m := modelWithClient(t, client)
+
+	updated, cmd := m.Update(threadinbox.ThreadChosenMsg{RootID: "p2", ChannelID: "dm1"})
+	m = updated.(tui.Model)
+	drain(cmd)
+	_, cmd = m.Update(threadinbox.FollowToggledMsg{RootID: "p2", Following: false})
+	drain(cmd)
+
+	if !slices.Contains(client.readThreads, "p2") {
+		t.Errorf("the thread was not marked read: %v", client.readThreads)
+	}
+	if len(client.followCalls) != 1 || client.followCalls[0].RootID != "p2" {
+		t.Errorf("the unfollow did not reach the server: %v", client.followCalls)
+	}
+}
+
 // A failed fetch must leave the loading state, or the overlay says "Loading…"
 // forever with the reason hidden.
 func TestModel_ThreadFetchFailureIsReported(t *testing.T) {

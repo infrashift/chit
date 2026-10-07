@@ -734,6 +734,15 @@
 - [x] Server: the thread list now returns the root post and the caller's read state. It returned neither, though the endpoint is documented to report unread status — an inbox with no unread marker and no message text is a list of IDs, and fetching each root separately would be one request per thread
 - [x] UAT guide documents the endpoint and the `/threads` keys; its post examples said `message` where the API takes `content`, so they had never worked
 
-Noted, not changed: replying follows a thread, but posting the root does not,
-so you are not told about replies to your own message. That is a product
-decision about follow semantics rather than a defect in this work.
+Since resolved server-side: the root post's author now follows the thread
+from its first reply, unless they have unfollowed.
+
+## DM thread inbox
+- [x] Client API: `GetMyDirectThreads` (GET /users/me/threads/direct). DM and group threads belong to no team, so the team list never held them
+- [x] `MarkThreadRead` and `SetThreadFollowing` use the team-less routes (`/users/me/threads/{id}/...`), so they work for DM threads; they no longer take a team ID
+- [x] `/threads` loads both lists and shows them in one overlay: the team's threads under "In <team>", then "Direct messages"; DM rows are labeled by who the conversation is with, not as a #channel
+- [x] `/threads` opens with no team selected (DM threads only) instead of refusing
+- [x] The cursor and `u` (unfollow) work across both sections without moving a DM thread into the team section
+- [x] Either fetch failing reports the error rather than showing half an inbox
+- [x] Tests: overlay sections, labels and fallbacks, unfollow across sections, both fetches, no-team fetch, read and unfollow without a team; e2e `TestDirectThreadInbox`
+- [x] UAT guide documents the DM thread list

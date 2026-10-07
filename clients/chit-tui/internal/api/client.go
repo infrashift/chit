@@ -29,8 +29,11 @@ type ChitClient interface {
 	GetThread(ctx context.Context, postID string) (*model.PostList, error)
 	// GetMyThreads lists the threads the caller follows in a team.
 	GetMyThreads(ctx context.Context, teamID string, page, perPage int) (*model.UserThreadList, error)
-	MarkThreadRead(ctx context.Context, teamID, threadID string) error
-	SetThreadFollowing(ctx context.Context, teamID, threadID string, following bool) error
+	// GetMyDirectThreads lists the threads the caller follows in direct and
+	// group channels, which belong to no team.
+	GetMyDirectThreads(ctx context.Context, page, perPage int) (*model.UserThreadList, error)
+	MarkThreadRead(ctx context.Context, threadID string) error
+	SetThreadFollowing(ctx context.Context, threadID string, following bool) error
 	GetCommands(ctx context.Context) ([]*model.Command, error)
 	ViewChannel(ctx context.Context, channelID string) error
 	GetUsersByIDs(ctx context.Context, ids []string) ([]*model.User, error)
@@ -188,12 +191,20 @@ func (c *httpClient) GetMyThreads(ctx context.Context, teamID string, page, perP
 	return &list, err
 }
 
-func (c *httpClient) MarkThreadRead(ctx context.Context, teamID, threadID string) error {
-	return c.put(ctx, fmt.Sprintf("/users/me/teams/%s/threads/%s/read", teamID, threadID), nil, nil)
+func (c *httpClient) GetMyDirectThreads(ctx context.Context, page, perPage int) (*model.UserThreadList, error) {
+	var list model.UserThreadList
+	err := c.get(ctx, fmt.Sprintf("/users/me/threads/direct?page=%d&per_page=%d", page, perPage), &list)
+	return &list, err
 }
 
-func (c *httpClient) SetThreadFollowing(ctx context.Context, teamID, threadID string, following bool) error {
-	return c.put(ctx, fmt.Sprintf("/users/me/teams/%s/threads/%s/following", teamID, threadID),
+// MarkThreadRead and SetThreadFollowing use the routes without a team: the
+// team-scoped ones ignore their team ID, and a thread in a DM has none.
+func (c *httpClient) MarkThreadRead(ctx context.Context, threadID string) error {
+	return c.put(ctx, fmt.Sprintf("/users/me/threads/%s/read", threadID), nil, nil)
+}
+
+func (c *httpClient) SetThreadFollowing(ctx context.Context, threadID string, following bool) error {
+	return c.put(ctx, fmt.Sprintf("/users/me/threads/%s/following", threadID),
 		map[string]bool{"following": following}, nil)
 }
 

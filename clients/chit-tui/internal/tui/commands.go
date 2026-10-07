@@ -166,22 +166,33 @@ func CreateDMChannel(client api.ChitClient, userID1, userID2 string) tea.Cmd {
 	}
 }
 
-// FetchMyThreads returns a command that loads the threads the caller follows
-// in a team.
+// FetchMyThreads returns a command that loads the threads the caller follows:
+// in teamID (skipped when empty), and in direct and group channels, which
+// belong to no team and so are never in a team's list.
 func FetchMyThreads(client api.ChitClient, teamID string) tea.Cmd {
 	return func() tea.Msg {
-		list, err := client.GetMyThreads(context.Background(), teamID, 0, threadInboxPageSize)
+		ctx := context.Background()
+		var msg ThreadsLoadedMsg
+		if teamID != "" {
+			list, err := client.GetMyThreads(ctx, teamID, 0, threadInboxPageSize)
+			if err != nil {
+				return ThreadsLoadedMsg{Err: err}
+			}
+			msg.Threads = list.Threads
+		}
+		direct, err := client.GetMyDirectThreads(ctx, 0, threadInboxPageSize)
 		if err != nil {
 			return ThreadsLoadedMsg{Err: err}
 		}
-		return ThreadsLoadedMsg{Threads: list.Threads}
+		msg.Direct = direct.Threads
+		return msg
 	}
 }
 
 // SetThreadFollowing returns a command that follows or unfollows a thread.
-func SetThreadFollowing(client api.ChitClient, teamID, rootID string, following bool) tea.Cmd {
+func SetThreadFollowing(client api.ChitClient, rootID string, following bool) tea.Cmd {
 	return func() tea.Msg {
-		err := client.SetThreadFollowing(context.Background(), teamID, rootID, following)
+		err := client.SetThreadFollowing(context.Background(), rootID, following)
 		return ThreadFollowChangedMsg{RootID: rootID, Err: err}
 	}
 }
@@ -189,9 +200,9 @@ func SetThreadFollowing(client api.ChitClient, teamID, rootID string, following 
 // MarkThreadRead returns a command that clears a thread's unread state. The
 // result is deliberately dropped: the read marker is a convenience, and a
 // failure to record it should not interrupt reading the thread.
-func MarkThreadRead(client api.ChitClient, teamID, rootID string) tea.Cmd {
+func MarkThreadRead(client api.ChitClient, rootID string) tea.Cmd {
 	return func() tea.Msg {
-		_ = client.MarkThreadRead(context.Background(), teamID, rootID)
+		_ = client.MarkThreadRead(context.Background(), rootID)
 		return nil
 	}
 }

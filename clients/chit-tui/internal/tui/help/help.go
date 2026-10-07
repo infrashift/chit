@@ -91,7 +91,7 @@ var clientCommands = []binding{
 	{"/group", "start a group conversation with three or more people"},
 	{"/nick", "change your display name"},
 	{"/username", "change your username (breaks existing @mentions)"},
-	{"/threads", "threads you follow in this team"},
+	{"/threads", "threads you follow, in this team and in DMs"},
 	{"/leave", "leave the current channel"},
 	{"/logout", "sign out and clear the stored session"},
 }

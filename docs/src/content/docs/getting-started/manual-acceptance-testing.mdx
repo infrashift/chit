@@ -340,21 +340,29 @@ curl -X POST -H "$BOB" -H 'Content-Type: application/json' \
 
 ### The thread inbox
 
-Replying to a thread starts following it. The author of the root post is
-**not** followed automatically, so use the replier's header here — Bob's, if
-he sent the reply above:
+Replying to a thread starts following it, and the author of the root post
+follows it from its first reply (unless they have unfollowed). Either Alice's
+or Bob's header works here:
 
 ```bash
 curl -H "$BOB" "http://localhost:8065/api/v1/users/me/teams/TEAM_ID/threads"
+```
+
+Threads in direct and group channels belong to no team, so they have their
+own list:
+
+```bash
+curl -H "$BOB" "http://localhost:8065/api/v1/users/me/threads/direct"
 ```
 
 Each entry carries the root post, `last_viewed_at`, and `unread_mentions`. A
 thread is unread when `thread.last_reply_at` is greater than `last_viewed_at`;
 a never-read thread has `last_viewed_at` of `0`.
 
-In chit-tui the same list is `/threads`: `enter` opens a thread (switching
-channels if it lives elsewhere, and marking it read), `u` unfollows it, `esc`
-closes the overlay.
+In chit-tui both lists are `/threads`: the active team's threads first, then a
+**Direct messages** section (it works with no team selected, showing only the
+DM threads). `enter` opens a thread (switching channels if it lives
+elsewhere, and marking it read), `u` unfollows it, `esc` closes the overlay.
 
 ### Search users
 
