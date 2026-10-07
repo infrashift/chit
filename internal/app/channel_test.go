@@ -60,6 +60,9 @@ func (s *chMockChannelStore) GetMember(_ context.Context, _, _ string) (*model.C
 }
 func (s *chMockChannelStore) IncrementMentionCount(_ context.Context, _, _ string) error         { return nil }
 func (s *chMockChannelStore) GetChannelIDsForUser(_ context.Context, _ string) ([]string, error) { return nil, nil }
+func (s *chMockChannelStore) GetMembersForUser(_ context.Context, _, _ string) ([]*model.ChannelMember, error) {
+	return nil, nil
+}
 
 type chMockTeamStore struct {
 	members []*model.TeamMember

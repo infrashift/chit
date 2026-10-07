@@ -57,6 +57,9 @@ type ChannelStore interface {
 	RemoveMember(ctx context.Context, channelID, userID string) error
 	GetMembers(ctx context.Context, channelID string, page, perPage int) ([]*model.ChannelMember, error)
 	GetMember(ctx context.Context, channelID, userID string) (*model.ChannelMember, error)
+	// GetMembersForUser returns userID's own member rows for the live
+	// channels of teamID: the counts behind their unread and mention badges.
+	GetMembersForUser(ctx context.Context, userID, teamID string) ([]*model.ChannelMember, error)
 	GetChannelIDsForUser(ctx context.Context, userID string) ([]string, error)
 	UpdateLastViewedAt(ctx context.Context, channelID, userID string, lastViewedAt int64) error
 	GetByName(ctx context.Context, teamID, name string) (*model.Channel, error)

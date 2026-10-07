@@ -608,6 +608,30 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /users/me/teams/{id}/channels/members:
+    get:
+      operationId: get_my_channel_members
+      summary: Get my channel memberships in a team
+      description: >-
+        Returns the authenticated user's own channel member rows for every
+        channel they belong to in a team. Each carries msg_count and
+        mention_count, from which a client computes unread and mention
+        badges without fetching every channel's full member list.
+      tags: [Channels]
+      parameters:
+        - $ref: "#/components/parameters/TeamIdParam"
+      responses:
+        "200":
+          description: The caller's member rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChannelMember"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /users/me/channels/direct:
     get:
       operationId: get_my_direct_channels
