@@ -37,10 +37,9 @@ func TestPostView_ContainsUsername(t *testing.T) {
 func TestPostView_ContainsTimestamp(t *testing.T) {
 	p := &model.Post{ID: "p1", Content: "Hello", CreateAt: 1700000000000}
 	m := post.New(p, "alice", testStyles(), 80, nil, "", 0, nil)
-	view := m.View()
-	// Should contain a time in HH:MM format
-	if !strings.Contains(view, ":") {
-		t.Errorf("expected view to contain timestamp, got:\n%s", view)
+	want := model.MillisToTime(p.CreateAt).Format("15:04")
+	if view := m.View(); !strings.Contains(view, want) {
+		t.Errorf("expected view to contain the time %s, got:\n%s", want, view)
 	}
 }
 

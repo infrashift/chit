@@ -88,9 +88,6 @@ func TestModel_EscClosingMemberPickerCreatesPendingChannel(t *testing.T) {
 	// emits a cancel message, whose handler issues CreateChannel.
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
 	m = updated.(tui.Model)
-	if cmd == nil {
-		t.Fatal("expected commands from Esc on the member picker")
-	}
 	created := false
 	for _, msg := range messagesOf(cmd) {
 		updated, next := m.Update(msg)

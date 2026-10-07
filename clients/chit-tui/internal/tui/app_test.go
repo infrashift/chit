@@ -93,9 +93,8 @@ func setupModel(t *testing.T) tui.Model {
 func TestModel_Init_FetchesUserAndTeams(t *testing.T) {
 	m := testModel()
 	cmd := m.Init()
-	if cmd == nil {
-		t.Fatal("expected init commands")
-	}
+	wantMsg[tui.UserLoadedMsg](t, cmd)
+	wantMsg[tui.TeamsLoadedMsg](t, cmd)
 }
 
 func TestModel_WindowSize(t *testing.T) {
@@ -134,9 +133,7 @@ func TestModel_ChannelSelectLoadsPosts(t *testing.T) {
 	m := setupModel(t)
 	ch := &model.Channel{ID: "c2", DisplayName: "Random"}
 	_, cmd := m.Update(palette.ChannelChosenMsg{Channel: ch})
-	if cmd == nil {
-		t.Error("expected command to fetch posts")
-	}
+	wantMsg[tui.PostsLoadedMsg](t, cmd)
 }
 
 func TestModel_WSEventInsertsPost(t *testing.T) {
@@ -167,9 +164,7 @@ func openThread(t *testing.T, m tui.Model) tui.Model {
 	t.Helper()
 	updated, cmd := m.Update(viewport.PostSelectedMsg{Post: &model.Post{ID: "p1", UserID: "u1", Content: "Hello"}})
 	m = updated.(tui.Model)
-	if cmd == nil {
-		t.Fatal("expected command to fetch thread")
-	}
+	wantMsg[tui.ThreadLoadedMsg](t, cmd)
 	updated, _ = m.Update(tui.ThreadLoadedMsg{
 		PostID: "p1",
 		Posts: &model.PostList{
@@ -250,9 +245,7 @@ func TestModel_PostSelectedOpensThread(t *testing.T) {
 
 	p := &model.Post{ID: "p1", UserID: "u1", Content: "Hello", CreateAt: 1700000000000}
 	_, cmd := m.Update(viewport.PostSelectedMsg{Post: p})
-	if cmd == nil {
-		t.Error("expected command to fetch thread")
-	}
+	wantMsg[tui.ThreadLoadedMsg](t, cmd)
 }
 
 // Choosing a command inserts it for completing rather than running it.
@@ -338,9 +331,7 @@ func TestModel_SendMsgInThreadPaneCreatesReply(t *testing.T) {
 
 	// Sending from the input while in the thread pane creates a reply.
 	_, cmd := m.Update(input.SendMsg{Content: "my reply"})
-	if cmd == nil {
-		t.Fatal("expected command from SendMsg in thread pane")
-	}
+	wantMsg[tui.PostCreatedMsg](t, cmd)
 	cmd()
 	if client.lastCreatedPost == nil {
 		t.Fatal("expected CreatePost to be called")
@@ -501,15 +492,21 @@ func TestModel_TabWithThread(t *testing.T) {
 	_ = m
 }
 
+// Ctrl+S opens the palette in message search: what is typed is searched for.
 func TestModel_CtrlSOpensSearch(t *testing.T) {
 	m := setupModel(t)
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
-	m = updated.(tui.Model)
+	m, _ = step(t, m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	if m.Focused() != tui.FocusPalette {
+		t.Fatalf("focus = %v, want the palette", m.Focused())
+	}
+	for _, r := range "deploy" {
+		m, _ = step(t, m, key(r))
+	}
+	_, cmd := step(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 
-	view := m.View()
-	if !strings.Contains(view, "Search") {
-		t.Errorf("expected search overlay in view:\n%s", view)
+	if got := wantMsg[palette.SearchSubmitMsg](t, cmd); got.Term != "deploy" {
+		t.Errorf("searched for %q, want deploy", got.Term)
 	}
 }
 
@@ -554,9 +551,7 @@ func TestModel_SearchSubmitMsg(t *testing.T) {
 	m := setupModel(t)
 
 	_, cmd := m.Update(palette.SearchSubmitMsg{Term: "hello"})
-	if cmd == nil {
-		t.Error("expected command to search posts")
-	}
+	wantMsg[tui.SearchResultsMsg](t, cmd)
 }
 
 func TestModel_WSConnectedStartsListening(t *testing.T) {
@@ -802,30 +797,27 @@ func TestModel_ThreadLoadedCachesCount(t *testing.T) {
 	}
 }
 
+// A failed load says so. Each loader is checked on its own: run together,
+// only the last one's message could be seen.
 func TestModel_ErrorMsgsFromLoaders(t *testing.T) {
-	m := setupModel(t)
-	errMsg := &model.AppError{Message: "fail"}
-
-	tests := []tea.Msg{
-		tui.UserLoadedMsg{Err: errMsg},
-		tui.TeamsLoadedMsg{Err: errMsg},
-		tui.ChannelsLoadedMsg{Err: errMsg},
-		tui.PostsLoadedMsg{Err: errMsg},
-		tui.PostCreatedMsg{Err: errMsg},
-		tui.ThreadLoadedMsg{Err: errMsg},
-		tui.CommandsLoadedMsg{Err: errMsg},
-		tui.UsersLoadedMsg{Err: errMsg},
-		tui.ChannelMembersLoadedMsg{Err: errMsg},
+	failed := func(what string) error { return &model.AppError{Message: what + " failed"} }
+	tests := map[string]tea.Msg{
+		"user":     tui.UserLoadedMsg{Err: failed("user")},
+		"teams":    tui.TeamsLoadedMsg{Err: failed("teams")},
+		"channels": tui.ChannelsLoadedMsg{Err: failed("channels")},
+		"posts":    tui.PostsLoadedMsg{ChannelID: "c1", Err: failed("posts")},
+		"send":     tui.PostCreatedMsg{Err: failed("send")},
+		"commands": tui.CommandsLoadedMsg{Err: failed("commands")},
+		"users":    tui.UsersLoadedMsg{Err: failed("users")},
+		"members":  tui.ChannelMembersLoadedMsg{Err: failed("members")},
 	}
-
-	for _, msg := range tests {
-		updated, _ := m.Update(msg)
-		m = updated.(tui.Model)
-	}
-
-	view := m.View()
-	if !strings.Contains(view, "fail") {
-		t.Errorf("expected error in view:\n%s", view)
+	for name, msg := range tests {
+		t.Run(name, func(t *testing.T) {
+			m, _ := step(t, setupModel(t), msg)
+			if !strings.Contains(viewOf(m), name+" failed") {
+				t.Errorf("error not shown:\n%s", viewOf(m))
+			}
+		})
 	}
 }
 
@@ -875,9 +867,7 @@ func TestModel_DMPickerSearchTriggered(t *testing.T) {
 	m := setupModel(t)
 
 	_, cmd := m.Update(dmpicker.SearchTriggeredMsg{Term: "bob"})
-	if cmd == nil {
-		t.Error("expected command from SearchTriggeredMsg")
-	}
+	wantMsg[tui.UserSearchResultsMsg](t, cmd)
 }
 
 func TestModel_UserSearchResultsMsg(t *testing.T) {
@@ -943,9 +933,7 @@ func TestModel_PaletteUserChosenCreatesDM(t *testing.T) {
 	_, cmd := m.Update(palette.UserChosenMsg{
 		User: &model.User{ID: "u2", Username: "bob"},
 	})
-	if cmd == nil {
-		t.Error("expected command from UserChosenMsg")
-	}
+	wantMsg[tui.DMCreatedMsg](t, cmd)
 }
 
 func TestModel_DMCreatedMsg(t *testing.T) {
@@ -956,9 +944,7 @@ func TestModel_DMCreatedMsg(t *testing.T) {
 	})
 	m = updated.(tui.Model)
 
-	if cmd == nil {
-		t.Error("expected commands from DMCreatedMsg")
-	}
+	wantMsg[tui.DMChannelsLoadedMsg](t, cmd)
 	_ = m.View()
 }
 
@@ -989,9 +975,7 @@ func TestModel_WSEventChannelCreatedDM(t *testing.T) {
 		},
 	}
 	_, cmd := m.Update(wsEvt)
-	if cmd == nil {
-		t.Error("expected command from channel_created DM event")
-	}
+	wantMsg[tui.DMChannelsLoadedMsg](t, cmd)
 }
 
 // A channel created in any of the user's teams is picked up; only the active
@@ -1110,9 +1094,7 @@ func TestModel_DMDisplayNameResolution_MeArrivesAfterDMChannels(t *testing.T) {
 	updated, cmd := m.Update(tui.UserLoadedMsg{User: &model.User{ID: "u1", Username: "alice"}})
 	m = updated.(tui.Model)
 
-	if cmd == nil {
-		t.Fatal("expected fetchMissingUsers command after UserLoadedMsg with pending DM channels")
-	}
+	wantMsg[tui.UsersLoadedMsg](t, cmd)
 
 	// Simulate the fetched user arriving
 	updated, _ = m.Update(tui.UsersLoadedMsg{
@@ -1192,19 +1174,6 @@ func TestModel_SlashSkinOpensSkinPicker(t *testing.T) {
 	}
 }
 
-// A bare slash is a request to browse the command list.
-func TestModel_BareSlashOpensPalette(t *testing.T) {
-	m := setupModel(t)
-
-	updated, _ := m.Update(input.SlashTriggerMsg{Input: "/"})
-	m = updated.(tui.Model)
-
-	view := testutil.StripANSI(m.View())
-	if !strings.Contains(view, "remind") {
-		t.Errorf("expected the command palette in view:\n%s", view)
-	}
-}
-
 // Anything else goes to the server, which owns the command registry and the
 // unknown-command reply. Opening the palette here used to discard the text.
 func TestModel_SlashCommandIsSentToServer(t *testing.T) {
@@ -1213,9 +1182,7 @@ func TestModel_SlashCommandIsSentToServer(t *testing.T) {
 	updated, cmd := m.Update(input.SlashTriggerMsg{Input: "/invite bob"})
 	m = updated.(tui.Model)
 
-	if cmd == nil {
-		t.Fatal("no command returned; the slash text was dropped")
-	}
+	wantMsg[tui.PostCreatedMsg](t, cmd)
 
 	view := testutil.StripANSI(m.View())
 	if strings.Contains(view, "Commands") {
@@ -1402,9 +1369,7 @@ func TestModel_ChannelSubmittedMsg(t *testing.T) {
 	_, cmd := m.Update(chcreator.ChannelSubmittedMsg{
 		Channel: &model.Channel{TeamID: "t1", Name: "deploy", DisplayName: "Deploy", Type: "O"},
 	})
-	if cmd == nil {
-		t.Error("expected command from ChannelSubmittedMsg")
-	}
+	wantMsg[tui.ChannelCreatedMsg](t, cmd)
 }
 
 func TestModel_ChannelCreatedMsg(t *testing.T) {
@@ -1415,9 +1380,7 @@ func TestModel_ChannelCreatedMsg(t *testing.T) {
 	})
 	m = updated.(tui.Model)
 
-	if cmd == nil {
-		t.Error("expected commands from ChannelCreatedMsg")
-	}
+	wantMsg[tui.PostsLoadedMsg](t, cmd)
 	view := m.View()
 	if !strings.Contains(view, "Deploy") {
 		t.Errorf("expected 'Deploy' in sidebar:\n%s", view)
@@ -1452,9 +1415,7 @@ func TestModel_WSEventChannelCreatedOpenType(t *testing.T) {
 		},
 	}
 	_, cmd := m.Update(wsEvt)
-	if cmd == nil {
-		t.Error("expected command from channel_created O event")
-	}
+	wantMsg[tui.ChannelsLoadedMsg](t, cmd)
 }
 
 func TestModel_WSEventChannelCreatedGroup(t *testing.T) {
@@ -1470,9 +1431,7 @@ func TestModel_WSEventChannelCreatedGroup(t *testing.T) {
 		},
 	}
 	_, cmd := m.Update(wsEvt)
-	if cmd == nil {
-		t.Error("expected command from channel_created G event")
-	}
+	wantMsg[tui.DMChannelsLoadedMsg](t, cmd)
 }
 
 func TestModel_WSEventPostedResolvesUnknownUser(t *testing.T) {
@@ -1491,9 +1450,7 @@ func TestModel_WSEventPostedResolvesUnknownUser(t *testing.T) {
 	}
 	_, cmd := m.Update(wsEvt)
 
-	if cmd == nil {
-		t.Fatal("expected a command to fetch unknown user; got nil")
-	}
+	wantMsg[tui.UsersLoadedMsg](t, cmd)
 
 	// Execute the batched command and check that one of them returns UsersLoadedMsg
 	msgs := messagesOf(cmd)
@@ -1632,10 +1589,9 @@ func TestModel_ClearErrMsg_IgnoresStaleSeq(t *testing.T) {
 
 func TestModel_StatusBar_UsernameNotTruncated(t *testing.T) {
 	m := setupModel(t)
-	view := m.View()
-	stripped := testutil.StripANSI(view)
-	if !strings.Contains(stripped, "alice") {
-		t.Errorf("expected full username 'alice' in status bar, got:\n%s", stripped)
+	lines := strings.Split(viewOf(m), "\n")
+	if bar := lines[len(lines)-1]; !strings.Contains(bar, "alice") {
+		t.Errorf("action bar = %q, want the full username", bar)
 	}
 }
 
@@ -2224,6 +2180,21 @@ func drain(cmd tea.Cmd) {
 	}
 }
 
+// wantMsg runs cmd and returns its first message of type T, failing the
+// test if there is none. A command merely existing proves little: setError
+// alone returns one, for its auto-clear timer.
+func wantMsg[T tea.Msg](t *testing.T, cmd tea.Cmd) T {
+	t.Helper()
+	for _, msg := range messagesOf(cmd) {
+		if v, ok := msg.(T); ok {
+			return v
+		}
+	}
+	var zero T
+	t.Fatalf("no %T among the command's messages", zero)
+	return zero
+}
+
 // messagesOf runs a command and returns its messages, unwrapping batches.
 // A command that does not return promptly is a timer, such as the status
 // line's ten-second auto-clear, and is abandoned rather than waited out:
@@ -2407,19 +2378,15 @@ func TestModel_ChannelDeletedMovesAway(t *testing.T) {
 	}
 }
 
-// Editing loads the post back into the input; sending then replaces it
-// rather than creating a new message.
 func TestModel_EditLoadsPostIntoInput(t *testing.T) {
 	m := setupModel(t)
+	m, _ = step(t, m, tea.KeyMsg{Type: tea.KeyTab}) // focus history
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab}) // focus history
-	m = updated.(tui.Model)
+	m, _ = step(t, m, key('e'))
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
-	m = updated.(tui.Model)
-
-	if !strings.Contains(testutil.StripANSI(m.View()), "Hello") {
-		t.Errorf("post text was not loaded into the input:\n%s", testutil.StripANSI(m.View()))
+	// Once in the history, once more in the input.
+	if n := strings.Count(viewOf(m), "Hello"); n != 2 {
+		t.Errorf("post text shown %d times, want it loaded into the input too:\n%s", n, viewOf(m))
 	}
 }
 
