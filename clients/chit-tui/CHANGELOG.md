@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Config file** — `~/.config/chit/config.toml` (or `CHIT_CONFIG_FILE`), checked against a CUE schema; an invalid setting is a warning, not a failure. The environment still overrides the file
+- **Theme flags and appearance** — `--theme`, `--appearance` and `--list-themes`; `theme_dark` and `theme_light` choose a theme by the terminal's appearance
+- **Light themes** — `tokyo-night-day`, `catppuccin-latte`, `kanagawa-lotus` and `dayfox` join the four dark themes
+- **Your own themes** — TOML files in `~/.config/chit/themes/`, checked against a schema; colors may be terminal color names
+- **Editing and deleting** — `e` edits your post, `d d` deletes it
+- **Pinning** — `p` pins or unpins a post
+- **Older history** — scrolling to the top loads the page before it
+- **Search everywhere** — `??` searches every channel; choosing a result jumps to it and highlights the matches
+- **Copying** — select history with the mouse; `y` copies it, or the selected post, through OSC 52
+- **Threads you follow** — `/threads` lists them, including those in DMs and groups
+- **Profile editing** — `/nick` and `/username`
+- **Group conversations** — `/group` with three or more people
+- **Leaving a channel** — `/leave`
+- **Connection reporting** — the action bar says when the socket drops, reconnects, or falls behind, and the open channel is reloaded after any gap
+- **Loading and empty states** — the history pane says whether it is loading or empty
+- **Functional tests** — flows run in a real Bubble Tea program with teatest; benchmarks cover rendering
+
+### Changed
+
+- **Slash commands go to the server** — anything but the client's own commands is sent as typed, rather than opening the palette and discarding the text
+- **Your own messages appear at once** — from the send's response, not only the WebSocket echo
+- **Fewer requests on startup** — tags load a page at a time and members only for the open channel, rather than one request per post and per channel
+- **Errors are shown** — failed requests report in the status line instead of failing silently; an expired session from any request asks you to sign in
+- **Replying is easier to find** — the action bar offers Reply when a post is selected, and a thread's root can be tagged
+- **Themes** — colors are `image/color` values, and the selection and search highlights are derived from each palette
+- **Deleting asks first** — `d` asks for confirmation; a second `d` deletes
+- **Pickers scroll** — every list overlay keeps its cursor on screen
+
 ### Fixed
 
 - **Your own posts signed with your user ID** — in a channel where nobody else's posts had loaded, your messages showed your truncated user ID instead of your username
@@ -45,6 +75,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Focus loss after closing overlays** — Esc-closing the tag picker, channel creator, member picker, or skin picker left keyboard focus on the closed overlay (keys went nowhere until `Tab`/`Ctrl+K`); every overlay now restores focus to a live component on close
 - **Member picker Esc abandoned the pending channel** — dismissing the member picker after submitting a private channel silently dropped it; the channel is now created without extra members (Esc only skips member selection)
 
+## Palette redesign — 2026-07
+
 ### Added
 
 - **Unified palette** — One overlay (`Ctrl+K`) for all navigation: channels/DMs sorted by mentions → unread → recency with fuzzy filtering, `@` people search (opens a DM), `/` slash commands, and `?` message search scoped to the active channel; `Ctrl+S`/`Ctrl+D` open it pre-filled
@@ -66,7 +98,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sidebar, command palette (`cmdpalette`), and search (`search`) components — superseded by the unified palette and action bar
 - Dead code left behind by the redesign: the producer-less group-create TUI chain (`GroupCreatedMsg`, `CreateGroupChannel` command), never-produced `AuthExpiredMsg`/`LogoutMsg`, the unmatched `Enter` keybinding, unused `CreateTagCmd`/`AddChannelMemberCmd`, `Styles.Sidebar`/`Styles.Border`, and unreferenced model DTOs (`TeamMember`, `ThreadMembership`, `ThreadResponse`); `SidebarItem`/`SidebarActive` styles renamed to `ListItem`/`ListItemActive`
 
-### Added (initial development)
+### Fixed
+
+- **No post selection in channels that started empty** — the history cursor stayed unset when posts only ever arrived via WebSocket appends, so `Enter` (open thread) and `t` (tag picker) silently did nothing until the channel was reloaded; the first appended post is now selected
+- **Focus loss after closing overlays** — Esc-closing the tag picker, channel creator, member picker, or skin picker left keyboard focus on the closed overlay (keys went nowhere until `Tab`/`Ctrl+K`); every overlay now restores focus to a live component on close
+- **Member picker Esc abandoned the pending channel** — dismissing the member picker after submitting a private channel silently dropped it; the channel is now created without extra members (Esc only skips member selection)
+
+## Initial development
+
+### Added
 
 - **Core TUI** — Full terminal client with Elm Architecture (Model-Update-View) using Bubble Tea
 - **Sidebar** — Team and channel navigation with cursor-based selection
@@ -105,12 +145,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Keybindings reference** — Documented `Ctrl+N` (channel creator), `Ctrl+D` (DM picker), `t` (tag picker), channel creator fields, DM picker multi-select, and tag picker controls
 - **UAT tutorial scenarios** — Scenarios for creating team channels, direct messages, and group channels (Scenarios 11-13)
 
-### Changed (initial development)
+### Changed
 
 - Viewport and thread renderers use theme-derived Glamour style configs instead of the built-in `"dark"` style
 - UAT tutorial Scenario 2 rewritten to reflect auto-selection behavior (sidebar starts in channels view, not teams view)
 
-### Fixed (initial development)
+### Fixed
 
 - Sidebar not responding to keys on launch — `NewModel()` now calls `sidebar.Focus()` so the sidebar accepts input immediately without requiring a full Tab cycle
 - Theme switching not updating markdown rendering — `SetStyles()` resets the Glamour renderer so posts re-render with the new theme's colors

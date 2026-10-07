@@ -1,6 +1,6 @@
-// Package dmpicker implements the member-selection overlay used when
-// creating a private channel. (Starting DMs is handled by the palette's
-// "@" mode.)
+// Package dmpicker is the member-selection overlay, used to add members to a
+// new private channel and to choose the people for /group. (Starting a DM
+// is the palette's "@" mode.)
 package dmpicker
 
 import (
