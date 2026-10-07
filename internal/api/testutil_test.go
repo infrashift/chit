@@ -99,7 +99,7 @@ func (s *mockUserStore) Get(_ context.Context, id string) (*model.User, error) {
 	defer s.mu.RUnlock()
 	u, ok := s.byID[id]
 	if !ok {
-		return nil, fmt.Errorf("user %s not found", id)
+		return nil, model.NewNotFoundError("mockUserStore.Get", id)
 	}
 	cp := *u
 	return &cp, nil
@@ -110,7 +110,7 @@ func (s *mockUserStore) GetByKratosID(_ context.Context, kratosID string) (*mode
 	defer s.mu.RUnlock()
 	u, ok := s.byKratos[kratosID]
 	if !ok {
-		return nil, fmt.Errorf("user with kratos_id=%s not found", kratosID)
+		return nil, model.NewNotFoundError("mockUserStore.GetByKratosID", kratosID)
 	}
 	cp := *u
 	return &cp, nil
@@ -121,7 +121,7 @@ func (s *mockUserStore) GetByUsername(_ context.Context, username string) (*mode
 	defer s.mu.RUnlock()
 	u, ok := s.byUN[username]
 	if !ok {
-		return nil, fmt.Errorf("user %s not found", username)
+		return nil, model.NewNotFoundError("mockUserStore.GetByUsername", username)
 	}
 	cp := *u
 	return &cp, nil
@@ -140,10 +140,20 @@ func (s *mockUserStore) GetByOAuthClientID(_ context.Context, clientID string) (
 			return &cp, nil
 		}
 	}
-	return nil, fmt.Errorf("oauth client %s not found", clientID)
+	return nil, model.NewNotFoundError("mockUserStore.GetByOAuthClientID", clientID)
 }
 
+// Update enforces the unique username, as the SQL store does with a 409.
 func (s *mockUserStore) Update(_ context.Context, u *model.User) (*model.User, error) {
+	s.mu.Lock()
+	if other, ok := s.byUN[u.Username]; ok && other.ID != u.ID {
+		s.mu.Unlock()
+		return nil, model.NewConflictError("mockUserStore.Update", "username or email is already taken")
+	}
+	if old, ok := s.byID[u.ID]; ok && old.Username != u.Username {
+		delete(s.byUN, old.Username)
+	}
+	s.mu.Unlock()
 	return s.Save(context.Background(), u)
 }
 
@@ -863,6 +873,7 @@ func setupTestApp(t *testing.T) (*app.App, *mockStore, func()) {
 		DisplayName: "Test User",
 		Email:       "test@example.com",
 		Roles:       "system_user",
+		ActorType:   model.ActorTypeUser,
 		CreateAt:    1000,
 		UpdateAt:    1000,
 	})
@@ -873,6 +884,7 @@ func setupTestApp(t *testing.T) (*app.App, *mockStore, func()) {
 		DisplayName: "Alice",
 		Email:       "alice@example.com",
 		Roles:       "system_user",
+		ActorType:   model.ActorTypeUser,
 		CreateAt:    1000,
 		UpdateAt:    1000,
 	})
@@ -883,6 +895,7 @@ func setupTestApp(t *testing.T) (*app.App, *mockStore, func()) {
 		DisplayName: "Charlie",
 		Email:       "charlie@example.com",
 		Roles:       "system_user",
+		ActorType:   model.ActorTypeUser,
 		CreateAt:    1000,
 		UpdateAt:    1000,
 	})
@@ -896,6 +909,7 @@ func setupTestApp(t *testing.T) (*app.App, *mockStore, func()) {
 		DisplayName: "Dana Admin",
 		Email:       "dana@example.com",
 		Roles:       "system_user system_admin",
+		ActorType:   model.ActorTypeUser,
 		CreateAt:    1000,
 		UpdateAt:    1000,
 	})
@@ -999,6 +1013,7 @@ func testUser() *model.User {
 		DisplayName: "Test User",
 		Email:       "test@example.com",
 		Roles:       "system_user",
+		ActorType:   model.ActorTypeUser,
 		CreateAt:    1000,
 		UpdateAt:    1000,
 	}

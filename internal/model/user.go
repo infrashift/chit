@@ -111,8 +111,13 @@ func (u *User) IsSystemAdmin() bool {
 	return false
 }
 
+// Sanitize strips what one user must not learn about another before the user
+// is returned to an API consumer.
 func (u *User) Sanitize() {
 	u.Email = ""
+	// The Kratos identity ID is the key the trusted proxy header carries;
+	// it identifies the person to the auth stack, not to other users.
+	u.KratosID = ""
 	// The OAuth2 client binding is a credential identifier and is of no use to
 	// API consumers; only the provisioning path (which returns the unsanitized
 	// saved user) needs to see it.

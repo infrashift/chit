@@ -53,22 +53,21 @@ func updateMe(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		var patch model.User
-		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+		var body struct {
+			Username    *string `json:"username"`
+			DisplayName *string `json:"display_name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			WriteError(w, model.NewBadRequestError("updateMe", "invalid request body"))
 			return
 		}
 
-		if patch.DisplayName != "" {
-			user.DisplayName = patch.DisplayName
-		}
-		if patch.Username != "" {
-			user.Username = patch.Username
-		}
-
-		updated, err := a.UpdateUser(r.Context(), user)
+		updated, err := a.UpdateMe(r.Context(), user.ID, app.UserPatch{
+			Username:    body.Username,
+			DisplayName: body.DisplayName,
+		})
 		if err != nil {
-			WriteError(w, model.NewInternalError("updateMe", err))
+			WriteAppError(w, "updateMe", err)
 			return
 		}
 
@@ -81,7 +80,7 @@ func getUser(a *app.App) http.HandlerFunc {
 		id := chi.URLParam(r, "id")
 		user, err := a.GetUser(r.Context(), id)
 		if err != nil {
-			WriteError(w, model.NewNotFoundError("getUser", id))
+			WriteAppError(w, "getUser", err)
 			return
 		}
 		user.Sanitize()
@@ -94,7 +93,7 @@ func getUserByUsername(a *app.App) http.HandlerFunc {
 		username := chi.URLParam(r, "username")
 		user, err := a.GetUserByUsername(r.Context(), username)
 		if err != nil {
-			WriteError(w, model.NewNotFoundError("getUserByUsername", username))
+			WriteAppError(w, "getUserByUsername", err)
 			return
 		}
 		user.Sanitize()
@@ -109,7 +108,7 @@ func searchUsers(a *app.App) http.HandlerFunc {
 
 		users, err := a.SearchUsers(r.Context(), term, page, perPage)
 		if err != nil {
-			WriteError(w, model.NewInternalError("searchUsers", err))
+			WriteAppError(w, "searchUsers", err)
 			return
 		}
 
@@ -131,7 +130,7 @@ func getUsersByIDs(a *app.App) http.HandlerFunc {
 
 		users, err := a.GetUsersByIDs(r.Context(), ids)
 		if err != nil {
-			WriteError(w, model.NewInternalError("getUsersByIDs", err))
+			WriteAppError(w, "getUsersByIDs", err)
 			return
 		}
 

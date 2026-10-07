@@ -2,6 +2,7 @@ package sqlstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -63,20 +64,35 @@ func (s *SqlUserStore) GetByOAuthClientID(ctx context.Context, clientID string) 
 	return s.getBy(ctx, "oauth_client_id", clientID)
 }
 
+// userColumns is the one SELECT list for users, and scanUser its one reader.
+// The nullable identity columns come back as ” rather than NULL, with the
+// uuid cast to text first: COALESCE(kratos_id, ”) resolves to uuid and fails
+// on ” (see 75af3a0). Every reader shares this so a column added here reaches
+// all of them, rather than some readers silently dropping it.
+const userColumns = `id, COALESCE(kratos_id::text, ''), username, display_name, COALESCE(email, ''),
+	roles, actor_type, COALESCE(oauth_client_id, ''), create_at, update_at, delete_at`
+
+func scanUser(row pgx.Row) (*model.User, error) {
+	u := &model.User{}
+	err := row.Scan(
+		&u.ID, &u.KratosID, &u.Username, &u.DisplayName, &u.Email,
+		&u.Roles, &u.ActorType, &u.OAuthClientID,
+		&u.CreateAt, &u.UpdateAt, &u.DeleteAt,
+	)
+	return u, err
+}
+
 func (s *SqlUserStore) getBy(ctx context.Context, column, value string) (*model.User, error) {
-	query := fmt.Sprintf(
-		`SELECT id, COALESCE(kratos_id::text, ''), username, display_name, COALESCE(email, ''), roles, actor_type,
-			COALESCE(oauth_client_id, ''), create_at, update_at, delete_at
-		FROM users WHERE %s = $1 AND delete_at = 0`, column,
-	)
-	user := &model.User{}
-	err := s.sqlStore.pool.QueryRow(ctx, query, value).Scan(
-		&user.ID, &user.KratosID, &user.Username, &user.DisplayName, &user.Email,
-		&user.Roles, &user.ActorType, &user.OAuthClientID,
-		&user.CreateAt, &user.UpdateAt, &user.DeleteAt,
-	)
+	// id and kratos_id are uuid columns. A value that is not a UUID can match
+	// nothing, and sent as-is Postgres rejects the cast (SQLSTATE 22P02),
+	// which surfaced as a 500 for GET /users/not-a-uuid.
+	if (column == "id" || column == "kratos_id") && !model.IsValidID(value) {
+		return nil, model.NewNotFoundError("SqlUserStore.getBy", value)
+	}
+	query := fmt.Sprintf(`SELECT `+userColumns+` FROM users WHERE %s = $1 AND delete_at = 0`, column)
+	user, err := scanUser(s.sqlStore.pool.QueryRow(ctx, query, value))
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, model.NewNotFoundError("SqlUserStore.getBy", value)
 		}
 		return nil, fmt.Errorf("get user by %s: %w", column, err)
@@ -94,6 +110,9 @@ func (s *SqlUserStore) Update(ctx context.Context, user *model.User) (*model.Use
 		user.Username, user.DisplayName, user.Email, user.Roles, user.ActorType, user.UpdateAt, user.ID,
 	)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return nil, model.NewConflictError("SqlUserStore.Update", "username or email is already taken")
+		}
 		return nil, fmt.Errorf("update user: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
@@ -103,15 +122,17 @@ func (s *SqlUserStore) Update(ctx context.Context, user *model.User) (*model.Use
 	return user, nil
 }
 
+// Search matches username and display name. Not email: results are sanitized,
+// but which users match still answered "does anyone's address contain X",
+// one guess at a time, which is enough to recover an address.
 func (s *SqlUserStore) Search(ctx context.Context, term string, page, perPage int) ([]*model.User, error) {
-	query := `SELECT id, COALESCE(kratos_id::text, ''), username, display_name, COALESCE(email, ''), roles, actor_type, create_at, update_at, delete_at
+	query := `SELECT ` + userColumns + `
 		FROM users
-		WHERE delete_at = 0 AND (username ILIKE $1 OR display_name ILIKE $1 OR email ILIKE $1)
+		WHERE delete_at = 0 AND (username ILIKE $1 ESCAPE '\' OR display_name ILIKE $1 ESCAPE '\')
 		ORDER BY username
 		LIMIT $2 OFFSET $3`
 
-	like := "%" + term + "%"
-	rows, err := s.sqlStore.pool.Query(ctx, query, like, perPage, page*perPage)
+	rows, err := s.sqlStore.pool.Query(ctx, query, likePattern(term), perPage, page*perPage)
 	if err != nil {
 		return nil, fmt.Errorf("search users: %w", err)
 	}
@@ -121,8 +142,7 @@ func (s *SqlUserStore) Search(ctx context.Context, term string, page, perPage in
 }
 
 func (s *SqlUserStore) GetByIDs(ctx context.Context, ids []string) ([]*model.User, error) {
-	query := `SELECT id, COALESCE(kratos_id::text, ''), username, display_name, COALESCE(email, ''), roles, actor_type, create_at, update_at, delete_at
-		FROM users WHERE id = ANY($1) AND delete_at = 0`
+	query := `SELECT ` + userColumns + ` FROM users WHERE id = ANY($1) AND delete_at = 0`
 
 	rows, err := s.sqlStore.pool.Query(ctx, query, ids)
 	if err != nil {
@@ -136,11 +156,8 @@ func (s *SqlUserStore) GetByIDs(ctx context.Context, ids []string) ([]*model.Use
 func scanUsers(rows pgx.Rows) ([]*model.User, error) {
 	var users []*model.User
 	for rows.Next() {
-		u := &model.User{}
-		if err := rows.Scan(
-			&u.ID, &u.KratosID, &u.Username, &u.DisplayName, &u.Email,
-			&u.Roles, &u.ActorType, &u.CreateAt, &u.UpdateAt, &u.DeleteAt,
-		); err != nil {
+		u, err := scanUser(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan user: %w", err)
 		}
 		users = append(users, u)
