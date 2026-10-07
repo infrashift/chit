@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Status messages ran off the action bar** — a long message such as the delete confirmation was cut mid-word and pushed the connection dot and username off the screen. It now takes the channel name's room when it needs it, and is shortened with "…" if it still does not fit
 - **Deleting a post above the selection** moved the selection onto the next post
 - **Requests outlived the session** — requests still running at sign-out or session expiry now stop there, rather than running on until they time out
 - **Smaller behaviour** —
