@@ -7,6 +7,7 @@ import (
 
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/palette"
 )
 
 func wsPosted(p map[string]any) tui.WebSocketEventMsg {
@@ -80,5 +81,21 @@ func TestModel_TheFirstChannelOpensLikeAnyOther(t *testing.T) {
 
 	if !slices.Contains(client.membersFetched, "c1") {
 		t.Errorf("members fetched for %v, want c1", client.membersFetched)
+	}
+}
+
+// The action bar named a DM by the other person's username while the
+// palette used their display name, so the same conversation went by two
+// names on one screen.
+func TestModel_ActionBarNamesADMLikeThePalette(t *testing.T) {
+	m := setupModel(t)
+	dm := &model.Channel{ID: "d1", Type: model.ChannelDirect, Name: "u1__u2", DisplayName: "u1__u2"}
+	m, _ = step(t, m, tui.DMChannelsLoadedMsg{Channels: []*model.Channel{dm}})
+	m, _ = step(t, m, tui.UsersLoadedMsg{Users: []*model.User{{ID: "u2", Username: "bob", DisplayName: "Bob Smith"}}})
+	m, _ = step(t, m, palette.ChannelChosenMsg{Channel: dm})
+
+	lines := strings.Split(viewOf(m), "\n")
+	if bar := lines[len(lines)-1]; !strings.Contains(bar, "Bob Smith") {
+		t.Errorf("action bar = %q, want the display name the palette shows", bar)
 	}
 }

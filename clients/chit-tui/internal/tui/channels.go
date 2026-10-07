@@ -93,48 +93,54 @@ func (m *Model) resolveDMDisplayNames() {
 		return
 	}
 	for _, ch := range m.dmChannels {
-		switch ch.Type {
-		case model.ChannelDirect:
-			parts := strings.Split(ch.Name, "__")
-			if len(parts) != 2 {
-				continue
-			}
-			otherID := parts[0]
-			if otherID == m.me.ID {
-				otherID = parts[1]
-			}
-			if u, ok := m.users[otherID]; ok && u != nil {
-				name := u.Username
-				if u.DisplayName != "" {
-					name = u.DisplayName
-				}
-				m.dmDisplayNames[ch.ID] = name
-			} else {
-				if _, exists := m.users[otherID]; !exists {
-					m.users[otherID] = nil
-				}
-			}
-
-		case model.ChannelGroup:
-			parts := strings.Split(ch.Name, "__")
-			var names []string
-			for _, uid := range parts {
-				if uid == m.me.ID {
-					continue
-				}
-				if u, ok := m.users[uid]; ok && u != nil {
-					names = append(names, u.Username)
-				} else {
-					if _, exists := m.users[uid]; !exists {
-						m.users[uid] = nil
-					}
-				}
-			}
-			if len(names) > 0 {
-				m.dmDisplayNames[ch.ID] = strings.Join(names, ", ")
+		if name := m.peopleName(ch); name != "" {
+			m.dmDisplayNames[ch.ID] = name
+		}
+		// Anyone not yet known is looked up, after which this runs again.
+		for _, id := range m.peerIDs(ch) {
+			if _, known := m.users[id]; !known {
+				m.users[id] = nil
 			}
 		}
 	}
+}
+
+// peerIDs returns the other members of a DM or group, read from its name,
+// which joins the member IDs with "__".
+func (m Model) peerIDs(ch *model.Channel) []string {
+	if m.me == nil || (ch.Type != model.ChannelDirect && ch.Type != model.ChannelGroup) {
+		return nil
+	}
+	parts := strings.Split(ch.Name, "__")
+	if ch.Type == model.ChannelDirect && len(parts) != 2 {
+		return nil
+	}
+	peers := make([]string, 0, len(parts))
+	for _, id := range parts {
+		if id != m.me.ID {
+			peers = append(peers, id)
+		}
+	}
+	return peers
+}
+
+// peopleName names a DM for the other person (display name, else username)
+// and a group for its other members' usernames. It is "" until at least one
+// of them has loaded.
+func (m Model) peopleName(ch *model.Channel) string {
+	var names []string
+	for _, id := range m.peerIDs(ch) {
+		u := m.users[id]
+		if u == nil {
+			continue
+		}
+		if ch.Type == model.ChannelDirect && u.DisplayName != "" {
+			names = append(names, u.DisplayName)
+		} else {
+			names = append(names, u.Username)
+		}
+	}
+	return strings.Join(names, ", ")
 }
 
 // activeChannelDisplayName resolves the human-readable name of the active
@@ -144,29 +150,12 @@ func (m Model) activeChannelDisplayName() string {
 	if m.activeChan == nil {
 		return ""
 	}
-	switch m.activeChan.Type {
-	case model.ChannelDirect:
-		if m.me != nil {
-			parts := strings.Split(m.activeChan.Name, "__")
-			if len(parts) == 2 {
-				otherID := parts[0]
-				if otherID == m.me.ID {
-					otherID = parts[1]
-				}
-				if u, ok := m.users[otherID]; ok && u != nil {
-					return u.Username
-				}
-			}
-		}
-		return m.activeChan.DisplayName
-	case model.ChannelGroup:
-		if name := m.dmDisplayNames[m.activeChan.ID]; name != "" {
-			return name
-		}
-		return m.activeChan.DisplayName
-	default:
-		return m.activeChan.DisplayName
+	// DMs and groups are named for the people in them, the same way the
+	// palette names them.
+	if name := m.peopleName(m.activeChan); name != "" {
+		return name
 	}
+	return m.activeChan.DisplayName
 }
 
 // replaceChannel swaps an updated channel into every list holding it, so a

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A DM had two names** — the action bar named a direct message by the other person's username while the palette used their display name
 - **TOML themes missing from the theme list** — themes in `~/.config/chit/themes/` loaded by name but never appeared in `/theme` or `--list-themes`. Names that cannot load (not lowercase, or shadowed by a bundled theme) are no longer listed
 - **`/theme` turned off appearance switching** — picking a theme saved `theme = …`, which outranks `theme_dark` and `theme_light`. With those configured, the pick is now saved for the current appearance
 - **Invisible selection with named-color themes** — a theme using terminal color names got a selection and search highlight the same color as the background
