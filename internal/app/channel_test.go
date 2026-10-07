@@ -83,8 +83,10 @@ func (s *chMockTeamStore) GetByName(_ context.Context, _ string) (*model.Team, e
 func (s *chMockTeamStore) Update(_ context.Context, _ *model.Team) (*model.Team, error) {
 	return nil, nil
 }
-func (s *chMockTeamStore) Delete(_ context.Context, _ string, _ int64) error         { return nil }
-func (s *chMockTeamStore) GetAll(_ context.Context, _, _ int) ([]*model.Team, error) { return nil, nil }
+func (s *chMockTeamStore) Delete(_ context.Context, _ string, _ int64) error { return nil }
+func (s *chMockTeamStore) GetAll(_ context.Context, _ string, _, _ int) ([]*model.Team, error) {
+	return nil, nil
+}
 func (s *chMockTeamStore) GetTeamsForUser(_ context.Context, _ string) ([]*model.Team, error) {
 	return nil, nil
 }

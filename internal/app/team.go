@@ -16,7 +16,7 @@ func (a *App) CreateTeam(ctx context.Context, team *model.Team) (*model.Team, er
 	member := &model.TeamMember{
 		TeamID: saved.ID,
 		UserID: saved.CreatorID,
-		Roles:  "team_admin team_user",
+		Roles:  model.TeamRoleAdmin + " " + model.TeamRoleUser,
 	}
 	if _, err := a.Store.Team().SaveMember(ctx, member); err != nil {
 		return nil, err
@@ -26,24 +26,73 @@ func (a *App) CreateTeam(ctx context.Context, team *model.Team) (*model.Team, er
 	return saved, nil
 }
 
-// GetTeam retrieves a team by ID.
-func (a *App) GetTeam(ctx context.Context, id string) (*model.Team, error) {
-	return a.Store.Team().Get(ctx, id)
+// GetTeam retrieves a team by ID on actor's behalf. Invite-only teams are
+// visible only to their members and to system admins.
+func (a *App) GetTeam(ctx context.Context, id string, actor *model.User) (*model.Team, error) {
+	team, err := a.Store.Team().Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := a.requireTeamVisible(ctx, team, actor); err != nil {
+		return nil, err
+	}
+	return team, nil
 }
 
-// UpdateTeam updates a team.
-func (a *App) UpdateTeam(ctx context.Context, team *model.Team) (*model.Team, error) {
+// TeamPatch is a partial team update. A nil field is left unchanged; a
+// non-nil one is applied even when empty, so a description can be cleared.
+// The name is the team's URL slug and cannot be changed.
+type TeamPatch struct {
+	DisplayName *string
+	Description *string
+	Type        *string
+}
+
+// UpdateTeam applies patch on actor's behalf. Requires team_admin or
+// system_admin.
+func (a *App) UpdateTeam(ctx context.Context, id string, patch TeamPatch, actor *model.User) (*model.Team, error) {
+	team, err := a.Store.Team().Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := a.requireTeamAdmin(ctx, id, actor, "App.UpdateTeam"); err != nil {
+		return nil, err
+	}
+	if patch.DisplayName != nil {
+		team.DisplayName = *patch.DisplayName
+	}
+	if patch.Description != nil {
+		team.Description = *patch.Description
+	}
+	if patch.Type != nil {
+		team.Type = *patch.Type
+	}
+	if err := team.IsValid(); err != nil {
+		return nil, err
+	}
 	return a.Store.Team().Update(ctx, team)
 }
 
-// DeleteTeam soft-deletes a team.
-func (a *App) DeleteTeam(ctx context.Context, id string) error {
+// DeleteTeam soft-deletes a team on actor's behalf. Requires team_admin or
+// system_admin.
+func (a *App) DeleteTeam(ctx context.Context, id string, actor *model.User) error {
+	if _, err := a.Store.Team().Get(ctx, id); err != nil {
+		return err
+	}
+	if err := a.requireTeamAdmin(ctx, id, actor, "App.DeleteTeam"); err != nil {
+		return err
+	}
 	return a.Store.Team().Delete(ctx, id, model.GetMillis())
 }
 
-// GetAllTeams retrieves all teams with pagination.
-func (a *App) GetAllTeams(ctx context.Context, page, perPage int) ([]*model.Team, error) {
-	return a.Store.Team().GetAll(ctx, page, perPage)
+// GetAllTeams lists the teams actor can see: every team for a system admin,
+// otherwise open teams plus the invite-only teams actor belongs to.
+func (a *App) GetAllTeams(ctx context.Context, actor *model.User, page, perPage int) ([]*model.Team, error) {
+	visibleTo := actor.ID
+	if actor.IsSystemAdmin() {
+		visibleTo = ""
+	}
+	return a.Store.Team().GetAll(ctx, visibleTo, page, perPage)
 }
 
 // GetTeamsForUser retrieves teams that a user is a member of.
@@ -97,7 +146,13 @@ func (a *App) RemoveTeamMember(ctx context.Context, teamID, userID, actorID stri
 	return nil
 }
 
-// GetTeamMembers retrieves members of a team.
-func (a *App) GetTeamMembers(ctx context.Context, teamID string, page, perPage int) ([]*model.TeamMember, error) {
+// GetTeamMembers lists a team's members on actor's behalf. Only members and
+// system admins may read the roster.
+func (a *App) GetTeamMembers(ctx context.Context, teamID string, actor *model.User, page, perPage int) ([]*model.TeamMember, error) {
+	if !actor.IsSystemAdmin() {
+		if err := a.requireTeamMember(ctx, teamID, actor.ID); err != nil {
+			return nil, err
+		}
+	}
 	return a.Store.Team().GetMembers(ctx, teamID, page, perPage)
 }

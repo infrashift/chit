@@ -261,7 +261,7 @@ func (mentionMockTeamStore) Update(_ context.Context, _ *model.Team) (*model.Tea
 	return nil, nil
 }
 func (mentionMockTeamStore) Delete(_ context.Context, _ string, _ int64) error { return nil }
-func (mentionMockTeamStore) GetAll(_ context.Context, _, _ int) ([]*model.Team, error) {
+func (mentionMockTeamStore) GetAll(_ context.Context, _ string, _, _ int) ([]*model.Team, error) {
 	return nil, nil
 }
 func (mentionMockTeamStore) GetTeamsForUser(_ context.Context, _ string) ([]*model.Team, error) {

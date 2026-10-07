@@ -3,6 +3,8 @@ package model
 import (
 	"net/http"
 	"regexp"
+	"slices"
+	"strings"
 )
 
 const (
@@ -82,9 +84,20 @@ func (tm *TeamMember) IsValid() *AppError {
 	return nil
 }
 
+// Team member roles, space-separated in TeamMember.Roles like User.Roles.
+const (
+	TeamRoleAdmin = "team_admin"
+	TeamRoleUser  = "team_user"
+)
+
+// IsTeamAdmin reports whether the member's roles include team_admin.
+func (tm *TeamMember) IsTeamAdmin() bool {
+	return slices.Contains(strings.Fields(tm.Roles), TeamRoleAdmin)
+}
+
 func (tm *TeamMember) PreSave() {
 	if tm.Roles == "" {
-		tm.Roles = "team_user"
+		tm.Roles = TeamRoleUser
 	}
 	if tm.CreateAt == 0 {
 		tm.CreateAt = GetMillis()

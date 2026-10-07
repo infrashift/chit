@@ -100,11 +100,15 @@ func (s *SqlTeamStore) Delete(ctx context.Context, id string, deleteAt int64) er
 	return nil
 }
 
-func (s *SqlTeamStore) GetAll(ctx context.Context, page, perPage int) ([]*model.Team, error) {
+func (s *SqlTeamStore) GetAll(ctx context.Context, visibleTo string, page, perPage int) ([]*model.Team, error) {
 	query := `SELECT id, name, display_name, description, type, creator_id, create_at, update_at, delete_at
-		FROM teams WHERE delete_at = 0 ORDER BY display_name LIMIT $1 OFFSET $2`
+		FROM teams t WHERE delete_at = 0
+		AND ($3 = '' OR t.type = 'O' OR EXISTS (
+			SELECT 1 FROM team_members tm
+			WHERE tm.team_id = t.id AND tm.user_id = NULLIF($3, '')::uuid AND tm.delete_at = 0))
+		ORDER BY display_name LIMIT $1 OFFSET $2`
 
-	rows, err := s.sqlStore.pool.Query(ctx, query, perPage, page*perPage)
+	rows, err := s.sqlStore.pool.Query(ctx, query, perPage, page*perPage, visibleTo)
 	if err != nil {
 		return nil, fmt.Errorf("get all teams: %w", err)
 	}
@@ -137,7 +141,7 @@ func (s *SqlTeamStore) SaveMember(ctx context.Context, member *model.TeamMember)
 
 	query := `INSERT INTO team_members (team_id, user_id, roles, create_at, delete_at)
 		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (team_id, user_id) DO UPDATE SET roles = EXCLUDED.roles
+		ON CONFLICT (team_id, user_id) DO UPDATE SET roles = team_members.roles
 		RETURNING team_id, user_id, roles, create_at, delete_at`
 	err := s.sqlStore.pool.QueryRow(ctx, query,
 		member.TeamID, member.UserID, member.Roles, member.CreateAt, member.DeleteAt,

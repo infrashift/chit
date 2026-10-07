@@ -201,10 +201,13 @@ func (s *mockTeamStore) Get(_ context.Context, id string) (*model.Team, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	t, ok := s.byID[id]
-	if !ok {
-		return nil, fmt.Errorf("team %s not found", id)
+	if !ok || t.DeleteAt != 0 {
+		return nil, model.NewNotFoundError("mockTeamStore.Get", id)
 	}
-	return t, nil
+	// A copy, as the SQL store returns: callers that mutate the result must
+	// not change the stored row until they call Update.
+	cp := *t
+	return &cp, nil
 }
 
 func (s *mockTeamStore) GetByName(_ context.Context, _ string) (*model.Team, error) {
@@ -224,23 +227,53 @@ func (s *mockTeamStore) Delete(_ context.Context, id string, deleteAt int64) err
 	return nil
 }
 
-func (s *mockTeamStore) GetAll(_ context.Context, _, _ int) ([]*model.Team, error) {
+func (s *mockTeamStore) GetAll(_ context.Context, visibleTo string, _, _ int) ([]*model.Team, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var teams []*model.Team
 	for _, t := range s.byID {
+		if t.DeleteAt != 0 {
+			continue
+		}
+		if visibleTo != "" && t.Type != model.TeamOpen && !s.isMemberLocked(t.ID, visibleTo) {
+			continue
+		}
 		teams = append(teams, t)
 	}
 	return teams, nil
 }
 
-func (s *mockTeamStore) GetTeamsForUser(_ context.Context, _ string) ([]*model.Team, error) {
-	return s.GetAll(context.Background(), 0, 100)
+func (s *mockTeamStore) isMemberLocked(teamID, userID string) bool {
+	for _, m := range s.members[teamID] {
+		if m.UserID == userID {
+			return true
+		}
+	}
+	return false
 }
 
+func (s *mockTeamStore) GetTeamsForUser(_ context.Context, userID string) ([]*model.Team, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var teams []*model.Team
+	for _, t := range s.byID {
+		if t.DeleteAt == 0 && s.isMemberLocked(t.ID, userID) {
+			teams = append(teams, t)
+		}
+	}
+	return teams, nil
+}
+
+// SaveMember matches the SQL upsert: an existing member keeps their roles.
 func (s *mockTeamStore) SaveMember(_ context.Context, m *model.TeamMember) (*model.TeamMember, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for _, existing := range s.members[m.TeamID] {
+		if existing.UserID == m.UserID {
+			return existing, nil
+		}
+	}
+	m.PreSave()
 	s.members[m.TeamID] = append(s.members[m.TeamID], m)
 	return m, nil
 }
@@ -874,9 +907,11 @@ func setupTestApp(t *testing.T) (*app.App, *mockStore, func()) {
 		CreateAt:    1000,
 		UpdateAt:    1000,
 	})
+	// testUser created the team, so holds team_admin, as CreateTeam grants.
 	ms.team.seedMember(&model.TeamMember{
 		TeamID: testTeamID,
 		UserID: testUserID,
+		Roles:  "team_admin team_user",
 	})
 	ms.team.seedMember(&model.TeamMember{
 		TeamID: testTeamID,

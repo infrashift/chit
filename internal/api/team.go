@@ -22,7 +22,7 @@ func createTeam(a *app.App) http.HandlerFunc {
 
 		saved, err := a.CreateTeam(r.Context(), &team)
 		if err != nil {
-			WriteError(w, model.NewInternalError("createTeam", err))
+			WriteAppError(w, "createTeam", err)
 			return
 		}
 
@@ -32,10 +32,9 @@ func createTeam(a *app.App) http.HandlerFunc {
 
 func getTeam(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := chi.URLParam(r, "id")
-		team, err := a.GetTeam(r.Context(), id)
+		team, err := a.GetTeam(r.Context(), chi.URLParam(r, "id"), ContextGetUser(r))
 		if err != nil {
-			WriteError(w, model.NewNotFoundError("getTeam", id))
+			WriteAppError(w, "getTeam", err)
 			return
 		}
 		WriteJSON(w, http.StatusOK, team)
@@ -44,48 +43,40 @@ func getTeam(a *app.App) http.HandlerFunc {
 
 func updateTeam(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := chi.URLParam(r, "id")
-
-		existing, err := a.GetTeam(r.Context(), id)
-		if err != nil {
-			WriteError(w, model.NewInternalError("updateTeam", err))
-			return
+		var body struct {
+			Name        *string `json:"name"`
+			DisplayName *string `json:"display_name"`
+			Description *string `json:"description"`
+			Type        *string `json:"type"`
 		}
-
-		var patch model.Team
-		if err = json.NewDecoder(r.Body).Decode(&patch); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			WriteError(w, model.NewBadRequestError("updateTeam", "invalid request body"))
 			return
 		}
-
-		if patch.DisplayName != "" {
-			existing.DisplayName = patch.DisplayName
-		}
-		if patch.Description != "" {
-			existing.Description = patch.Description
-		}
-		if patch.Name != "" {
-			existing.Name = patch.Name
-		}
-		if patch.Type != "" {
-			existing.Type = patch.Type
-		}
-
-		updated, err := a.UpdateTeam(r.Context(), existing)
-		if err != nil {
-			WriteError(w, model.NewInternalError("updateTeam", err))
+		// The name is the team's URL slug; renaming it would break every link
+		// to the team, so it is fixed at creation.
+		if body.Name != nil {
+			WriteError(w, model.NewBadRequestError("updateTeam", "team name cannot be changed"))
 			return
 		}
 
+		updated, err := a.UpdateTeam(r.Context(), chi.URLParam(r, "id"), app.TeamPatch{
+			DisplayName: body.DisplayName,
+			Description: body.Description,
+			Type:        body.Type,
+		}, ContextGetUser(r))
+		if err != nil {
+			WriteAppError(w, "updateTeam", err)
+			return
+		}
 		WriteJSON(w, http.StatusOK, updated)
 	}
 }
 
 func deleteTeam(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := chi.URLParam(r, "id")
-		if err := a.DeleteTeam(r.Context(), id); err != nil {
-			WriteError(w, model.NewInternalError("deleteTeam", err))
+		if err := a.DeleteTeam(r.Context(), chi.URLParam(r, "id"), ContextGetUser(r)); err != nil {
+			WriteAppError(w, "deleteTeam", err)
 			return
 		}
 		WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
@@ -96,9 +87,9 @@ func getAllTeams(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		page, perPage := parsePagination(r, 60)
 
-		teams, err := a.GetAllTeams(r.Context(), page, perPage)
+		teams, err := a.GetAllTeams(r.Context(), ContextGetUser(r), page, perPage)
 		if err != nil {
-			WriteError(w, model.NewInternalError("getAllTeams", err))
+			WriteAppError(w, "getAllTeams", err)
 			return
 		}
 
@@ -168,9 +159,9 @@ func getTeamMembers(a *app.App) http.HandlerFunc {
 		teamID := chi.URLParam(r, "id")
 		page, perPage := parsePagination(r, 60)
 
-		members, err := a.GetTeamMembers(r.Context(), teamID, page, perPage)
+		members, err := a.GetTeamMembers(r.Context(), teamID, ContextGetUser(r), page, perPage)
 		if err != nil {
-			WriteError(w, model.NewInternalError("getTeamMembers", err))
+			WriteAppError(w, "getTeamMembers", err)
 			return
 		}
 

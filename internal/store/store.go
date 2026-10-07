@@ -37,7 +37,9 @@ type TeamStore interface {
 	GetByName(ctx context.Context, name string) (*model.Team, error)
 	Update(ctx context.Context, team *model.Team) (*model.Team, error)
 	Delete(ctx context.Context, id string, deleteAt int64) error
-	GetAll(ctx context.Context, page, perPage int) ([]*model.Team, error)
+	// GetAll lists teams. A non-empty visibleTo limits the list to open teams
+	// plus the teams that user belongs to; "" lists every team.
+	GetAll(ctx context.Context, visibleTo string, page, perPage int) ([]*model.Team, error)
 	GetTeamsForUser(ctx context.Context, userID string) ([]*model.Team, error)
 	SaveMember(ctx context.Context, member *model.TeamMember) (*model.TeamMember, error)
 	RemoveMember(ctx context.Context, teamID, userID string) error
