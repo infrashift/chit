@@ -106,7 +106,6 @@ type Model struct {
 	threadCounts          map[string]int
 	allTags               []*model.Tag
 	postTags              map[string][]*model.Tag
-	pendingPostTags       []string
 	pendingPrivateChannel *model.Channel
 	pendingMembers        []string
 	// pendingGroupChannel marks the member picker as serving /group rather
@@ -578,9 +577,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case PostCreatedMsg:
 		if msg.Err != nil {
-			cmd := m.setError(msg.Err)
-			m.pendingPostTags = nil
-			return m, cmd
+			return m, m.setError(msg.Err)
 		}
 		// Show the message immediately rather than waiting for the WebSocket
 		// echo. With the socket down the echo never arrives, so the input
@@ -595,25 +592,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		if msg.Post != nil && len(m.pendingPostTags) > 0 {
-			for _, tagName := range m.pendingPostTags {
-				found := false
-				for _, t := range m.allTags {
-					if strings.EqualFold(t.Name, tagName) {
-						cmds = append(cmds, AddTagToPostCmd(m.client, msg.Post.ID, t.ID))
-						found = true
-						break
-					}
-				}
-				if !found {
-					cmds = append(cmds, CreateTagAndApplyCmd(m.client, tagName, msg.Post.ID))
-				}
-			}
-			m.pendingPostTags = nil
-			return m, tea.Batch(cmds...)
+		if msg.Post != nil {
+			cmds = append(cmds, m.tagPost(msg.Post.ID, msg.Tags)...)
 		}
-		m.pendingPostTags = nil
-		return m, nil
+		return m, tea.Batch(cmds...)
 
 	case ThreadLoadedMsg:
 		if m.mainPane != paneThread || msg.PostID != m.threadRootID {
@@ -779,17 +761,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.editingPostID != "" {
 			id := m.editingPostID
 			m.editingPostID = ""
-			m.pendingPostTags = nil
-			return m, EditPost(m.client, id, content)
+			cmds = append(cmds, EditPost(m.client, id, content))
+			cmds = append(cmds, m.tagPost(id, tagNames)...)
+			return m, tea.Batch(cmds...)
 		}
 
-		m.pendingPostTags = tagNames
 		post := &model.Post{
 			ChannelID: m.activeChan.ID,
 			UserID:    m.me.ID,
 			Content:   content,
 		}
-		cmds = append(cmds, CreatePost(m.client, post))
+		// The tags travel with the request, since only its response knows
+		// the new post's ID.
+		cmds = append(cmds, CreatePost(m.client, post, tagNames...))
 		return m, tea.Batch(cmds...)
 
 	case input.SlashTriggerMsg:
@@ -900,11 +884,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		term, tagNames := tagpicker.StripHashtags(msg.Term)
 		var tagIDs []string
 		for _, name := range tagNames {
-			for _, t := range m.allTags {
-				if strings.EqualFold(t.Name, name) {
-					tagIDs = append(tagIDs, t.ID)
-					break
-				}
+			if t := m.tagByName(name); t != nil {
+				tagIDs = append(tagIDs, t.ID)
 			}
 		}
 		m.searchTerm = term
@@ -1727,6 +1708,29 @@ func (m *Model) leaveThread() tea.Cmd {
 	m.thread.Clear()
 	m.resizeComponents()
 	return nil
+}
+
+// tagByName finds a known tag, ignoring case.
+func (m Model) tagByName(name string) *model.Tag {
+	for _, t := range m.allTags {
+		if strings.EqualFold(t.Name, name) {
+			return t
+		}
+	}
+	return nil
+}
+
+// tagPost applies tags by name to a post, creating any that do not exist yet.
+func (m Model) tagPost(postID string, names []string) []tea.Cmd {
+	cmds := make([]tea.Cmd, 0, len(names))
+	for _, name := range names {
+		if t := m.tagByName(name); t != nil {
+			cmds = append(cmds, AddTagToPostCmd(m.client, postID, t.ID))
+		} else {
+			cmds = append(cmds, CreateTagAndApplyCmd(m.client, name, postID))
+		}
+	}
+	return cmds
 }
 
 // cancelEdit abandons a post edit in progress, along with its text. An edit

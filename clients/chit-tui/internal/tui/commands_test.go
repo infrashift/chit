@@ -33,6 +33,7 @@ type mockClient struct {
 	postsFetched    []string // channel IDs passed to GetChannelPosts
 	editedPosts     []string // post IDs passed to UpdatePost
 	deletedPosts    []string // post IDs passed to DeletePost
+	taggedPosts     []string // "postID#tagID" passed to AddTagToPost
 	threads         []*model.ThreadResponse
 	// followCalls records (rootID, following) so tests can tell an unfollow
 	// that reached the server from one that only left the list.
@@ -159,7 +160,8 @@ func (m *mockClient) CreateTag(_ context.Context, name string) (*model.Tag, erro
 func (m *mockClient) GetTagsForPost(_ context.Context, _ string) ([]*model.Tag, error) {
 	return m.postTags, m.err
 }
-func (m *mockClient) AddTagToPost(_ context.Context, _, _ string) error {
+func (m *mockClient) AddTagToPost(_ context.Context, postID, tagID string) error {
+	m.taggedPosts = append(m.taggedPosts, postID+"#"+tagID)
 	return m.err
 }
 func (m *mockClient) RemoveTagFromPost(_ context.Context, _, _ string) error {

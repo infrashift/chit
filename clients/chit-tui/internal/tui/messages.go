@@ -31,6 +31,8 @@ type PostsLoadedMsg struct {
 // PostCreatedMsg is sent when a post is successfully created.
 type PostCreatedMsg struct {
 	Post *model.Post
+	// Tags are the names to apply to the new post once its ID is known.
+	Tags []string
 	Err  error
 }
 

@@ -211,3 +211,73 @@ func TestModel_DeleteIsOnlyConfirmedWhileTheQuestionShows(t *testing.T) {
 		t.Error("deleted on a question no longer shown")
 	}
 }
+
+// messagesOf runs a command and returns its messages, unwrapping batches.
+func messagesOf(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		return []tea.Msg{msg}
+	}
+	var out []tea.Msg
+	for _, c := range batch {
+		out = append(out, messagesOf(c)...)
+	}
+	return out
+}
+
+func createdPost(t *testing.T, cmd tea.Cmd) tui.PostCreatedMsg {
+	t.Helper()
+	for _, msg := range messagesOf(cmd) {
+		if created, ok := msg.(tui.PostCreatedMsg); ok {
+			return created
+		}
+	}
+	t.Fatal("no PostCreatedMsg")
+	return tui.PostCreatedMsg{}
+}
+
+// Tags waited in one slot on the model for the next post to be created, so
+// two quick sends gave the first post the second one's tags.
+func TestModel_TagsGoToThePostThatCarriedThem(t *testing.T) {
+	m, client := withOwnPost(t)
+	m, _ = step(t, m, tui.AllTagsLoadedMsg{Tags: []*model.Tag{{ID: "ta", Name: "alpha"}, {ID: "tb", Name: "beta"}}})
+
+	client.post = &model.Post{ID: "one", ChannelID: "c1", UserID: "u1"}
+	m, cmd := step(t, m, input.SendMsg{Content: "first #alpha"})
+	first := createdPost(t, cmd)
+	client.post = &model.Post{ID: "two", ChannelID: "c1", UserID: "u1"}
+	m, cmd = step(t, m, input.SendMsg{Content: "second #beta"})
+	second := createdPost(t, cmd)
+
+	// The second send's response lands first.
+	m, cmd = step(t, m, second)
+	drain(cmd)
+	_, cmd = step(t, m, first)
+	drain(cmd)
+
+	slices.Sort(client.taggedPosts)
+	if want := []string{"one#ta", "two#tb"}; !slices.Equal(client.taggedPosts, want) {
+		t.Errorf("tagged = %v, want %v", client.taggedPosts, want)
+	}
+}
+
+// Editing stripped "#prod" from the text and then dropped the tag, so the
+// word vanished and nothing was tagged.
+func TestModel_EditAppliesItsTags(t *testing.T) {
+	m, client := withOwnPost(t)
+	m, _ = step(t, m, tui.AllTagsLoadedMsg{Tags: []*model.Tag{{ID: "tp", Name: "prod"}}})
+	m, _ = step(t, m, key('e'))
+
+	_ = send(t, m, "deployed #prod")
+
+	if !slices.Equal(client.editedPosts, []string{"mine"}) {
+		t.Fatalf("edited = %v, want [mine]", client.editedPosts)
+	}
+	if !slices.Equal(client.taggedPosts, []string{"mine#tp"}) {
+		t.Errorf("tagged = %v, want [mine#tp]", client.taggedPosts)
+	}
+}

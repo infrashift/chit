@@ -49,11 +49,12 @@ func FetchOlderPosts(client api.ChitClient, channelID string, page, perPage int)
 	}
 }
 
-// CreatePost returns a command that creates a post.
-func CreatePost(client api.ChitClient, post *model.Post) tea.Cmd {
+// CreatePost returns a command that creates a post. Tags ride along in the
+// result, to be applied once the new post has an ID.
+func CreatePost(client api.ChitClient, post *model.Post, tags ...string) tea.Cmd {
 	return func() tea.Msg {
 		created, err := client.CreatePost(context.Background(), post)
-		return PostCreatedMsg{Post: created, Err: err}
+		return PostCreatedMsg{Post: created, Tags: tags, Err: err}
 	}
 }
 
