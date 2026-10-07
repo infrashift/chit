@@ -11,6 +11,9 @@ import (
 // more threads than this is possible; paging through them is not yet.
 const threadInboxPageSize = 50
 
+// errNotSent reports a message typed before there was anywhere to send it.
+var errNotSent = errors.New("not sent: no channel is open yet")
+
 // errSearchHitNotLoaded reports a result that is outside the loaded history.
 var errSearchHitNotLoaded = errors.New(
 	"that message is older than the loaded history; scroll back to reach it")

@@ -3,7 +3,7 @@ package chcreator
 import (
 	"regexp"
 	"strings"
-	"unicode"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -141,10 +141,14 @@ func (m *Model) focusActiveField() {
 // Slug generates a URL-safe channel name from a display name.
 func Slug(displayName string) string {
 	var b strings.Builder
+	// Names allow only ASCII letters, digits and hyphens. Other letters
+	// are dropped rather than kept for the name check to reject, which
+	// keeps the slug ASCII and so safe to cut by byte below.
 	for _, r := range strings.ToLower(displayName) {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
 			b.WriteRune(r)
-		} else if r == ' ' || r == '_' || r == '-' {
+		case r == ' ' || r == '_' || r == '-':
 			b.WriteRune('-')
 		}
 	}
@@ -171,7 +175,7 @@ func (m Model) validate() string {
 	if dn == "" {
 		return "Display name is required"
 	}
-	if len(dn) > 64 {
+	if utf8.RuneCountInString(dn) > 64 {
 		return "Display name max 64 chars"
 	}
 	nm := m.name.Value()
@@ -181,7 +185,7 @@ func (m Model) validate() string {
 	if !ValidateName(nm) {
 		return "Invalid name: lowercase alphanumeric and hyphens, 2-64 chars"
 	}
-	if len(m.purpose.Value()) > 250 {
+	if utf8.RuneCountInString(m.purpose.Value()) > 250 {
 		return "Purpose max 250 chars"
 	}
 	return ""

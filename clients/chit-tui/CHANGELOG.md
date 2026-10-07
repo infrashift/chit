@@ -39,6 +39,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Smaller behaviour** —
+  - pinning shows at once instead of waiting for the WebSocket echo, so a second `p` unpins;
+  - a message typed before any channel is open is kept in the input, with a note, rather than lost;
+  - choosing a search hit in another channel now selects the hit once that channel loads;
+  - the mouse wheel over an open thread no longer pages the channel history hidden behind it;
+  - a theme picked during the session now reaches the sign-in screen;
+  - the channel creator's slug is always a valid name (non-ASCII letters were kept, then rejected);
+  - Kratos field errors such as "password too short" are shown instead of raw JSON;
+  - a stored session is kept when Kratos cannot be reached at startup, and discarded only when Kratos rejects it
 - **Badges** — team channels showed no unread or mention badge until opened; they now load for the whole team at startup in one request (needs the server's `GET /users/me/teams/{id}/channels/members`). The open channel's badge no longer comes back after viewing it, your own posts from another device no longer count as unread, a mention in the channel you are reading no longer raises its badge, and DM badges are worked out even when their members load before you do
 - **Your own posts signed with your user ID** — in a channel where nobody else's posts had loaded, your messages showed your truncated user ID instead of your username
 - **A DM had two names** — the action bar named a direct message by the other person's username while the palette used their display name

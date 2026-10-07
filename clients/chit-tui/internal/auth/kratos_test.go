@@ -334,3 +334,45 @@ func TestParseError_TopLevelMessage(t *testing.T) {
 		t.Errorf("expected 'validation failed' in error, got: %v", err)
 	}
 }
+
+// A rejected login reports why on the form's fields (ui.nodes), not in a
+// top-level message. That case fell through to showing the raw flow JSON.
+func TestSubmitLogin_ReportsFieldErrors(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /self-service/login", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "flow-1",
+			"ui": map[string]any{
+				"nodes": []any{
+					map[string]any{"messages": []any{}},
+					map[string]any{"messages": []any{map[string]any{"text": "The password must be at least 8 characters long."}}},
+				},
+			},
+		})
+	})
+	client, _ := kratosServer(t, mux)
+
+	_, err := client.SubmitLogin(context.Background(), "flow-1", "alice", "short")
+	if err == nil || !strings.Contains(err.Error(), "at least 8 characters") {
+		t.Fatalf("err = %v, want the field's message", err)
+	}
+	if strings.Contains(err.Error(), "{") {
+		t.Errorf("err = %v, want no raw JSON", err)
+	}
+}
+
+// Only Kratos saying no to a session means it is gone. An unreachable or
+// failing Kratos says nothing about the session.
+func TestIsSessionRejected(t *testing.T) {
+	if !auth.IsSessionRejected(&auth.KratosError{StatusCode: http.StatusUnauthorized}) {
+		t.Error("a 401 is a rejection")
+	}
+	if auth.IsSessionRejected(&auth.KratosError{StatusCode: http.StatusBadGateway}) {
+		t.Error("a 502 is not")
+	}
+	_, err := auth.NewKratosClient("http://127.0.0.1:1").CheckSession(context.Background(), "tok")
+	if auth.IsSessionRejected(err) {
+		t.Error("an unreachable Kratos is not")
+	}
+}

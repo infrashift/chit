@@ -361,41 +361,6 @@ func TestModel_EscClosesThread(t *testing.T) {
 	}
 }
 
-func TestModel_WSEventDropsStale(t *testing.T) {
-	m := setupModel(t)
-
-	// Send event with seq=5
-	updated, _ := m.Update(tui.WebSocketEventMsg{
-		Event: model.WebSocketEvent{
-			Event:    model.WebSocketEventPosted,
-			Sequence: 5,
-			Data: map[string]any{
-				"id": "p2", "channel_id": "c1", "user_id": "u1",
-				"content": "first", "create_at": float64(1700000002000),
-			},
-		},
-	})
-	m = updated.(tui.Model)
-
-	// Send stale event with seq=3, should be dropped
-	updated, _ = m.Update(tui.WebSocketEventMsg{
-		Event: model.WebSocketEvent{
-			Event:    model.WebSocketEventPosted,
-			Sequence: 3,
-			Data: map[string]any{
-				"id": "p3", "channel_id": "c1", "user_id": "u1",
-				"content": "stale", "create_at": float64(1700000003000),
-			},
-		},
-	})
-	m = updated.(tui.Model)
-
-	view := m.View()
-	if strings.Contains(view, "stale") {
-		t.Error("stale WS event should have been dropped")
-	}
-}
-
 // Commands this client does not implement go to the server as a message;
 // the server owns the registry and replies to an unknown one.
 func TestModel_ServerSlashCommandIsSent(t *testing.T) {

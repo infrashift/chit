@@ -3,6 +3,7 @@ package chcreator_test
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
@@ -372,5 +373,27 @@ func TestChCreator_ClearsValidErrOnType(t *testing.T) {
 	view = m.View()
 	if strings.Contains(view, "required") {
 		t.Error("validation error should clear after typing")
+	}
+}
+
+// The slug kept letters outside a-z, which the name check then rejected,
+// and cut long names by byte, splitting a character.
+func TestSlug_IsAlwaysAValidName(t *testing.T) {
+	for _, in := range []string{
+		"Café Ops",
+		"日本語 team",
+		strings.Repeat("é", 40) + " and more words to make it long",
+		"Deploy -- Notes",
+	} {
+		got := chcreator.Slug(in)
+		if got != "" && !chcreator.ValidateName(got) {
+			t.Errorf("Slug(%q) = %q, which the name check rejects", in, got)
+		}
+		if !utf8.ValidString(got) {
+			t.Errorf("Slug(%q) = %q, not valid UTF-8", in, got)
+		}
+	}
+	if got := chcreator.Slug("Café Ops"); got != "caf-ops" && got != "cafe-ops" {
+		t.Errorf(`Slug("Café Ops") = %q`, got)
 	}
 }

@@ -21,6 +21,10 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.scrollUnderPointer(msg.Y, -wheelScrollLines)
+		// An open thread covers the channel history; only that is paged.
+		if m.mainPane != paneChannel {
+			return m, nil
+		}
 		return m, m.maybeLoadOlder()
 	case tea.MouseButtonWheelDown:
 		if m.palette.Visible() {

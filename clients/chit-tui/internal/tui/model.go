@@ -110,7 +110,6 @@ type Model struct {
 	mainPane            mainPane
 	channelAutoSelected bool
 	wsConnected         bool
-	lastWSSeq           int64
 	keys                KeyMap
 	styles              styles.Styles
 	width               int
@@ -141,6 +140,8 @@ type Model struct {
 	// user ID; commandResponses numbers the outputs so each has its own ID.
 	commandAuthors   map[string]string
 	commandResponses int
+	// pendingJumpID is a search hit to select once its channel has loaded.
+	pendingJumpID string
 	// confirmDeleteID is the post awaiting a second delete keypress.
 	confirmDeleteID string
 	// threadRootID is the root of the thread in the main pane, set as soon

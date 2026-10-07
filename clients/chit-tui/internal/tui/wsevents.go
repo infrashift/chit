@@ -24,12 +24,6 @@ var (
 
 func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 	evt := msg.Event
-	if evt.Sequence > 0 && evt.Sequence <= m.lastWSSeq {
-		return m, ListenWebSocket(m.wsClient)
-	}
-	if evt.Sequence > m.lastWSSeq {
-		m.lastWSSeq = evt.Sequence
-	}
 
 	var cmds []tea.Cmd
 	cmds = append(cmds, ListenWebSocket(m.wsClient))

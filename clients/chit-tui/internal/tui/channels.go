@@ -24,6 +24,7 @@ func (m *Model) selectChannel(ch *model.Channel) tea.Cmd {
 	}
 	m.activeChan = ch
 	m.channelAutoSelected = true
+	m.pendingJumpID = ""
 	m.cancelEdit()
 	// A highlight from a search in the previous channel would otherwise
 	// carry over and mark unrelated text here.

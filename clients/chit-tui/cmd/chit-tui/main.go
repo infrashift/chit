@@ -65,13 +65,10 @@ func main() {
 		// Env-sourced tokens skip validation.
 		tokenStore.Set(cfg.SessionToken)
 	} else {
-		if stored, err := sessionStore.Load(); err == nil && stored.Token != "" {
-			// Validate stored token before using it.
-			if _, err := kratosClient.CheckSession(context.Background(), stored.Token); err == nil {
-				tokenStore.Set(stored.Token)
-			}
-			// If validation fails, token stays empty → login screen.
-		}
+		tokenStore.Set(storedToken(sessionStore.Load, func(token string) error {
+			_, err := kratosClient.CheckSession(context.Background(), token)
+			return err
+		}))
 	}
 
 	client := api.NewClientWithTokenFn(cfg.ServerURL, tokenStore.Get, cfg.AuthHeader)
@@ -97,4 +94,19 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// storedToken returns the saved session's token unless Kratos rejects it;
+// "" sends the user to the sign-in screen. Only a rejection discards it: if
+// Kratos cannot be reached, the session may well be fine, and the server
+// will ask for sign-in itself if it is not.
+func storedToken(load func() (*auth.StoredSession, error), check func(token string) error) string {
+	stored, err := load()
+	if err != nil || stored.Token == "" {
+		return ""
+	}
+	if err := check(stored.Token); err != nil && auth.IsSessionRejected(err) {
+		return ""
+	}
+	return stored.Token
 }

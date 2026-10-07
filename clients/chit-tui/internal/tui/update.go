@@ -133,7 +133,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// A short first page means there is nothing older to ask for.
 		m.historyExhausted = len(page) < historyPageSize
 		m.postTags = make(map[string][]*model.Tag)
-		return m, m.afterPostsLoaded(page)
+		load := m.afterPostsLoaded(page)
+		if id := m.pendingJumpID; id != "" {
+			m.pendingJumpID = ""
+			m.viewport.SetSearchTerm(m.searchTerm)
+			if !m.viewport.ScrollToPost(id) {
+				return m, tea.Batch(load, m.setError(errSearchHitNotLoaded))
+			}
+		}
+		return m, load
 
 	case PostCreatedMsg:
 		if msg.Err != nil {
@@ -275,7 +283,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case input.SendMsg:
 		if m.activeChan == nil || m.me == nil {
-			return m, nil
+			// The input has already cleared; put the text back so it is
+			// not lost, and say why it went nowhere.
+			m.input.SetValue(msg.Content)
+			return m, m.setError(errNotSent)
 		}
 		// In the thread pane the input composes a reply to the thread root.
 		// The root's ID is known from the moment the thread opens, so a
@@ -391,7 +402,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Post.ChannelID != "" &&
 				(m.activeChan == nil || msg.Post.ChannelID != m.activeChan.ID) {
 				if ch := m.channelByID(msg.Post.ChannelID); ch != nil {
-					return m, tea.Batch(cmd, m.selectChannel(ch), m.setError(errSearchHitElsewhere))
+					open := m.selectChannel(ch)
+					// The hit is selected once the channel's history arrives.
+					m.pendingJumpID = msg.Post.ID
+					return m, tea.Batch(cmd, open, m.setError(errSearchHitElsewhere))
 				}
 			}
 			m.viewport.SetSearchTerm(m.searchTerm)
@@ -712,6 +726,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.thread.SetStyles(newStyles)
 		m.mention.SetStyles(newStyles)
 		m.actionBar.SetStyles(newStyles)
+		m.loginModel.SetStyles(newStyles)
 		for _, o := range m.overlays() {
 			o.setStyles(newStyles)
 		}
@@ -765,8 +780,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			return m, m.setError(msg.Err)
 		}
-		// The server broadcasts post_pinned with the full post, which
-		// updates the badge; nothing more is needed here.
+		// Shown now rather than on the WebSocket echo, which never comes
+		// with the socket down; the echo then changes nothing.
+		m.viewport.SetPinned(msg.PostID, msg.Pinned)
 		return m, nil
 
 	case PostEditedMsg:
