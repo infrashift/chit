@@ -5,9 +5,6 @@ CHANGELOG.
 
 ## Structure
 
-- [ ] The session file lives in `~/.config/chit-tui/`, the config and themes
-      in `~/.config/chit/`. Moving the session needs a migration so nobody is
-      signed out.
 - [ ] `update.go` is still about 800 lines; the channel, thread and tag cases
       could move beside their helpers.
 - [ ] `overlays()` builds seven closures on every call.

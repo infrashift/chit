@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Session file location** — the stored session moves from `~/.config/chit-tui/session.json` to `~/.config/chit/session.json`, beside the config and themes. An existing session is moved over on first start, so nobody is signed out
 - **Slash commands go to the server** — anything but the client's own commands is sent as typed, rather than opening the palette and discarding the text
 - **Your own messages appear at once** — from the send's response, not only the WebSocket echo
 - **Fewer requests on startup** — tags load a page at a time and members only for the open channel, rather than one request per post and per channel

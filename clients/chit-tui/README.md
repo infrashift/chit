@@ -37,7 +37,7 @@ Settings are read from `~/.config/chit/config.toml` (set `CHIT_CONFIG_FILE` to u
 |---|---|---|---|
 | `server_url` | `CHIT_SERVER_URL` | — (required) | Chit server or gateway URL, e.g. `http://localhost:4455` |
 | — | `CHIT_SESSION_TOKEN` | — | Session token to use instead of signing in |
-| `session_file` | `CHIT_SESSION_FILE` | `~/.config/chit-tui/session.json` | Where the signed-in session is kept (written `0600`) |
+| `session_file` | `CHIT_SESSION_FILE` | `~/.config/chit/session.json` | Where the signed-in session is kept (written `0600`) |
 | `ws_scheme` | `CHIT_WS_SCHEME` | `wss` for an `https://` server, else `ws` | WebSocket scheme |
 | `auth_header` | `CHIT_AUTH_HEADER` | `X-Session-Token` | Header the session token is sent in |
 | `theme` | `CHIT_THEME` | — | Theme to use whatever the terminal's appearance |

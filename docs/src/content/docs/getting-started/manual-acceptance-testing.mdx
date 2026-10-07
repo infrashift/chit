@@ -93,12 +93,12 @@ export CHIT_SERVER_URL=http://localhost:4455
 
 The login screen will appear. Enter any user's email and password from the
 table above. After successful login, the session token is stored at
-`~/.config/chit-tui/session.json` and reused on subsequent launches.
+`~/.config/chit/session.json` and reused on subsequent launches.
 
 To force a fresh login, clear the stored session:
 
 ```bash
-rm ~/.config/chit-tui/session.json
+rm ~/.config/chit/session.json
 ```
 
 Or use the `/logout` slash command in chit-tui.
@@ -110,7 +110,7 @@ broadcasting, a reply appearing in someone else's thread — needs more than one
 client. You can run as many as you like on a single machine.
 
 :::caution[This is why a second client appears impossible]
-Every client writes its session to the same file, `~/.config/chit-tui/session.json`,
+Every client writes its session to the same file, `~/.config/chit/session.json`,
 unless told otherwise. Start a second client without changing that and it
 overwrites the first one's token: both windows end up logged in as whoever
 authenticated last. Give each client its own `CHIT_SESSION_FILE` and they stay

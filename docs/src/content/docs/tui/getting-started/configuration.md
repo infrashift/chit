@@ -47,7 +47,7 @@ having no server URL at all.
 | `server_url` | `CHIT_SERVER_URL` | — (required) | Base URL of the Chit server or Oathkeeper proxy |
 | `ws_scheme` | `CHIT_WS_SCHEME` | `wss` for an `https://` server, else `ws` | WebSocket scheme: `ws` or `wss` |
 | `auth_header` | `CHIT_AUTH_HEADER` | `X-Session-Token` | HTTP header that carries the token |
-| `session_file` | `CHIT_SESSION_FILE` | `~/.config/chit-tui/session.json` | Where the login session is stored |
+| `session_file` | `CHIT_SESSION_FILE` | `~/.config/chit/session.json` | Where the login session is stored |
 | `theme` | `CHIT_THEME` | — | Theme to use regardless of appearance |
 | `theme_dark`, `theme_light` | — | — | Themes for dark and light terminals, used when `theme` is not set |
 | `appearance` | — | `system` | `dark`, `light`, or `system` (ask the terminal) |
@@ -103,7 +103,7 @@ export CHIT_AUTH_HEADER=X-User-Id
 ### `session_file` / `CHIT_SESSION_FILE`
 
 Override the path where chit-tui stores the session token. Defaults to
-`~/.config/chit-tui/session.json`. Set this to run multiple instances as
+`~/.config/chit/session.json`. Set this to run multiple instances as
 different users simultaneously — each instance uses its own session file.
 
 ```bash
