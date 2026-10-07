@@ -126,3 +126,50 @@ func TestThread_FocusBlur(t *testing.T) {
 		t.Error("should not be focused after blur")
 	}
 }
+
+// The HTTP response and the WebSocket echo both carry your own reply, so it
+// can be appended twice.
+func TestThread_AppendReplyIgnoresARepeat(t *testing.T) {
+	m := thread.New(testStyles())
+	m.SetSize(40, 20)
+	m.SetThread(&model.Post{ID: "root", UserID: "u1", Content: "Root", CreateAt: 1700000000000}, nil)
+	reply := &model.Post{ID: "r1", UserID: "u1", Content: "Reply", RootID: "root", CreateAt: 1700000001000}
+
+	m.AppendReply(reply)
+	m.AppendReply(reply)
+
+	if n := len(m.Replies()); n != 1 {
+		t.Errorf("replies = %d, want 1", n)
+	}
+}
+
+func TestThread_RemoveReply(t *testing.T) {
+	m := thread.New(testStyles())
+	m.SetSize(40, 20)
+	m.SetThread(&model.Post{ID: "root", UserID: "u1", Content: "Root", CreateAt: 1700000000000},
+		[]*model.Post{{ID: "r1", UserID: "u1", Content: "doomed reply", RootID: "root", CreateAt: 1700000001000}})
+
+	if !m.RemoveReply("r1") {
+		t.Fatal("RemoveReply reported the reply missing")
+	}
+	if view := testutil.StripANSI(m.View()); strings.Contains(view, "doomed reply") {
+		t.Errorf("removed reply still shown:\n%s", view)
+	}
+	if m.RemoveReply("r1") {
+		t.Error("RemoveReply found a reply already removed")
+	}
+}
+
+// Tags set on an open thread did not show until something else redrew it.
+func TestThread_SetPostTagsRedraws(t *testing.T) {
+	m := thread.New(testStyles())
+	m.SetSize(60, 20)
+	m.SetThread(&model.Post{ID: "root", UserID: "u1", Content: "Root", CreateAt: 1700000000000}, nil)
+	_ = m.View()
+
+	m.SetPostTags(map[string][]*model.Tag{"root": {{ID: "t1", Name: "urgent"}}})
+
+	if view := testutil.StripANSI(m.View()); !strings.Contains(view, "urgent") {
+		t.Errorf("tag not shown:\n%s", view)
+	}
+}

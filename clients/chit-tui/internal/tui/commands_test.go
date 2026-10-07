@@ -34,6 +34,7 @@ type mockClient struct {
 	editedPosts     []string // post IDs passed to UpdatePost
 	deletedPosts    []string // post IDs passed to DeletePost
 	taggedPosts     []string // "postID#tagID" passed to AddTagToPost
+	membersFetched  []string // channel IDs passed to GetChannelMembers
 	threads         []*model.ThreadResponse
 	// followCalls records (rootID, following) so tests can tell an unfollow
 	// that reached the server from one that only left the list.
@@ -127,7 +128,8 @@ func (m *mockClient) GetUsersByIDs(_ context.Context, _ []string) ([]*model.User
 func (m *mockClient) SearchPosts(_ context.Context, _, _ string, _ []string) (*model.PostList, error) {
 	return m.posts, m.err
 }
-func (m *mockClient) GetChannelMembers(_ context.Context, _ string) ([]*model.ChannelMember, error) {
+func (m *mockClient) GetChannelMembers(_ context.Context, channelID string) ([]*model.ChannelMember, error) {
+	m.membersFetched = append(m.membersFetched, channelID)
 	return m.channelMembers, m.err
 }
 func (m *mockClient) CreateDirectChannel(_ context.Context, _, _ string) (*model.Channel, error) {

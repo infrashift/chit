@@ -542,10 +542,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Auto-select the first channel only on the very first load, not
 			// on later reloads (e.g. after navigating back to the team list).
 			if !m.channelAutoSelected && m.activeChan == nil && len(msg.Channels) > 0 {
-				m.channelAutoSelected = true
-				m.activeChan = msg.Channels[0]
-				cmds = append(cmds, FetchPosts(m.client, msg.Channels[0].ID, 0, 60))
-				cmds = append(cmds, ViewChannel(m.client, msg.Channels[0].ID))
+				cmds = append(cmds, m.selectChannel(msg.Channels[0]))
 			}
 		}
 		return m, tea.Batch(cmds...)
@@ -592,6 +589,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Likewise a reply in the open thread: the echo is not guaranteed.
+		if msg.Post != nil && msg.Post.RootID != "" && m.mainPane == paneThread &&
+			msg.Post.RootID == m.threadRootID {
+			m.thread.AppendReply(msg.Post)
+		}
 		if msg.Post != nil {
 			cmds = append(cmds, m.tagPost(msg.Post.ID, msg.Tags)...)
 		}
@@ -691,7 +693,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// good — the stream has no replay — so re-read the channel
 			// rather than leaving a silent hole in the history.
 			if m.activeChan != nil {
-				cmds = append(cmds, FetchPosts(m.client, m.activeChan.ID, 0, 60))
+				cmds = append(cmds, FetchPosts(m.client, m.activeChan.ID, 0, historyPageSize))
 			}
 			cmds = append(cmds, m.setError(errReconnected))
 		}
@@ -1320,6 +1322,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.setError(msg.Err)
 		}
 		m.viewport.RemovePost(msg.PostID)
+		m.thread.RemoveReply(msg.PostID)
 		return m, nil
 
 	case PostsTagsLoadedMsg:
@@ -1843,18 +1846,16 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 		if m.activeChan != nil && p.ChannelID == m.activeChan.ID {
+			// Reply counts are left to thread_updated, which carries the
+			// server's total; counting here as well over-counted each reply.
+			if p.RootID != "" && m.mainPane == paneThread && p.RootID == m.threadRootID {
+				m.thread.AppendReply(p) // ignores a reply already shown
+			}
 			// The sender already appended this from the HTTP response.
 			if m.viewport.HasPost(p.ID) {
 				return m, tea.Batch(cmds...)
 			}
 			m.viewport.AppendPost(p)
-			if p.RootID != "" {
-				m.threadCounts[p.RootID]++
-				m.viewport.SetThreadCounts(m.threadCounts)
-				if m.mainPane == paneThread && m.thread.RootPost() != nil && m.thread.RootPost().ID == p.RootID {
-					m.thread.AppendReply(p)
-				}
-			}
 			m.resolvePostUsers([]*model.Post{p})
 			if fetchCmd := m.fetchMissingUsers(); fetchCmd != nil {
 				cmds = append(cmds, fetchCmd)
@@ -1890,6 +1891,8 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 			if m.mainPane == paneThread && m.thread.RootPost() != nil &&
 				m.thread.RootPost().ID == postID {
 				cmds = append(cmds, m.leaveThread())
+			} else if m.mainPane == paneThread {
+				m.thread.RemoveReply(postID)
 			}
 		}
 
@@ -1949,15 +1952,6 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 			} else {
 				m.threadCounts[t.PostID] = t.ReplyCount
 				m.viewport.SetThreadCounts(m.threadCounts)
-			}
-		}
-		if postData, ok := evt.Data["post"]; ok {
-			var p model.Post
-			if err := reDecode(postData, &p); err != nil {
-				slog.Warn("could not decode a thread_updated post", "error", err)
-			} else if p.RootID != "" && m.mainPane == paneThread &&
-				m.thread.RootPost() != nil && m.thread.RootPost().ID == p.RootID {
-				m.thread.AppendReply(&p)
 			}
 		}
 

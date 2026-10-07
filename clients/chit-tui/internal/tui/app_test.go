@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/api"
@@ -795,29 +796,6 @@ func TestModel_WSEventThreadUpdated(t *testing.T) {
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "5 replies") {
 		t.Errorf("expected '5 replies' badge in view after thread_updated:\n%s", view)
-	}
-}
-
-func TestModel_WSEventPostedIncrementsThreadCount(t *testing.T) {
-	m := setupModel(t)
-
-	// WS event: a reply post arrives in the active channel
-	wsEvt := tui.WebSocketEventMsg{
-		Event: model.WebSocketEvent{
-			Event:    model.WebSocketEventPosted,
-			Sequence: 1,
-			Data: map[string]any{
-				"id": "r1", "channel_id": "c1", "user_id": "u1",
-				"root_id": "p1", "content": "reply", "create_at": float64(1700000002000),
-			},
-		},
-	}
-	updated, _ := m.Update(wsEvt)
-	m = updated.(tui.Model)
-
-	view := testutil.StripANSI(m.View())
-	if !strings.Contains(view, "1 replies") {
-		t.Errorf("expected '1 replies' badge after WS reply:\n%s", view)
 	}
 }
 
@@ -2315,15 +2293,35 @@ func TestModel_ChannelListDoesNotFetchAllMembers(t *testing.T) {
 // drain runs a command tree to completion so the requests it issues are
 // counted. tea.Batch returns its children as a BatchMsg.
 func drain(cmd tea.Cmd) {
+	for range messagesOf(cmd) {
+	}
+}
+
+// messagesOf runs a command and returns its messages, unwrapping batches.
+// A command that does not return promptly is a timer, such as the status
+// line's ten-second auto-clear, and is abandoned rather than waited out:
+// nothing a test checks takes that long.
+func messagesOf(cmd tea.Cmd) []tea.Msg {
 	if cmd == nil {
-		return
+		return nil
 	}
-	switch msg := cmd().(type) {
-	case tea.BatchMsg:
-		for _, c := range msg {
-			drain(c)
-		}
+	done := make(chan tea.Msg, 1)
+	go func() { done <- cmd() }()
+	var msg tea.Msg
+	select {
+	case msg = <-done:
+	case <-time.After(100 * time.Millisecond):
+		return nil
 	}
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		return []tea.Msg{msg}
+	}
+	var out []tea.Msg
+	for _, c := range batch {
+		out = append(out, messagesOf(c)...)
+	}
+	return out
 }
 
 // A sent message used to appear only via the WebSocket echo, so with the

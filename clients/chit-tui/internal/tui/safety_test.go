@@ -212,23 +212,6 @@ func TestModel_DeleteIsOnlyConfirmedWhileTheQuestionShows(t *testing.T) {
 	}
 }
 
-// messagesOf runs a command and returns its messages, unwrapping batches.
-func messagesOf(cmd tea.Cmd) []tea.Msg {
-	if cmd == nil {
-		return nil
-	}
-	msg := cmd()
-	batch, ok := msg.(tea.BatchMsg)
-	if !ok {
-		return []tea.Msg{msg}
-	}
-	var out []tea.Msg
-	for _, c := range batch {
-		out = append(out, messagesOf(c)...)
-	}
-	return out
-}
-
 func createdPost(t *testing.T, cmd tea.Cmd) tui.PostCreatedMsg {
 	t.Helper()
 	for _, msg := range messagesOf(cmd) {

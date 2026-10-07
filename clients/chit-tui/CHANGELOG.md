@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Late responses overwrote the screen** — a slow history load for the channel just left replaced the one opened; likewise an earlier thread, search or user search. Each response is now dropped unless it is for what is on screen
+- **Replies typed while a thread loads** went to the channel as top-level posts; they are now replies. A failed thread load returns to the channel instead of leaving an empty pane
+- **Forgotten edits** — an edit started and abandoned was applied to the next message sent anywhere. Switching channel, opening a thread or `Esc` now cancels it, and the action bar shows "editing" while one is open
+- **`d` deleted at once** — it now asks; press `d` again to confirm
+- **Keys landing in the hidden history pane** — after the tag picker closed over a thread, or the thread's root was deleted mid-reply, single-letter keys acted on posts the reader could not see
+- **Hashtags mangled messages** — sending a message with a `#tag` collapsed double spaces (breaking code indentation), joined lines, treated `#123` and `#include` in code as tags, and editing dropped the tags. Tags now leave the rest of the message as written, and land on the post that carried them
+- **Thread pane** — your own reply sometimes never appeared, reply counts ran one high, and deleted replies stayed visible
+- **History paging** — scrolling up while a channel loaded fetched the wrong page, and overlapping pages showed posts twice
 - **Signing out kept the session** — whoever signed in next saw the previous user's channel and history. Signing out now starts from nothing; after an expiry, the same user keeps their place and the open channel is re-read, while anyone else starts fresh
 - **Crash on command output** — a slash command's response crashed the client when a post's author had not loaded (a deleted user, or a failed lookup)
 - **Repeated command output** — a second `/help` showed the first one's text, and output lost its `/slug` author whenever users loaded
