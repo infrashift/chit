@@ -224,15 +224,22 @@ func TestSearchPosts(t *testing.T) {
 		t.Fatalf("CreatePost: %v", err)
 	}
 
-	// Brief pause to allow indexing.
-	time.Sleep(500 * time.Millisecond)
-
-	pl, err := client.SearchPosts(ctx, channelID, unique, nil)
-	if err != nil {
-		t.Fatalf("SearchPosts: %v", err)
-	}
-	if len(pl.Order) < 1 {
-		t.Error("expected at least 1 search result")
+	// With ZincSearch configured a post is searchable once indexed: the
+	// indexer runs every 5s and holds back posts younger than 3s. Poll rather
+	// than guess a pause; without Zinc the first attempt finds it.
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		pl, err := client.SearchPosts(ctx, channelID, unique, nil)
+		if err != nil {
+			t.Fatalf("SearchPosts: %v", err)
+		}
+		if len(pl.Order) >= 1 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the post never became searchable")
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
 }
 

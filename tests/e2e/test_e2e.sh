@@ -101,6 +101,20 @@ assert_json_not_empty() {
   fi
 }
 
+# keto_allowed OBJECT SUBJECT — prints Keto's "allowed" for channel
+# membership, polling for up to 5s until it is true. chitd writes membership
+# tuples to Keto asynchronously (channel_members is the access check; Keto is
+# a best-effort mirror), so a check straight after a change can race the write.
+keto_allowed() {
+  local allowed="false"
+  for _ in $(seq 1 25); do
+    allowed=$(curl -s "${KETO_READ}/relation-tuples/check?namespace=chit/channel&object=$1&relation=member&subject_id=$2" | jq -r '.allowed')
+    [[ "$allowed" == "true" ]] && break
+    sleep 0.2
+  done
+  echo "$allowed"
+}
+
 # curl_api METHOD PATH [DATA] — returns "STATUS\nBODY"
 # Uses global CURRENT_TOKEN for auth.
 curl_api() {
@@ -477,7 +491,9 @@ if [[ "$LAST_STATUS" == "201" ]]; then
 else
   echo -e "  ${YELLOW}WARN${NC}: Channel 'secret-ops' already exists, reusing"
   SKIP_COUNT=$((SKIP_COUNT + 1))
-  curl_api_full GET "/teams/${TEAM_ID}/channels?page=0&per_page=100"
+  # The team list shows open channels only; a private channel is found
+  # through its member's own list.
+  curl_api_full GET "/users/me/teams/${TEAM_ID}/channels"
   PRIVATE_CHANNEL_ID=$(echo "$LAST_BODY" | jq -r '.[] | select(.name=="secret-ops") | .id')
   if [[ -n "$PRIVATE_CHANNEL_ID" && "$PRIVATE_CHANNEL_ID" != "null" ]]; then
     echo -e "  ${GREEN}PASS${NC} 2.7 reused existing private channel ${PRIVATE_CHANNEL_ID}"
@@ -489,8 +505,7 @@ else
 fi
 
 # 2.8 Verify Keto relation for Alice on public channel
-KETO_CHECK=$(curl -s "${KETO_READ}/relation-tuples/check?namespace=chit/channel&object=${PUBLIC_CHANNEL_ID}&relation=member&subject_id=${ALICE_ID}")
-KETO_ALLOWED=$(echo "$KETO_CHECK" | jq -r '.allowed')
+KETO_ALLOWED=$(keto_allowed "${PUBLIC_CHANNEL_ID}" "${ALICE_ID}")
 if [[ "$KETO_ALLOWED" == "true" ]]; then
   echo -e "  ${GREEN}PASS${NC} 2.8 Keto: Alice is member of public channel"
   PASS_COUNT=$((PASS_COUNT + 1))
@@ -508,7 +523,9 @@ curl_api_full POST "/channels/${PUBLIC_CHANNEL_ID}/members" "{\"user_id\":\"${CH
 assert_status "2.10 add Charlie to public channel" 201 "$LAST_STATUS"
 
 # 2.11 Verify Keto for Bob on public channel
-KETO_CHECK=$(curl -s "${KETO_READ}/relation-tuples/check?namespace=chit/channel&object=${PUBLIC_CHANNEL_ID}&relation=member&subject_id=${BOB_ID}")
+# Bob was already on the team, so the channel's creation added him (and
+# wrote his tuple, asynchronously); 2.9 found him already a member.
+KETO_CHECK="{\"allowed\": $(keto_allowed "${PUBLIC_CHANNEL_ID}" "${BOB_ID}")}"
 assert_json "2.11 Keto: Bob is member" ".allowed" "true" "$KETO_CHECK"
 
 # 2.12 Add Bob to private channel then remove him
