@@ -203,32 +203,34 @@ func TestWSClient_ReconnectsAfterDrop(t *testing.T) {
 }
 
 func TestWSClient_CloseStopsReconnect(t *testing.T) {
-	connected := make(chan struct{}, 1)
+	var mu sync.Mutex
+	dials := 0
 	srv := newTestWSServer(t, func(conn *websocket.Conn) {
-		connected <- struct{}{}
-		// Close immediately to trigger reconnect attempt
+		mu.Lock()
+		dials++
+		mu.Unlock()
+		// Hang up at once, so the client is always about to redial.
 		_ = conn.Close()
 	})
 
-	client := ws.NewWSClient(wsURL(srv), "test-token", 10)
-	if err := client.Connect(); err != nil {
+	c := fastClient(srv, 8, time.Minute)
+	if err := c.Connect(); err != nil {
 		t.Fatal(err)
 	}
-
-	// Wait for first connection
-	select {
-	case <-connected:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for connection")
+	waitState(t, c, disconnected, "the first drop")
+	if err := c.Close(); err != nil {
+		t.Logf("Close: %v", err)
 	}
 
-	// Close client — should stop the reconnect loop
-	if err := client.Close(); err != nil {
-		t.Logf("Close() error (expected for already-closed conn): %v", err)
+	mu.Lock()
+	after := dials
+	mu.Unlock()
+	time.Sleep(100 * time.Millisecond) // ten backoff periods
+	mu.Lock()
+	defer mu.Unlock()
+	if dials != after {
+		t.Errorf("dialed %d more times after Close", dials-after)
 	}
-
-	// Give it time to verify no panic / hang
-	time.Sleep(200 * time.Millisecond)
 }
 
 // A drop has to be observable. Before this, reconnect was entirely internal
