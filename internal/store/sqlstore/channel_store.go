@@ -41,6 +41,9 @@ func (s *SqlChannelStore) Save(ctx context.Context, channel *model.Channel) (*mo
 }
 
 func (s *SqlChannelStore) Get(ctx context.Context, id string) (*model.Channel, error) {
+	if !validIDs(id) {
+		return nil, model.NewNotFoundError("SqlChannelStore.Get", id)
+	}
 	query := `SELECT ` + channelColumns + `
 		FROM channels WHERE id = $1 AND delete_at = 0`
 
@@ -250,6 +253,9 @@ func (s *SqlChannelStore) GetChannelIDsForUser(ctx context.Context, userID strin
 // no members: this is the access check, and a member of a deleted channel
 // could otherwise keep posting to it and reading its history.
 func (s *SqlChannelStore) GetMember(ctx context.Context, channelID, userID string) (*model.ChannelMember, error) {
+	if !validIDs(channelID, userID) {
+		return nil, model.NewNotFoundError("SqlChannelStore.GetMember", channelID+"/"+userID)
+	}
 	query := `SELECT cm.channel_id, cm.user_id, cm.roles, cm.last_viewed_at, cm.msg_count, cm.mention_count, cm.notify_props, cm.create_at
 		FROM channel_members cm
 		INNER JOIN channels c ON c.id = cm.channel_id AND c.delete_at = 0

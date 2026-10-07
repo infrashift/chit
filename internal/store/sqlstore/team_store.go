@@ -34,6 +34,9 @@ func (s *SqlTeamStore) Save(ctx context.Context, team *model.Team) (*model.Team,
 }
 
 func (s *SqlTeamStore) Get(ctx context.Context, id string) (*model.Team, error) {
+	if !validIDs(id) {
+		return nil, model.NewNotFoundError("SqlTeamStore.Get", id)
+	}
 	query := `SELECT ` + teamColumns + `
 		FROM teams WHERE id = $1 AND delete_at = 0`
 
@@ -178,6 +181,9 @@ func (s *SqlTeamStore) GetMembers(ctx context.Context, teamID string, page, perP
 }
 
 func (s *SqlTeamStore) GetMember(ctx context.Context, teamID, userID string) (*model.TeamMember, error) {
+	if !validIDs(teamID, userID) {
+		return nil, model.NewNotFoundError("SqlTeamStore.GetMember", teamID+"/"+userID)
+	}
 	query := `SELECT team_id, user_id, roles, create_at, delete_at
 		FROM team_members WHERE team_id = $1 AND user_id = $2 AND delete_at = 0`
 

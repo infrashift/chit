@@ -3,6 +3,8 @@
 package sqlstore
 
 import (
+	"errors"
+	"net/http"
 	"testing"
 
 	"github.com/infrashift/chit/internal/model"
@@ -174,5 +176,23 @@ func TestTagStoreIntegration_GetTagsForPosts(t *testing.T) {
 	again, err := ss.Tag().Save(t.Context(), &model.Tag{Name: "bulkbug"})
 	if err != nil || again.ID != bug.ID {
 		t.Fatalf("re-saving a tag name gave %v, %v; want the existing tag", again, err)
+	}
+}
+
+// A malformed id is a 404 from every lookup, not a uuid cast failure.
+func TestStoreIntegration_MalformedIDsAreNotFound(t *testing.T) {
+	ss := testStore(t)
+	valid := model.NewID()
+	lookups := map[string]func() error{
+		"channel":        func() error { _, err := ss.Channel().Get(t.Context(), "abc"); return err },
+		"channel member": func() error { _, err := ss.Channel().GetMember(t.Context(), "abc", valid); return err },
+		"team":           func() error { _, err := ss.Team().Get(t.Context(), "abc"); return err },
+		"team member":    func() error { _, err := ss.Team().GetMember(t.Context(), valid, "abc"); return err },
+	}
+	for name, lookup := range lookups {
+		var appErr *model.AppError
+		if err := lookup(); !errors.As(err, &appErr) || appErr.StatusCode != http.StatusNotFound {
+			t.Errorf("%s: got %v, want a 404 AppError", name, err)
+		}
 	}
 }
