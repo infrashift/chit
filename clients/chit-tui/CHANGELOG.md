@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Requests outlived the session** — requests still running at sign-out or session expiry now stop there, rather than running on until they time out
 - **Smaller behaviour** —
   - pinning shows at once instead of waiting for the WebSocket echo, so a second `p` unpins;
   - a message typed before any channel is open is kept in the input, with a note, rather than lost;

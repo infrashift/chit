@@ -22,9 +22,9 @@ func (m Model) tagPost(postID string, names []string) []tea.Cmd {
 	cmds := make([]tea.Cmd, 0, len(names))
 	for _, name := range names {
 		if t := m.tagByName(name); t != nil {
-			cmds = append(cmds, AddTagToPostCmd(m.client, postID, t.ID))
+			cmds = append(cmds, AddTagToPostCmd(m.reqCtx(), m.client, postID, t.ID))
 		} else {
-			cmds = append(cmds, CreateTagAndApplyCmd(m.client, name, postID))
+			cmds = append(cmds, CreateTagAndApplyCmd(m.reqCtx(), m.client, name, postID))
 		}
 	}
 	return cmds

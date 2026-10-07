@@ -111,7 +111,7 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 			// Someone else left; the @-mention list is now stale.
 			delete(m.channelMembers, channelID)
 			if m.activeChan != nil && m.activeChan.ID == channelID {
-				cmds = append(cmds, FetchChannelMembers(m.client, channelID))
+				cmds = append(cmds, FetchChannelMembers(m.reqCtx(), m.client, channelID))
 			}
 		}
 
@@ -165,14 +165,14 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 			// The event names the channel but not its team, so every team
 			// is re-read, and the DMs in case it is a group.
 			for _, t := range m.teams {
-				cmds = append(cmds, FetchChannels(m.client, t.ID))
+				cmds = append(cmds, FetchChannels(m.reqCtx(), m.client, t.ID))
 			}
-			cmds = append(cmds, FetchDMChannels(m.client))
+			cmds = append(cmds, FetchDMChannels(m.reqCtx(), m.client))
 		case channelID != "":
 			// Someone else joined: the @-mention list for it is stale.
 			delete(m.channelMembers, channelID)
 			if m.activeChan != nil && m.activeChan.ID == channelID {
-				cmds = append(cmds, FetchChannelMembers(m.client, channelID))
+				cmds = append(cmds, FetchChannelMembers(m.reqCtx(), m.client, channelID))
 			}
 		}
 
@@ -181,11 +181,11 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 		teamID, _ := evt.Data["team_id"].(string)
 		switch kind {
 		case model.ChannelDirect, model.ChannelGroup:
-			cmds = append(cmds, FetchDMChannels(m.client))
+			cmds = append(cmds, FetchDMChannels(m.reqCtx(), m.client))
 		case model.ChannelOpen, model.ChannelPrivate:
 			// Any of the user's teams, not only the one in view.
 			if m.teamByID(teamID) != nil {
-				cmds = append(cmds, FetchChannels(m.client, teamID))
+				cmds = append(cmds, FetchChannels(m.reqCtx(), m.client, teamID))
 			}
 		}
 	}
@@ -247,7 +247,7 @@ func (m Model) handleWSState(msg WSStateMsg) (tea.Model, tea.Cmd) {
 	// would otherwise see no change and do nothing.
 	if msg.Desynced {
 		if m.activeChan != nil {
-			cmds = append(cmds, FetchPosts(m.client, m.activeChan.ID, 0, historyPageSize))
+			cmds = append(cmds, FetchPosts(m.reqCtx(), m.client, m.activeChan.ID, 0, historyPageSize))
 		}
 		cmds = append(cmds, m.setError(errDesynced))
 		return m, tea.Batch(cmds...)
@@ -258,7 +258,7 @@ func (m Model) handleWSState(msg WSStateMsg) (tea.Model, tea.Cmd) {
 		// good — the stream has no replay — so re-read the channel
 		// rather than leaving a silent hole in the history.
 		if m.activeChan != nil {
-			cmds = append(cmds, FetchPosts(m.client, m.activeChan.ID, 0, historyPageSize))
+			cmds = append(cmds, FetchPosts(m.reqCtx(), m.client, m.activeChan.ID, 0, historyPageSize))
 		}
 		cmds = append(cmds, m.setError(errReconnected))
 	}

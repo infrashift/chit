@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -140,6 +141,9 @@ type Model struct {
 	// user ID; commandResponses numbers the outputs so each has its own ID.
 	commandAuthors   map[string]string
 	commandResponses int
+	// scope is the signed-in session's request context. Every request runs
+	// under it, so ending the session cancels whatever is still in flight.
+	scope *requestScope
 	// pendingJumpID is a search hit to select once its channel has loaded.
 	pendingJumpID string
 	// confirmDeleteID is the post awaiting a second delete keypress.
@@ -165,6 +169,7 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 	}
 
 	m := Model{
+		scope:          newRequestScope(),
 		cfg:            cfg,
 		client:         client,
 		wsClient:       wsClient,
@@ -236,11 +241,11 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) initRunning() tea.Cmd {
 	cmds := []tea.Cmd{
-		FetchMe(m.client),
-		FetchTeams(m.client),
-		FetchCommands(m.client),
-		FetchDMChannels(m.client),
-		FetchAllTags(m.client),
+		FetchMe(m.reqCtx(), m.client),
+		FetchTeams(m.reqCtx(), m.client),
+		FetchCommands(m.reqCtx(), m.client),
+		FetchDMChannels(m.reqCtx(), m.client),
+		FetchAllTags(m.reqCtx(), m.client),
 	}
 	if m.wsClient != nil {
 		cmds = append(cmds, func() tea.Msg {
@@ -259,4 +264,25 @@ func msgError(msg tea.Msg) error {
 		return c.requestError()
 	}
 	return nil
+}
+
+// requestScope is a cancellable context shared by one session's requests.
+type requestScope struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func newRequestScope() *requestScope {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &requestScope{ctx: ctx, cancel: cancel}
+}
+
+// reqCtx is the context requests made now should run under.
+func (m Model) reqCtx() context.Context { return m.scope.ctx }
+
+// endRequests cancels every request of the session that is ending and
+// starts a fresh scope for the next one.
+func (m *Model) endRequests() {
+	m.scope.cancel()
+	m.scope = newRequestScope()
 }

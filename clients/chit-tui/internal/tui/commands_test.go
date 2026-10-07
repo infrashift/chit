@@ -38,6 +38,7 @@ type mockClient struct {
 	membersFetched  []string // channel IDs passed to GetChannelMembers
 	usersFetched    []string // user IDs passed to GetUsersByIDs
 	myMembers       []*model.ChannelMember
+	hang            bool // GetChannelPosts waits for its context to end
 	allTagsFetches  int
 	threads         []*model.ThreadResponse
 	// followCalls records (rootID, following) so tests can tell an unfollow
@@ -97,7 +98,12 @@ func (m *mockClient) GetMyChannels(_ context.Context, teamID string) ([]*model.C
 	m.channelsFetched = append(m.channelsFetched, teamID)
 	return m.channels, m.err
 }
-func (m *mockClient) GetChannelPosts(_ context.Context, channelID string, _, _ int) (*model.PostList, error) {
+func (m *mockClient) GetChannelPosts(ctx context.Context, channelID string, _, _ int) (*model.PostList, error) {
+	if m.hang {
+		// A server that never answers: only the context ends the wait.
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	m.postsFetched = append(m.postsFetched, channelID)
 	return m.posts, m.err
 }
@@ -250,7 +256,7 @@ func (m *mockWSClient) SetToken(_ string)                   {}
 
 func TestFetchMe_ReturnsUserLoadedMsg(t *testing.T) {
 	client := &mockClient{me: &model.User{ID: "u1", Username: "alice"}}
-	cmd := tui.FetchMe(client)
+	cmd := tui.FetchMe(context.Background(), client)
 	msg := cmd()
 
 	loaded, ok := msg.(tui.UserLoadedMsg)
@@ -267,7 +273,7 @@ func TestFetchMe_ReturnsUserLoadedMsg(t *testing.T) {
 
 func TestFetchTeams_ReturnsTeamsLoadedMsg(t *testing.T) {
 	client := &mockClient{teams: []*model.Team{{ID: "t1"}}}
-	cmd := tui.FetchTeams(client)
+	cmd := tui.FetchTeams(context.Background(), client)
 	msg := cmd()
 
 	loaded, ok := msg.(tui.TeamsLoadedMsg)
@@ -281,7 +287,7 @@ func TestFetchTeams_ReturnsTeamsLoadedMsg(t *testing.T) {
 
 func TestFetchChannels_ReturnsChannelsLoadedMsg(t *testing.T) {
 	client := &mockClient{channels: []*model.Channel{{ID: "c1"}}}
-	cmd := tui.FetchChannels(client, "t1")
+	cmd := tui.FetchChannels(context.Background(), client, "t1")
 	msg := cmd()
 
 	loaded, ok := msg.(tui.ChannelsLoadedMsg)
@@ -295,7 +301,7 @@ func TestFetchChannels_ReturnsChannelsLoadedMsg(t *testing.T) {
 
 func TestFetchPosts_ReturnsPostsLoadedMsg(t *testing.T) {
 	client := &mockClient{posts: &model.PostList{Order: []*model.Post{{ID: "p1"}}}}
-	cmd := tui.FetchPosts(client, "c1", 0, 60)
+	cmd := tui.FetchPosts(context.Background(), client, "c1", 0, 60)
 	msg := cmd()
 
 	loaded, ok := msg.(tui.PostsLoadedMsg)
@@ -310,7 +316,7 @@ func TestFetchPosts_ReturnsPostsLoadedMsg(t *testing.T) {
 func TestCreatePost_ReturnsPostCreatedMsg(t *testing.T) {
 	created := &model.Post{ID: "new", Content: "hi"}
 	client := &mockClient{post: created}
-	cmd := tui.CreatePost(client, &model.Post{ChannelID: "c1", Content: "hi"})
+	cmd := tui.CreatePost(context.Background(), client, &model.Post{ChannelID: "c1", Content: "hi"})
 	msg := cmd()
 
 	m, ok := msg.(tui.PostCreatedMsg)
@@ -326,7 +332,7 @@ func TestFetchThread_ReturnsThreadLoadedMsg(t *testing.T) {
 	client := &mockClient{thread: &model.PostList{
 		Order: []*model.Post{{ID: "p1"}},
 	}}
-	cmd := tui.FetchThread(client, "p1")
+	cmd := tui.FetchThread(context.Background(), client, "p1")
 	msg := cmd()
 
 	loaded, ok := msg.(tui.ThreadLoadedMsg)
@@ -342,7 +348,7 @@ func TestFetchChannelMembers_ReturnsChannelMembersLoadedMsg(t *testing.T) {
 	client := &mockClient{channelMembers: []*model.ChannelMember{
 		{ChannelID: "c1", UserID: "u1", MsgCount: 5},
 	}}
-	cmd := tui.FetchChannelMembers(client, "c1")
+	cmd := tui.FetchChannelMembers(context.Background(), client, "c1")
 	msg := cmd()
 
 	loaded, ok := msg.(tui.ChannelMembersLoadedMsg)
@@ -359,7 +365,7 @@ func TestFetchChannelMembers_ReturnsChannelMembersLoadedMsg(t *testing.T) {
 
 func TestFetchCommands_ReturnsCommandsLoadedMsg(t *testing.T) {
 	client := &mockClient{commands: []*model.Command{{ID: "c1", Slug: "remind"}}}
-	cmd := tui.FetchCommands(client)
+	cmd := tui.FetchCommands(context.Background(), client)
 	msg := cmd()
 
 	loaded, ok := msg.(tui.CommandsLoadedMsg)
@@ -373,7 +379,7 @@ func TestFetchCommands_ReturnsCommandsLoadedMsg(t *testing.T) {
 
 func TestFetchDMChannels_ReturnsDMChannelsLoadedMsg(t *testing.T) {
 	client := &mockClient{dmChannels: []*model.Channel{{ID: "dm1", Type: "D"}}}
-	cmd := tui.FetchDMChannels(client)
+	cmd := tui.FetchDMChannels(context.Background(), client)
 	msg := cmd()
 
 	loaded, ok := msg.(tui.DMChannelsLoadedMsg)
@@ -390,7 +396,7 @@ func TestFetchDMChannels_ReturnsDMChannelsLoadedMsg(t *testing.T) {
 
 func TestSearchUsersCmd_ReturnsUserSearchResultsMsg(t *testing.T) {
 	client := &mockClient{searchUsers: []*model.User{{ID: "u1", Username: "alice"}}}
-	cmd := tui.SearchUsersCmd(client, "ali")
+	cmd := tui.SearchUsersCmd(context.Background(), client, "ali")
 	msg := cmd()
 
 	loaded, ok := msg.(tui.UserSearchResultsMsg)
@@ -404,7 +410,7 @@ func TestSearchUsersCmd_ReturnsUserSearchResultsMsg(t *testing.T) {
 
 func TestCreateDMChannel_ReturnsDMCreatedMsg(t *testing.T) {
 	client := &mockClient{dmChannel: &model.Channel{ID: "dm1", Type: "D"}}
-	cmd := tui.CreateDMChannel(client, "u1", "u2")
+	cmd := tui.CreateDMChannel(context.Background(), client, "u1", "u2")
 	msg := cmd()
 
 	loaded, ok := msg.(tui.DMCreatedMsg)
@@ -418,7 +424,7 @@ func TestCreateDMChannel_ReturnsDMCreatedMsg(t *testing.T) {
 
 func TestCreateChannel_ReturnsChannelCreatedMsg(t *testing.T) {
 	client := &mockClient{createdChannel: &model.Channel{ID: "ch1", Type: "O", Name: "deploy"}}
-	cmd := tui.CreateChannel(client, &model.Channel{TeamID: "t1", Name: "deploy", Type: "O"})
+	cmd := tui.CreateChannel(context.Background(), client, &model.Channel{TeamID: "t1", Name: "deploy", Type: "O"})
 	msg := cmd()
 
 	loaded, ok := msg.(tui.ChannelCreatedMsg)
@@ -432,7 +438,7 @@ func TestCreateChannel_ReturnsChannelCreatedMsg(t *testing.T) {
 
 func TestFetchAllTags_ReturnsAllTagsLoadedMsg(t *testing.T) {
 	client := &mockClient{allTags: []*model.Tag{{ID: "t1", Name: "urgent"}}}
-	cmd := tui.FetchAllTags(client)
+	cmd := tui.FetchAllTags(context.Background(), client)
 	msg := cmd()
 
 	loaded, ok := msg.(tui.AllTagsLoadedMsg)
@@ -446,7 +452,7 @@ func TestFetchAllTags_ReturnsAllTagsLoadedMsg(t *testing.T) {
 
 func TestFetchPostTags_ReturnsPostTagsLoadedMsg(t *testing.T) {
 	client := &mockClient{postTags: []*model.Tag{{ID: "t1", Name: "urgent"}}}
-	cmd := tui.FetchPostTags(client, "p1")
+	cmd := tui.FetchPostTags(context.Background(), client, "p1")
 	msg := cmd()
 
 	loaded, ok := msg.(tui.PostTagsLoadedMsg)
@@ -463,7 +469,7 @@ func TestFetchPostTags_ReturnsPostTagsLoadedMsg(t *testing.T) {
 
 func TestAddTagToPostCmd_ReturnsTagAddedToPostMsg(t *testing.T) {
 	client := &mockClient{}
-	cmd := tui.AddTagToPostCmd(client, "p1", "t1")
+	cmd := tui.AddTagToPostCmd(context.Background(), client, "p1", "t1")
 	msg := cmd()
 
 	loaded, ok := msg.(tui.TagAddedToPostMsg)
@@ -477,7 +483,7 @@ func TestAddTagToPostCmd_ReturnsTagAddedToPostMsg(t *testing.T) {
 
 func TestRemoveTagFromPostCmd_ReturnsTagRemovedFromPostMsg(t *testing.T) {
 	client := &mockClient{}
-	cmd := tui.RemoveTagFromPostCmd(client, "p1", "t1")
+	cmd := tui.RemoveTagFromPostCmd(context.Background(), client, "p1", "t1")
 	msg := cmd()
 
 	loaded, ok := msg.(tui.TagRemovedFromPostMsg)
@@ -491,7 +497,7 @@ func TestRemoveTagFromPostCmd_ReturnsTagRemovedFromPostMsg(t *testing.T) {
 
 func TestAddChannelMembersCmd_ReturnsAllMembersAddedMsg(t *testing.T) {
 	client := &mockClient{}
-	cmd := tui.AddChannelMembersCmd(client, "c1", []string{"u2", "u3"})
+	cmd := tui.AddChannelMembersCmd(context.Background(), client, "c1", []string{"u2", "u3"})
 	msg := cmd()
 
 	loaded, ok := msg.(tui.AllMembersAddedMsg)

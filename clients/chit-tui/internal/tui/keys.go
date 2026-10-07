@@ -28,7 +28,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if asking && key.Matches(msg, m.keys.Delete) && m.focus == FocusViewport {
 			if p := m.ownSelectedPost(); p != nil && p.ID == id {
-				return m, DeletePost(m.client, p.ID)
+				return m, DeletePost(m.reqCtx(), m.client, p.ID)
 			}
 		}
 	}
@@ -129,7 +129,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// on anyone's post.
 	if key.Matches(msg, m.keys.Pin) && m.focus == FocusViewport {
 		if p := m.viewport.SelectedPost(); p != nil {
-			return m, SetPostPinned(m.client, p.ID, !p.IsPinned)
+			return m, SetPostPinned(m.reqCtx(), m.client, p.ID, !p.IsPinned)
 		}
 	}
 

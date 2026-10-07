@@ -1,9 +1,12 @@
 package tui_test
 
 import (
+	"context"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/api"
@@ -203,4 +206,58 @@ func TestModel_EachCommandKeepsItsOwnAuthor(t *testing.T) {
 	if !strings.Contains(view, "/help") || !strings.Contains(view, "/echo") {
 		t.Errorf("want both command authors shown:\n%s", view)
 	}
+}
+
+// Requests still in flight when the user signs out belong to a session that
+// is over. They used context.Background(), so they ran on regardless.
+func TestModel_SignOutCancelsRequestsInFlight(t *testing.T) {
+	client := &mockClient{hang: true}
+	m := modelWithClient(t, client)
+	m, _ = step(t, m, tui.TeamsLoadedMsg{Teams: []*model.Team{{ID: "t1"}}})
+	m, cmd := step(t, m, tui.ChannelsLoadedMsg{TeamID: "t1", Channels: []*model.Channel{{ID: "c1", TeamID: "t1"}}})
+
+	// The channel's history request, waiting on a server that never answers.
+	got := make(chan error, 1)
+	go func() {
+		for _, msg := range messagesOfSlowly(cmd) {
+			if loaded, ok := msg.(tui.PostsLoadedMsg); ok {
+				got <- loaded.Err
+				return
+			}
+		}
+		got <- nil
+	}()
+
+	_, _ = step(t, m, input.SlashTriggerMsg{Input: "/logout"})
+
+	select {
+	case err := <-got:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("request ended with %v, want it canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the request was still running after sign-out")
+	}
+}
+
+// messagesOfSlowly is messagesOf without the timeout, for commands a test
+// expects to block until something else happens.
+func messagesOfSlowly(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		return []tea.Msg{msg}
+	}
+	results := make(chan []tea.Msg, len(batch))
+	for _, c := range batch {
+		go func() { results <- messagesOfSlowly(c) }()
+	}
+	var out []tea.Msg
+	for range batch {
+		out = append(out, <-results...)
+	}
+	return out
 }

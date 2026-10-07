@@ -58,7 +58,7 @@ func (m Model) fetchMissingUsers() tea.Cmd {
 	if len(missing) == 0 {
 		return nil
 	}
-	return FetchUsersByIDs(m.client, missing)
+	return FetchUsersByIDs(m.reqCtx(), m.client, missing)
 }
 
 // usernameMap names every author known so far: real users that have loaded

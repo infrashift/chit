@@ -20,7 +20,7 @@ var errGroupTooSmall = errors.New(
 func (m *Model) selectChannel(ch *model.Channel) tea.Cmd {
 	var cmds []tea.Cmd
 	if m.activeChan != nil && m.activeChan.ID != ch.ID {
-		cmds = append(cmds, ViewChannel(m.client, m.activeChan.ID))
+		cmds = append(cmds, ViewChannel(m.reqCtx(), m.client, m.activeChan.ID))
 	}
 	m.activeChan = ch
 	m.channelAutoSelected = true
@@ -39,13 +39,13 @@ func (m *Model) selectChannel(ch *model.Channel) tea.Cmd {
 	m.viewport.SetLoading(true)
 	// Paging state belongs to the channel being left.
 	m.historyPage, m.loadingOlder, m.historyExhausted = 0, false, false
-	cmds = append(cmds, FetchPosts(m.client, ch.ID, 0, historyPageSize))
-	cmds = append(cmds, ViewChannel(m.client, ch.ID))
+	cmds = append(cmds, FetchPosts(m.reqCtx(), m.client, ch.ID, 0, historyPageSize))
+	cmds = append(cmds, ViewChannel(m.reqCtx(), m.client, ch.ID))
 	// Members are only read for the active channel, to build the @-mention
 	// list, so they are fetched on entry rather than for every channel in
 	// every team up front.
 	if _, have := m.channelMembers[ch.ID]; !have {
-		cmds = append(cmds, FetchChannelMembers(m.client, ch.ID))
+		cmds = append(cmds, FetchChannelMembers(m.reqCtx(), m.client, ch.ID))
 	}
 	m.mainPane = paneChannel
 	m.thread.Clear()

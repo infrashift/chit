@@ -87,7 +87,7 @@ func (m Model) handleSlash(msg input.SlashTriggerMsg) (tea.Model, tea.Cmd) {
 		cmd := m.setFocus(FocusThreadInbox)
 		m.threadInbox.SetChannelNames(m.channelDisplayNames())
 		m.threadInbox.Open()
-		return m, tea.Batch(cmd, FetchMyThreads(m.client, m.activeTeam.ID))
+		return m, tea.Batch(cmd, FetchMyThreads(m.reqCtx(), m.client, m.activeTeam.ID))
 	case "/leave":
 		// Handled here rather than server-side: there is no leave command
 		// in the registry, and the REST endpoint already permits a member
@@ -95,14 +95,14 @@ func (m Model) handleSlash(msg input.SlashTriggerMsg) (tea.Model, tea.Cmd) {
 		if m.activeChan == nil || m.me == nil {
 			return m, nil
 		}
-		return m, LeaveChannel(m.client, m.activeChan.ID, m.me.ID)
+		return m, LeaveChannel(m.reqCtx(), m.client, m.activeChan.ID, m.me.ID)
 	case "/nick":
 		// Display name only. The handle is /username, kept separate
 		// because renaming it breaks every @mention already written.
 		if args == "" {
 			return m, m.setError(errNickUsage)
 		}
-		return m, UpdateProfile(m.client, &model.User{DisplayName: args})
+		return m, UpdateProfile(m.reqCtx(), m.client, &model.User{DisplayName: args})
 	case "/username":
 		if args == "" {
 			return m, m.setError(errUsernameUsage)
@@ -110,7 +110,7 @@ func (m Model) handleSlash(msg input.SlashTriggerMsg) (tea.Model, tea.Cmd) {
 		if strings.ContainsAny(args, " \t") {
 			return m, m.setError(errUsernameSpaces)
 		}
-		return m, UpdateProfile(m.client, &model.User{Username: args})
+		return m, UpdateProfile(m.reqCtx(), m.client, &model.User{Username: args})
 	case "/":
 		// A bare slash is a request to browse, not to send.
 		return m, m.openPalette("/")
@@ -123,7 +123,7 @@ func (m Model) handleSlash(msg input.SlashTriggerMsg) (tea.Model, tea.Cmd) {
 	if m.activeChan == nil || m.me == nil {
 		return m, nil
 	}
-	return m, CreatePost(m.client, &model.Post{
+	return m, CreatePost(m.reqCtx(), m.client, &model.Post{
 		ChannelID: m.activeChan.ID,
 		UserID:    m.me.ID,
 		Content:   trimmed,

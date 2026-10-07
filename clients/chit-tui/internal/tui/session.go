@@ -69,6 +69,7 @@ func (m Model) handleLoginSuccess(msg login.LoginSuccessMsg) (tea.Model, tea.Cmd
 // usually the same user picking up where they left off. Who signs in is only
 // known once their user loads; resumeAfterReLogin decides then.
 func (m Model) handleAuthExpired() (tea.Model, tea.Cmd) {
+	m.endRequests()
 	m.appState = AppStateReLogin
 	m.wsConnected = false
 	m.loginModel.Reset()
@@ -98,7 +99,9 @@ func (m Model) handleLogout() (tea.Model, tea.Cmd) {
 	}
 
 	// Whoever signs in next starts from nothing. Keeping the session showed
-	// them the previous user's channel and history.
+	// them the previous user's channel and history. Requests still running
+	// belong to the old session and are canceled.
+	m.scope.cancel()
 	m = m.newSession()
 	m.appState = AppStateLogin
 

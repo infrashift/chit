@@ -91,7 +91,7 @@ func (m *Model) maybeLoadOlder() tea.Cmd {
 	}
 	m.loadingOlder = true
 	return tea.Batch(
-		FetchOlderPosts(m.client, m.activeChan.ID, m.historyPage+1, historyPageSize),
+		FetchOlderPosts(m.reqCtx(), m.client, m.activeChan.ID, m.historyPage+1, historyPageSize),
 		m.setError(errLoadingOlder),
 	)
 }
@@ -122,7 +122,7 @@ func (m *Model) afterPostsLoaded(posts []*model.Post) tea.Cmd {
 	var cmds []tea.Cmd
 	m.resolvePostUsers(posts)
 	if ids := postIDs(posts); len(ids) > 0 {
-		cmds = append(cmds, FetchPostsTags(m.client, ids))
+		cmds = append(cmds, FetchPostsTags(m.reqCtx(), m.client, ids))
 	}
 	if fetchCmd := m.fetchMissingUsers(); fetchCmd != nil {
 		cmds = append(cmds, fetchCmd)

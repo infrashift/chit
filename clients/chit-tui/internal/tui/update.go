@@ -91,7 +91,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.activeTeam = msg.Teams[0]
 		}
 		for _, t := range msg.Teams {
-			cmds = append(cmds, FetchChannels(m.client, t.ID))
+			cmds = append(cmds, FetchChannels(m.reqCtx(), m.client, t.ID))
 		}
 		return m, tea.Batch(cmds...)
 
@@ -103,7 +103,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.channels = m.flattenChannels()
 		m.palette.SetChannels(m.channels)
 		// Every channel's badges, in one request for the team.
-		cmds = append(cmds, FetchMyChannelMembers(m.client, msg.TeamID))
+		cmds = append(cmds, FetchMyChannelMembers(m.reqCtx(), m.client, msg.TeamID))
 		if m.activeTeam != nil && msg.TeamID == m.activeTeam.ID {
 			// Auto-select the first channel only on the very first load, not
 			// on later reloads (e.g. after navigating back to the team list).
@@ -274,7 +274,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case viewport.PostSelectedMsg:
 		m.cancelEdit()
-		cmds = append(cmds, FetchThread(m.client, msg.Post.ID))
+		cmds = append(cmds, FetchThread(m.reqCtx(), m.client, msg.Post.ID))
 		m.mainPane = paneThread
 		m.threadRootID = msg.Post.ID
 		cmds = append(cmds, m.setFocus(FocusInput))
@@ -302,7 +302,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				RootID:    m.threadRootID,
 				Content:   msg.Content,
 			}
-			cmds = append(cmds, CreatePost(m.client, reply))
+			cmds = append(cmds, CreatePost(m.reqCtx(), m.client, reply))
 			return m, tea.Batch(cmds...)
 		}
 		content, tagNames := tagpicker.StripHashtags(msg.Content)
@@ -312,7 +312,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.editingPostID != "" {
 			id := m.editingPostID
 			m.editingPostID = ""
-			cmds = append(cmds, EditPost(m.client, id, content))
+			cmds = append(cmds, EditPost(m.reqCtx(), m.client, id, content))
 			cmds = append(cmds, m.tagPost(id, tagNames)...)
 			return m, tea.Batch(cmds...)
 		}
@@ -324,7 +324,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// The tags travel with the request, since only its response knows
 		// the new post's ID.
-		cmds = append(cmds, CreatePost(m.client, post, tagNames...))
+		cmds = append(cmds, CreatePost(m.reqCtx(), m.client, post, tagNames...))
 		return m, tea.Batch(cmds...)
 
 	case input.SlashTriggerMsg:
@@ -346,13 +346,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case palette.UserChosenMsg:
 		if m.me != nil {
-			cmds = append(cmds, CreateDMChannel(m.client, m.me.ID, msg.User.ID))
+			cmds = append(cmds, CreateDMChannel(m.reqCtx(), m.client, m.me.ID, msg.User.ID))
 		}
 		return m, tea.Batch(cmds...)
 
 	case palette.UserQueryMsg:
 		m.userQuery = msg.Term
-		cmds = append(cmds, SearchUsersCmd(m.client, msg.Term))
+		cmds = append(cmds, SearchUsersCmd(m.reqCtx(), m.client, msg.Term))
 		return m, tea.Batch(cmds...)
 
 	case palette.DebounceMsg:
@@ -373,9 +373,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch {
 		case msg.Everywhere:
-			cmds = append(cmds, SearchPostsEverywhere(m.client, term, tagIDs))
+			cmds = append(cmds, SearchPostsEverywhere(m.reqCtx(), m.client, term, tagIDs))
 		case m.activeChan != nil:
-			cmds = append(cmds, SearchPosts(m.client, m.activeChan.ID, term, tagIDs))
+			cmds = append(cmds, SearchPosts(m.reqCtx(), m.client, m.activeChan.ID, term, tagIDs))
 		}
 		return m, tea.Batch(cmds...)
 
@@ -446,7 +446,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// before are fetched.
 		for _, ch := range msg.Channels {
 			if _, have := m.channelMembers[ch.ID]; !have {
-				cmds = append(cmds, FetchChannelMembers(m.client, ch.ID))
+				cmds = append(cmds, FetchChannelMembers(m.reqCtx(), m.client, ch.ID))
 			}
 		}
 		if fetchCmd := m.fetchMissingUsers(); fetchCmd != nil {
@@ -456,7 +456,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case dmpicker.SearchTriggeredMsg:
 		m.userQuery = msg.Term
-		cmds = append(cmds, SearchUsersCmd(m.client, msg.Term))
+		cmds = append(cmds, SearchUsersCmd(m.reqCtx(), m.client, msg.Term))
 		return m, tea.Batch(cmds...)
 
 	case UserSearchResultsMsg:
@@ -507,13 +507,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.selectChannel(ch))
 		}
 		m.cancelEdit()
-		cmds = append(cmds, FetchThread(m.client, msg.RootID))
+		cmds = append(cmds, FetchThread(m.reqCtx(), m.client, msg.RootID))
 		m.mainPane = paneThread
 		m.threadRootID = msg.RootID
 		cmds = append(cmds, m.setFocus(FocusThread))
 		m.resizeComponents()
 		if m.activeTeam != nil {
-			cmds = append(cmds, MarkThreadRead(m.client, m.activeTeam.ID, msg.RootID))
+			cmds = append(cmds, MarkThreadRead(m.reqCtx(), m.client, m.activeTeam.ID, msg.RootID))
 		}
 		return m, tea.Batch(cmds...)
 
@@ -521,7 +521,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.activeTeam == nil {
 			return m, nil
 		}
-		return m, SetThreadFollowing(m.client, m.activeTeam.ID, msg.RootID, msg.Following)
+		return m, SetThreadFollowing(m.reqCtx(), m.client, m.activeTeam.ID, msg.RootID, msg.Following)
 
 	case threadinbox.ClosedMsg:
 		return m, m.setFocus(FocusInput)
@@ -543,7 +543,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Channel != nil {
 			m.addDMChannel(msg.Channel)
 			cmds = append(cmds, m.selectChannel(msg.Channel))
-			cmds = append(cmds, FetchDMChannels(m.client))
+			cmds = append(cmds, FetchDMChannels(m.reqCtx(), m.client))
 		}
 		return m, tea.Batch(cmds...)
 
@@ -555,7 +555,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.dmPicker.OpenForMembers()
 			return m, cmd
 		}
-		cmds = append(cmds, CreateChannel(m.client, msg.Channel))
+		cmds = append(cmds, CreateChannel(m.reqCtx(), m.client, msg.Channel))
 		return m, tea.Batch(cmds...)
 
 	case dmpicker.CancelledMsg:
@@ -569,7 +569,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ch := m.pendingPrivateChannel
 			m.pendingPrivateChannel = nil
 			m.pendingMembers = nil
-			cmds = append(cmds, CreateChannel(m.client, ch))
+			cmds = append(cmds, CreateChannel(m.reqCtx(), m.client, ch))
 		}
 		return m, tea.Batch(cmds...)
 
@@ -595,7 +595,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.setError(errGroupTooSmall))
 				return m, tea.Batch(cmds...)
 			}
-			cmds = append(cmds, CreateGroupChannel(m.client, ids))
+			cmds = append(cmds, CreateGroupChannel(m.reqCtx(), m.client, ids))
 			return m, tea.Batch(cmds...)
 		}
 
@@ -603,7 +603,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			for _, u := range msg.Users {
 				m.pendingMembers = append(m.pendingMembers, u.ID)
 			}
-			cmds = append(cmds, CreateChannel(m.client, m.pendingPrivateChannel))
+			cmds = append(cmds, CreateChannel(m.reqCtx(), m.client, m.pendingPrivateChannel))
 			m.pendingPrivateChannel = nil
 		}
 		return m, tea.Batch(cmds...)
@@ -620,17 +620,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.channels = m.flattenChannels()
 			m.palette.SetChannels(m.channels)
 			cmds = append(cmds, m.selectChannel(msg.Channel))
-			cmds = append(cmds, FetchChannelMembers(m.client, msg.Channel.ID))
+			cmds = append(cmds, FetchChannelMembers(m.reqCtx(), m.client, msg.Channel.ID))
 			if len(m.pendingMembers) > 0 {
 				members := m.pendingMembers
 				m.pendingMembers = nil
-				cmds = append(cmds, AddChannelMembersCmd(m.client, msg.Channel.ID, members))
+				cmds = append(cmds, AddChannelMembersCmd(m.reqCtx(), m.client, msg.Channel.ID, members))
 			}
 		}
 		return m, tea.Batch(cmds...)
 
 	case AllMembersAddedMsg:
-		cmds = append(cmds, FetchChannelMembers(m.client, msg.ChannelID))
+		cmds = append(cmds, FetchChannelMembers(m.reqCtx(), m.client, msg.ChannelID))
 		return m, tea.Batch(cmds...)
 
 	case ChannelMemberAddedMsg:
@@ -666,14 +666,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tagpicker.TagToggledMsg:
 		if msg.Applied {
-			cmds = append(cmds, AddTagToPostCmd(m.client, msg.PostID, msg.TagID))
+			cmds = append(cmds, AddTagToPostCmd(m.reqCtx(), m.client, msg.PostID, msg.TagID))
 		} else {
-			cmds = append(cmds, RemoveTagFromPostCmd(m.client, msg.PostID, msg.TagID))
+			cmds = append(cmds, RemoveTagFromPostCmd(m.reqCtx(), m.client, msg.PostID, msg.TagID))
 		}
 		return m, tea.Batch(cmds...)
 
 	case tagpicker.TagCreateRequestMsg:
-		cmds = append(cmds, CreateTagAndApplyCmd(m.client, msg.Name, msg.PostID))
+		cmds = append(cmds, CreateTagAndApplyCmd(m.reqCtx(), m.client, msg.Name, msg.PostID))
 		return m, tea.Batch(cmds...)
 
 	case TagCreatedMsg:
@@ -693,14 +693,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.allTags = append(m.allTags, msg.NewTag)
 		}
 		m.tagPicker.AddApplied(msg.PostID, msg.NewTag)
-		cmds = append(cmds, FetchPostTags(m.client, msg.PostID))
+		cmds = append(cmds, FetchPostTags(m.reqCtx(), m.client, msg.PostID))
 		return m, tea.Batch(cmds...)
 
 	case TagRemovedFromPostMsg:
 		if msg.Err != nil {
 			return m, m.setError(msg.Err)
 		}
-		cmds = append(cmds, FetchPostTags(m.client, msg.PostID))
+		cmds = append(cmds, FetchPostTags(m.reqCtx(), m.client, msg.PostID))
 		return m, tea.Batch(cmds...)
 
 	case skinpicker.SkinSelectedMsg:
