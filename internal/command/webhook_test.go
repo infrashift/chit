@@ -26,8 +26,12 @@ func TestNewCloudEvent(t *testing.T) {
 	if ce.Source != "/chit/commands" {
 		t.Errorf("source=%s", ce.Source)
 	}
-	if ce.ID == "" {
-		t.Error("id is empty")
+	// The id is the audit log's event_id, so a receiver can correlate.
+	if ce.ID != "evt-1" {
+		t.Errorf("id=%q, want the event's id evt-1", ce.ID)
+	}
+	if NewCloudEvent(&WebhookEvent{}).ID == "" {
+		t.Error("an event without an id still needs one: CloudEvents requires it")
 	}
 	if ce.DataContentType != "application/json" {
 		t.Errorf("datacontenttype=%s", ce.DataContentType)

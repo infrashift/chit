@@ -3,6 +3,7 @@ package api
 import (
 	"log/slog"
 	"net/http"
+	"slices"
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
@@ -24,25 +25,26 @@ func New(a *app.App) http.Handler {
 	r.Use(StructuredLogger)
 	r.Use(chimiddleware.Recoverer)
 
+	// The same allowlist governs CORS and WebSocket origins. An empty list
+	// allows no browser origin: no CORS handler is installed, as the
+	// WebSocket check refuses every Origin. It used to mean "*" for CORS
+	// only, since go-chi/cors treats an empty list as allow-all.
 	allowedOrigins := a.Config.AllowedOrigins
-	if len(allowedOrigins) == 0 {
-		allowedOrigins = []string{"*"}
+	if slices.Contains(allowedOrigins, "*") {
+		slog.Warn("CORS and WebSocket origins are open to all sites; set CHIT_ALLOWED_ORIGINS in production")
 	}
-	for _, origin := range allowedOrigins {
-		if origin == "*" {
-			slog.Warn("CORS is configured to allow all origins; set CHIT_ALLOWED_ORIGINS in production")
-		}
+	if len(allowedOrigins) > 0 {
+		// Note: the trusted proxy header (X-User-Id) is intentionally NOT an
+		// allowed CORS header — only the auth proxy may set it, server-side.
+		r.Use(cors.Handler(cors.Options{
+			AllowedOrigins:   allowedOrigins,
+			AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+			AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
+			ExposedHeaders:   []string{"Link"},
+			AllowCredentials: false,
+			MaxAge:           300,
+		}))
 	}
-	// Note: the trusted proxy header (X-User-Id) is intentionally NOT an
-	// allowed CORS header — only the auth proxy may set it, server-side.
-	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   allowedOrigins,
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
-		ExposedHeaders:   []string{"Link"},
-		AllowCredentials: false,
-		MaxAge:           300,
-	}))
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// Public endpoints (no auth required)

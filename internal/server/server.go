@@ -112,13 +112,21 @@ type hubMembershipAdapter struct {
 	store *sqlstore.SqlStore
 }
 
+// membershipLoadTimeout bounds a hub membership load. The loads are not tied
+// to a request, and without a deadline a hung query left the user marked as
+// loading forever, so their load was never retried.
+const membershipLoadTimeout = 10 * time.Second
+
 func (a hubMembershipAdapter) GetChannelIDsForUser(userID string) ([]string, error) {
-	// Hub membership loads are server-internal work, not tied to a request.
-	return a.store.Channel().GetChannelIDsForUser(context.Background(), userID)
+	ctx, cancel := context.WithTimeout(context.Background(), membershipLoadTimeout)
+	defer cancel()
+	return a.store.Channel().GetChannelIDsForUser(ctx, userID)
 }
 
 func (a hubMembershipAdapter) GetTeamIDsForUser(userID string) ([]string, error) {
-	teams, err := a.store.Team().GetTeamsForUser(context.Background(), userID)
+	ctx, cancel := context.WithTimeout(context.Background(), membershipLoadTimeout)
+	defer cancel()
+	teams, err := a.store.Team().GetTeamsForUser(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +145,7 @@ func (s *Server) initPubSub() error {
 			return err
 		}
 		s.pubsub = ps
-	default:
+	default: // "pgnotify"; config validation refuses anything else
 		ps, err := pubsub.NewPGNotify(s.store.Pool())
 		if err != nil {
 			return err
@@ -195,8 +203,8 @@ func (s *Server) initCommands() {
 	}
 	s.app.AuditLogger = al
 
-	// Webhook channel.
-	if s.config.WebhookEnabled && s.config.WebhookURL != "" {
+	// Webhook channel. Config validation requires a URL when enabled.
+	if s.config.WebhookEnabled {
 		ch := make(chan *command.WebhookEvent, s.config.WebhookQueueSize)
 		s.webhookCh = ch
 		s.app.WebhookCh = ch
@@ -244,7 +252,6 @@ func (s *Server) initHTTP() {
 	}
 }
 
-// Start begins serving and blocks until a shutdown signal is received.
 // ensureMachineActors reconciles the declared non-human callers at boot.
 //
 // FATAL ON FAILURE, deliberately. These rows are the difference between a
@@ -264,6 +271,8 @@ func (s *Server) ensureMachineActors() error {
 	return s.app.EnsureMachineActors(ctx, actors)
 }
 
+// Start begins serving and blocks until a shutdown signal is received or the
+// listener fails. Either way it shuts down every component before returning.
 func (s *Server) Start() error {
 	s.scheduler.Start()
 
@@ -281,6 +290,9 @@ func (s *Server) Start() error {
 
 	select {
 	case err := <-errCh:
+		// The listener failed (a port in use, say). The scheduler, hub,
+		// pubsub and store are already running and must still be stopped.
+		_ = s.Shutdown()
 		return fmt.Errorf("server error: %w", err)
 	case sig := <-quit:
 		slog.Info("shutdown signal received", "signal", sig)

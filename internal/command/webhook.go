@@ -41,11 +41,18 @@ type CloudEventData struct {
 
 // NewCloudEvent builds a CloudEvents v1.0 envelope from a WebhookEvent.
 func NewCloudEvent(evt *WebhookEvent) *CloudEvent {
+	// The audit log's event_id, so a receiver can correlate a delivery with
+	// the audit record; a fresh UUID matched nothing. CloudEvents requires an
+	// id, so one is minted for an event that has none.
+	id := evt.EventID
+	if id == "" {
+		id = uuid.Must(uuid.NewV7()).String()
+	}
 	return &CloudEvent{
 		SpecVersion:     "1.0",
 		Type:            "com.chit.command.executed",
 		Source:          "/chit/commands",
-		ID:              uuid.Must(uuid.NewV7()).String(),
+		ID:              id,
 		Time:            time.Now().UTC(),
 		DataContentType: "application/json",
 		Data: CloudEventData{

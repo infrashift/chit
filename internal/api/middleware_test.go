@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/infrashift/chit/internal/model"
 )
@@ -276,5 +277,39 @@ func TestAuthExtract_ProxySecretRequired(t *testing.T) {
 	mw(next).ServeHTTP(w, r)
 	if w.Code != http.StatusOK {
 		t.Fatalf("correct secret: expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// Idle buckets are evicted once they would have refilled anyway; a busy
+// caller's bucket is never reset (the old janitor wiped every bucket every
+// ten minutes, refilling the burst of whoever was active).
+func TestUserLimiters_EvictsOnlyIdleBuckets(t *testing.T) {
+	now := time.Unix(0, 0)
+	clock := func() time.Time { return now }
+	u := newUserLimiters(1, 2, clock)
+
+	for i := range 2 {
+		if !u.allow("busy") {
+			t.Fatalf("request %d of a burst of 2 refused", i+1)
+		}
+	}
+	if !u.allow("idle") {
+		t.Fatal("first request refused")
+	}
+	if u.allow("busy") {
+		t.Fatal("a third request inside a second was allowed with a burst of 2")
+	}
+
+	// Long enough for "idle" to be evicted; "busy" keeps calling.
+	for range 3 {
+		now = now.Add(u.idleAfter / 2)
+		u.allow("busy")
+	}
+	u.mu.Lock()
+	_, idleKept := u.entries["idle"]
+	_, busyKept := u.entries["busy"]
+	u.mu.Unlock()
+	if idleKept || !busyKept {
+		t.Fatalf("idle kept=%v busy kept=%v, want only the busy bucket", idleKept, busyKept)
 	}
 }

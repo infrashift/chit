@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -71,18 +72,20 @@ type Config struct {
 // Defaults returns a Config populated with default values.
 func Defaults() *Config {
 	return &Config{
-		ListenAddress:           ":8065",
-		DBMaxOpenConn:           25,
-		DBMaxIdleConn:           10,
-		PubSubBackend:           "pgnotify",
-		NatsURL:                 "nats://localhost:4222",
-		TrustedProxyHeader:      "X-User-Id",
-		TrustedClientHeader:     "X-Client-Id",
-		AllowedOrigins:          []string{"*"},
-		KratosAdminURL:          "http://localhost:4434",
-		KetoReadURL:             "http://localhost:4466",
-		KetoWriteURL:            "http://localhost:4467",
-		ZincSearchURL:           "http://localhost:4080",
+		ListenAddress:       ":8065",
+		DBMaxOpenConn:       25,
+		DBMaxIdleConn:       10,
+		PubSubBackend:       "pgnotify",
+		NatsURL:             "nats://localhost:4222",
+		TrustedProxyHeader:  "X-User-Id",
+		TrustedClientHeader: "X-Client-Id",
+		AllowedOrigins:      []string{"*"},
+		KratosAdminURL:      "http://localhost:4434",
+		KetoReadURL:         "http://localhost:4466",
+		KetoWriteURL:        "http://localhost:4467",
+		// Empty: ZincSearch is opt-in. Search then uses SQL, and no indexer
+		// runs. The deploy manifests set it.
+		ZincSearchURL:           "",
 		ZincSearchUser:          "admin",
 		WSPingInterval:          30 * time.Second,
 		WSWriteTimeout:          10 * time.Second,
@@ -153,6 +156,66 @@ func load() (*Config, error) {
 	if err := k.Unmarshal("", cfg); err != nil {
 		return nil, err
 	}
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
 
 	return cfg, nil
+}
+
+// validate refuses settings that would fail later and less legibly: a zero
+// ping interval panics on the first WebSocket connection (time.NewTicker), a
+// zero cache TTL expires every entry at once, and a misspelt pubsub backend
+// silently fell back to pgnotify.
+func (c *Config) validate() error {
+	var errs []error
+	positive := func(name string, v int64) {
+		if v <= 0 {
+			errs = append(errs, fmt.Errorf("%s must be positive, got %d", name, v))
+		}
+	}
+	positive("CHIT_WS_PING_INTERVAL", int64(c.WSPingInterval))
+	positive("CHIT_WS_WRITE_TIMEOUT", int64(c.WSWriteTimeout))
+	positive("CHIT_CACHE_SIZE", int64(c.CacheSize))
+	positive("CHIT_CACHE_TTL", int64(c.CacheTTL))
+	positive("CHIT_DB_MAX_OPEN_CONN", int64(c.DBMaxOpenConn))
+	if c.DBMaxIdleConn < 0 || c.DBMaxIdleConn > c.DBMaxOpenConn {
+		errs = append(errs, fmt.Errorf("CHIT_DB_MAX_IDLE_CONN must be between 0 and CHIT_DB_MAX_OPEN_CONN (%d), got %d",
+			c.DBMaxOpenConn, c.DBMaxIdleConn))
+	}
+
+	switch c.PubSubBackend {
+	case "pgnotify":
+	case "nats":
+		if c.NatsURL == "" {
+			errs = append(errs, errors.New("CHIT_NATS_URL is required when CHIT_PUBSUB_BACKEND=nats"))
+		}
+	default:
+		errs = append(errs, fmt.Errorf("CHIT_PUBSUB_BACKEND must be pgnotify or nats, got %q", c.PubSubBackend))
+	}
+
+	if c.TrustedProxyHeader == "" {
+		errs = append(errs, errors.New("CHIT_TRUSTED_PROXY_HEADER must not be empty"))
+	}
+	switch c.LogLevel {
+	case "debug", "info", "warn", "error":
+	default:
+		errs = append(errs, fmt.Errorf("CHIT_LOG_LEVEL must be debug, info, warn or error, got %q", c.LogLevel))
+	}
+	switch c.LogFormat {
+	case "json", "text":
+	default:
+		errs = append(errs, fmt.Errorf("CHIT_LOG_FORMAT must be json or text, got %q", c.LogFormat))
+	}
+
+	if c.WebhookEnabled {
+		// Enabled with no URL used to be silently disabled.
+		if c.WebhookURL == "" {
+			errs = append(errs, errors.New("CHIT_WEBHOOK_URL is required when CHIT_WEBHOOK_ENABLED=true"))
+		}
+		positive("CHIT_WEBHOOK_WORKER_COUNT", int64(c.WebhookWorkerCount))
+		positive("CHIT_WEBHOOK_QUEUE_SIZE", int64(c.WebhookQueueSize))
+		positive("CHIT_WEBHOOK_TIMEOUT_SEC", int64(c.WebhookTimeoutSec))
+	}
+	return errors.Join(errs...)
 }

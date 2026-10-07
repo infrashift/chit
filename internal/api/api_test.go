@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
@@ -126,5 +127,21 @@ func TestRoutes_MatchTheOpenAPISpec(t *testing.T) {
 			t.Errorf("route %s %s is served but absent from api/openapi.yaml, "+
 				"so the request validator will reject it", method, p)
 		}
+	}
+}
+
+// An empty origin allowlist admits no browser origin. CORS used to fall back
+// to "*" for it while the WebSocket check refused everything.
+func TestRouter_EmptyOriginListSendsNoCORSHeaders(t *testing.T) {
+	a, _, cleanup := setupTestApp(t)
+	defer cleanup()
+	a.Config.AllowedOrigins = nil
+
+	r, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/system/ping", http.NoBody)
+	r.Header.Set("Origin", "https://elsewhere.example")
+	w := httptest.NewRecorder()
+	New(a).ServeHTTP(w, r)
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("Access-Control-Allow-Origin = %q with an empty allowlist", got)
 	}
 }
