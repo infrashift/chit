@@ -2,6 +2,7 @@ package sqlstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -42,7 +43,7 @@ func (s *SqlTeamStore) Get(ctx context.Context, id string) (*model.Team, error) 
 		&team.CreatorID, &team.CreateAt, &team.UpdateAt, &team.DeleteAt,
 	)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, model.NewNotFoundError("SqlTeamStore.Get", id)
 		}
 		return nil, fmt.Errorf("get team: %w", err)
@@ -61,7 +62,7 @@ func (s *SqlTeamStore) GetByName(ctx context.Context, name string) (*model.Team,
 		&team.CreatorID, &team.CreateAt, &team.UpdateAt, &team.DeleteAt,
 	)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, model.NewNotFoundError("SqlTeamStore.GetByName", name)
 		}
 		return nil, fmt.Errorf("get team by name: %w", err)
@@ -193,7 +194,7 @@ func (s *SqlTeamStore) GetMember(ctx context.Context, teamID, userID string) (*m
 		&m.TeamID, &m.UserID, &m.Roles, &m.CreateAt, &m.DeleteAt,
 	)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, model.NewNotFoundError("SqlTeamStore.GetMember", teamID+"/"+userID)
 		}
 		return nil, fmt.Errorf("get team member: %w", err)

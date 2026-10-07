@@ -944,9 +944,11 @@ func (s *TagStore) Save(_ context.Context, t *model.Tag) (*model.Tag, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Upsert by name, as the SQL store does: an existing tag is returned.
 	for _, existing := range s.tags {
 		if existing.Name == t.Name {
-			return nil, model.NewConflictError("storetest.TagStore.Save", "tag already exists")
+			*t = *existing
+			return t, nil
 		}
 	}
 	s.tags[t.ID] = cp(t)

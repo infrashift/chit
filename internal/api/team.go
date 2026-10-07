@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -13,14 +12,20 @@ import (
 func createTeam(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
-		var team model.Team
-		if err := json.NewDecoder(r.Body).Decode(&team); err != nil {
-			WriteError(w, model.NewBadRequestError("createTeam", "invalid request body"))
+		var body struct {
+			Name        string `json:"name"`
+			DisplayName string `json:"display_name"`
+			Description string `json:"description"`
+			Type        string `json:"type"`
+		}
+		if !decodeBody(w, r, &body, "createTeam") {
 			return
 		}
-		team.CreatorID = user.ID
 
-		saved, err := a.CreateTeam(r.Context(), &team)
+		saved, err := a.CreateTeam(r.Context(), &model.Team{
+			Name: body.Name, DisplayName: body.DisplayName, Description: body.Description,
+			Type: body.Type, CreatorID: user.ID,
+		})
 		if err != nil {
 			WriteAppError(w, "createTeam", err)
 			return
@@ -49,8 +54,7 @@ func updateTeam(a *app.App) http.HandlerFunc {
 			Description *string `json:"description"`
 			Type        *string `json:"type"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			WriteError(w, model.NewBadRequestError("updateTeam", "invalid request body"))
+		if !decodeBody(w, r, &body, "updateTeam") {
 			return
 		}
 		// The name is the team's URL slug; renaming it would break every link
@@ -102,7 +106,7 @@ func getMyTeams(a *app.App) http.HandlerFunc {
 		user := ContextGetUser(r)
 		teams, err := a.GetTeamsForUser(r.Context(), user.ID)
 		if err != nil {
-			WriteError(w, model.NewInternalError("getMyTeams", err))
+			WriteAppError(w, "getMyTeams", err)
 			return
 		}
 		WriteJSON(w, http.StatusOK, teams)
@@ -120,8 +124,7 @@ func addTeamMember(a *app.App) http.HandlerFunc {
 		var body struct {
 			UserID string `json:"user_id"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			WriteError(w, model.NewBadRequestError("addTeamMember", "invalid request body"))
+		if !decodeBody(w, r, &body, "addTeamMember") {
 			return
 		}
 

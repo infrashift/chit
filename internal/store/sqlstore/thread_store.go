@@ -2,6 +2,7 @@ package sqlstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -44,7 +45,7 @@ func (s *SqlThreadStore) Get(ctx context.Context, postID string) (*model.Thread,
 		&t.PostID, &t.ChannelID, &t.ReplyCount, &t.LastReplyAt, &t.Participants,
 	)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, model.NewNotFoundError("SqlThreadStore.Get", postID)
 		}
 		return nil, fmt.Errorf("get thread: %w", err)
@@ -124,7 +125,7 @@ func (s *SqlThreadStore) GetMembership(ctx context.Context, postID, userID strin
 		&m.PostID, &m.UserID, &m.Following, &m.LastViewedAt, &m.UnreadMentionCount,
 	)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, model.NewNotFoundError("SqlThreadStore.GetMembership", postID+"/"+userID)
 		}
 		return nil, fmt.Errorf("get thread membership: %w", err)

@@ -1,7 +1,7 @@
 package api
 
 import (
-	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -19,8 +19,7 @@ func createUser(a *app.App) http.HandlerFunc {
 		}
 
 		var user model.User
-		if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
-			WriteError(w, model.NewBadRequestError("createUser", "invalid request body"))
+		if !decodeBody(w, r, &user, "createUser") {
 			return
 		}
 
@@ -57,8 +56,7 @@ func updateMe(a *app.App) http.HandlerFunc {
 			Username    *string `json:"username"`
 			DisplayName *string `json:"display_name"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			WriteError(w, model.NewBadRequestError("updateMe", "invalid request body"))
+		if !decodeBody(w, r, &body, "updateMe") {
 			return
 		}
 
@@ -123,8 +121,12 @@ func searchUsers(a *app.App) http.HandlerFunc {
 func getUsersByIDs(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var ids []string
-		if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
-			WriteError(w, model.NewBadRequestError("getUsersByIDs", "invalid request body"))
+		if !decodeBody(w, r, &ids, "getUsersByIDs") {
+			return
+		}
+		const maxIDs = 200
+		if len(ids) > maxIDs {
+			WriteError(w, model.NewBadRequestError("getUsersByIDs", fmt.Sprintf("at most %d ids", maxIDs)))
 			return
 		}
 

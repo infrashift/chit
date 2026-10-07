@@ -1,13 +1,11 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/infrashift/chit/internal/app"
-	"github.com/infrashift/chit/internal/model"
 )
 
 func getThread(a *app.App) http.HandlerFunc {
@@ -61,8 +59,7 @@ func updateThreadFollowing(a *app.App) http.HandlerFunc {
 		var body struct {
 			Following bool `json:"following"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			WriteError(w, model.NewBadRequestError("updateThreadFollowing", "invalid request body"))
+		if !decodeBody(w, r, &body, "updateThreadFollowing") {
 			return
 		}
 

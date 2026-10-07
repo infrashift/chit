@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -33,8 +32,7 @@ const (
 func searchPosts(a *app.App, scope searchScope) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body searchPostsBody
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			WriteError(w, model.NewBadRequestError("searchPosts", "invalid request body"))
+		if !decodeBody(w, r, &body, "searchPosts") {
 			return
 		}
 		if body.Terms == "" && len(body.TagIDs) == 0 {

@@ -81,3 +81,46 @@ func TestGetUser_RedactsIdentity(t *testing.T) {
 		t.Fatalf("another user's email/kratos_id leaked: %+v", u)
 	}
 }
+
+func TestGetUsersByIDs(t *testing.T) {
+	a, _, cleanup := setupTestApp(t)
+	defer cleanup()
+	serve := func(body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(body))
+		r = authedRequest(r, testUser())
+		w := httptest.NewRecorder()
+		getUsersByIDs(a).ServeHTTP(w, r)
+		return w
+	}
+
+	w := serve(`["` + extraUserID + `","` + thirdUserID + `"]`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var users []model.User
+	decodeJSON(t, w.Body, &users)
+	if len(users) != 2 || users[0].Email != "" {
+		t.Fatalf("got %+v, want 2 sanitized users", users)
+	}
+
+	if w := serve(`[` + strings.Repeat(`"x",`, 200) + `"x"]`); w.Code != http.StatusBadRequest {
+		t.Fatalf("201 ids: got %d, want 400", w.Code)
+	}
+}
+
+func TestSearchUsers(t *testing.T) {
+	a, _, cleanup := setupTestApp(t)
+	defer cleanup()
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/users?term=ali", http.NoBody)
+	r = authedRequest(r, testUser())
+	w := httptest.NewRecorder()
+	searchUsers(a).ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var users []model.User
+	decodeJSON(t, w.Body, &users)
+	if len(users) != 1 || users[0].Username != "alice" || users[0].Email != "" {
+		t.Fatalf("got %+v, want only alice, sanitized", users)
+	}
+}

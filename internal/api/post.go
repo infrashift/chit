@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -23,8 +22,7 @@ func createPost(a *app.App) http.HandlerFunc {
 			Content   string         `json:"content"`
 			Props     map[string]any `json:"props"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			WriteError(w, model.NewBadRequestError("createPost", "invalid request body"))
+		if !decodeBody(w, r, &body, "createPost") {
 			return
 		}
 		// mentions is computed by the server; a client-supplied list would be
@@ -68,8 +66,7 @@ func updatePost(a *app.App) http.HandlerFunc {
 			Content *string        `json:"content"`
 			Props   map[string]any `json:"props"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			WriteError(w, model.NewBadRequestError("updatePost", "invalid request body"))
+		if !decodeBody(w, r, &body, "updatePost") {
 			return
 		}
 

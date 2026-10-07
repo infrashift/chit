@@ -2,6 +2,7 @@ package sqlstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -50,7 +51,7 @@ func (s *SqlChannelStore) Get(ctx context.Context, id string) (*model.Channel, e
 		&ch.LastPostAt, &ch.CreateAt, &ch.UpdateAt, &ch.DeleteAt,
 	)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, model.NewNotFoundError("SqlChannelStore.Get", id)
 		}
 		return nil, fmt.Errorf("get channel: %w", err)
@@ -70,7 +71,7 @@ func (s *SqlChannelStore) GetByName(ctx context.Context, teamID, name string) (*
 		&ch.LastPostAt, &ch.CreateAt, &ch.UpdateAt, &ch.DeleteAt,
 	)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, model.NewNotFoundError("SqlChannelStore.GetByName", name)
 		}
 		return nil, fmt.Errorf("get channel by name: %w", err)
@@ -253,7 +254,7 @@ func (s *SqlChannelStore) GetMember(ctx context.Context, channelID, userID strin
 		&m.ChannelID, &m.UserID, &m.Roles, &m.LastViewedAt, &m.MsgCount, &m.MentionCount, &m.NotifyProps, &m.CreateAt,
 	)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, model.NewNotFoundError("SqlChannelStore.GetMember", channelID+"/"+userID)
 		}
 		return nil, fmt.Errorf("get channel member: %w", err)
@@ -286,7 +287,7 @@ func (s *SqlChannelStore) GetDirectChannelByName(ctx context.Context, name strin
 		&ch.LastPostAt, &ch.CreateAt, &ch.UpdateAt, &ch.DeleteAt,
 	)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, model.NewNotFoundError("SqlChannelStore.GetDirectChannelByName", name)
 		}
 		return nil, fmt.Errorf("get direct channel by name: %w", err)

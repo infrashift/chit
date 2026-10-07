@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -23,8 +22,7 @@ func createChannel(a *app.App) http.HandlerFunc {
 			Header      string `json:"header"`
 			Purpose     string `json:"purpose"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			WriteError(w, model.NewBadRequestError("createChannel", "invalid request body"))
+		if !decodeBody(w, r, &body, "createChannel") {
 			return
 		}
 
@@ -65,8 +63,7 @@ func updateChannel(a *app.App) http.HandlerFunc {
 			Header      *string `json:"header"`
 			Purpose     *string `json:"purpose"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			WriteError(w, model.NewBadRequestError("updateChannel", "invalid request body"))
+		if !decodeBody(w, r, &body, "updateChannel") {
 			return
 		}
 		if body.Name != nil {
@@ -123,7 +120,7 @@ func getMyChannels(a *app.App) http.HandlerFunc {
 
 		channels, err := a.GetChannelsForUser(r.Context(), user.ID, teamID)
 		if err != nil {
-			WriteError(w, model.NewInternalError("getMyChannels", err))
+			WriteAppError(w, "getMyChannels", err)
 			return
 		}
 
@@ -137,7 +134,7 @@ func getMyDirectChannels(a *app.App) http.HandlerFunc {
 
 		channels, err := a.GetDirectChannelsForUser(r.Context(), user.ID)
 		if err != nil {
-			WriteError(w, model.NewInternalError("getMyDirectChannels", err))
+			WriteAppError(w, "getMyDirectChannels", err)
 			return
 		}
 
@@ -153,8 +150,7 @@ func createDirectChannel(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
 		var userIDs []string
-		if err := json.NewDecoder(r.Body).Decode(&userIDs); err != nil {
-			WriteError(w, model.NewBadRequestError("createDirectChannel", "invalid request body"))
+		if !decodeBody(w, r, &userIDs, "createDirectChannel") {
 			return
 		}
 		if len(userIDs) != 2 {
@@ -176,8 +172,7 @@ func createGroupChannel(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
 		var userIDs []string
-		if err := json.NewDecoder(r.Body).Decode(&userIDs); err != nil {
-			WriteError(w, model.NewBadRequestError("createGroupChannel", "invalid request body"))
+		if !decodeBody(w, r, &userIDs, "createGroupChannel") {
 			return
 		}
 
@@ -198,8 +193,7 @@ func addChannelMember(a *app.App) http.HandlerFunc {
 		var body struct {
 			UserID string `json:"user_id"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			WriteError(w, model.NewBadRequestError("addChannelMember", "invalid request body"))
+		if !decodeBody(w, r, &body, "addChannelMember") {
 			return
 		}
 

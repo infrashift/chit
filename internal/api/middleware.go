@@ -58,7 +58,7 @@ func AuthExtract(a *app.App) func(http.Handler) http.Handler {
 			user, err := a.ProvisionUser(r.Context(), kratosID)
 			if err != nil {
 				slog.Error("auth: failed to provision user", "kratos_id", kratosID, "error", err)
-				WriteError(w, model.NewInternalError("AuthExtract", err))
+				WriteAppError(w, "AuthExtract", err)
 				return
 			}
 

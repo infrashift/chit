@@ -173,3 +173,29 @@ func TestGetTagsForPosts_RejectsOversizedBatch(t *testing.T) {
 		t.Errorf("expected 400 for an oversized batch, got %d", w.Code)
 	}
 }
+
+func TestCreateTag_IsIdempotentAndIgnoresID(t *testing.T) {
+	a, _, cleanup := setupTestApp(t)
+	defer cleanup()
+	create := func(body string) model.Tag {
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(body))
+		r = authedRequest(r, testUser())
+		w := httptest.NewRecorder()
+		createTag(a).ServeHTTP(w, r)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected 201, got %d; body: %s", w.Code, w.Body.String())
+		}
+		var tag model.Tag
+		decodeJSON(t, w.Body, &tag)
+		return tag
+	}
+
+	forged := "019421a0-0000-7000-8000-0000000000ee"
+	first := create(`{"id":"` + forged + `","name":"release"}`)
+	if first.ID == forged {
+		t.Fatal("a client-chosen tag id was used")
+	}
+	if again := create(`{"name":"release"}`); again.ID != first.ID {
+		t.Fatalf("re-creating a tag gave id %s, want the existing %s", again.ID, first.ID)
+	}
+}
