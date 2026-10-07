@@ -11,6 +11,15 @@ Chit TUI needs to know where the Chit server (or Oathkeeper proxy) is:
 export CHIT_SERVER_URL=http://localhost:4455
 ```
 
+To make it permanent, put it in `~/.config/chit/config.toml` instead:
+
+```toml
+server_url = "http://localhost:4455"
+```
+
+See [Configuration](/chit/tui/getting-started/configuration/) for the other
+settings.
+
 ## 2. Launch
 
 ```bash
@@ -40,6 +49,7 @@ All navigation goes through the **palette**:
 | Find a person / start a DM | `Ctrl+D` (or type `@` in the palette) |
 | Run a slash command | type `/` in the palette |
 | Search messages in the active channel | `Ctrl+S` (or type `?`) |
+| Search messages in every channel | type `??` in the palette |
 | Toggle focus between history and input | `Tab` |
 | Show all keybindings | `?` (from the history pane) |
 
@@ -65,7 +75,9 @@ wheel-scroll the history.
 
 Press `Ctrl+S` — the palette opens in message-search mode. Type a query,
 press `Enter` to search the active channel, then use arrow keys to browse
-results.
+results. Start the query with a second `?` (`??term`) to search every channel
+you belong to. Choosing a result jumps to that message, opening its channel
+first if needed.
 
 ## 8. Quit
 

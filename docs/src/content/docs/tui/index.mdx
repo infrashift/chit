@@ -20,22 +20,22 @@ to the [Keybindings reference](/chit/tui/reference/keybindings/).
 
 <CardGrid>
   <Card title="Real-Time Messaging" icon="rocket">
-    WebSocket connectivity with automatic reconnection and exponential backoff. Messages appear instantly as they're posted.
+    WebSocket connectivity with keepalive pings and automatic reconnection with backoff. Messages appear instantly as they're posted, and the channel is re-read after a reconnect so nothing sent meanwhile is missed.
   </Card>
   <Card title="Unified Palette" icon="magnifier">
-    One overlay for everything (Ctrl+K): jump to channels sorted by unread activity, find people with `@`, run slash commands with `/`, and search messages with `?`.
+    One overlay for everything (Ctrl+K): jump to channels sorted by unread activity, find people with `@`, run slash commands with `/`, and search messages with `?` (or `??` for every channel).
   </Card>
   <Card title="Threaded Conversations" icon="comment">
     Press Enter on a post to open its thread full-screen. Reply from the regular input box; Esc returns to the channel.
   </Card>
   <Card title="Mouse Support" icon="setting">
-    Click action-bar buttons, select palette rows, and wheel-scroll history — while everything stays fully keyboard-drivable.
+    Click action-bar buttons and posts, select palette rows, wheel-scroll history, and drag to select lines to copy — while everything stays fully keyboard-drivable.
   </Card>
   <Card title="Markdown Rendering" icon="document">
     Posts rendered with Glamour for rich terminal output — code blocks, links, emphasis, and more.
   </Card>
   <Card title="Customizable Themes" icon="sun">
-    Four built-in themes — Tokyo Night, Catppuccin, Kanagawa, and Nightfox — plus JSON-based custom theme support.
+    Eight bundled themes in dark and light pairs — Tokyo Night, Catppuccin, Kanagawa, and Nightfox — that can follow your terminal's appearance, plus your own TOML themes.
   </Card>
   <Card title="Unread Badges" icon="information">
     Per-channel unread and mention counts surface in the palette, which sorts the most active channels to the top.
@@ -44,6 +44,6 @@ to the [Keybindings reference](/chit/tui/reference/keybindings/).
     Tag posts with `#tag` syntax or the tag picker overlay. Search by tags to find relevant conversations quickly.
   </Card>
   <Card title="Keyboard First" icon="laptop">
-    Every mouse action has a keybinding. Press `?` for the built-in help overlay.
+    Every mouse action has a keybinding: copy with `y`, edit with `e`, delete with `d d`, pin with `p`. Press `?` for the built-in help overlay.
   </Card>
 </CardGrid>
