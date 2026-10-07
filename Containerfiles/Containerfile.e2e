@@ -6,7 +6,7 @@
 
 FROM ghcr.io/infrashift/trusted-base-images/trusted/ubi9-standard
 
-ARG GO_VERSION=1.25.4
+ARG GO_VERSION=1.25.14
 ARG MIGRATE_VERSION=4.18.3
 
 ENV GOPATH=/go \
