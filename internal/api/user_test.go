@@ -13,10 +13,7 @@ import (
 )
 
 func TestGetMe(t *testing.T) {
-	a, _, cleanup := setupTestApp(t)
-	defer cleanup()
-
-	handler := getMe(a)
+	handler := getMe()
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/users/me", http.NoBody)
 	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()
@@ -35,10 +32,7 @@ func TestGetMe(t *testing.T) {
 }
 
 func TestGetMe_Unauthed(t *testing.T) {
-	a, _, cleanup := setupTestApp(t)
-	defer cleanup()
-
-	handler := getMe(a)
+	handler := getMe()
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/users/me", http.NoBody)
 	// No user in context
 	w := httptest.NewRecorder()

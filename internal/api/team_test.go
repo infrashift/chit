@@ -333,3 +333,16 @@ func TestAddTeamMember_ReAddKeepsRoles(t *testing.T) {
 		t.Fatalf("re-adding the creator dropped team_admin: %+v, %v", m, err)
 	}
 }
+
+// A nil slice encodes as null; every list endpoint answers [] instead.
+func TestListEndpoints_EmptyIsAnArray(t *testing.T) {
+	a, _, cleanup := setupTestApp(t)
+	defer cleanup()
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/users/me/teams", http.NoBody)
+	r = authedRequest(r, charlieUser()) // on no team
+	w := httptest.NewRecorder()
+	getMyTeams(a).ServeHTTP(w, r)
+	if body := strings.TrimSpace(w.Body.String()); body != "[]" {
+		t.Fatalf("body = %s, want []", body)
+	}
+}

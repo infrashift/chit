@@ -113,10 +113,8 @@ func (cm *ChannelMember) PreSave() {
 
 // GetPostsOptions defines pagination and filtering options for post queries.
 type GetPostsOptions struct {
-	ChannelID string
-	Page      int
-	PerPage   int
-	Before    string
-	After     string
-	Since     int64
+	Page    int
+	PerPage int
+	// Since, when set, returns only posts created after it, oldest first.
+	Since int64
 }

@@ -27,10 +27,7 @@ func TestSystemPing(t *testing.T) {
 }
 
 func TestSystemClientConfig(t *testing.T) {
-	a, _, cleanup := setupTestApp(t)
-	defer cleanup()
-
-	handler := systemClientConfig(a)
+	handler := systemClientConfig()
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/system/config/client", http.NoBody)
 	w := httptest.NewRecorder()
 

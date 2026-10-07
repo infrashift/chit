@@ -216,7 +216,6 @@ func (a *App) GetPostsForChannel(ctx context.Context, channelID, userID string, 
 		return nil, err
 	}
 
-	opts.ChannelID = channelID
 	list, err := a.Store.Post().GetPostsForChannel(ctx, channelID, opts)
 	if err != nil {
 		return nil, err

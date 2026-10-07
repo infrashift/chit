@@ -88,7 +88,7 @@ func deletePost(a *app.App) http.HandlerFunc {
 			WriteAppError(w, "deletePost", err)
 			return
 		}
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
+		writeOK(w)
 	}
 }
 
@@ -100,7 +100,7 @@ func pinPost(a *app.App) http.HandlerFunc {
 			WriteAppError(w, "pinPost", err)
 			return
 		}
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
+		writeOK(w)
 	}
 }
 
@@ -112,7 +112,7 @@ func unpinPost(a *app.App) http.HandlerFunc {
 			WriteAppError(w, "unpinPost", err)
 			return
 		}
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
+		writeOK(w)
 	}
 }
 

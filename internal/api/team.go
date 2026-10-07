@@ -83,7 +83,7 @@ func deleteTeam(a *app.App) http.HandlerFunc {
 			WriteAppError(w, "deleteTeam", err)
 			return
 		}
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
+		writeOK(w)
 	}
 }
 
@@ -97,7 +97,7 @@ func getAllTeams(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		WriteJSON(w, http.StatusOK, teams)
+		writeList(w, teams)
 	}
 }
 
@@ -109,7 +109,7 @@ func getMyTeams(a *app.App) http.HandlerFunc {
 			WriteAppError(w, "getMyTeams", err)
 			return
 		}
-		WriteJSON(w, http.StatusOK, teams)
+		writeList(w, teams)
 	}
 }
 
@@ -153,7 +153,7 @@ func removeTeamMember(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
+		writeOK(w)
 	}
 }
 
@@ -168,6 +168,6 @@ func getTeamMembers(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		WriteJSON(w, http.StatusOK, members)
+		writeList(w, members)
 	}
 }

@@ -33,7 +33,7 @@ func createUser(a *app.App) http.HandlerFunc {
 	}
 }
 
-func getMe(_ *app.App) http.HandlerFunc {
+func getMe() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
 		if user == nil {
@@ -114,7 +114,7 @@ func searchUsers(a *app.App) http.HandlerFunc {
 			u.Sanitize()
 		}
 
-		WriteJSON(w, http.StatusOK, users)
+		writeList(w, users)
 	}
 }
 
@@ -140,6 +140,6 @@ func getUsersByIDs(a *app.App) http.HandlerFunc {
 			u.Sanitize()
 		}
 
-		WriteJSON(w, http.StatusOK, users)
+		writeList(w, users)
 	}
 }

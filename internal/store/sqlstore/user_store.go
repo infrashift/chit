@@ -53,10 +53,6 @@ func (s *SqlUserStore) GetByUsername(ctx context.Context, username string) (*mod
 	return s.getBy(ctx, "username", username)
 }
 
-func (s *SqlUserStore) GetByEmail(ctx context.Context, email string) (*model.User, error) {
-	return s.getBy(ctx, "email", email)
-}
-
 // GetByOAuthClientID resolves the machine actor bound to an OAuth2 client.
 // Unlike GetByKratosID there is no just-in-time provisioning fallback: an
 // unrecognised client must fail authentication rather than mint a user.

@@ -18,6 +18,21 @@ func WriteJSON(w http.ResponseWriter, status int, data any) {
 	}
 }
 
+// writeOK answers 200 with {"status":"OK"}, the body of every endpoint that
+// has nothing else to return.
+func writeOK(w http.ResponseWriter) {
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
+}
+
+// writeList answers 200 with items, as [] rather than null when there are
+// none: a nil slice encodes as null, which clients then have to special-case.
+func writeList[T any](w http.ResponseWriter, items []T) {
+	if items == nil {
+		items = []T{}
+	}
+	WriteJSON(w, http.StatusOK, items)
+}
+
 // WriteError writes a structured error response.
 //
 // A 5xx is logged with its detail and sent without it. DetailedError on a

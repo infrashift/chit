@@ -140,7 +140,7 @@ func (a *App) DeleteChannel(ctx context.Context, id, actorID string) error {
 		return err
 	}
 	if channel.CreatorID != actorID {
-		if user, uerr := a.Store.User().Get(ctx, actorID); uerr != nil || !user.IsSystemAdmin() {
+		if err := a.requireSystemAdmin(ctx, actorID, "App.DeleteChannel"); err != nil {
 			return model.NewForbiddenError("App.DeleteChannel", "only the channel creator may delete a channel")
 		}
 	}
@@ -345,7 +345,7 @@ func (a *App) AddChannelMember(ctx context.Context, channelID, userID, actorID s
 	}
 	a.Hub.NotifyMembershipChanged(userID, channelID, true)
 
-	_ = a.WriteKetoRelation(ctx, model.KetoNamespaceChannel, channelID, model.KetoRelationMember, userID)
+	_ = a.keto.WriteRelation(ctx, model.KetoNamespaceChannel, channelID, model.KetoRelationMember, userID)
 
 	a.publishEvent(ctx, &model.WebSocketEvent{
 		Event: model.WebSocketEventUserAdded,
@@ -371,7 +371,7 @@ func (a *App) RemoveChannelMember(ctx context.Context, channelID, userID, actorI
 		return err
 	}
 	if userID != actorID {
-		if user, uerr := a.Store.User().Get(ctx, actorID); uerr != nil || !user.IsSystemAdmin() {
+		if err := a.requireSystemAdmin(ctx, actorID, "App.RemoveChannelMember"); err != nil {
 			return model.NewForbiddenError("App.RemoveChannelMember",
 				"only a system admin may remove another member")
 		}
@@ -382,7 +382,7 @@ func (a *App) RemoveChannelMember(ctx context.Context, channelID, userID, actorI
 	}
 	a.Hub.NotifyMembershipChanged(userID, channelID, false)
 
-	_ = a.DeleteKetoRelation(ctx, model.KetoNamespaceChannel, channelID, model.KetoRelationMember, userID)
+	_ = a.keto.DeleteRelation(ctx, model.KetoNamespaceChannel, channelID, model.KetoRelationMember, userID)
 	a.publishUserRemoved(ctx, channelID, userID)
 	return nil
 }

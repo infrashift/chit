@@ -93,7 +93,7 @@ func deleteChannel(a *app.App) http.HandlerFunc {
 			WriteAppError(w, "deleteChannel", err)
 			return
 		}
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
+		writeOK(w)
 	}
 }
 
@@ -109,7 +109,7 @@ func getChannelsForTeam(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		WriteJSON(w, http.StatusOK, channels)
+		writeList(w, channels)
 	}
 }
 
@@ -124,7 +124,7 @@ func getMyChannels(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		WriteJSON(w, http.StatusOK, channels)
+		writeList(w, channels)
 	}
 }
 
@@ -138,11 +138,7 @@ func getMyDirectChannels(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		if channels == nil {
-			channels = []*model.Channel{}
-		}
-
-		WriteJSON(w, http.StatusOK, channels)
+		writeList(w, channels)
 	}
 }
 
@@ -218,7 +214,7 @@ func removeChannelMember(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
+		writeOK(w)
 	}
 }
 
@@ -234,7 +230,7 @@ func getChannelMembers(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		WriteJSON(w, http.StatusOK, members)
+		writeList(w, members)
 	}
 }
 
@@ -248,6 +244,6 @@ func viewChannel(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
+		writeOK(w)
 	}
 }

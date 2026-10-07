@@ -152,10 +152,6 @@ func (s *UserStore) GetByUsername(_ context.Context, name string) (*model.User, 
 	return s.getBy("UserStore.GetByUsername", name, func(u *model.User) bool { return u.Username == name })
 }
 
-func (s *UserStore) GetByEmail(_ context.Context, email string) (*model.User, error) {
-	return s.getBy("UserStore.GetByEmail", email, func(u *model.User) bool { return email != "" && u.Email == email })
-}
-
 func (s *UserStore) GetByOAuthClientID(_ context.Context, id string) (*model.User, error) {
 	return s.getBy("UserStore.GetByOAuthClientID", id, func(u *model.User) bool { return id != "" && u.OAuthClientID == id })
 }

@@ -50,7 +50,7 @@ func New(a *app.App) http.Handler {
 		// Public endpoints (no auth required)
 		r.Group(func(r chi.Router) {
 			r.Get("/system/ping", systemPing)
-			r.Get("/system/config/client", systemClientConfig(a))
+			r.Get("/system/config/client", systemClientConfig())
 
 			// OpenAPI spec + Swagger UI
 			MountDocs(r, chitapi.OpenAPISpec)
@@ -73,7 +73,7 @@ func New(a *app.App) http.Handler {
 
 			// Users
 			r.Post("/users", createUser(a))
-			r.Get("/users/me", getMe(a))
+			r.Get("/users/me", getMe())
 			r.Put("/users/me", updateMe(a))
 			r.Get("/users/{id}", getUser(a))
 			r.Get("/users/username/{username}", getUserByUsername(a))

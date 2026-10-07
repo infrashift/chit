@@ -41,15 +41,10 @@ func (s *SqlChannelStore) Save(ctx context.Context, channel *model.Channel) (*mo
 }
 
 func (s *SqlChannelStore) Get(ctx context.Context, id string) (*model.Channel, error) {
-	query := `SELECT id, COALESCE(team_id::text, ''), creator_id, name, display_name, header, purpose, type, total_msg_count, last_post_at, create_at, update_at, delete_at
+	query := `SELECT ` + channelColumns + `
 		FROM channels WHERE id = $1 AND delete_at = 0`
 
-	ch := &model.Channel{}
-	err := s.sqlStore.pool.QueryRow(ctx, query, id).Scan(
-		&ch.ID, &ch.TeamID, &ch.CreatorID, &ch.Name, &ch.DisplayName,
-		&ch.Header, &ch.Purpose, &ch.Type, &ch.TotalMsgCount,
-		&ch.LastPostAt, &ch.CreateAt, &ch.UpdateAt, &ch.DeleteAt,
-	)
+	ch, err := scanChannel(s.sqlStore.pool.QueryRow(ctx, query, id))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, model.NewNotFoundError("SqlChannelStore.Get", id)
@@ -61,15 +56,10 @@ func (s *SqlChannelStore) Get(ctx context.Context, id string) (*model.Channel, e
 }
 
 func (s *SqlChannelStore) GetByName(ctx context.Context, teamID, name string) (*model.Channel, error) {
-	query := `SELECT id, COALESCE(team_id::text, ''), creator_id, name, display_name, header, purpose, type, total_msg_count, last_post_at, create_at, update_at, delete_at
+	query := `SELECT ` + channelColumns + `
 		FROM channels WHERE team_id = $1 AND name = $2 AND delete_at = 0`
 
-	ch := &model.Channel{}
-	err := s.sqlStore.pool.QueryRow(ctx, query, teamID, name).Scan(
-		&ch.ID, &ch.TeamID, &ch.CreatorID, &ch.Name, &ch.DisplayName,
-		&ch.Header, &ch.Purpose, &ch.Type, &ch.TotalMsgCount,
-		&ch.LastPostAt, &ch.CreateAt, &ch.UpdateAt, &ch.DeleteAt,
-	)
+	ch, err := scanChannel(s.sqlStore.pool.QueryRow(ctx, query, teamID, name))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, model.NewNotFoundError("SqlChannelStore.GetByName", name)
@@ -155,7 +145,7 @@ func (s *SqlChannelStore) RemoveMemberFromTeam(ctx context.Context, teamID, user
 // may browse and join. Private channels are listed only to their members, by
 // GetChannelsForUser.
 func (s *SqlChannelStore) GetChannelsForTeam(ctx context.Context, teamID string, page, perPage int) ([]*model.Channel, error) {
-	query := `SELECT id, COALESCE(team_id::text, ''), creator_id, name, display_name, header, purpose, type, total_msg_count, last_post_at, create_at, update_at, delete_at
+	query := `SELECT ` + channelColumns + `
 		FROM channels WHERE team_id = $1 AND type = 'O' AND delete_at = 0 ORDER BY display_name LIMIT $2 OFFSET $3`
 
 	rows, err := s.sqlStore.pool.Query(ctx, query, teamID, perPage, page*perPage)
@@ -168,7 +158,7 @@ func (s *SqlChannelStore) GetChannelsForTeam(ctx context.Context, teamID string,
 }
 
 func (s *SqlChannelStore) GetChannelsForUser(ctx context.Context, userID, teamID string) ([]*model.Channel, error) {
-	query := `SELECT c.id, COALESCE(c.team_id::text, ''), c.creator_id, c.name, c.display_name, c.header, c.purpose, c.type, c.total_msg_count, c.last_post_at, c.create_at, c.update_at, c.delete_at
+	query := `SELECT ` + channelColumnsAs("c") + `
 		FROM channels c
 		INNER JOIN channel_members cm ON c.id = cm.channel_id
 		WHERE cm.user_id = $1 AND c.team_id = $2 AND c.delete_at = 0
@@ -293,15 +283,10 @@ func (s *SqlChannelStore) UpdateLastViewedAt(ctx context.Context, channelID, use
 }
 
 func (s *SqlChannelStore) GetDirectChannelByName(ctx context.Context, name string) (*model.Channel, error) {
-	query := `SELECT id, COALESCE(team_id::text, ''), creator_id, name, display_name, header, purpose, type, total_msg_count, last_post_at, create_at, update_at, delete_at
+	query := `SELECT ` + channelColumns + `
 		FROM channels WHERE team_id IS NULL AND type IN ('D', 'G') AND name = $1 AND delete_at = 0`
 
-	ch := &model.Channel{}
-	err := s.sqlStore.pool.QueryRow(ctx, query, name).Scan(
-		&ch.ID, &ch.TeamID, &ch.CreatorID, &ch.Name, &ch.DisplayName,
-		&ch.Header, &ch.Purpose, &ch.Type, &ch.TotalMsgCount,
-		&ch.LastPostAt, &ch.CreateAt, &ch.UpdateAt, &ch.DeleteAt,
-	)
+	ch, err := scanChannel(s.sqlStore.pool.QueryRow(ctx, query, name))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, model.NewNotFoundError("SqlChannelStore.GetDirectChannelByName", name)
@@ -355,7 +340,7 @@ func (s *SqlChannelStore) SaveDirectChannel(ctx context.Context, channel *model.
 }
 
 func (s *SqlChannelStore) GetDirectChannelsForUser(ctx context.Context, userID string) ([]*model.Channel, error) {
-	query := `SELECT c.id, COALESCE(c.team_id::text, ''), c.creator_id, c.name, c.display_name, c.header, c.purpose, c.type, c.total_msg_count, c.last_post_at, c.create_at, c.update_at, c.delete_at
+	query := `SELECT ` + channelColumnsAs("c") + `
 		FROM channels c
 		INNER JOIN channel_members cm ON c.id = cm.channel_id
 		WHERE cm.user_id = $1 AND c.team_id IS NULL
@@ -410,15 +395,34 @@ func (s *SqlChannelStore) GetMemberIDsByUsernames(ctx context.Context, channelID
 	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
+// channelColumns is the one SELECT list for channels, and scanChannel its one
+// reader. team_id is NULL for direct and group channels and comes back as ”.
+const channelColumns = `id, COALESCE(team_id::text, ''), creator_id, name, display_name, header, purpose,
+	type, total_msg_count, last_post_at, create_at, update_at, delete_at`
+
+// channelColumnsAs is channelColumns qualified by alias, for joins.
+func channelColumnsAs(alias string) string {
+	return alias + `.id, COALESCE(` + alias + `.team_id::text, ''), ` + alias + `.creator_id, ` + alias + `.name, ` +
+		alias + `.display_name, ` + alias + `.header, ` + alias + `.purpose, ` + alias + `.type, ` +
+		alias + `.total_msg_count, ` + alias + `.last_post_at, ` + alias + `.create_at, ` + alias + `.update_at, ` +
+		alias + `.delete_at`
+}
+
+func scanChannel(row pgx.Row) (*model.Channel, error) {
+	ch := &model.Channel{}
+	err := row.Scan(
+		&ch.ID, &ch.TeamID, &ch.CreatorID, &ch.Name, &ch.DisplayName,
+		&ch.Header, &ch.Purpose, &ch.Type, &ch.TotalMsgCount,
+		&ch.LastPostAt, &ch.CreateAt, &ch.UpdateAt, &ch.DeleteAt,
+	)
+	return ch, err
+}
+
 func scanChannels(rows pgx.Rows) ([]*model.Channel, error) {
 	var channels []*model.Channel
 	for rows.Next() {
-		ch := &model.Channel{}
-		if err := rows.Scan(
-			&ch.ID, &ch.TeamID, &ch.CreatorID, &ch.Name, &ch.DisplayName,
-			&ch.Header, &ch.Purpose, &ch.Type, &ch.TotalMsgCount,
-			&ch.LastPostAt, &ch.CreateAt, &ch.UpdateAt, &ch.DeleteAt,
-		); err != nil {
+		ch, err := scanChannel(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan channel: %w", err)
 		}
 		channels = append(channels, ch)

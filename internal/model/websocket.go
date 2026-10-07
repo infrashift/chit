@@ -13,7 +13,6 @@ const (
 	WebSocketEventUserAdded       = "user_added"
 	WebSocketEventUserRemoved     = "user_removed"
 	WebSocketEventThreadUpdated   = "thread_updated"
-	WebSocketEventStatusChange    = "status_change"
 	WebSocketEventMentioned       = "mentioned"
 	WebSocketEventCommandResponse = "command_response"
 )

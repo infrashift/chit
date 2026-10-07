@@ -38,7 +38,7 @@ func getAllTags(a *app.App) http.HandlerFunc {
 			WriteAppError(w, "getAllTags", err)
 			return
 		}
-		WriteJSON(w, http.StatusOK, tags)
+		writeList(w, tags)
 	}
 }
 
@@ -58,7 +58,7 @@ func addTagToPost(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
+		writeOK(w)
 	}
 }
 
@@ -73,7 +73,7 @@ func removeTagFromPost(a *app.App) http.HandlerFunc {
 			return
 		}
 
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "OK"})
+		writeOK(w)
 	}
 }
 
@@ -86,7 +86,7 @@ func getTagsForPost(a *app.App) http.HandlerFunc {
 			WriteAppError(w, "getTagsForPost", err)
 			return
 		}
-		WriteJSON(w, http.StatusOK, tags)
+		writeList(w, tags)
 	}
 }
 

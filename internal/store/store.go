@@ -23,7 +23,6 @@ type UserStore interface {
 	Get(ctx context.Context, id string) (*model.User, error)
 	GetByKratosID(ctx context.Context, kratosID string) (*model.User, error)
 	GetByUsername(ctx context.Context, username string) (*model.User, error)
-	GetByEmail(ctx context.Context, email string) (*model.User, error)
 	GetByOAuthClientID(ctx context.Context, clientID string) (*model.User, error)
 	Update(ctx context.Context, user *model.User) (*model.User, error)
 	Search(ctx context.Context, term string, page, perPage int) ([]*model.User, error)
