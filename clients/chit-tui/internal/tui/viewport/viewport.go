@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/key"
 	bvp "github.com/charmbracelet/bubbles/viewport"
@@ -42,7 +43,18 @@ type Model struct {
 	width           int
 	height          int
 	renderer        *glamour.TermRenderer
-	cache           map[string]string // postID -> rendered string
+	cache           map[string]renderedPost // by post ID
+}
+
+// renderedPost is a post as drawn, kept until something it depends on
+// changes. Rendering through glamour is by far the costliest step, and the
+// plain lines spare re-stripping the whole history on every cursor move.
+type renderedPost struct {
+	text  string
+	plain []string // text without ANSI escapes, one entry per line
+	// hlTerm and hlText cache text with hlTerm highlighted.
+	hlTerm string
+	hlText string
 }
 
 // New creates a new viewport model.
@@ -53,7 +65,7 @@ func New(s styles.Styles) Model {
 		threadCounts: make(map[string]int),
 		postTags:     make(map[string][]string),
 		styles:       s,
-		cache:        make(map[string]string),
+		cache:        make(map[string]renderedPost),
 	}
 }
 
@@ -66,7 +78,7 @@ func (m *Model) SetPosts(posts []*model.Post) {
 	}
 	m.posts = reversed
 	m.cursor = len(reversed) - 1
-	m.cache = make(map[string]string)
+	m.cache = make(map[string]renderedPost)
 	m.updateContent()
 	m.viewport.GotoBottom()
 }
@@ -134,6 +146,11 @@ func (m *Model) RemovePost(id string) bool {
 		}
 		m.posts = append(m.posts[:i], m.posts[i+1:]...)
 		delete(m.cache, id)
+		// A post removed above the cursor shifts the selected one up a
+		// place; follow it rather than land on its neighbor.
+		if i < m.cursor {
+			m.cursor--
+		}
 		if m.cursor >= len(m.posts) {
 			m.cursor = len(m.posts) - 1
 		}
@@ -152,10 +169,21 @@ func (m *Model) PrependPosts(older []*model.Post) {
 	}
 
 	// Older arrives newest-first, like the rest of the history API; reverse
-	// it so the combined list stays chronological.
-	reversed := make([]*model.Post, len(older))
-	for i, p := range older {
-		reversed[len(older)-1-i] = p
+	// it so the combined list stays chronological. Paging is by offset, so
+	// posts that arrived since the first page shift the boundary and the
+	// page can repeat some of what is shown; those are skipped.
+	shown := make(map[string]bool, len(m.posts))
+	for _, p := range m.posts {
+		shown[p.ID] = true
+	}
+	reversed := make([]*model.Post, 0, len(older))
+	for i := len(older) - 1; i >= 0; i-- {
+		if !shown[older[i].ID] {
+			reversed = append(reversed, older[i])
+		}
+	}
+	if len(reversed) == 0 {
+		return
 	}
 
 	linesBefore := len(m.plainLines)
@@ -190,7 +218,7 @@ func (m *Model) SetUsernames(names map[string]string) {
 // SetCurrentUsername sets the current user's username for mention highlighting.
 func (m *Model) SetCurrentUsername(username string) {
 	m.currentUsername = username
-	m.cache = make(map[string]string)
+	m.cache = make(map[string]renderedPost)
 	m.updateContent()
 }
 
@@ -213,8 +241,17 @@ func (m *Model) SetThreadCounts(counts map[string]int) {
 
 // SetPostTags updates the tag names for a post and invalidates its cache.
 func (m *Model) SetPostTags(postID string, tagNames []string) {
-	m.postTags[postID] = tagNames
-	delete(m.cache, postID)
+	m.SetPostsTags(map[string][]string{postID: tagNames})
+}
+
+// SetPostsTags updates the tag names for many posts at once. Tags arrive a
+// page at a time, and setting them one by one redrew the whole history for
+// each post.
+func (m *Model) SetPostsTags(tags map[string][]string) {
+	for id, names := range tags {
+		m.postTags[id] = names
+		delete(m.cache, id)
+	}
 	m.updateContent()
 }
 
@@ -238,18 +275,24 @@ func (m Model) SelectedPost() *model.Post {
 func (m *Model) SetStyles(s styles.Styles) {
 	m.styles = s
 	m.renderer = nil
-	m.cache = make(map[string]string)
+	m.cache = make(map[string]renderedPost)
 	m.updateContent()
 }
 
 // Focus sets focus state and re-renders to show the selection highlight.
 func (m *Model) Focus() {
+	if m.focused {
+		return
+	}
 	m.focused = true
 	m.updateContent()
 }
 
 // Blur removes focus and re-renders to remove the selection highlight.
 func (m *Model) Blur() {
+	if !m.focused {
+		return
+	}
 	m.focused = false
 	m.updateContent()
 }
@@ -257,15 +300,24 @@ func (m *Model) Blur() {
 // Focused returns the focus state.
 func (m Model) Focused() bool { return m.focused }
 
-// SetSize sets the viewport dimensions.
+// SetSize sets the viewport dimensions. Posts are wrapped to the width, so
+// only a width change re-renders them; the root model re-applies its layout
+// on every channel switch and thread open, nearly always unchanged.
 func (m *Model) SetSize(w, h int) {
+	if w == m.width && h == m.height {
+		return
+	}
+	widthChanged := w != m.width
 	m.width = w
 	m.height = h
 	m.viewport.Width = w - 2
 	m.viewport.Height = h - 2
-	// Width changed — need a new renderer and full re-render.
+	if !widthChanged {
+		m.viewport.SetYOffset(m.viewport.YOffset) // re-clamp to the new height
+		return
+	}
 	m.renderer = nil
-	m.cache = make(map[string]string)
+	m.cache = make(map[string]renderedPost)
 	m.updateContent()
 }
 
@@ -367,6 +419,9 @@ func (m Model) placeholder() string {
 // showing a stale or blank view while the request is out.
 func (m *Model) SetLoading(loading bool) { m.loading = loading }
 
+// Loading reports whether the channel's first page is still on its way.
+func (m Model) Loading() bool { return m.loading }
+
 // Note: a "loading older" banner is deliberately not injected into the
 // rendered content. Every line of that content is indexed for selection and
 // click-to-select, so an extra line would shift the map and make clicks
@@ -405,50 +460,48 @@ func formatDaySeparator(t time.Time, width int) string {
 
 func (m *Model) updateContent() {
 	m.ensureRenderer()
-	var lines []string
+	// Blocks are the day separators and posts, joined by a blank line.
+	// plain mirrors the joined content line for line, without escapes, and
+	// is assembled from each post's cached plain lines rather than by
+	// stripping the whole history again.
+	blocks := make([]string, 0, len(m.posts)+8)
+	plain := make([]string, 0, len(m.plainLines)+8)
+	add := func(display string, lines []string) int {
+		if len(blocks) > 0 {
+			plain = append(plain, "")
+		}
+		first := len(plain)
+		blocks = append(blocks, display)
+		plain = append(plain, lines...)
+		return first
+	}
+
 	m.postLineOffsets = make([]int, len(m.posts))
-	lineCount := 0
 	var prevDate time.Time
 	for i, p := range m.posts {
 		curDate := model.MillisToTime(p.CreateAt)
 		if i > 0 && !sameDay(prevDate, curDate) {
 			sep := m.styles.DaySeparator.Render(formatDaySeparator(curDate, m.width-4))
-			lines = append(lines, sep)
-			lineCount += strings.Count(sep, "\n") + 1 + 1 // +1 for blank line separator
+			add(sep, plainLinesOf(sep))
 		}
 		prevDate = curDate
 
-		m.postLineOffsets[i] = lineCount
-		if cached, ok := m.cache[p.ID]; ok {
-			rendered := m.highlightMatches(cached)
-			if i == m.cursor && m.focused {
-				rendered = m.styles.SelectedPost.Render(rendered)
-			}
-			lines = append(lines, rendered)
-			lineCount += strings.Count(rendered, "\n") + 1 + 1 // +1 for the blank line separator
-			continue
+		rp := m.render(p)
+		display, lines := rp.text, rp.plain
+		if m.searchTerm != "" {
+			// Highlighting changes the escapes, never the text, so the
+			// plain lines still hold.
+			display = rp.hlText
 		}
-		username := m.usernames[p.UserID]
-		if username == "" {
-			username = p.UserID[:min(8, len(p.UserID))]
-		}
-		pb := post.New(p, username, m.styles, m.width-4, m.renderer, m.currentUsername, m.threadCounts[p.ID], m.postTagNames(p.ID))
-		rendered := pb.View()
-		m.cache[p.ID] = rendered
-		display := m.highlightMatches(rendered)
 		if i == m.cursor && m.focused {
-			display = m.styles.SelectedPost.Render(rendered)
+			display = m.styles.SelectedPost.Render(display)
+			lines = plainLinesOf(display)
 		}
-		lines = append(lines, display)
-		lineCount += strings.Count(display, "\n") + 1 + 1
+		m.postLineOffsets[i] = add(display, lines)
 	}
-	content := strings.Join(lines, "\n\n")
-
-	// Build the line map and the plain-text mirror the selection works from.
-	// This is done on the joined content rather than per block so the indices
-	// match what the viewport actually scrolls over, including the blank
-	// separator lines.
-	m.indexLines(content)
+	content := strings.Join(blocks, "\n\n")
+	m.plainLines = plain
+	m.indexLineOwners()
 
 	if m.selActive {
 		content = m.applySelection(content)
@@ -456,23 +509,42 @@ func (m *Model) updateContent() {
 	m.viewport.SetContent(content)
 }
 
-// indexLines records, for every line of rendered content, the post it belongs
-// to and its text with styling removed. The reverse map is what turns a mouse
-// row into a post, which post→line offsets alone cannot do.
-func (m *Model) indexLines(content string) {
-	raw := strings.Split(content, "\n")
+// render returns a post as drawn, from the cache when it is there, with
+// the current search term highlighted.
+func (m *Model) render(p *model.Post) renderedPost {
+	rp, ok := m.cache[p.ID]
+	if !ok {
+		username := m.usernames[p.UserID]
+		if username == "" {
+			username = p.UserID[:min(8, len(p.UserID))]
+		}
+		pb := post.New(p, username, m.styles, m.width-4, m.renderer, m.currentUsername, m.threadCounts[p.ID], m.postTagNames(p.ID))
+		rp.text = pb.View()
+		rp.plain = plainLinesOf(rp.text)
+	}
+	if m.searchTerm != "" && (rp.hlTerm != m.searchTerm || rp.hlText == "") {
+		rp.hlTerm, rp.hlText = m.searchTerm, m.highlightMatches(rp.text)
+	}
+	m.cache[p.ID] = rp
+	return rp
+}
 
-	m.plainLines = make([]string, len(raw))
-	m.lineToPost = make([]int, len(raw))
-	for i, line := range raw {
-		m.plainLines[i] = ansi.Strip(line)
+// plainLinesOf splits rendered text into lines without ANSI escapes.
+func plainLinesOf(s string) []string {
+	return strings.Split(ansi.Strip(s), "\n")
+}
+
+// indexLineOwners maps each content line to the post it belongs to: from a
+// post's first line up to the next post's, which takes in the blank line
+// and any day separator after it. The reverse map is what turns a mouse row
+// into a post, which post→line offsets alone cannot do.
+func (m *Model) indexLineOwners() {
+	m.lineToPost = make([]int, len(m.plainLines))
+	for i := range m.lineToPost {
 		m.lineToPost[i] = -1
 	}
-
-	// postLineOffsets holds the first line of each post; everything up to the
-	// next post's offset belongs to it.
 	for i, start := range m.postLineOffsets {
-		end := len(raw)
+		end := len(m.lineToPost)
 		if i+1 < len(m.postLineOffsets) {
 			end = m.postLineOffsets[i+1]
 		}
@@ -537,8 +609,6 @@ func (m *Model) SetSearchTerm(term string) {
 		return
 	}
 	m.searchTerm = term
-	// Highlighting is baked into the rendered text, so the cache has to go.
-	m.cache = make(map[string]string)
 	m.updateContent()
 }
 
@@ -553,11 +623,9 @@ func (m Model) highlightMatches(rendered string) string {
 	if m.searchTerm == "" {
 		return rendered
 	}
+	term := []rune(m.searchTerm)
 
-	term := strings.ToLower(m.searchTerm)
 	var b strings.Builder
-	lower := strings.ToLower(rendered)
-
 	for i := 0; i < len(rendered); {
 		// Copy escape sequences through untouched.
 		if rendered[i] == 0x1b {
@@ -571,16 +639,35 @@ func (m Model) highlightMatches(rendered string) string {
 			continue
 		}
 
-		if strings.HasPrefix(lower[i:], term) {
-			b.WriteString(m.styles.SearchMatch.Render(rendered[i : i+len(term)]))
-			i += len(term)
+		if n := matchFold(rendered[i:], term); n > 0 {
+			b.WriteString(m.styles.SearchMatch.Render(rendered[i : i+n]))
+			i += n
 			continue
 		}
 
-		b.WriteByte(rendered[i])
-		i++
+		_, size := utf8.DecodeRuneInString(rendered[i:])
+		b.WriteString(rendered[i : i+size])
+		i += size
 	}
 	return b.String()
+}
+
+// matchFold reports how many bytes at the start of s match term, ignoring
+// case, or 0 if they do not. It compares character by character, because a
+// lowercased copy does not keep byte offsets: some characters change length.
+func matchFold(s string, term []rune) int {
+	n := 0
+	for _, want := range term {
+		if n >= len(s) {
+			return 0
+		}
+		got, size := utf8.DecodeRuneInString(s[n:])
+		if got != want && !strings.EqualFold(string(got), string(want)) {
+			return 0
+		}
+		n += size
+	}
+	return n
 }
 
 // --- Selection -------------------------------------------------------------

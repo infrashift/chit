@@ -150,3 +150,60 @@ func TestChannelStoreIntegration_DirectChannel(t *testing.T) {
 		t.Errorf("GetDirectChannelByName: got %s, want %s", found.ID, dm.ID)
 	}
 }
+
+// GetMembersForUser returns one user's own member rows, for one team's live
+// channels only: the counts behind their unread and mention badges.
+func TestChannelStoreIntegration_GetMembersForUser(t *testing.T) {
+	ss := testStore(t)
+	user, channel := newTestChannelFixture(t, ss)
+
+	other, err := ss.User().Save(t.Context(), newTestUser("member3"))
+	if err != nil {
+		t.Fatalf("save user: %v", err)
+	}
+	gone, err := ss.Channel().Save(t.Context(), &model.Channel{
+		TeamID: channel.TeamID, Name: "gone", DisplayName: "Gone",
+		Type: model.ChannelOpen, CreatorID: user.ID,
+	})
+	if err != nil {
+		t.Fatalf("save channel: %v", err)
+	}
+	otherTeam, err := ss.Team().Save(t.Context(), &model.Team{
+		Name: "other-team", DisplayName: "Other", Type: model.TeamOpen, CreatorID: user.ID,
+	})
+	if err != nil {
+		t.Fatalf("save team: %v", err)
+	}
+	elsewhere, err := ss.Channel().Save(t.Context(), &model.Channel{
+		TeamID: otherTeam.ID, Name: "elsewhere", DisplayName: "Elsewhere",
+		Type: model.ChannelOpen, CreatorID: user.ID,
+	})
+	if err != nil {
+		t.Fatalf("save channel: %v", err)
+	}
+
+	for _, m := range []*model.ChannelMember{
+		{ChannelID: channel.ID, UserID: user.ID, MentionCount: 2},
+		{ChannelID: channel.ID, UserID: other.ID, MentionCount: 9},
+		{ChannelID: gone.ID, UserID: user.ID},
+		{ChannelID: elsewhere.ID, UserID: user.ID},
+	} {
+		if _, err := ss.Channel().SaveMember(t.Context(), m); err != nil {
+			t.Fatalf("SaveMember: %v", err)
+		}
+	}
+	if err := ss.Channel().Delete(t.Context(), gone.ID, 1); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	members, err := ss.Channel().GetMembersForUser(t.Context(), user.ID, channel.TeamID)
+	if err != nil {
+		t.Fatalf("GetMembersForUser: %v", err)
+	}
+	if len(members) != 1 || members[0].ChannelID != channel.ID || members[0].UserID != user.ID {
+		t.Fatalf("got %+v, want only %s's row in %s", members, user.ID, channel.ID)
+	}
+	if members[0].MentionCount != 2 {
+		t.Errorf("MentionCount = %d, want 2", members[0].MentionCount)
+	}
+}

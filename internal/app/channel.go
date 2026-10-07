@@ -125,6 +125,13 @@ func (a *App) GetChannelsForUser(ctx context.Context, userID, teamID string) ([]
 	return a.Store.Channel().GetChannelsForUser(ctx, userID, teamID)
 }
 
+// GetMyChannelMembers returns userID's own member rows for teamID's
+// channels. Only the caller's rows are returned, so no membership check is
+// needed: a user who is not in the team simply has none.
+func (a *App) GetMyChannelMembers(ctx context.Context, userID, teamID string) ([]*model.ChannelMember, error) {
+	return a.Store.Channel().GetMembersForUser(ctx, userID, teamID)
+}
+
 // GetDirectChannelsForUser retrieves DM and group channels for a user.
 func (a *App) GetDirectChannelsForUser(ctx context.Context, userID string) ([]*model.Channel, error) {
 	return a.Store.Channel().GetDirectChannelsForUser(ctx, userID)

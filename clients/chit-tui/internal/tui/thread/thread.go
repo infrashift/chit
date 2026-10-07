@@ -82,8 +82,14 @@ func (m Model) RootPost() *model.Post { return m.rootPost }
 // Replies returns the reply posts.
 func (m Model) Replies() []*model.Post { return m.replies }
 
-// AppendReply adds a reply.
+// AppendReply adds a reply. Your own reply arrives twice, from the HTTP
+// response and the WebSocket echo, so one already shown is ignored.
 func (m *Model) AppendReply(p *model.Post) {
+	for _, r := range m.replies {
+		if r.ID == p.ID {
+			return
+		}
+	}
 	m.replies = append(m.replies, p)
 	m.updateContent()
 	m.viewport.GotoBottom()
@@ -111,12 +117,20 @@ func (m *Model) SetStyles(s styles.Styles) {
 	m.updateContent()
 }
 
-// SetSize sets the pane dimensions.
+// SetSize sets the pane dimensions. Posts are wrapped to the width, so only
+// a width change re-renders them.
 func (m *Model) SetSize(w, h int) {
+	if w == m.width && h == m.height {
+		return
+	}
+	widthChanged := w != m.width
 	m.width = w
 	m.height = h
 	m.viewport.Width = w - 4
 	m.viewport.Height = max(h-2, 3)
+	if !widthChanged {
+		return
+	}
 	m.renderer = nil
 	m.cache = make(map[string]string)
 	m.updateContent()
@@ -190,6 +204,7 @@ func (m *Model) updateContent() {
 func (m *Model) SetPostTags(tags map[string][]*model.Tag) {
 	m.postTags = tags
 	m.cache = make(map[string]string)
+	m.updateContent()
 }
 
 // tagNames returns the tag names for a post, or nil when it has none.
@@ -217,6 +232,19 @@ func (m *Model) renderPost(p *model.Post, width int) string {
 	rendered := pb.View()
 	m.cache[p.ID] = rendered
 	return rendered
+}
+
+// RemoveReply drops a deleted reply, and reports whether it was shown.
+func (m *Model) RemoveReply(id string) bool {
+	for i, r := range m.replies {
+		if r.ID == id {
+			m.replies = append(m.replies[:i], m.replies[i+1:]...)
+			delete(m.cache, id)
+			m.updateContent()
+			return true
+		}
+	}
+	return false
 }
 
 // UpdatePost replaces the root post or one of the replies in place, and

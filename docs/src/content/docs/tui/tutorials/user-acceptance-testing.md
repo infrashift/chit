@@ -79,12 +79,12 @@ Point chit-tui at the **Oathkeeper proxy** (port 4455). When no
 CHIT_SERVER_URL=http://localhost:4455 ./bin/chit-tui
 ```
 
-After login, the session token is stored at `~/.config/chit-tui/session.json`
+After login, the session token is stored at `~/.config/chit/session.json`
 (or the path set by `CHIT_SESSION_FILE`) and reused on subsequent launches. To
 force a fresh login:
 
 ```bash
-rm ~/.config/chit-tui/session.json
+rm ~/.config/chit/session.json
 ```
 
 Or use the `/logout` slash command inside chit-tui.
@@ -520,7 +520,7 @@ the theme is hot-swapped via `/skin`.
 | 3 | Press `Ctrl+K` | Channels load without re-entering credentials |
 
 **What this validates:** Session token persistence at
-`~/.config/chit-tui/session.json`, stored token validation via Kratos
+`~/.config/chit/session.json`, stored token validation via Kratos
 `CheckSession` on startup.
 
 #### Scenario 20: Logout

@@ -6,60 +6,15 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/testutil"
 )
 
-func TestNewTestUser(t *testing.T) {
-	u := testutil.NewTestUser()
-	if u.ID == "" || u.Username == "" || u.Email == "" {
-		t.Error("NewTestUser returned empty required fields")
+func TestStripANSI(t *testing.T) {
+	tests := map[string]string{
+		"color":     "\x1b[38;2;1;2;3mhello\x1b[0m",
+		"cursor":    "\x1b[2Khello",
+		"hyperlink": "\x1b]8;;https://example.com\x1b\\hello\x1b]8;;\x1b\\",
 	}
-}
-
-func TestNewTestTeam(t *testing.T) {
-	tm := testutil.NewTestTeam()
-	if tm.ID == "" || tm.Name == "" || tm.Type == "" {
-		t.Error("NewTestTeam returned empty required fields")
-	}
-}
-
-func TestNewTestChannel(t *testing.T) {
-	ch := testutil.NewTestChannel()
-	if ch.ID == "" || ch.Name == "" || ch.Type == "" || ch.TeamID == "" {
-		t.Error("NewTestChannel returned empty required fields")
-	}
-}
-
-func TestNewTestPost(t *testing.T) {
-	p := testutil.NewTestPost()
-	if p.ID == "" || p.ChannelID == "" || p.UserID == "" || p.Content == "" {
-		t.Error("NewTestPost returned empty required fields")
-	}
-}
-
-func TestNewTestCommand(t *testing.T) {
-	cmd := testutil.NewTestCommand()
-	if cmd.ID == "" || cmd.Slug == "" || cmd.Description == "" {
-		t.Error("NewTestCommand returned empty required fields")
-	}
-}
-
-func TestNewTestThread(t *testing.T) {
-	th := testutil.NewTestThread()
-	if th.PostID == "" || th.ChannelID == "" || th.ReplyCount == 0 {
-		t.Error("NewTestThread returned empty required fields")
-	}
-}
-
-func TestMockServerMux(t *testing.T) {
-	srv, mux := testutil.NewMockServerMux()
-	defer srv.Close()
-
-	mux.HandleFunc("/test", testutil.MockHandler(200, map[string]string{"ok": "true"}))
-
-	resp, err := srv.Client().Get(srv.URL + "/test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != 200 {
-		t.Errorf("expected 200, got %d", resp.StatusCode)
+	for name, in := range tests {
+		if got := testutil.StripANSI(in); got != "hello" {
+			t.Errorf("%s: StripANSI(%q) = %q, want hello", name, in, got)
+		}
 	}
 }

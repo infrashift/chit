@@ -133,41 +133,6 @@ func TestLipRejectsUnrenderableColor(t *testing.T) {
 	}
 }
 
-// ShiftLightness moves channels up when the channel average is below 128 and
-// down otherwise. This is a port of tuicr's algorithm, not an HSL lighten.
-func TestShiftLightness(t *testing.T) {
-	t.Run("dark color gets lighter", func(t *testing.T) {
-		r, g, b := rgb(t, ShiftLightness(hexColor("#1a1b26"), 18))
-		if r != 0x1a+18 || g != 0x1b+18 || b != 0x26+18 {
-			t.Errorf("got %02x%02x%02x, want each channel +18", r, g, b)
-		}
-	})
-
-	t.Run("light color gets darker", func(t *testing.T) {
-		r, g, b := rgb(t, ShiftLightness(hexColor("#c0caf5"), 18))
-		if r != 0xc0-18 || g != 0xca-18 || b != 0xf5-18 {
-			t.Errorf("got %02x%02x%02x, want each channel -18", r, g, b)
-		}
-	})
-
-	t.Run("clamps at bounds", func(t *testing.T) {
-		r, _, _ := rgb(t, ShiftLightness(hexColor("#000000"), 300))
-		if r != 255 {
-			t.Errorf("got r=%d, want clamp to 255", r)
-		}
-		r2, _, _ := rgb(t, ShiftLightness(hexColor("#ffffff"), 300))
-		if r2 != 0 {
-			t.Errorf("got r=%d, want clamp to 0", r2)
-		}
-	})
-
-	t.Run("nil passes through", func(t *testing.T) {
-		if ShiftLightness(nil, 18) != nil {
-			t.Error("want nil")
-		}
-	})
-}
-
 func TestBlend(t *testing.T) {
 	t.Run("zero percent keeps base", func(t *testing.T) {
 		r, g, b := rgb(t, Blend(hexColor("#1a1b26"), hexColor("#9ece6a"), 0))
@@ -222,4 +187,20 @@ func TestLip(t *testing.T) {
 			t.Errorf("Lip(ansi) = %v, want 5", got)
 		}
 	})
+}
+
+// A theme declared in terminal color names cannot be blended. Returning the
+// base made Selection and SearchMatch the background color itself, so
+// selections and search hits were invisible.
+func TestBlend_NamedColorsStayVisible(t *testing.T) {
+	base, accent := parseThemeColor("black"), parseThemeColor("yellow")
+	if base == nil || accent == nil {
+		t.Fatal("setup: named colors did not parse")
+	}
+	if got := Blend(base, accent, 25); got != accent {
+		t.Errorf("Blend(named, named) = %v, want the accent %v", got, accent)
+	}
+	if got := Blend(hexColor("#000000"), accent, 25); got != accent {
+		t.Errorf("Blend(hex, named) = %v, want the accent %v", got, accent)
+	}
 }

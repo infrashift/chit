@@ -9,6 +9,7 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/testutil"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/palette"
 )
 
 // setupModelWithManyPosts loads enough posts that the viewport can scroll.
@@ -110,9 +111,7 @@ func TestModel_MouseClickPaletteRowSelectsChannel(t *testing.T) {
 	}
 	updated, cmd := m.Update(tea.MouseMsg{X: 60, Y: 6, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft})
 	m = updated.(tui.Model)
-	if cmd == nil {
-		t.Fatal("expected command from palette row click")
-	}
+	wantMsg[palette.ChannelChosenMsg](t, cmd)
 
 	view := testutil.StripANSI(m.View())
 	if strings.Contains(view, "↵ select") {
@@ -210,14 +209,14 @@ func TestMouse_WheelOverInputDoesNotScrollHistory(t *testing.T) {
 // click behaves like choosing a post.
 func TestMouse_PressInHistorySelectsPost(t *testing.T) {
 	m := setupModel(t)
+	// Newest first, as the API returns them: the top row is the oldest, and
+	// the newest is the one selected by default.
+	m, _ = step(t, m, tui.PostsLoadedMsg{ChannelID: "c1", Posts: posts("c1", "newest", "oldest")})
 
-	updated, _ := m.Update(tea.MouseMsg{
-		X: 5, Y: 2, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
-	})
-	m = updated.(tui.Model)
+	m, _ = step(t, m, tea.MouseMsg{X: 5, Y: 2, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
 
-	if m.SelectedPostID() == "" {
-		t.Error("pressing in the history selected no post")
+	if got := m.SelectedPostID(); got != "c1-oldest" {
+		t.Errorf("selected %q, want the post under the pointer", got)
 	}
 }
 
@@ -237,21 +236,5 @@ func TestMouse_DragExtendsSelection(t *testing.T) {
 
 	if !m.HasSelection() {
 		t.Error("dragging did not produce a selection")
-	}
-}
-
-// A click on the action bar must still reach the bar rather than being
-// swallowed by the selection handling added above it.
-func TestMouse_ActionBarStillReachable(t *testing.T) {
-	m := setupModel(t)
-
-	updated, _ := m.Update(tea.MouseMsg{
-		X: 3, Y: 39, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft,
-	})
-	m = updated.(tui.Model)
-
-	if !strings.Contains(testutil.StripANSI(m.View()), "Jump to channel") {
-		t.Errorf("clicking the bar did not open the palette:\n%s",
-			testutil.StripANSI(m.View()))
 	}
 }

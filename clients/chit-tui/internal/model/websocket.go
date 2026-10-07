@@ -16,6 +16,9 @@ const (
 	WebSocketEventStatusChange    = "status_change"
 	WebSocketEventMentioned       = "mentioned"
 	WebSocketEventCommandResponse = "command_response"
+	// WebSocketEventPostTagsUpdated carries a post's whole tag list after a
+	// tag is added or removed.
+	WebSocketEventPostTagsUpdated = "post_tags_updated"
 )
 
 // WebSocketEvent mirrors the server's WebSocketEvent model.

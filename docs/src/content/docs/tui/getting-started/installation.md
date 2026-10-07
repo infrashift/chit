@@ -5,9 +5,10 @@ description: How to install Chit TUI from source.
 
 ## Prerequisites
 
-- **Go 1.24+** — [Install Go](https://go.dev/doc/install)
+- **Go 1.25+** — [Install Go](https://go.dev/doc/install)
 - **A Chit server** — A running instance of [Chit](https://github.com/infrashift/chit)
-- **A session token** — Obtained by authenticating with your Chit server
+- **An account on that server** — You sign in from the TUI's login screen
+  (or supply a token with `CHIT_SESSION_TOKEN`)
 
 ## Build from Source
 
@@ -29,6 +30,9 @@ Run the full quality suite to confirm everything is working:
 ```bash
 make all   # lint + test + build
 ```
+
+`make test` runs the tests with the race detector on (`go test -race`), and
+`make lint` expects `golangci-lint` in `$(go env GOPATH)/bin`.
 
 ## Install to PATH
 

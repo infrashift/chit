@@ -10,7 +10,7 @@ import (
 )
 
 // Colors are image/color.Color rather than lipgloss.Color so palettes can be
-// derived arithmetically (see ShiftLightness and Blend). A nil color means
+// derived arithmetically (see Blend). A nil color means
 // "terminal default" — Lip turns it into lipgloss.NoColor, and the fg/bg
 // helpers in styles.go skip the attribute entirely.
 
@@ -63,40 +63,19 @@ func clamp8(v int) uint8 {
 	}
 }
 
-// ShiftLightness moves every channel by amount: up when the channel average is
-// below 128 (dark colors get lighter) and down otherwise. This is an exact port
-// of tuicr's shift_lightness — deliberately not an HSL-based lighten/darken,
-// which produces visibly different results on desaturated colors.
-func ShiftLightness(c color.Color, amount int) color.Color {
-	r, g, b, ok := rgbComponents(c)
-	if !ok {
-		return c
-	}
-
-	avg := (int(r) + int(g) + int(b)) / 3
-	delta := amount
-	if avg >= 128 {
-		delta = -amount
-	}
-
-	return color.RGBA{
-		R: clamp8(int(r) + delta),
-		G: clamp8(int(g) + delta),
-		B: clamp8(int(b) + delta),
-		A: 0xff,
-	}
-}
-
 // Blend mixes accent into base by accentPercent (0-100). It is how the palette
 // generators derive highlight and badge backgrounds from a base palette.
 func Blend(base, accent color.Color, accentPercent int) color.Color {
 	br, bg, bb, baseOK := rgbComponents(base)
 	ar, ag, ab, accentOK := rgbComponents(accent)
 
+	// A terminal color name has no RGB value to mix. Falling back to the
+	// base made a derived highlight the background color itself, so it was
+	// invisible; the accent at least stays visible.
 	switch {
-	case !accentOK:
+	case accent == nil:
 		return base
-	case !baseOK:
+	case !accentOK || !baseOK:
 		return accent
 	}
 

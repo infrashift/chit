@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -402,5 +403,38 @@ func TestViewChannel(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
+	}
+}
+
+// The caller gets their own member rows for the team's channels, which carry
+// their unread and mention counts, and nobody else's.
+func TestGetMyChannelMembers(t *testing.T) {
+	a, ms, cleanup := setupTestApp(t)
+	defer cleanup()
+	ms.channel.seedMember(&model.ChannelMember{ChannelID: testChannelID, UserID: extraUserID, MentionCount: 9})
+	ms.channel.seed(&model.Channel{ID: "chan-other-team", TeamID: "other-team", Name: "x", Type: "O"})
+	ms.channel.seedMember(&model.ChannelMember{ChannelID: "chan-other-team", UserID: testUserID})
+	for _, m := range ms.channel.members[testChannelID] {
+		if m.UserID == testUserID {
+			m.MentionCount = 2
+		}
+	}
+
+	handler := getMyChannelMembers(a)
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r = withChiParam(r, "id", testTeamID)
+	r = authedRequest(r, testUser())
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var got []*model.ChannelMember
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ChannelID != testChannelID || got[0].UserID != testUserID || got[0].MentionCount != 2 {
+		t.Errorf("got %+v, want only the caller's row in the team's channel", got)
 	}
 }

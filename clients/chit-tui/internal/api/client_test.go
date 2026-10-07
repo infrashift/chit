@@ -3,10 +3,14 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/infrashift/chit/clients/chit-tui/internal/api"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
@@ -591,5 +595,165 @@ func TestUpdateMe_ErrorResponse(t *testing.T) {
 
 	if _, err := client.UpdateMe(context.Background(), &model.User{Username: "bob"}); err == nil {
 		t.Fatal("expected an error for a taken username")
+	}
+}
+
+// With no timeout, a server that accepted a request and never answered left
+// the command waiting forever: "Loading messages…" never cleared, and paging
+// stayed locked for the channel.
+func TestClient_GivesUpOnAServerThatNeverAnswers(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer srv.Close()
+	defer close(release)
+
+	c := api.NewClient(srv.URL, "token")
+	if api.DefaultTimeout <= 0 {
+		t.Fatal("no default timeout")
+	}
+	api.SetTimeout(c, 50*time.Millisecond)
+
+	done := make(chan error, 1)
+	go func() { _, err := c.GetMe(context.Background()); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a request that never got an answer succeeded")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the request never gave up")
+	}
+}
+
+// Each call reaches the endpoint the server serves it on, with the body the
+// server expects. These had no test at all.
+func TestClient_Endpoints(t *testing.T) {
+	tests := []struct {
+		name     string
+		route    string // "METHOD path", as http.ServeMux patterns write it
+		reply    any
+		call     func(api.ChitClient) error
+		wantBody string // JSON the request must carry; "" for none
+	}{
+		{
+			name:  "threads",
+			route: "GET /api/v1/users/me/teams/t1/threads",
+			reply: model.UserThreadList{Total: 1},
+			call: func(c api.ChitClient) error {
+				list, err := c.GetMyThreads(context.Background(), "t1", 2, 25)
+				if err == nil && list.Total != 1 {
+					return fmt.Errorf("total = %d, want 1", list.Total)
+				}
+				return err
+			},
+		},
+		{
+			name:  "search everywhere",
+			route: "POST /api/v1/posts/search",
+			reply: model.PostList{},
+			call: func(c api.ChitClient) error {
+				_, err := c.SearchPostsEverywhere(context.Background(), "deploy", nil)
+				return err
+			},
+			wantBody: `{"terms":"deploy"}`,
+		},
+		{
+			name:  "search everywhere by tag",
+			route: "POST /api/v1/posts/search",
+			reply: model.PostList{},
+			call: func(c api.ChitClient) error {
+				_, err := c.SearchPostsEverywhere(context.Background(), "", []string{"t9"})
+				return err
+			},
+			wantBody: `{"tag_ids":["t9"],"terms":""}`,
+		},
+		{
+			name:  "edit",
+			route: "PUT /api/v1/posts/p1",
+			reply: model.Post{ID: "p1", Content: "new"},
+			call: func(c api.ChitClient) error {
+				p, err := c.UpdatePost(context.Background(), "p1", "new")
+				if err == nil && p.Content != "new" {
+					return fmt.Errorf("content = %q", p.Content)
+				}
+				return err
+			},
+			wantBody: `{"content":"new"}`,
+		},
+		{
+			name:  "delete",
+			route: "DELETE /api/v1/posts/p1",
+			call:  func(c api.ChitClient) error { return c.DeletePost(context.Background(), "p1") },
+		},
+		{
+			name:  "tags for posts",
+			route: "POST /api/v1/tags/posts",
+			reply: map[string][]*model.Tag{"p1": {{ID: "t1", Name: "urgent"}}},
+			call: func(c api.ChitClient) error {
+				tags, err := c.GetTagsForPosts(context.Background(), []string{"p1", "p2"})
+				if err == nil && (len(tags["p1"]) != 1 || tags["p1"][0].Name != "urgent") {
+					return fmt.Errorf("tags = %v", tags)
+				}
+				return err
+			},
+			wantBody: `{"post_ids":["p1","p2"]}`,
+		},
+		{
+			name:  "my memberships in a team",
+			route: "GET /api/v1/users/me/teams/t1/channels/members",
+			reply: []*model.ChannelMember{{ChannelID: "c1", UserID: "u1", MentionCount: 2}},
+			call: func(c api.ChitClient) error {
+				ms, err := c.GetMyChannelMembers(context.Background(), "t1")
+				if err == nil && (len(ms) != 1 || ms[0].MentionCount != 2) {
+					return fmt.Errorf("members = %v", ms)
+				}
+				return err
+			},
+		},
+		{
+			name:  "leave",
+			route: "DELETE /api/v1/channels/c1/members/u1",
+			call:  func(c api.ChitClient) error { return c.RemoveChannelMember(context.Background(), "c1", "u1") },
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var body string
+			hit := false
+			mux := http.NewServeMux()
+			mux.HandleFunc(tc.route, func(w http.ResponseWriter, r *http.Request) {
+				hit = true
+				raw, _ := io.ReadAll(r.Body)
+				body = strings.TrimSpace(string(raw))
+				if tc.reply != nil {
+					writeJSON(w, tc.reply)
+				}
+			})
+			client, _ := setupTestClient(t, mux)
+
+			if err := tc.call(client); err != nil {
+				t.Fatal(err)
+			}
+			if !hit {
+				t.Fatalf("%s was not requested", tc.route)
+			}
+			if body != tc.wantBody {
+				t.Errorf("body = %s, want %s", body, tc.wantBody)
+			}
+		})
+	}
+}
+
+// With no posts there is nothing to ask for, and no request is made.
+func TestClient_GetTagsForNoPostsMakesNoRequest(t *testing.T) {
+	client, _ := setupTestClient(t, http.NewServeMux()) // any request would 404
+	tags, err := client.GetTagsForPosts(context.Background(), nil)
+	if err != nil || len(tags) != 0 {
+		t.Errorf("got %v, %v; want an empty map and no error", tags, err)
 	}
 }

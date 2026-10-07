@@ -125,6 +125,27 @@ func getMyChannels(a *app.App) http.HandlerFunc {
 	}
 }
 
+// getMyChannelMembers returns the caller's member rows for a team's channels
+// in one request, so a client can show every channel's unread and mention
+// badges without fetching each channel's full member list.
+func getMyChannelMembers(a *app.App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := ContextGetUser(r)
+		teamID := chi.URLParam(r, "id")
+
+		members, err := a.GetMyChannelMembers(r.Context(), user.ID, teamID)
+		if err != nil {
+			WriteError(w, model.NewInternalError("getMyChannelMembers", err))
+			return
+		}
+		if members == nil {
+			members = []*model.ChannelMember{}
+		}
+
+		WriteJSON(w, http.StatusOK, members)
+	}
+}
+
 func getMyDirectChannels(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)

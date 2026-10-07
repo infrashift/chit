@@ -207,3 +207,50 @@ func TestSaveTheme_UnreadableFile(t *testing.T) {
 		t.Error("expected an error when the existing config cannot be read")
 	}
 }
+
+// The picker always wrote "theme", which outranks theme_dark and
+// theme_light, so one pick turned off appearance switching for good.
+func TestSaveThemeSetting_WritesOnlyItsKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	t.Setenv("CHIT_CONFIG_FILE", path)
+	if err := os.WriteFile(path, []byte("theme_dark = \"kanagawa\"\ntheme_light = \"dayfox\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := config.SaveThemeSetting("theme_dark", "nightfox"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, _ := os.ReadFile(path)
+	if want := "theme_dark = \"nightfox\"\ntheme_light = \"dayfox\"\n"; string(got) != want {
+		t.Errorf("config = %q, want %q", got, want)
+	}
+}
+
+func TestSaveThemeSetting_RejectsOtherKeys(t *testing.T) {
+	t.Setenv("CHIT_CONFIG_FILE", filepath.Join(t.TempDir(), "config.toml"))
+	if err := config.SaveThemeSetting("server_url", "x"); err == nil {
+		t.Error("wrote a setting that is not a theme")
+	}
+}
+
+func TestConfig_ThemeSettingKey(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  config.Config
+		dark bool
+		want string
+	}{
+		{"no themes configured", config.Config{}, true, "theme"},
+		{"a fixed theme", config.Config{ThemeName: "kanagawa", ThemeDark: "nightfox"}, true, "theme"},
+		{"per appearance, dark", config.Config{ThemeDark: "nightfox"}, true, "theme_dark"},
+		{"per appearance, light", config.Config{ThemeLight: "dayfox"}, false, "theme_light"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.cfg.ThemeSettingKey(tc.dark); got != tc.want {
+				t.Errorf("ThemeSettingKey(%v) = %q, want %q", tc.dark, got, tc.want)
+			}
+		})
+	}
+}

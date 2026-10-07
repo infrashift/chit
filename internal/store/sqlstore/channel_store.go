@@ -227,6 +227,29 @@ func (s *SqlChannelStore) GetMember(ctx context.Context, channelID, userID strin
 	return m, nil
 }
 
+func (s *SqlChannelStore) GetMembersForUser(ctx context.Context, userID, teamID string) ([]*model.ChannelMember, error) {
+	query := `SELECT cm.channel_id, cm.user_id, cm.roles, cm.last_viewed_at, cm.msg_count, cm.mention_count, cm.notify_props, cm.create_at
+		FROM channel_members cm
+		INNER JOIN channels c ON c.id = cm.channel_id
+		WHERE cm.user_id = $1 AND c.team_id = $2 AND c.delete_at = 0`
+
+	rows, err := s.sqlStore.pool.Query(ctx, query, userID, teamID)
+	if err != nil {
+		return nil, fmt.Errorf("get members for user: %w", err)
+	}
+	defer rows.Close()
+
+	members := []*model.ChannelMember{}
+	for rows.Next() {
+		m := &model.ChannelMember{}
+		if err := rows.Scan(&m.ChannelID, &m.UserID, &m.Roles, &m.LastViewedAt, &m.MsgCount, &m.MentionCount, &m.NotifyProps, &m.CreateAt); err != nil {
+			return nil, fmt.Errorf("scan channel member: %w", err)
+		}
+		members = append(members, m)
+	}
+	return members, rows.Err()
+}
+
 func (s *SqlChannelStore) UpdateLastViewedAt(ctx context.Context, channelID, userID string, lastViewedAt int64) error {
 	query := `UPDATE channel_members
 		SET last_viewed_at = $1,

@@ -87,14 +87,6 @@ type Request struct {
 func Resolve(req Request) (Theme, []string, error) {
 	var warnings []string
 
-	appearance := req.FlagAppearance
-	if appearance == AppearanceUnset {
-		appearance = req.ConfigAppearance
-	}
-	if appearance == AppearanceUnset {
-		appearance = AppearanceSystem
-	}
-
 	if req.FlagTheme != "" {
 		t, w, err := ResolveNamed(req.FlagTheme, req.ThemesDir)
 		warnings = append(warnings, w...)
@@ -126,7 +118,7 @@ func Resolve(req Request) (Theme, []string, error) {
 		warnings = append(warnings, configThemeWarning(req.ConfigTheme, err))
 	}
 
-	dark := appearanceIsDark(appearance, req.SystemIsDark)
+	dark := req.Dark()
 
 	// theme_dark and theme_light name a theme per appearance; only the one
 	// matching the resolved appearance is consulted.
@@ -143,6 +135,19 @@ func Resolve(req Request) (Theme, []string, error) {
 		return TokyoNight(), warnings, nil
 	}
 	return TokyoNightDay(), warnings, nil
+}
+
+// Dark reports whether the requested appearance is dark: the flag, then the
+// config, then the terminal itself.
+func (req Request) Dark() bool {
+	appearance := req.FlagAppearance
+	if appearance == AppearanceUnset {
+		appearance = req.ConfigAppearance
+	}
+	if appearance == AppearanceUnset {
+		appearance = AppearanceSystem
+	}
+	return appearanceIsDark(appearance, req.SystemIsDark)
 }
 
 // pickByAppearance returns the configured theme name for the resolved

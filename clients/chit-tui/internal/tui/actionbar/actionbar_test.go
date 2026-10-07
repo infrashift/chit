@@ -127,3 +127,45 @@ func TestHitTest_ThreadOpenAddsBackButton(t *testing.T) {
 		t.Errorf("expected back button in view:\n%s", view)
 	}
 }
+
+// A status message too long for the bar ran off the right edge, taking the
+// connection dot and username with it and cutting the message mid-word, so
+// "press d again to confirm" lost the key to press.
+func TestView_LongStatusFitsTheBar(t *testing.T) {
+	m := actionbar.New(testutil.Styles())
+	m.SetSize(120)
+	m.SetContext("UAT Team", "Invite Test", "alice")
+	m.SetCanReply(true)
+	m.SetError("delete this message? Press d again to confirm, any other key to cancel")
+
+	view := testutil.StripANSI(m.View())
+	if w := ansi.StringWidth(view); w > 120 {
+		t.Errorf("bar is %d wide, want at most 120", w)
+	}
+	if !strings.HasSuffix(view, " alice ") {
+		t.Errorf("username pushed off the bar: %q", view)
+	}
+	if !strings.Contains(view, "Press d again") {
+		t.Errorf("the instruction was cut: %q", view)
+	}
+}
+
+// When the message would not fit beside the channel name, the message wins:
+// the channel is on screen already, the message is news.
+func TestView_StatusTakesTheContextsRoomWhenShort(t *testing.T) {
+	m := actionbar.New(testutil.Styles())
+	m.SetSize(100)
+	m.SetContext("UAT Team", "Invite Test", "alice")
+	m.SetError("connection lost — reconnecting")
+
+	view := testutil.StripANSI(m.View())
+	if w := ansi.StringWidth(view); w > 100 {
+		t.Errorf("bar is %d wide, want at most 100", w)
+	}
+	if !strings.Contains(view, "connection lost — reconnecting") {
+		t.Errorf("status cut: %q", view)
+	}
+	if !strings.HasSuffix(view, " alice ") {
+		t.Errorf("username pushed off the bar: %q", view)
+	}
+}

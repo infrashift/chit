@@ -154,3 +154,37 @@ func TestFindMentions_None(t *testing.T) {
 		t.Fatalf("got %d spans, want 0", len(spans))
 	}
 }
+
+// The cursor column is in characters, but the text was indexed by byte, so
+// an accented letter before the @ shifted everything after it.
+func TestExtractMentionPrefix_CountsCharactersNotBytes(t *testing.T) {
+	prefix, startCol, active := ExtractMentionPrefix("héllo @bo", 9)
+	if !active || prefix != "bo" || startCol != 6 {
+		t.Errorf("got (%q, %d, %v), want (\"bo\", 6, true)", prefix, startCol, active)
+	}
+}
+
+// An @ inside a word is an email address, not a mention.
+func TestExtractMentionPrefix_IgnoresEmailAddresses(t *testing.T) {
+	if _, _, active := ExtractMentionPrefix("mail foo@b", 10); active {
+		t.Error("an email address opened the mention popup")
+	}
+	if _, _, active := ExtractMentionPrefix("(@b", 3); !active {
+		t.Error("a mention after punctuation was not recognized")
+	}
+}
+
+// The trailing full stop of a sentence was taken as part of the name, so
+// "@bob." did not highlight as a mention of bob.
+func TestFindMentions_SentencePunctuationIsNotPartOfTheName(t *testing.T) {
+	spans := FindMentions("thanks @bob.")
+	if len(spans) != 1 || spans[0].Username != "bob" {
+		t.Errorf("spans = %+v, want one mention of bob", spans)
+	}
+}
+
+func TestFindMentions_IgnoresEmailAddresses(t *testing.T) {
+	if spans := FindMentions("write to someone@example.com"); len(spans) != 0 {
+		t.Errorf("spans = %+v, want none", spans)
+	}
+}

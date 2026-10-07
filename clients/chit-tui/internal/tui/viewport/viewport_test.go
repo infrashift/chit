@@ -13,12 +13,8 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/viewport"
 )
 
-func testStyles() styles.Styles {
-	return styles.New(theme.TokyoNight())
-}
-
 func TestViewport_SetPosts(t *testing.T) {
-	m := viewport.New(testStyles())
+	m := viewport.New(testutil.Styles())
 	m.SetSize(80, 24)
 	m.SetPosts([]*model.Post{
 		{ID: "p1", UserID: "u1", Content: "Hello", CreateAt: 1700000000000},
@@ -36,7 +32,7 @@ func TestViewport_SetPosts(t *testing.T) {
 }
 
 func TestViewport_AppendPost(t *testing.T) {
-	m := viewport.New(testStyles())
+	m := viewport.New(testutil.Styles())
 	m.SetSize(80, 24)
 	m.SetPosts([]*model.Post{
 		{ID: "p1", UserID: "u1", Content: "First", CreateAt: 1700000000000},
@@ -50,7 +46,7 @@ func TestViewport_AppendPost(t *testing.T) {
 }
 
 func TestViewport_AppendPostKeepsExistingSelection(t *testing.T) {
-	m := viewport.New(testStyles())
+	m := viewport.New(testutil.Styles())
 	m.SetSize(80, 24)
 	m.Focus()
 	// SetPosts takes server order (newest first) and reverses for display.
@@ -69,7 +65,7 @@ func TestViewport_AppendPostKeepsExistingSelection(t *testing.T) {
 }
 
 func TestViewport_AppendPostIntoEmptyChannelSelectsIt(t *testing.T) {
-	m := viewport.New(testStyles())
+	m := viewport.New(testutil.Styles())
 	m.SetSize(80, 24)
 	// A channel that starts empty leaves the cursor unset (-1).
 	m.SetPosts(nil)
@@ -82,7 +78,7 @@ func TestViewport_AppendPostIntoEmptyChannelSelectsIt(t *testing.T) {
 }
 
 func TestViewport_SetUsernames(t *testing.T) {
-	m := viewport.New(testStyles())
+	m := viewport.New(testutil.Styles())
 	m.SetSize(80, 24)
 	m.SetPosts([]*model.Post{
 		{ID: "p1", UserID: "u1", Content: "Hello", CreateAt: 1700000000000},
@@ -96,7 +92,7 @@ func TestViewport_SetUsernames(t *testing.T) {
 }
 
 func TestViewport_SelectedPost(t *testing.T) {
-	m := viewport.New(testStyles())
+	m := viewport.New(testutil.Styles())
 	m.SetSize(80, 24)
 	m.SetPosts([]*model.Post{
 		{ID: "p1", UserID: "u1", Content: "Hello", CreateAt: 1700000000000},
@@ -108,7 +104,7 @@ func TestViewport_SelectedPost(t *testing.T) {
 }
 
 func TestViewport_SelectPostMsg(t *testing.T) {
-	m := viewport.New(testStyles())
+	m := viewport.New(testutil.Styles())
 	m.SetSize(80, 24)
 	m.SetPosts([]*model.Post{
 		{ID: "p1", UserID: "u1", Content: "Hello", CreateAt: 1700000000000},
@@ -131,7 +127,7 @@ func TestViewport_SelectPostMsg(t *testing.T) {
 }
 
 func TestViewport_ChannelSwitch(t *testing.T) {
-	m := viewport.New(testStyles())
+	m := viewport.New(testutil.Styles())
 	m.SetSize(80, 24)
 	m.SetPosts([]*model.Post{
 		{ID: "p1", UserID: "u1", Content: "old", CreateAt: 1700000000000},
@@ -148,7 +144,7 @@ func TestViewport_ChannelSwitch(t *testing.T) {
 }
 
 func TestViewport_SetCurrentUsername(t *testing.T) {
-	m := viewport.New(testStyles())
+	m := viewport.New(testutil.Styles())
 	m.SetSize(80, 24)
 	m.SetPosts([]*model.Post{
 		{ID: "p1", UserID: "u1", Content: "hello @bob", CreateAt: 1700000000000},
@@ -165,7 +161,7 @@ func TestViewport_SetCurrentUsername(t *testing.T) {
 }
 
 func TestViewport_UpdateNotFocused(t *testing.T) {
-	m := viewport.New(testStyles())
+	m := viewport.New(testutil.Styles())
 	m.SetSize(80, 24)
 	// Not focused — should return nil cmd
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
@@ -175,34 +171,8 @@ func TestViewport_UpdateNotFocused(t *testing.T) {
 	}
 }
 
-func TestViewport_UpdateNonKeyMsg(t *testing.T) {
-	m := viewport.New(testStyles())
-	m.SetSize(80, 24)
-	m.SetPosts([]*model.Post{
-		{ID: "p1", UserID: "u1", Content: "Hello", CreateAt: 1700000000000},
-	})
-	m.Focus()
-
-	// Non-key message when focused — delegates to inner viewport
-	updated, _ := m.Update(tea.MouseMsg{})
-	_ = updated
-}
-
-func TestViewport_UpdateDefaultKey(t *testing.T) {
-	m := viewport.New(testStyles())
-	m.SetSize(80, 24)
-	m.SetPosts([]*model.Post{
-		{ID: "p1", UserID: "u1", Content: "Hello", CreateAt: 1700000000000},
-	})
-	m.Focus()
-
-	// Non-enter key when focused — delegates to inner viewport
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
-	_ = updated
-}
-
 func TestViewport_ViewFocused(t *testing.T) {
-	m := viewport.New(testStyles())
+	m := viewport.New(testutil.Styles())
 	m.SetSize(80, 24)
 	m.Focus()
 	view := m.View()
@@ -212,7 +182,7 @@ func TestViewport_ViewFocused(t *testing.T) {
 }
 
 func TestViewport_SelectedPostEmpty(t *testing.T) {
-	m := viewport.New(testStyles())
+	m := viewport.New(testutil.Styles())
 	p := m.SelectedPost()
 	if p != nil {
 		t.Errorf("expected nil for empty post list, got %+v", p)
@@ -220,7 +190,7 @@ func TestViewport_SelectedPostEmpty(t *testing.T) {
 }
 
 func TestViewport_SetThreadCounts(t *testing.T) {
-	m := viewport.New(testStyles())
+	m := viewport.New(testutil.Styles())
 	m.SetSize(80, 24)
 	m.SetPosts([]*model.Post{
 		{ID: "p1", UserID: "u1", Content: "Hello", CreateAt: 1700000000000},
@@ -236,7 +206,7 @@ func TestViewport_SetThreadCounts(t *testing.T) {
 }
 
 func TestViewport_SetThreadCountsCacheInvalidation(t *testing.T) {
-	m := viewport.New(testStyles())
+	m := viewport.New(testutil.Styles())
 	m.SetSize(80, 24)
 	m.SetPosts([]*model.Post{
 		{ID: "p1", UserID: "u1", Content: "Hello", CreateAt: 1700000000000},
@@ -260,7 +230,7 @@ func TestViewport_SetThreadCountsCacheInvalidation(t *testing.T) {
 }
 
 func TestViewport_CursorMovement(t *testing.T) {
-	m := viewport.New(testStyles())
+	m := viewport.New(testutil.Styles())
 	m.SetSize(80, 24)
 	// Input is API order (newest first). SetPosts reverses to [p3, p2, p1]
 	// so display order top→bottom is: p3, p2, p1. Cursor starts at last index (p1).
@@ -309,7 +279,7 @@ func TestViewport_CursorMovement(t *testing.T) {
 }
 
 func TestViewport_CursorEnterSelectsPost(t *testing.T) {
-	m := viewport.New(testStyles())
+	m := viewport.New(testutil.Styles())
 	m.SetSize(80, 24)
 	// After reversal: [p2, p1], cursor starts at index 1 (p1)
 	m.SetPosts([]*model.Post{
@@ -338,7 +308,7 @@ func TestViewport_CursorEnterSelectsPost(t *testing.T) {
 }
 
 func TestViewport_SelectedPostHighlighted(t *testing.T) {
-	m := viewport.New(testStyles())
+	m := viewport.New(testutil.Styles())
 	m.SetSize(80, 24)
 	m.SetPosts([]*model.Post{
 		{ID: "p1", UserID: "u1", Content: "First", CreateAt: 1700000000000},
@@ -358,7 +328,7 @@ func TestViewport_SelectedPostHighlighted(t *testing.T) {
 }
 
 func TestViewport_SetStyles(t *testing.T) {
-	m := viewport.New(testStyles())
+	m := viewport.New(testutil.Styles())
 	m.SetSize(80, 24)
 	m.SetPosts([]*model.Post{
 		{ID: "p1", UserID: "u1", Content: "Hello", CreateAt: 1700000000000},
@@ -372,7 +342,7 @@ func TestViewport_SetStyles(t *testing.T) {
 }
 
 func TestViewport_CursorUpArrow(t *testing.T) {
-	m := viewport.New(testStyles())
+	m := viewport.New(testutil.Styles())
 	m.SetSize(80, 24)
 	m.SetPosts([]*model.Post{
 		{ID: "p1", UserID: "u1", Content: "First", CreateAt: 1700000000000},
@@ -394,7 +364,7 @@ func TestViewport_CursorUpArrow(t *testing.T) {
 }
 
 func TestViewport_DaySeparator_MultiDay(t *testing.T) {
-	m := viewport.New(testStyles())
+	m := viewport.New(testutil.Styles())
 	m.SetSize(80, 24)
 	// Two posts on different days (86400000ms = 1 day apart).
 	m.SetPosts([]*model.Post{
@@ -409,7 +379,7 @@ func TestViewport_DaySeparator_MultiDay(t *testing.T) {
 }
 
 func TestViewport_DaySeparator_SameDay(t *testing.T) {
-	m := viewport.New(testStyles())
+	m := viewport.New(testutil.Styles())
 	m.SetSize(80, 24)
 	// Two posts on the same day (1 second apart).
 	m.SetPosts([]*model.Post{
@@ -425,7 +395,7 @@ func TestViewport_DaySeparator_SameDay(t *testing.T) {
 }
 
 func TestViewport_DaySeparator_SinglePost(t *testing.T) {
-	m := viewport.New(testStyles())
+	m := viewport.New(testutil.Styles())
 	m.SetSize(80, 24)
 	m.SetPosts([]*model.Post{
 		{ID: "p1", UserID: "u1", Content: "Only one", CreateAt: 1700000000000},
@@ -439,7 +409,7 @@ func TestViewport_DaySeparator_SinglePost(t *testing.T) {
 }
 
 func TestViewport_FocusBlur(t *testing.T) {
-	m := viewport.New(testStyles())
+	m := viewport.New(testutil.Styles())
 	if m.Focused() {
 		t.Error("should not be focused initially")
 	}
@@ -489,7 +459,8 @@ func TestSearchTermHighlighting(t *testing.T) {
 		{ID: "p1", UserID: "u1", Content: "the quick brown fox", CreateAt: 1700000000000},
 	})
 
-	plain := testutil.StripANSI(m.View())
+	before := m.View()
+	plain := testutil.StripANSI(before)
 	m.SetSearchTerm("quick")
 
 	if m.SearchTerm() != "quick" {
@@ -499,8 +470,10 @@ func TestSearchTermHighlighting(t *testing.T) {
 	if got := testutil.StripANSI(m.View()); got != plain {
 		t.Errorf("highlighting altered the text:\n%s\nwant:\n%s", got, plain)
 	}
-	// And the styled output must actually differ.
-	if m.View() == plain {
+	// And the styled output must actually differ. This compared against the
+	// stripped text, which glamour's own colors always differ from, so it
+	// could not fail.
+	if m.View() == before {
 		t.Error("no styling was applied for the search term")
 	}
 }
@@ -790,4 +763,68 @@ func TestEmptyAndLoadingStates(t *testing.T) {
 			t.Errorf("placeholder still shown with posts:\n%s", view)
 		}
 	})
+}
+
+// Paging is by offset, so posts that arrived since the first page shift the
+// boundary and an older page repeats some of what is already shown.
+func TestViewport_PrependPostsSkipsPostsAlreadyShown(t *testing.T) {
+	m := viewport.New(testutil.Styles())
+	m.SetSize(80, 24)
+	// Newest-first, like the API.
+	m.SetPosts([]*model.Post{
+		{ID: "p3", UserID: "u1", Content: "three", CreateAt: 1700000003000},
+		{ID: "p2", UserID: "u1", Content: "two", CreateAt: 1700000002000},
+	})
+
+	// p2 overlaps.
+	m.PrependPosts([]*model.Post{
+		{ID: "p2", UserID: "u1", Content: "two", CreateAt: 1700000002000},
+		{ID: "p1", UserID: "u1", Content: "one", CreateAt: 1700000001000},
+	})
+
+	var ids []string
+	for _, p := range m.Posts() {
+		ids = append(ids, p.ID)
+	}
+	if got := strings.Join(ids, ","); got != "p1,p2,p3" {
+		t.Errorf("posts = %s, want p1,p2,p3", got)
+	}
+}
+
+// Matching scanned a lowercased copy with the original's byte offsets. Some
+// characters change byte length when lowercased (the Kelvin sign becomes a
+// plain k), so the offsets drifted and could run past the end.
+func TestSearchHighlightSurvivesLowercasingThatChangesLength(t *testing.T) {
+	m := viewport.New(styles.New(theme.TokyoNight()))
+	m.SetSize(80, 20)
+	m.SetPosts([]*model.Post{
+		{ID: "p1", UserID: "u1", Content: "KKKK then abc", CreateAt: 1700000000000},
+	})
+	before := m.View()
+	plain := testutil.StripANSI(before)
+
+	m.SetSearchTerm("abc")
+
+	if got := testutil.StripANSI(m.View()); got != plain {
+		t.Errorf("highlighting altered the text:\n%s\nwant:\n%s", got, plain)
+	}
+	if m.View() == before {
+		t.Error("the term was not highlighted")
+	}
+}
+
+// The post under the cursor was drawn without the highlight whenever it had
+// just been rendered, which a search always caused.
+func TestSearchHighlightShowsOnTheSelectedPost(t *testing.T) {
+	m := viewport.New(styles.New(theme.TokyoNight()))
+	m.SetSize(80, 20)
+	m.SetPosts([]*model.Post{{ID: "p1", UserID: "u1", Content: "hello world", CreateAt: 1700000000000}})
+	m.Focus()
+	before := m.View()
+
+	m.SetSearchTerm("hello")
+
+	if m.View() == before {
+		t.Error("the selected post lost the highlight")
+	}
 }

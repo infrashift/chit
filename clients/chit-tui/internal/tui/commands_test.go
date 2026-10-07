@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/infrashift/chit/clients/chit-tui/internal/api"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui"
 	"github.com/infrashift/chit/clients/chit-tui/internal/ws"
@@ -30,6 +31,15 @@ type mockClient struct {
 	postTags        []*model.Tag
 	lastCreatedPost *model.Post
 	channelsFetched []string // team IDs passed to GetMyChannels
+	postsFetched    []string // channel IDs passed to GetChannelPosts
+	editedPosts     []string // post IDs passed to UpdatePost
+	deletedPosts    []string // post IDs passed to DeletePost
+	taggedPosts     []string // "postID#tagID" passed to AddTagToPost
+	membersFetched  []string // channel IDs passed to GetChannelMembers
+	usersFetched    []string // user IDs passed to GetUsersByIDs
+	myMembers       []*model.ChannelMember
+	hang            bool // GetChannelPosts waits for its context to end
+	allTagsFetches  int
 	threads         []*model.ThreadResponse
 	// followCalls records (rootID, following) so tests can tell an unfollow
 	// that reached the server from one that only left the list.
@@ -88,7 +98,13 @@ func (m *mockClient) GetMyChannels(_ context.Context, teamID string) ([]*model.C
 	m.channelsFetched = append(m.channelsFetched, teamID)
 	return m.channels, m.err
 }
-func (m *mockClient) GetChannelPosts(_ context.Context, _ string, _, _ int) (*model.PostList, error) {
+func (m *mockClient) GetChannelPosts(ctx context.Context, channelID string, _, _ int) (*model.PostList, error) {
+	if m.hang {
+		// A server that never answers: only the context ends the wait.
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	m.postsFetched = append(m.postsFetched, channelID)
 	return m.posts, m.err
 }
 func (m *mockClient) CreatePost(_ context.Context, p *model.Post) (*model.Post, error) {
@@ -116,14 +132,19 @@ func (m *mockClient) GetCommands(_ context.Context) ([]*model.Command, error) {
 func (m *mockClient) ViewChannel(_ context.Context, _ string) error {
 	return m.err
 }
-func (m *mockClient) GetUsersByIDs(_ context.Context, _ []string) ([]*model.User, error) {
+func (m *mockClient) GetUsersByIDs(_ context.Context, ids []string) ([]*model.User, error) {
+	m.usersFetched = append(m.usersFetched, ids...)
 	return m.users, m.err
 }
 func (m *mockClient) SearchPosts(_ context.Context, _, _ string, _ []string) (*model.PostList, error) {
 	return m.posts, m.err
 }
-func (m *mockClient) GetChannelMembers(_ context.Context, _ string) ([]*model.ChannelMember, error) {
+func (m *mockClient) GetChannelMembers(_ context.Context, channelID string) ([]*model.ChannelMember, error) {
+	m.membersFetched = append(m.membersFetched, channelID)
 	return m.channelMembers, m.err
+}
+func (m *mockClient) GetMyChannelMembers(_ context.Context, _ string) ([]*model.ChannelMember, error) {
+	return m.myMembers, m.err
 }
 func (m *mockClient) CreateDirectChannel(_ context.Context, _, _ string) (*model.Channel, error) {
 	return m.dmChannel, m.err
@@ -144,6 +165,7 @@ func (m *mockClient) CreateChannel(_ context.Context, ch *model.Channel) (*model
 	return ch, m.err
 }
 func (m *mockClient) GetAllTags(_ context.Context) ([]*model.Tag, error) {
+	m.allTagsFetches++
 	return m.allTags, m.err
 }
 func (m *mockClient) CreateTag(_ context.Context, name string) (*model.Tag, error) {
@@ -155,7 +177,8 @@ func (m *mockClient) CreateTag(_ context.Context, name string) (*model.Tag, erro
 func (m *mockClient) GetTagsForPost(_ context.Context, _ string) ([]*model.Tag, error) {
 	return m.postTags, m.err
 }
-func (m *mockClient) AddTagToPost(_ context.Context, _, _ string) error {
+func (m *mockClient) AddTagToPost(_ context.Context, postID, tagID string) error {
+	m.taggedPosts = append(m.taggedPosts, postID+"#"+tagID)
 	return m.err
 }
 func (m *mockClient) RemoveTagFromPost(_ context.Context, _, _ string) error {
@@ -175,13 +198,17 @@ func (m *mockClient) GetTagsForPosts(_ context.Context, ids []string) (map[strin
 }
 
 func (m *mockClient) UpdatePost(_ context.Context, postID, content string) (*model.Post, error) {
+	m.editedPosts = append(m.editedPosts, postID)
 	if m.err != nil {
 		return nil, m.err
 	}
 	return &model.Post{ID: postID, Content: content, UserID: "u1", ChannelID: "c1"}, nil
 }
 
-func (m *mockClient) DeletePost(_ context.Context, _ string) error { return m.err }
+func (m *mockClient) DeletePost(_ context.Context, postID string) error {
+	m.deletedPosts = append(m.deletedPosts, postID)
+	return m.err
+}
 
 func (m *mockClient) SearchPostsEverywhere(_ context.Context, _ string, _ []string) (*model.PostList, error) {
 	if m.err != nil {
@@ -198,10 +225,20 @@ func (m *mockClient) RemoveChannelMember(_ context.Context, _, _ string) error {
 	return m.err
 }
 
+// Fail at compile time, not with a confusing error, if the mocks fall
+// behind the interfaces they stand in for.
+var (
+	_ api.ChitClient = (*mockClient)(nil)
+	_ ws.WSClient    = (*mockWSClient)(nil)
+)
+
 // mockWSClient implements ws.WSClient for testing.
 type mockWSClient struct {
 	events chan model.WebSocketEvent
 	state  chan ws.ConnState
+	// closes counts Close calls. Like the real client, the channels outlive
+	// Close, so listeners from one session serve the next.
+	closes int
 }
 
 func newMockWSClient() *mockWSClient {
@@ -212,15 +249,14 @@ func newMockWSClient() *mockWSClient {
 }
 
 func (m *mockWSClient) Connect() error                      { return nil }
-func (m *mockWSClient) Close() error                        { close(m.events); return nil }
+func (m *mockWSClient) Close() error                        { m.closes++; return nil }
 func (m *mockWSClient) Events() <-chan model.WebSocketEvent { return m.events }
 func (m *mockWSClient) State() <-chan ws.ConnState          { return m.state }
-func (m *mockWSClient) Send(_ model.WebSocketMessage) error { return nil }
 func (m *mockWSClient) SetToken(_ string)                   {}
 
 func TestFetchMe_ReturnsUserLoadedMsg(t *testing.T) {
 	client := &mockClient{me: &model.User{ID: "u1", Username: "alice"}}
-	cmd := tui.FetchMe(client)
+	cmd := tui.FetchMe(context.Background(), client)
 	msg := cmd()
 
 	loaded, ok := msg.(tui.UserLoadedMsg)
@@ -237,7 +273,7 @@ func TestFetchMe_ReturnsUserLoadedMsg(t *testing.T) {
 
 func TestFetchTeams_ReturnsTeamsLoadedMsg(t *testing.T) {
 	client := &mockClient{teams: []*model.Team{{ID: "t1"}}}
-	cmd := tui.FetchTeams(client)
+	cmd := tui.FetchTeams(context.Background(), client)
 	msg := cmd()
 
 	loaded, ok := msg.(tui.TeamsLoadedMsg)
@@ -251,7 +287,7 @@ func TestFetchTeams_ReturnsTeamsLoadedMsg(t *testing.T) {
 
 func TestFetchChannels_ReturnsChannelsLoadedMsg(t *testing.T) {
 	client := &mockClient{channels: []*model.Channel{{ID: "c1"}}}
-	cmd := tui.FetchChannels(client, "t1")
+	cmd := tui.FetchChannels(context.Background(), client, "t1")
 	msg := cmd()
 
 	loaded, ok := msg.(tui.ChannelsLoadedMsg)
@@ -265,7 +301,7 @@ func TestFetchChannels_ReturnsChannelsLoadedMsg(t *testing.T) {
 
 func TestFetchPosts_ReturnsPostsLoadedMsg(t *testing.T) {
 	client := &mockClient{posts: &model.PostList{Order: []*model.Post{{ID: "p1"}}}}
-	cmd := tui.FetchPosts(client, "c1", 0, 60)
+	cmd := tui.FetchPosts(context.Background(), client, "c1", 0, 60)
 	msg := cmd()
 
 	loaded, ok := msg.(tui.PostsLoadedMsg)
@@ -280,7 +316,7 @@ func TestFetchPosts_ReturnsPostsLoadedMsg(t *testing.T) {
 func TestCreatePost_ReturnsPostCreatedMsg(t *testing.T) {
 	created := &model.Post{ID: "new", Content: "hi"}
 	client := &mockClient{post: created}
-	cmd := tui.CreatePost(client, &model.Post{ChannelID: "c1", Content: "hi"})
+	cmd := tui.CreatePost(context.Background(), client, &model.Post{ChannelID: "c1", Content: "hi"})
 	msg := cmd()
 
 	m, ok := msg.(tui.PostCreatedMsg)
@@ -296,7 +332,7 @@ func TestFetchThread_ReturnsThreadLoadedMsg(t *testing.T) {
 	client := &mockClient{thread: &model.PostList{
 		Order: []*model.Post{{ID: "p1"}},
 	}}
-	cmd := tui.FetchThread(client, "p1")
+	cmd := tui.FetchThread(context.Background(), client, "p1")
 	msg := cmd()
 
 	loaded, ok := msg.(tui.ThreadLoadedMsg)
@@ -312,7 +348,7 @@ func TestFetchChannelMembers_ReturnsChannelMembersLoadedMsg(t *testing.T) {
 	client := &mockClient{channelMembers: []*model.ChannelMember{
 		{ChannelID: "c1", UserID: "u1", MsgCount: 5},
 	}}
-	cmd := tui.FetchChannelMembers(client, "c1")
+	cmd := tui.FetchChannelMembers(context.Background(), client, "c1")
 	msg := cmd()
 
 	loaded, ok := msg.(tui.ChannelMembersLoadedMsg)
@@ -329,7 +365,7 @@ func TestFetchChannelMembers_ReturnsChannelMembersLoadedMsg(t *testing.T) {
 
 func TestFetchCommands_ReturnsCommandsLoadedMsg(t *testing.T) {
 	client := &mockClient{commands: []*model.Command{{ID: "c1", Slug: "remind"}}}
-	cmd := tui.FetchCommands(client)
+	cmd := tui.FetchCommands(context.Background(), client)
 	msg := cmd()
 
 	loaded, ok := msg.(tui.CommandsLoadedMsg)
@@ -343,7 +379,7 @@ func TestFetchCommands_ReturnsCommandsLoadedMsg(t *testing.T) {
 
 func TestFetchDMChannels_ReturnsDMChannelsLoadedMsg(t *testing.T) {
 	client := &mockClient{dmChannels: []*model.Channel{{ID: "dm1", Type: "D"}}}
-	cmd := tui.FetchDMChannels(client)
+	cmd := tui.FetchDMChannels(context.Background(), client)
 	msg := cmd()
 
 	loaded, ok := msg.(tui.DMChannelsLoadedMsg)
@@ -360,7 +396,7 @@ func TestFetchDMChannels_ReturnsDMChannelsLoadedMsg(t *testing.T) {
 
 func TestSearchUsersCmd_ReturnsUserSearchResultsMsg(t *testing.T) {
 	client := &mockClient{searchUsers: []*model.User{{ID: "u1", Username: "alice"}}}
-	cmd := tui.SearchUsersCmd(client, "ali")
+	cmd := tui.SearchUsersCmd(context.Background(), client, "ali")
 	msg := cmd()
 
 	loaded, ok := msg.(tui.UserSearchResultsMsg)
@@ -374,7 +410,7 @@ func TestSearchUsersCmd_ReturnsUserSearchResultsMsg(t *testing.T) {
 
 func TestCreateDMChannel_ReturnsDMCreatedMsg(t *testing.T) {
 	client := &mockClient{dmChannel: &model.Channel{ID: "dm1", Type: "D"}}
-	cmd := tui.CreateDMChannel(client, "u1", "u2")
+	cmd := tui.CreateDMChannel(context.Background(), client, "u1", "u2")
 	msg := cmd()
 
 	loaded, ok := msg.(tui.DMCreatedMsg)
@@ -388,7 +424,7 @@ func TestCreateDMChannel_ReturnsDMCreatedMsg(t *testing.T) {
 
 func TestCreateChannel_ReturnsChannelCreatedMsg(t *testing.T) {
 	client := &mockClient{createdChannel: &model.Channel{ID: "ch1", Type: "O", Name: "deploy"}}
-	cmd := tui.CreateChannel(client, &model.Channel{TeamID: "t1", Name: "deploy", Type: "O"})
+	cmd := tui.CreateChannel(context.Background(), client, &model.Channel{TeamID: "t1", Name: "deploy", Type: "O"})
 	msg := cmd()
 
 	loaded, ok := msg.(tui.ChannelCreatedMsg)
@@ -402,7 +438,7 @@ func TestCreateChannel_ReturnsChannelCreatedMsg(t *testing.T) {
 
 func TestFetchAllTags_ReturnsAllTagsLoadedMsg(t *testing.T) {
 	client := &mockClient{allTags: []*model.Tag{{ID: "t1", Name: "urgent"}}}
-	cmd := tui.FetchAllTags(client)
+	cmd := tui.FetchAllTags(context.Background(), client)
 	msg := cmd()
 
 	loaded, ok := msg.(tui.AllTagsLoadedMsg)
@@ -416,7 +452,7 @@ func TestFetchAllTags_ReturnsAllTagsLoadedMsg(t *testing.T) {
 
 func TestFetchPostTags_ReturnsPostTagsLoadedMsg(t *testing.T) {
 	client := &mockClient{postTags: []*model.Tag{{ID: "t1", Name: "urgent"}}}
-	cmd := tui.FetchPostTags(client, "p1")
+	cmd := tui.FetchPostTags(context.Background(), client, "p1")
 	msg := cmd()
 
 	loaded, ok := msg.(tui.PostTagsLoadedMsg)
@@ -433,7 +469,7 @@ func TestFetchPostTags_ReturnsPostTagsLoadedMsg(t *testing.T) {
 
 func TestAddTagToPostCmd_ReturnsTagAddedToPostMsg(t *testing.T) {
 	client := &mockClient{}
-	cmd := tui.AddTagToPostCmd(client, "p1", "t1")
+	cmd := tui.AddTagToPostCmd(context.Background(), client, "p1", "t1")
 	msg := cmd()
 
 	loaded, ok := msg.(tui.TagAddedToPostMsg)
@@ -447,7 +483,7 @@ func TestAddTagToPostCmd_ReturnsTagAddedToPostMsg(t *testing.T) {
 
 func TestRemoveTagFromPostCmd_ReturnsTagRemovedFromPostMsg(t *testing.T) {
 	client := &mockClient{}
-	cmd := tui.RemoveTagFromPostCmd(client, "p1", "t1")
+	cmd := tui.RemoveTagFromPostCmd(context.Background(), client, "p1", "t1")
 	msg := cmd()
 
 	loaded, ok := msg.(tui.TagRemovedFromPostMsg)
@@ -461,7 +497,7 @@ func TestRemoveTagFromPostCmd_ReturnsTagRemovedFromPostMsg(t *testing.T) {
 
 func TestAddChannelMembersCmd_ReturnsAllMembersAddedMsg(t *testing.T) {
 	client := &mockClient{}
-	cmd := tui.AddChannelMembersCmd(client, "c1", []string{"u2", "u3"})
+	cmd := tui.AddChannelMembersCmd(context.Background(), client, "c1", []string{"u2", "u3"})
 	msg := cmd()
 
 	loaded, ok := msg.(tui.AllMembersAddedMsg)

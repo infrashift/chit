@@ -606,3 +606,31 @@ func TestSearchScopeIsVisible(t *testing.T) {
 		t.Errorf("global scope not shown:\n%s", testutil.StripANSI(m.View()))
 	}
 }
+
+// The cursor kept its index when the filter changed, so after moving down
+// and typing, Enter chose whichever row now sat at that index rather than
+// the best match at the top.
+func TestPalette_TypingMovesTheCursorToTheTop(t *testing.T) {
+	m := newPalette()
+	var chans []*model.Channel
+	for i := 1; i <= 5; i++ {
+		chans = append(chans, &model.Channel{ID: fmt.Sprintf("c%d", i), DisplayName: fmt.Sprintf("area%d", i), TeamID: "t1", LastPostAt: int64(i)})
+	}
+	m.SetChannels(chans)
+	m.Open("")
+	for range 3 {
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	}
+
+	m, _ = typeRunes(m, "a")
+
+	for _, line := range strings.Split(testutil.StripANSI(m.View()), "\n") {
+		if strings.Contains(line, "area") {
+			if !strings.Contains(line, "> ") {
+				t.Errorf("the cursor is not on the top row:\n%s", testutil.StripANSI(m.View()))
+			}
+			return
+		}
+	}
+	t.Fatal("no rows shown")
+}

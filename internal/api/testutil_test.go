@@ -384,6 +384,23 @@ func (s *mockChannelStore) GetMember(_ context.Context, channelID, userID string
 	return nil, model.NewNotFoundError("mockChannelStore.GetMember", channelID+"/"+userID)
 }
 
+func (s *mockChannelStore) GetMembersForUser(_ context.Context, userID, teamID string) ([]*model.ChannelMember, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []*model.ChannelMember
+	for channelID, members := range s.members {
+		if c := s.byID[channelID]; c == nil || c.TeamID != teamID || c.DeleteAt != 0 {
+			continue
+		}
+		for _, m := range members {
+			if m.UserID == userID {
+				out = append(out, m)
+			}
+		}
+	}
+	return out, nil
+}
+
 func (s *mockChannelStore) GetChannelIDsForUser(_ context.Context, userID string) ([]string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -53,6 +54,15 @@ type KratosError struct {
 
 func (e *KratosError) Error() string {
 	return fmt.Sprintf("kratos: %d %s", e.StatusCode, e.Message)
+}
+
+// IsSessionRejected reports whether Kratos itself refused a session. Any
+// other failure, such as Kratos being unreachable or erroring, says nothing
+// about whether the session is still good.
+func IsSessionRejected(err error) bool {
+	var ke *KratosError
+	return errors.As(err, &ke) &&
+		(ke.StatusCode == http.StatusUnauthorized || ke.StatusCode == http.StatusForbidden)
 }
 
 // KratosClient is an HTTP client for Kratos self-service flows.
@@ -179,6 +189,13 @@ func (c *KratosClient) parseError(resp *http.Response) error {
 			Messages []struct {
 				Text string `json:"text"`
 			} `json:"messages"`
+			// A rejected form reports on its fields, such as a password
+			// that is too short, rather than in a top-level message.
+			Nodes []struct {
+				Messages []struct {
+					Text string `json:"text"`
+				} `json:"messages"`
+			} `json:"nodes"`
 		} `json:"ui"`
 	}
 	if err := json.Unmarshal(body, &errResp); err != nil {
@@ -194,6 +211,13 @@ func (c *KratosClient) parseError(resp *http.Response) error {
 			if m.Text != "" {
 				msg = m.Text
 				break
+			}
+		}
+	}
+	for _, n := range errResp.UI.Nodes {
+		for _, m := range n.Messages {
+			if msg == "" && m.Text != "" {
+				msg = m.Text
 			}
 		}
 	}

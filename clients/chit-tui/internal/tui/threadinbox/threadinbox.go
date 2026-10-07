@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/listwin"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 )
 
@@ -180,8 +181,9 @@ func (m Model) View() string {
 			m.styles.Timestamp.Render("  Reply to a message to start following its thread."))
 	default:
 		items = append(items, "")
-		for i, t := range m.threads {
-			items = append(items, m.renderRow(i, t))
+		start, end := listwin.Window(m.cursor, len(m.threads), listwin.Rows(m.height))
+		for i := start; i < end; i++ {
+			items = append(items, m.renderRow(i, m.threads[i]))
 		}
 		items = append(items, "",
 			m.styles.Timestamp.Render("  enter to open · u to unfollow · esc to close"))

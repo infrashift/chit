@@ -39,15 +39,3 @@ func InitLoginAndSubmit(kratosClient *auth.KratosClient, identifier, password st
 		}
 	}
 }
-
-// ValidateSession checks if a stored session token is still valid.
-func ValidateSession(kratosClient *auth.KratosClient, token string) tea.Cmd {
-	return func() tea.Msg {
-		ctx := context.Background()
-		_, err := kratosClient.CheckSession(ctx, token)
-		if err != nil {
-			return LoginErrorMsg{Err: err}
-		}
-		return LoginSuccessMsg{Token: token}
-	}
-}

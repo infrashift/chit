@@ -2,6 +2,7 @@ package ws
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -37,21 +38,37 @@ type WSClient interface {
 	Events() <-chan model.WebSocketEvent
 	// State reports connect and disconnect transitions.
 	State() <-chan ConnState
-	Send(msg model.WebSocketMessage) error
 	SetToken(token string)
 }
 
 type wsClient struct {
 	url        string
-	token      string
 	headerName string
-	conn       *websocket.Conn
 	events     chan model.WebSocketEvent
 	state      chan ConnState
-	done       chan struct{}
-	backoff    *Backoff
-	mu         sync.Mutex
+
+	// newBackoff builds the delay schedule for one session's redials.
+	newBackoff func() *Backoff
+	// pongWait is how long the link may stay silent before it is declared
+	// dead; pingPeriod is how often a ping is sent to break that silence.
+	pongWait   time.Duration
+	pingPeriod time.Duration
+
+	mu    sync.Mutex
+	token string
+	// conn is the live connection, if any. Only the session's run loop
+	// reads from it; Close reaches it through mu.
+	conn *websocket.Conn
+	// stop is closed to end the current session. It is nil while closed,
+	// which is what lets Close be called twice and Connect be called again.
+	stop chan struct{}
 }
+
+const (
+	defaultPongWait   = 60 * time.Second
+	defaultPingPeriod = 25 * time.Second
+	writeWait         = 10 * time.Second
+)
 
 // NewWSClient creates a new WebSocket client.
 func NewWSClient(url, token string, bufSize int) WSClient {
@@ -70,13 +87,51 @@ func NewWSClientWithHeader(url, token string, bufSize int, headerName string) WS
 		events:     make(chan model.WebSocketEvent, bufSize),
 		// Small buffer: transitions are rare and only the latest matters, so
 		// dropping one under contention is preferable to blocking the reader.
-		state:   make(chan ConnState, 8),
-		done:    make(chan struct{}),
-		backoff: NewBackoff(),
+		state:      make(chan ConnState, 8),
+		newBackoff: NewBackoff,
+		pongWait:   defaultPongWait,
+		pingPeriod: defaultPingPeriod,
 	}
 }
 
+// Connect starts a session. A failed first dial is returned so the caller
+// can show it, but unless the credentials were rejected the session keeps
+// redialing in the background, the same as after a drop. Calling Connect on
+// a running session does nothing.
 func (c *wsClient) Connect() error {
+	c.mu.Lock()
+	if c.stop != nil {
+		c.mu.Unlock()
+		return nil
+	}
+	stop := make(chan struct{})
+	c.stop = stop
+	c.mu.Unlock()
+
+	conn, err := c.dial()
+	if err != nil {
+		if errors.Is(err, ErrUnauthorized) {
+			c.mu.Lock()
+			if c.stop == stop {
+				c.stop = nil
+			}
+			c.mu.Unlock()
+			return err
+		}
+		go c.run(stop, nil)
+		return err
+	}
+	if !c.adopt(stop, conn) {
+		return nil
+	}
+	c.emitState(ConnState{Connected: true})
+	go c.run(stop, conn)
+	return nil
+}
+
+// dial opens one connection. A handshake the server rejected for its
+// credentials wraps ErrUnauthorized: retrying cannot fix it.
+func (c *wsClient) dial() (*websocket.Conn, error) {
 	c.mu.Lock()
 	token := c.token
 	c.mu.Unlock()
@@ -88,19 +143,38 @@ func (c *wsClient) Connect() error {
 	if err != nil {
 		if resp != nil {
 			_ = resp.Body.Close()
-			return fmt.Errorf("ws: %w (HTTP %d)", err, resp.StatusCode)
+			if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+				return nil, fmt.Errorf("ws: %w: %w (HTTP %d)", ErrUnauthorized, err, resp.StatusCode)
+			}
+			return nil, fmt.Errorf("ws: %w (HTTP %d)", err, resp.StatusCode)
 		}
-		return err
+		return nil, err
 	}
+	return conn, nil
+}
 
+// adopt makes conn the live connection of the session that stop belongs
+// to. If that session was closed while the dial was in flight, the
+// connection is discarded and adopt reports false.
+func (c *wsClient) adopt(stop chan struct{}, conn *websocket.Conn) bool {
 	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.stop != stop {
+		_ = conn.Close()
+		return false
+	}
 	c.conn = conn
+	return true
+}
+
+// release forgets conn if it is still the live connection, and closes it.
+func (c *wsClient) release(conn *websocket.Conn) {
+	c.mu.Lock()
+	if c.conn == conn {
+		c.conn = nil
+	}
 	c.mu.Unlock()
-
-	c.emitState(ConnState{Connected: true})
-
-	go c.readLoop()
-	return nil
+	_ = conn.Close()
 }
 
 // State returns the connection-state channel.
@@ -115,25 +189,62 @@ func (c *wsClient) emitState(s ConnState) {
 	}
 }
 
-func (c *wsClient) readLoop() {
+// run owns one session: it reads conn until it fails, then redials, until
+// stop is closed. A nil conn means the first dial failed and it starts by
+// redialing.
+func (c *wsClient) run(stop chan struct{}, conn *websocket.Conn) {
+	backoff := c.newBackoff()
 	for {
-		select {
-		case <-c.done:
-			c.closeConn()
-			return
-		default:
-		}
-
-		_, msg, err := c.conn.ReadMessage()
-		if err != nil {
-			c.closeConn()
-			c.emitState(ConnState{Connected: false, Err: err})
-			if !c.reconnect() {
+		if conn == nil {
+			conn = c.redial(stop, backoff)
+			if conn == nil {
 				return
 			}
 			c.emitState(ConnState{Connected: true})
-			continue
 		}
+
+		err := c.read(stop, conn)
+		c.release(conn)
+		conn = nil
+		select {
+		case <-stop:
+			return
+		default:
+		}
+		c.emitState(ConnState{Connected: false, Err: err})
+	}
+}
+
+// read delivers events from conn until the connection fails or stop is
+// closed. Any frame, pongs included, proves the link is alive; a link
+// silent for longer than pongWait is treated as dead, since a half-open TCP
+// connection would otherwise block here forever.
+func (c *wsClient) read(stop chan struct{}, conn *websocket.Conn) error {
+	alive := func() { _ = conn.SetReadDeadline(time.Now().Add(c.pongWait)) }
+	alive()
+	conn.SetPongHandler(func(string) error { alive(); return nil })
+	conn.SetPingHandler(func(data string) error {
+		alive()
+		err := conn.WriteControl(websocket.PongMessage, []byte(data), time.Now().Add(writeWait))
+		if errors.Is(err, websocket.ErrCloseSent) {
+			return nil
+		}
+		return err
+	})
+
+	pinging := make(chan struct{})
+	defer close(pinging)
+	go c.ping(conn, pinging)
+
+	// desynced marks an overflow already reported, so one burst of drops
+	// asks for one resync rather than one per lost event.
+	desynced := false
+	for {
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			return err
+		}
+		alive()
 
 		var evt model.WebSocketEvent
 		if err := json.Unmarshal(msg, &evt); err != nil {
@@ -142,76 +253,81 @@ func (c *wsClient) readLoop() {
 
 		select {
 		case c.events <- evt:
-		case <-c.done:
-			c.closeConn()
-			return
+			desynced = false
+		case <-stop:
+			return nil
 		default:
 			// The buffer is full, so this event is lost. Dropping it quietly
 			// leaves the view stale with the socket still up and nothing to
 			// hint at it, so report the gap and let the reader resync.
-			c.emitState(ConnState{Connected: true, Desynced: true})
+			if !desynced {
+				desynced = true
+				c.emitState(ConnState{Connected: true, Desynced: true})
+			}
 		}
 	}
 }
 
-func (c *wsClient) closeConn() {
-	c.mu.Lock()
-	if c.conn != nil {
-		_ = c.conn.Close()
-		c.conn = nil
-	}
-	c.mu.Unlock()
-}
-
-func (c *wsClient) reconnect() bool {
+// ping keeps a quiet link provably alive until done is closed. WriteControl
+// is safe alongside the reader and Send, so it needs no lock.
+func (c *wsClient) ping(conn *websocket.Conn, done chan struct{}) {
+	t := time.NewTicker(c.pingPeriod)
+	defer t.Stop()
 	for {
-		wait := c.backoff.Next()
-
 		select {
-		case <-c.done:
-			return false
-		case <-time.After(wait):
+		case <-done:
+			return
+		case <-t.C:
+			if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(writeWait)); err != nil {
+				return
+			}
+		}
+	}
+}
+
+// redial dials until it connects, stop is closed, or the credentials are
+// rejected. It returns the adopted connection, or nil if the session ends.
+func (c *wsClient) redial(stop chan struct{}, backoff *Backoff) *websocket.Conn {
+	for {
+		select {
+		case <-stop:
+			return nil
+		case <-time.After(backoff.Next()):
 		}
 
-		c.mu.Lock()
-		token := c.token
-		c.mu.Unlock()
-
-		header := http.Header{}
-		header.Set(c.headerName, token)
-
-		conn, resp, err := websocket.DefaultDialer.Dial(c.url, header)
+		conn, err := c.dial()
 		if err != nil {
 			// Retrying cannot fix rejected credentials. Report it and stop,
 			// so the UI can ask the user to sign in again instead of the
 			// loop dialing forever behind a dead session.
-			if resp != nil {
-				status := resp.StatusCode
-				_ = resp.Body.Close()
-				if status == http.StatusUnauthorized || status == http.StatusForbidden {
-					c.emitState(ConnState{Connected: false, Err: err, Unauthorized: true})
-					return false
-				}
+			if errors.Is(err, ErrUnauthorized) {
+				c.emitState(ConnState{Connected: false, Err: err, Unauthorized: true})
+				return nil
 			}
 			continue
 		}
-
-		c.mu.Lock()
-		c.conn = conn
-		c.mu.Unlock()
-		c.backoff.Reset()
-		return true
+		if !c.adopt(stop, conn) {
+			return nil
+		}
+		backoff.Reset()
+		return conn
 	}
 }
 
+// Close ends the session. It is safe to call more than once, and Connect
+// may start a new session afterwards.
 func (c *wsClient) Close() error {
-	close(c.done)
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.conn != nil {
-		err := c.conn.Close()
-		c.conn = nil
-		return err
+	stop, conn := c.stop, c.conn
+	c.stop, c.conn = nil, nil
+	c.mu.Unlock()
+
+	if stop != nil {
+		close(stop)
+	}
+	if conn != nil {
+		// Closing the connection unblocks the reader, which then sees stop.
+		return conn.Close()
 	}
 	return nil
 }
@@ -225,13 +341,4 @@ func (c *wsClient) SetToken(token string) {
 
 func (c *wsClient) Events() <-chan model.WebSocketEvent {
 	return c.events
-}
-
-func (c *wsClient) Send(msg model.WebSocketMessage) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.conn == nil {
-		return ErrNotConnected
-	}
-	return c.conn.WriteJSON(msg)
 }

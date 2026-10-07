@@ -75,7 +75,7 @@ func TestLegacySkinRejectsTraversal(t *testing.T) {
 func TestListAvailableIncludesLegacySkins(t *testing.T) {
 	writeLegacySkin(t, "myskin", `{"name":"My Skin"}`)
 
-	names := ListAvailable()
+	names := ListAvailable(t.TempDir())
 
 	var sawSkin, sawBuiltin bool
 	for _, n := range names {

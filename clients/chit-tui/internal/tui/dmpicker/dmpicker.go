@@ -1,6 +1,6 @@
-// Package dmpicker implements the member-selection overlay used when
-// creating a private channel. (Starting DMs is handled by the palette's
-// "@" mode.)
+// Package dmpicker is the member-selection overlay, used to add members to a
+// new private channel and to choose the people for /group. (Starting a DM
+// is the palette's "@" mode.)
 package dmpicker
 
 import (
@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/listwin"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 )
 
@@ -238,8 +239,8 @@ func (m Model) View() string {
 		items = append(items, m.styles.Timestamp.Render("  Tab to pick · Enter to choose"))
 	}
 
-	maxItems := min(len(m.results), max((m.height/2)-4, 5))
-	for i := range maxItems {
+	start, end := listwin.Window(m.cursor, len(m.results), listwin.Rows(m.height))
+	for i := start; i < end; i++ {
 		u := m.results[i]
 		label := fmt.Sprintf("@%s", u.Username)
 		if u.DisplayName != "" {

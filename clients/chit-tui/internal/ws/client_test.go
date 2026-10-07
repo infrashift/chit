@@ -2,9 +2,11 @@ package ws_test
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -83,41 +85,6 @@ func TestWSClient_ConnectAndReceive(t *testing.T) {
 	}
 }
 
-func TestWSClient_Send(t *testing.T) {
-	received := make(chan model.WebSocketMessage, 1)
-
-	srv := newTestWSServer(t, func(conn *websocket.Conn) {
-		_, msg, err := conn.ReadMessage()
-		if err != nil {
-			return
-		}
-		var wsMsg model.WebSocketMessage
-		if err := json.Unmarshal(msg, &wsMsg); err == nil {
-			received <- wsMsg
-		}
-	})
-
-	client := ws.NewWSClient(wsURL(srv), "test-token", 10)
-	if err := client.Connect(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = client.Close() }()
-
-	msg := model.WebSocketMessage{Action: "typing", Seq: 1, Data: map[string]any{"channel_id": "c1"}}
-	if err := client.Send(msg); err != nil {
-		t.Fatal(err)
-	}
-
-	select {
-	case got := <-received:
-		if got.Action != "typing" {
-			t.Errorf("action = %q, want %q", got.Action, "typing")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for message")
-	}
-}
-
 func TestWSClient_Close(t *testing.T) {
 	srv := newTestWSServer(t, func(conn *websocket.Conn) {
 		// Echo server — keep reading until closed.
@@ -169,8 +136,8 @@ func TestBackoff_Reset(t *testing.T) {
 	_ = b.Next()
 	b.Reset()
 	d := b.Next()
-	if d != b.Base {
-		t.Errorf("after reset, first backoff = %v, want %v", d, b.Base)
+	if d > b.Base || d < b.Base*4/5 {
+		t.Errorf("after reset, first backoff = %v, want the base %v less jitter", d, b.Base)
 	}
 }
 
@@ -236,32 +203,34 @@ func TestWSClient_ReconnectsAfterDrop(t *testing.T) {
 }
 
 func TestWSClient_CloseStopsReconnect(t *testing.T) {
-	connected := make(chan struct{}, 1)
+	var mu sync.Mutex
+	dials := 0
 	srv := newTestWSServer(t, func(conn *websocket.Conn) {
-		connected <- struct{}{}
-		// Close immediately to trigger reconnect attempt
+		mu.Lock()
+		dials++
+		mu.Unlock()
+		// Hang up at once, so the client is always about to redial.
 		_ = conn.Close()
 	})
 
-	client := ws.NewWSClient(wsURL(srv), "test-token", 10)
-	if err := client.Connect(); err != nil {
+	c := fastClient(srv, 8, time.Minute)
+	if err := c.Connect(); err != nil {
 		t.Fatal(err)
 	}
-
-	// Wait for first connection
-	select {
-	case <-connected:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for connection")
+	waitState(t, c, disconnected, "the first drop")
+	if err := c.Close(); err != nil {
+		t.Logf("Close: %v", err)
 	}
 
-	// Close client — should stop the reconnect loop
-	if err := client.Close(); err != nil {
-		t.Logf("Close() error (expected for already-closed conn): %v", err)
+	mu.Lock()
+	after := dials
+	mu.Unlock()
+	time.Sleep(100 * time.Millisecond) // ten backoff periods
+	mu.Lock()
+	defer mu.Unlock()
+	if dials != after {
+		t.Errorf("dialed %d more times after Close", dials-after)
 	}
-
-	// Give it time to verify no panic / hang
-	time.Sleep(200 * time.Millisecond)
 }
 
 // A drop has to be observable. Before this, reconnect was entirely internal
@@ -387,6 +356,292 @@ func TestWSClient_ReportsDesyncWhenTheBufferOverflows(t *testing.T) {
 			}
 		case <-deadline:
 			t.Fatal("events were dropped without reporting a desync")
+		}
+	}
+}
+
+// fastClient returns a client whose timers suit a test: reconnects in
+// milliseconds, and a link that goes quiet for longer than pongWait is
+// declared dead.
+func fastClient(srv *httptest.Server, bufSize int, pongWait time.Duration) ws.WSClient {
+	c := ws.NewWSClient(wsURL(srv), "test-token", bufSize)
+	ws.SetTimings(c, 10*time.Millisecond, pongWait, pongWait/3)
+	return c
+}
+
+func waitState(t *testing.T, c ws.WSClient, want func(ws.ConnState) bool, what string) ws.ConnState {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case st := <-c.State():
+			if want(st) {
+				return st
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for %s", what)
+		}
+	}
+}
+
+func connected(st ws.ConnState) bool    { return st.Connected && !st.Desynced }
+func disconnected(st ws.ConnState) bool { return !st.Connected }
+
+// Logging out closes the client and signing back in connects it again. Close
+// used to close a channel that was never remade, so the second sign-out
+// panicked and the second session's read loop exited at once.
+func TestWSClient_SurvivesCloseAndReconnect(t *testing.T) {
+	sessions := make(chan *websocket.Conn, 4)
+	srv := newTestWSServer(t, func(conn *websocket.Conn) {
+		sessions <- conn
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	})
+
+	c := fastClient(srv, 8, time.Minute)
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	<-sessions
+	if err := c.Close(); err != nil {
+		t.Fatalf("first Close: %v", err)
+	}
+
+	if err := c.Connect(); err != nil {
+		t.Fatalf("second Connect: %v", err)
+	}
+	conn := <-sessions
+
+	evt, _ := json.Marshal(model.WebSocketEvent{Event: model.WebSocketEventPosted, Sequence: 7})
+	if err := conn.WriteMessage(websocket.TextMessage, evt); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-c.Events():
+		if got.Sequence != 7 {
+			t.Errorf("sequence = %d, want 7", got.Sequence)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the second session delivered no events")
+	}
+
+	if err := c.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close on a closed client: %v", err)
+	}
+}
+
+// The exponent used to grow without bound until the duration overflowed to a
+// negative wait, turning a long outage into a busy dial loop.
+func TestBackoff_StaysPositiveAndCapped(t *testing.T) {
+	b := ws.NewBackoff()
+	for i := range 200 {
+		d := b.Next()
+		if d <= 0 || d > b.Max {
+			t.Fatalf("attempt %d: backoff %v outside (0, %v]", i, d, b.Max)
+		}
+	}
+}
+
+// A half-open link (laptop sleep, NAT timeout) never errors on its own. The
+// client has to notice the silence and redial.
+func TestWSClient_ReconnectsWhenTheLinkGoesQuiet(t *testing.T) {
+	var mu sync.Mutex
+	dials := 0
+	srv := newTestWSServer(t, func(conn *websocket.Conn) {
+		mu.Lock()
+		dials++
+		mu.Unlock()
+		// Never read, so pings go unanswered: the link looks dead.
+		time.Sleep(time.Second)
+	})
+
+	c := fastClient(srv, 8, 100*time.Millisecond)
+	defer func() { _ = c.Close() }()
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+
+	waitState(t, c, connected, "connect")
+	waitState(t, c, disconnected, "the silent link to be dropped")
+	waitState(t, c, connected, "reconnect")
+
+	mu.Lock()
+	defer mu.Unlock()
+	if dials < 2 {
+		t.Errorf("dials = %d, want a redial", dials)
+	}
+}
+
+// A link that is quiet but healthy answers pings, so it must stay up.
+func TestWSClient_KeepsAQuietHealthyLink(t *testing.T) {
+	srv := newTestWSServer(t, func(conn *websocket.Conn) {
+		// Reading processes pings, so the client's pings are answered.
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	})
+
+	c := fastClient(srv, 8, 100*time.Millisecond)
+	defer func() { _ = c.Close() }()
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, c, connected, "connect")
+
+	select {
+	case st := <-c.State():
+		t.Fatalf("healthy link changed state: %+v", st)
+	case <-time.After(500 * time.Millisecond):
+	}
+}
+
+// A failed first dial (server restarting at launch) used to leave the session
+// with no real-time updates at all: only a successful dial started the loop
+// that reconnects.
+func TestWSClient_RetriesWhenTheFirstDialFails(t *testing.T) {
+	var mu sync.Mutex
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		attempts++
+		n := attempts
+		mu.Unlock()
+		if n == 1 {
+			http.Error(w, "starting", http.StatusServiceUnavailable)
+			return
+		}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := fastClient(srv, 8, time.Minute)
+	defer func() { _ = c.Close() }()
+	if err := c.Connect(); err == nil {
+		t.Fatal("first dial should report its failure")
+	}
+	waitState(t, c, connected, "the retry to connect")
+}
+
+// Rejected credentials on the first dial must be recognizable as such, so
+// the caller can ask the user to sign in, and must not be retried.
+func TestWSClient_FirstDialUnauthorized(t *testing.T) {
+	var mu sync.Mutex
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		attempts++
+		mu.Unlock()
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := fastClient(srv, 8, time.Minute)
+	defer func() { _ = c.Close() }()
+	err := c.Connect()
+	if !errors.Is(err, ws.ErrUnauthorized) {
+		t.Fatalf("err = %v, want ErrUnauthorized", err)
+	}
+
+	time.Sleep(100 * time.Millisecond) // ten backoff periods
+	mu.Lock()
+	defer mu.Unlock()
+	if attempts != 1 {
+		t.Errorf("attempts = %d, want no retry after a 401", attempts)
+	}
+}
+
+// One overflow is one gap to resync. Reporting every dropped event set off a
+// refetch per event.
+func TestWSClient_ReportsOneDesyncPerOverflow(t *testing.T) {
+	const buffered = 2
+	written := make(chan struct{})
+	srv := newTestWSServer(t, func(conn *websocket.Conn) {
+		for i := range buffered * 10 {
+			data, _ := json.Marshal(model.WebSocketEvent{Event: model.WebSocketEventPosted, Sequence: int64(i)})
+			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+				return
+			}
+		}
+		close(written)
+		time.Sleep(time.Second)
+	})
+
+	c := fastClient(srv, buffered, time.Minute)
+	defer func() { _ = c.Close() }()
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	<-written
+	time.Sleep(200 * time.Millisecond) // let the reader catch up
+
+	desyncs := 0
+	for {
+		select {
+		case st := <-c.State():
+			if st.Desynced {
+				desyncs++
+			}
+			continue
+		default:
+		}
+		break
+	}
+	if desyncs != 1 {
+		t.Errorf("desync reports = %d, want 1", desyncs)
+	}
+}
+
+// A new token, set after signing in again, is what redials present; the
+// header name is the configured one.
+func TestWSClient_RedialsWithTheCurrentTokenAndHeader(t *testing.T) {
+	tokens := make(chan string, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tokens <- r.Header.Get("X-Custom-Auth")
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		_ = conn.Close() // hang up, so the client redials
+	}))
+	t.Cleanup(srv.Close)
+
+	c := ws.NewWSClientWithHeader(wsURL(srv), "first", 8, "X-Custom-Auth")
+	ws.SetTimings(c, 10*time.Millisecond, time.Minute, 20*time.Second)
+	defer func() { _ = c.Close() }()
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-tokens; got != "first" {
+		t.Fatalf("first dial sent %q, want first", got)
+	}
+
+	c.SetToken("second")
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case got := <-tokens:
+			if got == "second" {
+				return
+			}
+		case <-deadline:
+			t.Fatal("no redial with the new token")
 		}
 	}
 }

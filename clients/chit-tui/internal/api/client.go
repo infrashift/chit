@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 )
@@ -38,6 +39,9 @@ type ChitClient interface {
 	// SearchPostsEverywhere searches every channel the user belongs to.
 	SearchPostsEverywhere(ctx context.Context, term string, tagIDs []string) (*model.PostList, error)
 	GetChannelMembers(ctx context.Context, channelID string) ([]*model.ChannelMember, error)
+	// GetMyChannelMembers returns the caller's own member rows for a team's
+	// channels, which carry their unread and mention counts.
+	GetMyChannelMembers(ctx context.Context, teamID string) ([]*model.ChannelMember, error)
 	CreateDirectChannel(ctx context.Context, userID1, userID2 string) (*model.Channel, error)
 	GetMyDirectChannels(ctx context.Context) ([]*model.Channel, error)
 	SearchUsers(ctx context.Context, term string, page, perPage int) ([]*model.User, error)
@@ -60,11 +64,16 @@ type httpClient struct {
 	http    *http.Client
 }
 
+// DefaultTimeout bounds every request. Without one, a server that accepted a
+// request and never answered left its command waiting forever.
+const DefaultTimeout = 30 * time.Second
+
 // NewClient creates a new ChitClient.
 func NewClient(baseURL, token string) ChitClient {
 	return &httpClient{
 		baseURL: baseURL + "/api/v1",
 		http: &http.Client{
+			Timeout:   DefaultTimeout,
 			Transport: newAuthTransport(nil, func() string { return token }),
 		},
 	}
@@ -75,6 +84,7 @@ func NewClientWithHeader(baseURL, token, headerName string) ChitClient {
 	return &httpClient{
 		baseURL: baseURL + "/api/v1",
 		http: &http.Client{
+			Timeout:   DefaultTimeout,
 			Transport: newAuthTransportWithHeader(nil, func() string { return token }, headerName),
 		},
 	}
@@ -85,6 +95,7 @@ func NewClientWithTokenFn(baseURL string, tokenFn func() string, headerName stri
 	return &httpClient{
 		baseURL: baseURL + "/api/v1",
 		http: &http.Client{
+			Timeout:   DefaultTimeout,
 			Transport: newAuthTransportWithHeader(nil, tokenFn, headerName),
 		},
 	}
@@ -145,10 +156,15 @@ func (c *httpClient) do(req *http.Request, out any) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		// A body left partly unread closes the connection rather than
+		// returning it for reuse.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+		_ = resp.Body.Close()
+	}()
 	if resp.StatusCode >= 400 {
 		return parseErrorResponse(resp)
 	}
-	defer func() { _ = resp.Body.Close() }()
 	if out == nil {
 		return nil
 	}
@@ -269,7 +285,12 @@ func (c *httpClient) SearchPosts(ctx context.Context, channelID, term string, ta
 
 func (c *httpClient) SearchPostsEverywhere(ctx context.Context, term string, tagIDs []string) (*model.PostList, error) {
 	var pl model.PostList
-	body := map[string]any{"terms": term, "tag_ids": tagIDs}
+	// Like SearchPosts, tag_ids is sent only when there are some; nil
+	// marshals as null.
+	body := map[string]any{"terms": term}
+	if len(tagIDs) > 0 {
+		body["tag_ids"] = tagIDs
+	}
 	err := c.post(ctx, "/posts/search", body, &pl)
 	return &pl, err
 }
@@ -277,6 +298,12 @@ func (c *httpClient) SearchPostsEverywhere(ctx context.Context, term string, tag
 func (c *httpClient) GetChannelMembers(ctx context.Context, channelID string) ([]*model.ChannelMember, error) {
 	var members []*model.ChannelMember
 	err := c.get(ctx, fmt.Sprintf("/channels/%s/members", channelID), &members)
+	return members, err
+}
+
+func (c *httpClient) GetMyChannelMembers(ctx context.Context, teamID string) ([]*model.ChannelMember, error) {
+	var members []*model.ChannelMember
+	err := c.get(ctx, fmt.Sprintf("/users/me/teams/%s/channels/members", teamID), &members)
 	return members, err
 }
 

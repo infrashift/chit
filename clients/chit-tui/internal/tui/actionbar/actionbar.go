@@ -46,6 +46,7 @@ type Model struct {
 	err        string
 	canReply   bool
 	threadOpen bool
+	editing    bool
 	connected  bool
 	styles     styles.Styles
 }
@@ -75,6 +76,10 @@ func (m *Model) SetThreadOpen(open bool) { m.threadOpen = open }
 // selected in the history pane, and that pane has to be focused first — the
 // button is the only on-screen hint that the capability exists at all.
 func (m *Model) SetCanReply(can bool) { m.canReply = can }
+
+// SetEditing marks a post edit in progress. Sending replaces that post
+// rather than posting a new one, which nothing else on screen shows.
+func (m *Model) SetEditing(e bool) { m.editing = e }
 
 // SetConnected sets the WebSocket connection indicator state.
 func (m *Model) SetConnected(c bool) { m.connected = c }
@@ -124,14 +129,8 @@ func (m Model) layout() (string, []span) {
 		spans = append(spans, span{start: start, end: x, action: btn.action})
 	}
 
-	ctx := " │ " + m.team
-	if m.channel != "" {
-		ctx += " > " + m.channel
-	}
-	write(base.Render(ctx))
-
-	if m.err != "" {
-		write(m.styles.ErrorText.Render(" " + m.err))
+	if m.editing {
+		write(m.styles.MentionBadge.Render(" editing — enter saves, esc cancels "))
 	}
 
 	dot := m.styles.UnreadBadge.Render("●")
@@ -139,6 +138,30 @@ func (m Model) layout() (string, []span) {
 		dot = m.styles.ErrorText.Render("○")
 	}
 	right := dot + base.Render(" "+m.user+" ")
+
+	// What is left between the buttons and the connection dot holds the
+	// team and channel, then any status message. A message that will not
+	// fit beside them takes their room: the channel is on screen already,
+	// the message is news. Whatever still does not fit is cut short, so the
+	// bar never runs past the edge and pushes the dot and name off it.
+	room := max(m.width-x-ansi.StringWidth(right), 0)
+	ctx := " │ " + m.team
+	if m.channel != "" {
+		ctx += " > " + m.channel
+	}
+	status := ""
+	if m.err != "" {
+		status = " " + m.err
+		if ansi.StringWidth(ctx)+ansi.StringWidth(status) > room {
+			ctx = ""
+		}
+	}
+	ctx = ansi.Truncate(ctx, room, "…")
+	status = ansi.Truncate(status, room-ansi.StringWidth(ctx), "…")
+	write(base.Render(ctx))
+	if status != "" {
+		write(m.styles.ErrorText.Render(status))
+	}
 
 	gap := m.width - x - ansi.StringWidth(right)
 	if gap < 0 {

@@ -11,22 +11,6 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/palette"
 )
 
-// runCmds executes a command (unwrapping batches) and returns the messages.
-func runCmds(cmd tea.Cmd) []tea.Msg {
-	if cmd == nil {
-		return nil
-	}
-	msg := cmd()
-	if batch, ok := msg.(tea.BatchMsg); ok {
-		var msgs []tea.Msg
-		for _, c := range batch {
-			msgs = append(msgs, runCmds(c)...)
-		}
-		return msgs
-	}
-	return []tea.Msg{msg}
-}
-
 func TestModel_TeamsLoadedFetchesChannelsForAllTeams(t *testing.T) {
 	m := testModel()
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
@@ -38,7 +22,7 @@ func TestModel_TeamsLoadedFetchesChannelsForAllTeams(t *testing.T) {
 	}})
 
 	requested := map[string]bool{}
-	for _, msg := range runCmds(cmd) {
+	for _, msg := range messagesOf(cmd) {
 		if cl, ok := msg.(tui.ChannelsLoadedMsg); ok {
 			requested[cl.TeamID] = true
 		}

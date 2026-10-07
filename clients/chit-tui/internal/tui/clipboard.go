@@ -1,11 +1,16 @@
 package tui
 
 import (
+	"io"
 	"os"
 
 	"github.com/aymanbagabas/go-osc52/v2"
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+// clipboardOut is where the OSC 52 sequence goes: the terminal, except in
+// tests, which would otherwise write escape sequences into their output.
+var clipboardOut io.Writer = os.Stdout
 
 // copyToClipboard writes text to the system clipboard using OSC 52.
 //
@@ -24,7 +29,7 @@ func copyToClipboard(text string) tea.Cmd {
 		// A failed write means the terminal did not receive the sequence;
 		// there is no recovery and no channel to report it on, and the
 		// acknowledgement below is already best-effort for the same reason.
-		_, _ = osc52.New(text).WriteTo(os.Stdout)
+		_, _ = osc52.New(text).WriteTo(clipboardOut)
 		return clipboardCopiedMsg{lines: countLines(text)}
 	}
 }

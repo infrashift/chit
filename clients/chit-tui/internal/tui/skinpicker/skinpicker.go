@@ -4,6 +4,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/listwin"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 )
 
@@ -112,8 +113,8 @@ func (m Model) View() string {
 	items = append(items, m.styles.ListItemActive.Render("Select Theme"))
 	items = append(items, "")
 
-	maxItems := min(len(m.skins), max((m.height/2)-4, 5))
-	for i := range maxItems {
+	start, end := listwin.Window(m.cursor, len(m.skins), listwin.Rows(m.height))
+	for i := start; i < end; i++ {
 		name := m.skins[i]
 		if i == m.cursor {
 			items = append(items, m.styles.ListItemActive.Render("> "+name))

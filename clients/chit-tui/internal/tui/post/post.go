@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/glamour"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/mention"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
@@ -83,11 +82,6 @@ func (m Model) View() string {
 		result = m.styles.ReplyIndent.Render(result)
 	}
 	return result
-}
-
-// Height returns the approximate rendered height.
-func (m Model) Height() int {
-	return lipgloss.Height(m.View())
 }
 
 func highlightMentions(content, currentUsername string, s styles.Styles) string {

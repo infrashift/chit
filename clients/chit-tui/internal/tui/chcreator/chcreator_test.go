@@ -3,20 +3,16 @@ package chcreator_test
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/testutil"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/chcreator"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
 
-func testStyles() styles.Styles {
-	return styles.New(theme.TokyoNight())
-}
-
 func TestChCreator_OpenClose(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	if m.Visible() {
 		t.Error("should not be visible initially")
 	}
@@ -33,7 +29,7 @@ func TestChCreator_OpenClose(t *testing.T) {
 }
 
 func TestChCreator_EscapeCloses(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.Open("t1")
 
@@ -44,7 +40,7 @@ func TestChCreator_EscapeCloses(t *testing.T) {
 }
 
 func TestChCreator_FieldNavigation(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.Open("t1")
 
@@ -85,7 +81,7 @@ func TestChCreator_AutoSlug(t *testing.T) {
 }
 
 func TestChCreator_AutoSlugWhileTyping(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.Open("t1")
 
@@ -101,7 +97,7 @@ func TestChCreator_AutoSlugWhileTyping(t *testing.T) {
 }
 
 func TestChCreator_ManualNameDisablesAutoSlug(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.Open("t1")
 
@@ -138,7 +134,7 @@ func TestChCreator_ManualNameDisablesAutoSlug(t *testing.T) {
 }
 
 func TestChCreator_TypeToggle(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.Open("t1")
 
@@ -168,7 +164,7 @@ func TestChCreator_TypeToggle(t *testing.T) {
 }
 
 func TestChCreator_ValidationEmptyDisplayName(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.Open("t1")
 
@@ -184,7 +180,7 @@ func TestChCreator_ValidationEmptyDisplayName(t *testing.T) {
 }
 
 func TestChCreator_ValidationInvalidName(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.Open("t1")
 
@@ -205,7 +201,7 @@ func TestChCreator_ValidationInvalidName(t *testing.T) {
 }
 
 func TestChCreator_SubmitSuccess(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.Open("t1")
 
@@ -239,7 +235,7 @@ func TestChCreator_SubmitSuccess(t *testing.T) {
 }
 
 func TestChCreator_SubmitPrivate(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.Open("t1")
 
@@ -268,7 +264,7 @@ func TestChCreator_SubmitPrivate(t *testing.T) {
 }
 
 func TestChCreator_SubmitWithPurpose(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.Open("t1")
 
@@ -298,7 +294,7 @@ func TestChCreator_SubmitWithPurpose(t *testing.T) {
 }
 
 func TestChCreator_ViewHiddenEmpty(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 
 	view := m.View()
@@ -308,7 +304,7 @@ func TestChCreator_ViewHiddenEmpty(t *testing.T) {
 }
 
 func TestChCreator_ViewShowsAllFields(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.Open("t1")
 
@@ -328,7 +324,7 @@ func TestChCreator_ViewShowsAllFields(t *testing.T) {
 }
 
 func TestChCreator_IgnoresInputWhenNotVisible(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 
 	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -361,7 +357,7 @@ func TestChCreator_ValidateName(t *testing.T) {
 }
 
 func TestChCreator_ClearsValidErrOnType(t *testing.T) {
-	m := chcreator.New(testStyles())
+	m := chcreator.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.Open("t1")
 
@@ -377,5 +373,27 @@ func TestChCreator_ClearsValidErrOnType(t *testing.T) {
 	view = m.View()
 	if strings.Contains(view, "required") {
 		t.Error("validation error should clear after typing")
+	}
+}
+
+// The slug kept letters outside a-z, which the name check then rejected,
+// and cut long names by byte, splitting a character.
+func TestSlug_IsAlwaysAValidName(t *testing.T) {
+	for _, in := range []string{
+		"Café Ops",
+		"日本語 team",
+		strings.Repeat("é", 40) + " and more words to make it long",
+		"Deploy -- Notes",
+	} {
+		got := chcreator.Slug(in)
+		if got != "" && !chcreator.ValidateName(got) {
+			t.Errorf("Slug(%q) = %q, which the name check rejects", in, got)
+		}
+		if !utf8.ValidString(got) {
+			t.Errorf("Slug(%q) = %q, not valid UTF-8", in, got)
+		}
+	}
+	if got := chcreator.Slug("Café Ops"); got != "caf-ops" && got != "cafe-ops" {
+		t.Errorf(`Slug("Café Ops") = %q`, got)
 	}
 }

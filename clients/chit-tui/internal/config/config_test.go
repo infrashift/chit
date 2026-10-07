@@ -136,3 +136,48 @@ func TestConfig_KratosBaseURL(t *testing.T) {
 		t.Errorf("KratosBaseURL() = %q, want %q", got, want)
 	}
 }
+
+// A secure server defaulted to an insecure WebSocket: the dial failed, or the
+// session token crossed the network in the clear.
+func TestLoad_HTTPSServerDefaultsToSecureWebSocket(t *testing.T) {
+	t.Setenv("CHIT_SERVER_URL", "https://chat.example.com")
+	t.Setenv("CHIT_WS_SCHEME", "")
+
+	cfg, _, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := cfg.WSURL(), "wss://chat.example.com/api/v1/websocket"; got != want {
+		t.Errorf("WSURL = %q, want %q", got, want)
+	}
+}
+
+func TestLoad_ExplicitWSSchemeStillWins(t *testing.T) {
+	t.Setenv("CHIT_SERVER_URL", "https://chat.example.com")
+	t.Setenv("CHIT_WS_SCHEME", "ws")
+
+	cfg, _, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.WSScheme != "ws" {
+		t.Errorf("WSScheme = %q, want the explicit ws", cfg.WSScheme)
+	}
+}
+
+// "http://host/" produced "http://host//api/v1".
+func TestLoad_TrailingSlashIsDropped(t *testing.T) {
+	t.Setenv("CHIT_SERVER_URL", "http://localhost:4455/")
+	t.Setenv("CHIT_WS_SCHEME", "")
+
+	cfg, _, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ServerURL != "http://localhost:4455" {
+		t.Errorf("ServerURL = %q", cfg.ServerURL)
+	}
+	if got, want := cfg.WSURL(), "ws://localhost:4455/api/v1/websocket"; got != want {
+		t.Errorf("WSURL = %q, want %q", got, want)
+	}
+}

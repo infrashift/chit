@@ -190,7 +190,7 @@ func themeErrorMessages(raw map[string]any, verr error) []string {
 
 		switch {
 		case colorKeys[key]:
-			msgs = append(msgs, fmt.Sprintf("key `%s` must be a hex color such as #7aa2f7", key))
+			msgs = append(msgs, fmt.Sprintf("key `%s` must be a hex color such as #7aa2f7, or a terminal color name such as blue", key))
 		case key == "name" || key == "author":
 			msgs = append(msgs, fmt.Sprintf("key `%s` must be a string", key))
 		default:

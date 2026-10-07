@@ -224,3 +224,14 @@ func TestIsDarkColor(t *testing.T) {
 		})
 	}
 }
+
+// isDarkColor reports whether a color reads as dark, by channel average. A
+// color with no RGB form (nil, ANSI index) counts as dark, matching the
+// terminal default assumption used elsewhere.
+func isDarkColor(c color.Color) bool {
+	r, g, b, ok := rgbComponents(c)
+	if !ok {
+		return true
+	}
+	return (int(r)+int(g)+int(b))/3 < 128
+}

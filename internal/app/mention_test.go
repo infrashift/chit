@@ -167,6 +167,10 @@ func (s *mentionMockChannelStore) GetDirectChannelsForUser(_ context.Context, _ 
 func (s *mentionMockChannelStore) IncrementMsgCount(_ context.Context, _ string, _ int64) error {
 	return nil
 }
+func (s *mentionMockChannelStore) GetMembersForUser(_ context.Context, _, _ string) ([]*model.ChannelMember, error) {
+	return nil, nil
+}
+
 func (s *mentionMockChannelStore) GetChannelIDsForUser(_ context.Context, userID string) ([]string, error) {
 	var ids []string
 	for channelID, members := range s.members {

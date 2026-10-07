@@ -2,8 +2,10 @@ package app
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/infrashift/chit/internal/model"
+	"github.com/infrashift/chit/internal/pubsub"
 )
 
 // Tag operations are authorized against the channel the post belongs to. A tag
@@ -28,7 +30,11 @@ func (a *App) AddTagToPost(ctx context.Context, messageID, tagID, actorID string
 	if err := a.requirePostChannelMember(ctx, messageID, actorID); err != nil {
 		return err
 	}
-	return a.Store.Tag().AddTagToPost(ctx, messageID, tagID)
+	if err := a.Store.Tag().AddTagToPost(ctx, messageID, tagID); err != nil {
+		return err
+	}
+	a.broadcastPostTags(ctx, messageID)
+	return nil
 }
 
 // RemoveTagFromPost removes a tag association, requiring the actor to be a
@@ -37,7 +43,37 @@ func (a *App) RemoveTagFromPost(ctx context.Context, messageID, tagID, actorID s
 	if err := a.requirePostChannelMember(ctx, messageID, actorID); err != nil {
 		return err
 	}
-	return a.Store.Tag().RemoveTagFromPost(ctx, messageID, tagID)
+	if err := a.Store.Tag().RemoveTagFromPost(ctx, messageID, tagID); err != nil {
+		return err
+	}
+	a.broadcastPostTags(ctx, messageID)
+	return nil
+}
+
+// broadcastPostTags sends a post's whole tag list to its channel after a
+// change. Tags are applied after a post is created, by separate requests,
+// so without this other clients only saw them after reloading the channel.
+// The full list, rather than the one tag that changed, lets a client
+// replace what it has without tracking adds and removes.
+func (a *App) broadcastPostTags(ctx context.Context, postID string) {
+	post, err := a.Store.Post().Get(ctx, postID)
+	if err != nil {
+		slog.Warn("post_tags_updated: could not read post", "post_id", postID, "error", err)
+		return
+	}
+	tags, err := a.Store.Tag().GetTagsForPost(ctx, postID)
+	if err != nil {
+		slog.Warn("post_tags_updated: could not read tags", "post_id", postID, "error", err)
+		return
+	}
+	if tags == nil {
+		tags = []*model.Tag{}
+	}
+	a.publishEvent(ctx, &model.WebSocketEvent{
+		Event:     model.WebSocketEventPostTagsUpdated,
+		Data:      map[string]any{"post_id": postID, "channel_id": post.ChannelID, "tags": tags},
+		Broadcast: &model.WebSocketBroadcast{ChannelID: post.ChannelID},
+	}, pubsub.EventEnvelope{Event: model.WebSocketEventPostTagsUpdated, PostID: postID, ChannelID: post.ChannelID})
 }
 
 // GetTagsForPost retrieves tags for a post, requiring the actor to be a member

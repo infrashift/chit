@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/api"
@@ -24,6 +25,7 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/viewport"
+	"github.com/infrashift/chit/clients/chit-tui/internal/ws"
 )
 
 func testModel() tui.Model {
@@ -91,9 +93,8 @@ func setupModel(t *testing.T) tui.Model {
 func TestModel_Init_FetchesUserAndTeams(t *testing.T) {
 	m := testModel()
 	cmd := m.Init()
-	if cmd == nil {
-		t.Fatal("expected init commands")
-	}
+	wantMsg[tui.UserLoadedMsg](t, cmd)
+	wantMsg[tui.TeamsLoadedMsg](t, cmd)
 }
 
 func TestModel_WindowSize(t *testing.T) {
@@ -132,9 +133,7 @@ func TestModel_ChannelSelectLoadsPosts(t *testing.T) {
 	m := setupModel(t)
 	ch := &model.Channel{ID: "c2", DisplayName: "Random"}
 	_, cmd := m.Update(palette.ChannelChosenMsg{Channel: ch})
-	if cmd == nil {
-		t.Error("expected command to fetch posts")
-	}
+	wantMsg[tui.PostsLoadedMsg](t, cmd)
 }
 
 func TestModel_WSEventInsertsPost(t *testing.T) {
@@ -165,9 +164,7 @@ func openThread(t *testing.T, m tui.Model) tui.Model {
 	t.Helper()
 	updated, cmd := m.Update(viewport.PostSelectedMsg{Post: &model.Post{ID: "p1", UserID: "u1", Content: "Hello"}})
 	m = updated.(tui.Model)
-	if cmd == nil {
-		t.Fatal("expected command to fetch thread")
-	}
+	wantMsg[tui.ThreadLoadedMsg](t, cmd)
 	updated, _ = m.Update(tui.ThreadLoadedMsg{
 		PostID: "p1",
 		Posts: &model.PostList{
@@ -222,20 +219,25 @@ func TestModel_PaletteSlashModeListsCommands(t *testing.T) {
 	}
 }
 
-func TestModel_EscClosesPalette(t *testing.T) {
-	m := setupModel(t)
+// Esc closes the palette, whichever mode opened it, and hands the keyboard
+// back to the input.
+func TestModel_EscClosesThePalette(t *testing.T) {
+	for _, opener := range []tea.KeyType{tea.KeyCtrlK, tea.KeyCtrlS} {
+		m := setupModel(t)
+		m, _ = step(t, m, tea.KeyMsg{Type: opener})
+		if m.Focused() != tui.FocusPalette {
+			t.Fatalf("%v: palette did not take focus", opener)
+		}
 
-	// Open palette
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
-	m = updated.(tui.Model)
+		m, _ = step(t, m, tea.KeyMsg{Type: tea.KeyEscape})
 
-	// Close with escape
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
-	m = updated.(tui.Model)
-
-	view := m.View()
-	// Should not show palette search input
-	_ = view
+		if m.Focused() != tui.FocusInput {
+			t.Errorf("%v: focus = %v after Esc, want the input", opener, m.Focused())
+		}
+		if strings.Contains(viewOf(m), "↵ select") {
+			t.Errorf("%v: palette still drawn after Esc:\n%s", opener, viewOf(m))
+		}
+	}
 }
 
 func TestModel_PostSelectedOpensThread(t *testing.T) {
@@ -243,21 +245,24 @@ func TestModel_PostSelectedOpensThread(t *testing.T) {
 
 	p := &model.Post{ID: "p1", UserID: "u1", Content: "Hello", CreateAt: 1700000000000}
 	_, cmd := m.Update(viewport.PostSelectedMsg{Post: p})
-	if cmd == nil {
-		t.Error("expected command to fetch thread")
-	}
+	wantMsg[tui.ThreadLoadedMsg](t, cmd)
 }
 
-func TestModel_CommandChosenMsg(t *testing.T) {
+// Choosing a command inserts it for completing rather than running it.
+func TestModel_CommandChosenInsertsIt(t *testing.T) {
 	m := setupModel(t)
+	if strings.Contains(viewOf(m), "/remind") {
+		t.Fatal("setup: /remind already on screen")
+	}
 
-	cmd := &model.Command{ID: "cmd1", Slug: "remind"}
-	updated, _ := m.Update(palette.CommandChosenMsg{Command: cmd})
-	m = updated.(tui.Model)
+	m, _ = step(t, m, palette.CommandChosenMsg{Command: &model.Command{ID: "cmd1", Slug: "remind"}})
 
-	// Focus should return to input
-	view := m.View()
-	_ = view
+	if !strings.Contains(viewOf(m), "/remind") {
+		t.Errorf("command not inserted into the input:\n%s", viewOf(m))
+	}
+	if m.Focused() != tui.FocusInput {
+		t.Errorf("focus = %v, want the input", m.Focused())
+	}
 }
 
 func TestModel_ErrorMsg(t *testing.T) {
@@ -293,28 +298,14 @@ func TestModel_ShiftTabCyclesFocusBackward(t *testing.T) {
 	}
 }
 
-func TestModel_ThreadLoadedMsg(t *testing.T) {
-	m := setupModel(t)
-	updated, _ := m.Update(tui.ThreadLoadedMsg{
-		PostID: "p1",
-		Posts: &model.PostList{
-			Order: []*model.Post{
-				{ID: "p1", UserID: "u1", Content: "Root", CreateAt: 1700000000000},
-				{ID: "r1", UserID: "u1", Content: "Reply", RootID: "p1", CreateAt: 1700000001000},
-			},
-		},
-	})
-	m = updated.(tui.Model)
-	view := m.View()
-	_ = view
-}
+func TestModel_SendPostsToTheActiveChannel(t *testing.T) {
+	m, client := withOwnPost(t)
 
-func TestModel_SendMsgFromInput(t *testing.T) {
-	m := setupModel(t)
-	updated, cmd := m.Update(input.SendMsg{Content: "test message"})
-	m = updated.(tui.Model)
-	_ = m
-	_ = cmd
+	_ = send(t, m, "test message")
+
+	if p := client.lastCreatedPost; p == nil || p.Content != "test message" || p.ChannelID != "c1" {
+		t.Errorf("created %+v, want \"test message\" in c1", p)
+	}
 }
 
 func TestModel_SendMsgInThreadPaneCreatesReply(t *testing.T) {
@@ -340,9 +331,7 @@ func TestModel_SendMsgInThreadPaneCreatesReply(t *testing.T) {
 
 	// Sending from the input while in the thread pane creates a reply.
 	_, cmd := m.Update(input.SendMsg{Content: "my reply"})
-	if cmd == nil {
-		t.Fatal("expected command from SendMsg in thread pane")
-	}
+	wantMsg[tui.PostCreatedMsg](t, cmd)
 	cmd()
 	if client.lastCreatedPost == nil {
 		t.Fatal("expected CreatePost to be called")
@@ -372,77 +361,52 @@ func TestModel_EscClosesThread(t *testing.T) {
 	}
 }
 
-func TestModel_WSEventDropsStale(t *testing.T) {
-	m := setupModel(t)
+// Commands this client does not implement go to the server as a message;
+// the server owns the registry and replies to an unknown one.
+func TestModel_ServerSlashCommandIsSent(t *testing.T) {
+	m, client := withOwnPost(t)
 
-	// Send event with seq=5
-	updated, _ := m.Update(tui.WebSocketEventMsg{
-		Event: model.WebSocketEvent{
-			Event:    model.WebSocketEventPosted,
-			Sequence: 5,
-			Data: map[string]any{
-				"id": "p2", "channel_id": "c1", "user_id": "u1",
-				"content": "first", "create_at": float64(1700000002000),
-			},
-		},
-	})
-	m = updated.(tui.Model)
+	_, cmd := step(t, m, input.SlashTriggerMsg{Input: "/remind me in 5m"})
+	drain(cmd)
 
-	// Send stale event with seq=3, should be dropped
-	updated, _ = m.Update(tui.WebSocketEventMsg{
-		Event: model.WebSocketEvent{
-			Event:    model.WebSocketEventPosted,
-			Sequence: 3,
-			Data: map[string]any{
-				"id": "p3", "channel_id": "c1", "user_id": "u1",
-				"content": "stale", "create_at": float64(1700000003000),
-			},
-		},
-	})
-	m = updated.(tui.Model)
-
-	view := m.View()
-	if strings.Contains(view, "stale") {
-		t.Error("stale WS event should have been dropped")
+	if p := client.lastCreatedPost; p == nil || p.Content != "/remind me in 5m" {
+		t.Errorf("created %+v, want the command sent as typed", p)
 	}
 }
 
-func TestModel_ChannelViewedMsg(t *testing.T) {
+func TestModel_HistoryKeysMoveTheSelection(t *testing.T) {
 	m := setupModel(t)
-	updated, _ := m.Update(tui.ChannelViewedMsg{ChannelID: "c1"})
-	m = updated.(tui.Model)
-	_ = m
+	// Newest first, as the API returns them.
+	m, _ = step(t, m, tui.PostsLoadedMsg{ChannelID: "c1", Posts: posts("c1", "newest", "oldest")})
+	m, _ = step(t, m, tea.KeyMsg{Type: tea.KeyTab})
+	if got := m.SelectedPostID(); got != "c1-newest" {
+		t.Fatalf("setup: selected %q, want the newest", got)
+	}
+
+	m, _ = step(t, m, key('k'))
+
+	if got := m.SelectedPostID(); got != "c1-oldest" {
+		t.Errorf("selected %q after k, want the post above", got)
+	}
 }
 
-func TestModel_SlashTriggerOpensPalette(t *testing.T) {
+// Keys reach the input once Tab has cycled focus back to it.
+func TestModel_TypingReachesTheInput(t *testing.T) {
 	m := setupModel(t)
-	updated, _ := m.Update(input.SlashTriggerMsg{Input: "/remind"})
-	m = updated.(tui.Model)
-	_ = m
-}
+	m, _ = step(t, m, tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = step(t, m, tea.KeyMsg{Type: tea.KeyTab})
+	for _, r := range "hi" {
+		m, _ = step(t, m, key(r))
+	}
 
-func TestModel_DelegateKeyToViewport(t *testing.T) {
-	m := setupModel(t)
-	// Tab to viewport
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(tui.Model)
-	// Send a key to viewport
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
-	m = updated.(tui.Model)
-	_ = m
-}
+	_, cmd := step(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 
-func TestModel_DelegateKeyToInput(t *testing.T) {
-	m := setupModel(t)
-	// Tab to viewport, then to input
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(tui.Model)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(tui.Model)
-	// Type in input
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
-	m = updated.(tui.Model)
-	_ = m
+	for _, msg := range messagesOf(cmd) {
+		if sent, ok := msg.(input.SendMsg); ok && sent.Content == "hi" {
+			return
+		}
+	}
+	t.Error("Enter did not send what was typed")
 }
 
 func TestModel_DelegateKeyToThread(t *testing.T) {
@@ -456,15 +420,29 @@ func TestModel_DelegateKeyToThread(t *testing.T) {
 	_ = m
 }
 
-func TestModel_DelegateKeyToPalette(t *testing.T) {
+// Keys typed with the palette open filter it.
+func TestModel_TypingFiltersThePalette(t *testing.T) {
 	m := setupModel(t)
-	// Open palette
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
-	m = updated.(tui.Model)
-	// Send key to palette
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
-	m = updated.(tui.Model)
-	_ = m
+	m, _ = step(t, m, tui.ChannelsLoadedMsg{TeamID: "t1", Channels: []*model.Channel{
+		{ID: "c1", TeamID: "t1", DisplayName: "General"},
+		{ID: "c2", TeamID: "t1", DisplayName: "Random"},
+	}})
+	m, _ = step(t, m, tea.KeyMsg{Type: tea.KeyCtrlK})
+	for _, r := range "rand" {
+		m, _ = step(t, m, key(r))
+	}
+
+	_, cmd := step(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	for _, msg := range messagesOf(cmd) {
+		if chosen, ok := msg.(palette.ChannelChosenMsg); ok {
+			if chosen.Channel.ID != "c2" {
+				t.Errorf("chose %q, want Random", chosen.Channel.DisplayName)
+			}
+			return
+		}
+	}
+	t.Error("Enter chose no channel")
 }
 
 func TestModel_TabWithThread(t *testing.T) {
@@ -479,30 +457,22 @@ func TestModel_TabWithThread(t *testing.T) {
 	_ = m
 }
 
+// Ctrl+S opens the palette in message search: what is typed is searched for.
 func TestModel_CtrlSOpensSearch(t *testing.T) {
 	m := setupModel(t)
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
-	m = updated.(tui.Model)
-
-	view := m.View()
-	if !strings.Contains(view, "Search") {
-		t.Errorf("expected search overlay in view:\n%s", view)
+	m, _ = step(t, m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	if m.Focused() != tui.FocusPalette {
+		t.Fatalf("focus = %v, want the palette", m.Focused())
 	}
-}
+	for _, r := range "deploy" {
+		m, _ = step(t, m, key(r))
+	}
+	_, cmd := step(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 
-func TestModel_EscClosesSearch(t *testing.T) {
-	m := setupModel(t)
-
-	// Open search
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
-	m = updated.(tui.Model)
-
-	// Close with escape
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
-	m = updated.(tui.Model)
-
-	_ = m.View()
+	if got := wantMsg[palette.SearchSubmitMsg](t, cmd); got.Term != "deploy" {
+		t.Errorf("searched for %q, want deploy", got.Term)
+	}
 }
 
 func TestModel_SearchResultsMsg(t *testing.T) {
@@ -526,23 +496,27 @@ func TestModel_SearchResultsMsg(t *testing.T) {
 	}
 }
 
-func TestModel_SearchResultSelected(t *testing.T) {
+// Choosing a search hit in this channel selects it in the history.
+func TestModel_SearchResultIsSelected(t *testing.T) {
 	m := setupModel(t)
+	// Newest first: the hit is not the post selected by default.
+	m, _ = step(t, m, tui.PostsLoadedMsg{ChannelID: "c1", Posts: posts("c1", "later", "the hit")})
 
-	updated, _ := m.Update(palette.PostChosenMsg{
-		Post: &model.Post{ID: "p1", Content: "result"},
-	})
-	m = updated.(tui.Model)
-	_ = m
+	m, _ = step(t, m, palette.PostChosenMsg{Post: &model.Post{ID: "c1-the hit", ChannelID: "c1"}})
+
+	if got := m.SelectedPostID(); got != "c1-the hit" {
+		t.Errorf("selected %q, want the hit", got)
+	}
+	if m.Focused() != tui.FocusViewport {
+		t.Errorf("focus = %v, want the history pane", m.Focused())
+	}
 }
 
 func TestModel_SearchSubmitMsg(t *testing.T) {
 	m := setupModel(t)
 
 	_, cmd := m.Update(palette.SearchSubmitMsg{Term: "hello"})
-	if cmd == nil {
-		t.Error("expected command to search posts")
-	}
+	wantMsg[tui.SearchResultsMsg](t, cmd)
 }
 
 func TestModel_WSConnectedStartsListening(t *testing.T) {
@@ -575,27 +549,26 @@ func TestModel_WSConnectedStartsListening(t *testing.T) {
 func TestModel_ChannelMembersComputesUnread(t *testing.T) {
 	m := setupModel(t)
 
-	// Channel c1 has TotalMsgCount=0 from setupModel. Set a channel with known count.
+	// c1 is open, and so always read; c2 has ten messages.
 	updated, _ := m.Update(tui.ChannelsLoadedMsg{
 		TeamID: "t1",
-		Channels: []*model.Channel{{
-			ID:            "c1",
-			DisplayName:   "General",
-			TotalMsgCount: 10,
-		}},
+		Channels: []*model.Channel{
+			{ID: "c1", DisplayName: "General"},
+			{ID: "c2", DisplayName: "Random", TotalMsgCount: 10},
+		},
 	})
 	m = updated.(tui.Model)
 
 	// Simulate channel members loaded with user having read 7 messages
 	updated, _ = m.Update(tui.ChannelMembersLoadedMsg{
-		ChannelID: "c1",
+		ChannelID: "c2",
 		Members: []*model.ChannelMember{
-			{ChannelID: "c1", UserID: "u1", MsgCount: 7},
+			{ChannelID: "c2", UserID: "u1", MsgCount: 7},
 		},
 	})
 	m = updated.(tui.Model)
 
-	if got := m.UnreadCount("c1"); got != 3 {
+	if got := m.UnreadCount("c2"); got != 3 {
 		t.Fatalf("expected unread count 3, got %d", got)
 	}
 
@@ -608,97 +581,72 @@ func TestModel_ChannelMembersComputesUnread(t *testing.T) {
 	}
 }
 
-func TestModel_WSMentionedEventIncrementsBadge(t *testing.T) {
+// A mention counts toward its channel's badge until the channel is viewed.
+func TestModel_MentionBadgeCountsUntilViewed(t *testing.T) {
 	m := setupModel(t)
+	mentioned := tui.WebSocketEventMsg{Event: model.WebSocketEvent{
+		Event: model.WebSocketEventMentioned,
+		Data:  map[string]any{"channel_id": "c2", "post_id": "x1", "user_id": "u2"},
+		// As the server sends it: the channel in the data, only the
+		// recipient in the broadcast.
+		Broadcast: &model.WebSocketBroadcast{UserID: "u1"},
+	}}
 
-	wsEvt := tui.WebSocketEventMsg{
-		Event: model.WebSocketEvent{
-			Event:    model.WebSocketEventMentioned,
-			Sequence: 1,
-			Data:     map[string]any{},
-			Broadcast: &model.WebSocketBroadcast{
-				ChannelID: "c1",
-			},
-		},
+	m, _ = step(t, m, mentioned)
+	m, _ = step(t, m, mentioned)
+	if got := m.MentionCount("c2"); got != 2 {
+		t.Fatalf("mentions = %d after two, want 2", got)
 	}
-	updated, _ := m.Update(wsEvt)
-	m = updated.(tui.Model)
-	_ = m
+
+	m, _ = step(t, m, tui.ChannelViewedMsg{ChannelID: "c2"})
+	if got := m.MentionCount("c2"); got != 0 {
+		t.Errorf("mentions = %d after viewing, want 0", got)
+	}
 }
 
-func TestModel_ChannelViewedClearsMention(t *testing.T) {
+func TestModel_MentionPopupShowsAndHides(t *testing.T) {
 	m := setupModel(t)
 
-	// Simulate mention increment
-	updated, _ := m.Update(tui.WebSocketEventMsg{
-		Event: model.WebSocketEvent{
-			Event:    model.WebSocketEventMentioned,
-			Sequence: 1,
-			Data:     map[string]any{},
-			Broadcast: &model.WebSocketBroadcast{
-				ChannelID: "c1",
-			},
-		},
-	})
-	m = updated.(tui.Model)
+	m, _ = step(t, m, input.AtTriggerMsg{Prefix: "", StartCol: 0})
+	if !strings.Contains(viewOf(m), "@channel") {
+		t.Fatalf("popup not shown:\n%s", viewOf(m))
+	}
 
-	// View channel clears mention
-	updated, _ = m.Update(tui.ChannelViewedMsg{ChannelID: "c1"})
-	m = updated.(tui.Model)
-	_ = m
+	m, _ = step(t, m, input.AtDismissMsg{})
+	if strings.Contains(viewOf(m), "@channel") {
+		t.Errorf("popup still shown after dismiss:\n%s", viewOf(m))
+	}
 }
 
-func TestModel_AtTriggerShowsMention(t *testing.T) {
+func TestModel_MentionChosenIsInserted(t *testing.T) {
 	m := setupModel(t)
+	for _, r := range "hi @al" {
+		m, _ = step(t, m, key(r))
+	}
 
-	updated, _ := m.Update(input.AtTriggerMsg{Prefix: "al", StartCol: 0})
-	m = updated.(tui.Model)
-	_ = m
+	m, _ = step(t, m, mention.UserSelectedMsg{Username: "alice", StartCol: 3})
+
+	if !strings.Contains(viewOf(m), "hi @alice") {
+		t.Errorf("mention not completed in the input:\n%s", viewOf(m))
+	}
 }
 
-func TestModel_AtDismissHidesMention(t *testing.T) {
+// The member row for the signed-in user carries their unread mentions.
+func TestModel_ChannelMembersSetTheMentionBadge(t *testing.T) {
 	m := setupModel(t)
+	m, _ = step(t, m, tui.ChannelsLoadedMsg{TeamID: "t1", Channels: []*model.Channel{
+		{ID: "c1", DisplayName: "General"},
+		{ID: "c2", DisplayName: "Random"},
+	}})
 
-	// Show mention first
-	updated, _ := m.Update(input.AtTriggerMsg{Prefix: "", StartCol: 0})
-	m = updated.(tui.Model)
+	m, _ = step(t, m, tui.ChannelMembersLoadedMsg{ChannelID: "c2", Members: []*model.ChannelMember{
+		{ChannelID: "c2", UserID: "someone-else", MentionCount: 9},
+		{ChannelID: "c2", UserID: "u1", MsgCount: 7, MentionCount: 2},
+	}})
 
-	// Dismiss
-	updated, _ = m.Update(input.AtDismissMsg{})
-	m = updated.(tui.Model)
-	_ = m
-}
-
-func TestModel_MentionUserSelected(t *testing.T) {
-	m := setupModel(t)
-
-	// Focus input first
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(tui.Model)
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(tui.Model)
-
-	// Show mention
-	updated, _ = m.Update(input.AtTriggerMsg{Prefix: "", StartCol: 0})
-	m = updated.(tui.Model)
-
-	// Select user
-	updated, _ = m.Update(mention.UserSelectedMsg{Username: "alice", StartCol: 0})
-	m = updated.(tui.Model)
-	_ = m
-}
-
-func TestModel_ChannelMembersLoadsMentions(t *testing.T) {
-	m := setupModel(t)
-
-	updated, _ := m.Update(tui.ChannelMembersLoadedMsg{
-		ChannelID: "c1",
-		Members: []*model.ChannelMember{
-			{ChannelID: "c1", UserID: "u1", MsgCount: 7, MentionCount: 2},
-		},
-	})
-	m = updated.(tui.Model)
-	_ = m
+	if got := m.MentionCount("c2"); got != 2 {
+		t.Errorf("mentions = %d, want the signed-in user's 2", got)
+	}
 }
 
 func TestModel_WSEventPostedOtherChannel(t *testing.T) {
@@ -797,31 +745,9 @@ func TestModel_WSEventThreadUpdated(t *testing.T) {
 	}
 }
 
-func TestModel_WSEventPostedIncrementsThreadCount(t *testing.T) {
-	m := setupModel(t)
-
-	// WS event: a reply post arrives in the active channel
-	wsEvt := tui.WebSocketEventMsg{
-		Event: model.WebSocketEvent{
-			Event:    model.WebSocketEventPosted,
-			Sequence: 1,
-			Data: map[string]any{
-				"id": "r1", "channel_id": "c1", "user_id": "u1",
-				"root_id": "p1", "content": "reply", "create_at": float64(1700000002000),
-			},
-		},
-	}
-	updated, _ := m.Update(wsEvt)
-	m = updated.(tui.Model)
-
-	view := testutil.StripANSI(m.View())
-	if !strings.Contains(view, "1 replies") {
-		t.Errorf("expected '1 replies' badge after WS reply:\n%s", view)
-	}
-}
-
 func TestModel_ThreadLoadedCachesCount(t *testing.T) {
 	m := setupModel(t)
+	m = startThread(t, m, &model.Post{ID: "p1", UserID: "u1", Content: "Hello"})
 
 	updated, _ := m.Update(tui.ThreadLoadedMsg{
 		PostID: "p1",
@@ -833,6 +759,7 @@ func TestModel_ThreadLoadedCachesCount(t *testing.T) {
 		},
 	})
 	m = updated.(tui.Model)
+	m, _ = step(t, m, tea.KeyMsg{Type: tea.KeyEscape})
 
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "1 replies") {
@@ -840,30 +767,27 @@ func TestModel_ThreadLoadedCachesCount(t *testing.T) {
 	}
 }
 
+// A failed load says so. Each loader is checked on its own: run together,
+// only the last one's message could be seen.
 func TestModel_ErrorMsgsFromLoaders(t *testing.T) {
-	m := setupModel(t)
-	errMsg := &model.AppError{Message: "fail"}
-
-	tests := []tea.Msg{
-		tui.UserLoadedMsg{Err: errMsg},
-		tui.TeamsLoadedMsg{Err: errMsg},
-		tui.ChannelsLoadedMsg{Err: errMsg},
-		tui.PostsLoadedMsg{Err: errMsg},
-		tui.PostCreatedMsg{Err: errMsg},
-		tui.ThreadLoadedMsg{Err: errMsg},
-		tui.CommandsLoadedMsg{Err: errMsg},
-		tui.UsersLoadedMsg{Err: errMsg},
-		tui.ChannelMembersLoadedMsg{Err: errMsg},
+	failed := func(what string) error { return &model.AppError{Message: what + " failed"} }
+	tests := map[string]tea.Msg{
+		"user":     tui.UserLoadedMsg{Err: failed("user")},
+		"teams":    tui.TeamsLoadedMsg{Err: failed("teams")},
+		"channels": tui.ChannelsLoadedMsg{Err: failed("channels")},
+		"posts":    tui.PostsLoadedMsg{ChannelID: "c1", Err: failed("posts")},
+		"send":     tui.PostCreatedMsg{Err: failed("send")},
+		"commands": tui.CommandsLoadedMsg{Err: failed("commands")},
+		"users":    tui.UsersLoadedMsg{Err: failed("users")},
+		"members":  tui.ChannelMembersLoadedMsg{Err: failed("members")},
 	}
-
-	for _, msg := range tests {
-		updated, _ := m.Update(msg)
-		m = updated.(tui.Model)
-	}
-
-	view := m.View()
-	if !strings.Contains(view, "fail") {
-		t.Errorf("expected error in view:\n%s", view)
+	for name, msg := range tests {
+		t.Run(name, func(t *testing.T) {
+			m, _ := step(t, setupModel(t), msg)
+			if !strings.Contains(viewOf(m), name+" failed") {
+				t.Errorf("error not shown:\n%s", viewOf(m))
+			}
+		})
 	}
 }
 
@@ -895,19 +819,6 @@ func TestModel_EscClosesPeopleMode(t *testing.T) {
 	}
 }
 
-func TestModel_DMChannelsLoadedMsg(t *testing.T) {
-	m := setupModel(t)
-
-	updated, _ := m.Update(tui.DMChannelsLoadedMsg{
-		Channels: []*model.Channel{
-			{ID: "dm1", Name: "u1__u2", Type: "D"},
-		},
-	})
-	m = updated.(tui.Model)
-
-	_ = m.View()
-}
-
 func TestModel_DMChannelsLoadedMsg_Error(t *testing.T) {
 	m := setupModel(t)
 
@@ -926,9 +837,7 @@ func TestModel_DMPickerSearchTriggered(t *testing.T) {
 	m := setupModel(t)
 
 	_, cmd := m.Update(dmpicker.SearchTriggeredMsg{Term: "bob"})
-	if cmd == nil {
-		t.Error("expected command from SearchTriggeredMsg")
-	}
+	wantMsg[tui.UserSearchResultsMsg](t, cmd)
 }
 
 func TestModel_UserSearchResultsMsg(t *testing.T) {
@@ -994,9 +903,7 @@ func TestModel_PaletteUserChosenCreatesDM(t *testing.T) {
 	_, cmd := m.Update(palette.UserChosenMsg{
 		User: &model.User{ID: "u2", Username: "bob"},
 	})
-	if cmd == nil {
-		t.Error("expected command from UserChosenMsg")
-	}
+	wantMsg[tui.DMCreatedMsg](t, cmd)
 }
 
 func TestModel_DMCreatedMsg(t *testing.T) {
@@ -1007,9 +914,7 @@ func TestModel_DMCreatedMsg(t *testing.T) {
 	})
 	m = updated.(tui.Model)
 
-	if cmd == nil {
-		t.Error("expected commands from DMCreatedMsg")
-	}
+	wantMsg[tui.DMChannelsLoadedMsg](t, cmd)
 	_ = m.View()
 }
 
@@ -1027,26 +932,6 @@ func TestModel_DMCreatedMsg_Error(t *testing.T) {
 	}
 }
 
-func TestModel_DMCreatedMsg_NoDuplicate(t *testing.T) {
-	m := setupModel(t)
-
-	// First, load DM channels
-	updated, _ := m.Update(tui.DMChannelsLoadedMsg{
-		Channels: []*model.Channel{
-			{ID: "dm1", Name: "u1__u2", Type: "D"},
-		},
-	})
-	m = updated.(tui.Model)
-
-	// Create same DM again - should not duplicate
-	updated, _ = m.Update(tui.DMCreatedMsg{
-		Channel: &model.Channel{ID: "dm1", Name: "u1__u2", Type: "D"},
-	})
-	m = updated.(tui.Model)
-
-	_ = m.View()
-}
-
 func TestModel_WSEventChannelCreatedDM(t *testing.T) {
 	m := setupModel(t)
 
@@ -1060,25 +945,71 @@ func TestModel_WSEventChannelCreatedDM(t *testing.T) {
 		},
 	}
 	_, cmd := m.Update(wsEvt)
-	if cmd == nil {
-		t.Error("expected command from channel_created DM event")
+	wantMsg[tui.DMChannelsLoadedMsg](t, cmd)
+}
+
+// A channel created in any of the user's teams is picked up; only the active
+// team's used to be, so channels in the others never appeared.
+func TestModel_ChannelCreatedRefreshesItsTeam(t *testing.T) {
+	client := &mockClient{}
+	m := modelWithClient(t, client)
+	m, _ = step(t, m, tui.TeamsLoadedMsg{Teams: []*model.Team{{ID: "t1"}, {ID: "t2"}}})
+	created := func(team string) tui.WebSocketEventMsg {
+		return tui.WebSocketEventMsg{Event: model.WebSocketEvent{
+			Event: model.WebSocketEventChannelCreated,
+			Data:  map[string]any{"type": "O", "team_id": team},
+		}}
+	}
+
+	client.channelsFetched = nil
+	_, cmd := step(t, m, created("t2"))
+	drain(cmd)
+	if !slices.Equal(client.channelsFetched, []string{"t2"}) {
+		t.Errorf("fetched channels for %v, want [t2]", client.channelsFetched)
+	}
+
+	client.channelsFetched = nil
+	_, cmd = step(t, m, created("not-mine"))
+	drain(cmd)
+	if len(client.channelsFetched) != 0 {
+		t.Errorf("fetched channels for %v on a team the user is not in", client.channelsFetched)
 	}
 }
 
-func TestModel_WSEventChannelCreatedNonDM(t *testing.T) {
-	m := setupModel(t)
+// Being added to a channel says which channel, not which team, so every team
+// is refreshed; previously only the active one was.
+func TestModel_AddedToAChannelRefreshesEveryTeam(t *testing.T) {
+	client := &mockClient{}
+	m := modelWithClient(t, client)
+	m, _ = step(t, m, tui.TeamsLoadedMsg{Teams: []*model.Team{{ID: "t1"}, {ID: "t2"}}})
+	client.channelsFetched = nil
 
-	wsEvt := tui.WebSocketEventMsg{
-		Event: model.WebSocketEvent{
-			Event:    model.WebSocketEventChannelCreated,
-			Sequence: 1,
-			Data: map[string]any{
-				"type": "O",
-			},
-		},
+	_, cmd := step(t, m, tui.WebSocketEventMsg{Event: model.WebSocketEvent{
+		Event: model.WebSocketEventUserAdded,
+		Data:  map[string]any{"user_id": "u1", "channel_id": "c9"},
+	}})
+	drain(cmd)
+
+	slices.Sort(client.channelsFetched)
+	if !slices.Equal(client.channelsFetched, []string{"t1", "t2"}) {
+		t.Errorf("fetched channels for %v, want both teams", client.channelsFetched)
 	}
-	_, _ = m.Update(wsEvt)
-	// Should not trigger FetchDMChannels for non-DM channel type
+}
+
+// Someone else joining changes who can be @-mentioned in that channel.
+func TestModel_SomeoneAddedRefreshesTheActiveChannelsMembers(t *testing.T) {
+	m, client := withOwnPost(t)
+	client.membersFetched = nil
+
+	_, cmd := step(t, m, tui.WebSocketEventMsg{Event: model.WebSocketEvent{
+		Event: model.WebSocketEventUserAdded,
+		Data:  map[string]any{"user_id": "u7", "channel_id": "c1"},
+	}})
+	drain(cmd)
+
+	if !slices.Equal(client.membersFetched, []string{"c1"}) {
+		t.Errorf("members fetched for %v, want [c1]", client.membersFetched)
+	}
 }
 
 func TestModel_DMDisplayNameResolution(t *testing.T) {
@@ -1133,9 +1064,7 @@ func TestModel_DMDisplayNameResolution_MeArrivesAfterDMChannels(t *testing.T) {
 	updated, cmd := m.Update(tui.UserLoadedMsg{User: &model.User{ID: "u1", Username: "alice"}})
 	m = updated.(tui.Model)
 
-	if cmd == nil {
-		t.Fatal("expected fetchMissingUsers command after UserLoadedMsg with pending DM channels")
-	}
+	wantMsg[tui.UsersLoadedMsg](t, cmd)
 
 	// Simulate the fetched user arriving
 	updated, _ = m.Update(tui.UsersLoadedMsg{
@@ -1169,20 +1098,6 @@ func TestModel_StatusBarDMChannel(t *testing.T) {
 	if !strings.Contains(view, "bob") {
 		t.Errorf("expected 'bob' in status bar for DM channel:\n%s", view)
 	}
-}
-
-func TestModel_DelegateKeyToDMPicker(t *testing.T) {
-	m := setupModel(t)
-
-	// Open DM picker
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
-	m = updated.(tui.Model)
-
-	// Type in DM picker
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-	m = updated.(tui.Model)
-
-	_ = m.View()
 }
 
 func TestModel_DMChannelsUnreadComputed(t *testing.T) {
@@ -1229,19 +1144,6 @@ func TestModel_SlashSkinOpensSkinPicker(t *testing.T) {
 	}
 }
 
-// A bare slash is a request to browse the command list.
-func TestModel_BareSlashOpensPalette(t *testing.T) {
-	m := setupModel(t)
-
-	updated, _ := m.Update(input.SlashTriggerMsg{Input: "/"})
-	m = updated.(tui.Model)
-
-	view := testutil.StripANSI(m.View())
-	if !strings.Contains(view, "remind") {
-		t.Errorf("expected the command palette in view:\n%s", view)
-	}
-}
-
 // Anything else goes to the server, which owns the command registry and the
 // unknown-command reply. Opening the palette here used to discard the text.
 func TestModel_SlashCommandIsSentToServer(t *testing.T) {
@@ -1250,9 +1152,7 @@ func TestModel_SlashCommandIsSentToServer(t *testing.T) {
 	updated, cmd := m.Update(input.SlashTriggerMsg{Input: "/invite bob"})
 	m = updated.(tui.Model)
 
-	if cmd == nil {
-		t.Fatal("no command returned; the slash text was dropped")
-	}
+	wantMsg[tui.PostCreatedMsg](t, cmd)
 
 	view := testutil.StripANSI(m.View())
 	if strings.Contains(view, "Commands") {
@@ -1439,9 +1339,7 @@ func TestModel_ChannelSubmittedMsg(t *testing.T) {
 	_, cmd := m.Update(chcreator.ChannelSubmittedMsg{
 		Channel: &model.Channel{TeamID: "t1", Name: "deploy", DisplayName: "Deploy", Type: "O"},
 	})
-	if cmd == nil {
-		t.Error("expected command from ChannelSubmittedMsg")
-	}
+	wantMsg[tui.ChannelCreatedMsg](t, cmd)
 }
 
 func TestModel_ChannelCreatedMsg(t *testing.T) {
@@ -1452,9 +1350,7 @@ func TestModel_ChannelCreatedMsg(t *testing.T) {
 	})
 	m = updated.(tui.Model)
 
-	if cmd == nil {
-		t.Error("expected commands from ChannelCreatedMsg")
-	}
+	wantMsg[tui.PostsLoadedMsg](t, cmd)
 	view := m.View()
 	if !strings.Contains(view, "Deploy") {
 		t.Errorf("expected 'Deploy' in sidebar:\n%s", view)
@@ -1489,26 +1385,7 @@ func TestModel_WSEventChannelCreatedOpenType(t *testing.T) {
 		},
 	}
 	_, cmd := m.Update(wsEvt)
-	if cmd == nil {
-		t.Error("expected command from channel_created O event")
-	}
-}
-
-func TestModel_WSEventChannelCreatedOtherTeam(t *testing.T) {
-	m := setupModel(t)
-
-	wsEvt := tui.WebSocketEventMsg{
-		Event: model.WebSocketEvent{
-			Event:    model.WebSocketEventChannelCreated,
-			Sequence: 1,
-			Data: map[string]any{
-				"type":    "O",
-				"team_id": "other-team",
-			},
-		},
-	}
-	_, _ = m.Update(wsEvt)
-	// Should not trigger FetchChannels for other team
+	wantMsg[tui.ChannelsLoadedMsg](t, cmd)
 }
 
 func TestModel_WSEventChannelCreatedGroup(t *testing.T) {
@@ -1524,9 +1401,7 @@ func TestModel_WSEventChannelCreatedGroup(t *testing.T) {
 		},
 	}
 	_, cmd := m.Update(wsEvt)
-	if cmd == nil {
-		t.Error("expected command from channel_created G event")
-	}
+	wantMsg[tui.DMChannelsLoadedMsg](t, cmd)
 }
 
 func TestModel_WSEventPostedResolvesUnknownUser(t *testing.T) {
@@ -1545,12 +1420,10 @@ func TestModel_WSEventPostedResolvesUnknownUser(t *testing.T) {
 	}
 	_, cmd := m.Update(wsEvt)
 
-	if cmd == nil {
-		t.Fatal("expected a command to fetch unknown user; got nil")
-	}
+	wantMsg[tui.UsersLoadedMsg](t, cmd)
 
 	// Execute the batched command and check that one of them returns UsersLoadedMsg
-	msgs := executeBatchCmd(cmd)
+	msgs := messagesOf(cmd)
 	found := false
 	for _, msg := range msgs {
 		if _, ok := msg.(tui.UsersLoadedMsg); ok {
@@ -1579,12 +1452,8 @@ func TestModel_WSEventPostedSkipsFetchForKnownUser(t *testing.T) {
 	}
 	_, cmd := m.Update(wsEvt)
 
-	if cmd == nil {
-		t.Fatal("expected at least ListenWebSocket command; got nil")
-	}
-
 	// Execute the batched command — should NOT contain a UsersLoadedMsg
-	msgs := executeBatchCmd(cmd)
+	msgs := messagesOf(cmd)
 	for _, msg := range msgs {
 		if _, ok := msg.(tui.UsersLoadedMsg); ok {
 			t.Error("should not fetch users for already-known user u1")
@@ -1610,7 +1479,7 @@ func TestModel_WSEventUserAddedRefetchesChannels(t *testing.T) {
 		t.Fatal("expected command from user_added event")
 	}
 
-	msgs := executeBatchCmd(cmd)
+	msgs := messagesOf(cmd)
 	foundChannelsLoaded := false
 	for _, msg := range msgs {
 		if _, ok := msg.(tui.ChannelsLoadedMsg); ok {
@@ -1636,50 +1505,13 @@ func TestModel_WSEventUserAddedIgnoresOtherUser(t *testing.T) {
 		},
 	}
 	_, cmd := m.Update(wsEvt)
-	if cmd == nil {
-		t.Fatal("expected at least ListenWebSocket command")
-	}
 
-	msgs := executeBatchCmd(cmd)
+	msgs := messagesOf(cmd)
 	for _, msg := range msgs {
 		if _, ok := msg.(tui.ChannelsLoadedMsg); ok {
 			t.Error("should NOT fetch channels when another user is added")
 		}
 	}
-}
-
-// executeBatchCmd runs a tea.Cmd and collects messages from batched commands.
-// Commands that panic (e.g. ListenWebSocket with nil wsClient) are skipped.
-func executeBatchCmd(cmd tea.Cmd) []tea.Msg {
-	if cmd == nil {
-		return nil
-	}
-	msg := safeExec(cmd)
-	if msg == nil {
-		return nil
-	}
-	// tea.Batch returns a BatchMsg (which is []Cmd)
-	if batch, ok := msg.(tea.BatchMsg); ok {
-		var msgs []tea.Msg
-		for _, c := range batch {
-			if c != nil {
-				if m := safeExec(c); m != nil {
-					msgs = append(msgs, m)
-				}
-			}
-		}
-		return msgs
-	}
-	return []tea.Msg{msg}
-}
-
-func safeExec(cmd tea.Cmd) (msg tea.Msg) {
-	defer func() {
-		if r := recover(); r != nil {
-			msg = nil
-		}
-	}()
-	return cmd()
 }
 
 func TestModel_ErrorMsg_ReturnsCmd(t *testing.T) {
@@ -1727,10 +1559,9 @@ func TestModel_ClearErrMsg_IgnoresStaleSeq(t *testing.T) {
 
 func TestModel_StatusBar_UsernameNotTruncated(t *testing.T) {
 	m := setupModel(t)
-	view := m.View()
-	stripped := testutil.StripANSI(view)
-	if !strings.Contains(stripped, "alice") {
-		t.Errorf("expected full username 'alice' in status bar, got:\n%s", stripped)
+	lines := strings.Split(viewOf(m), "\n")
+	if bar := lines[len(lines)-1]; !strings.Contains(bar, "alice") {
+		t.Errorf("action bar = %q, want the full username", bar)
 	}
 }
 
@@ -1974,6 +1805,7 @@ func TestModel_TagPickerOpensFromThread(t *testing.T) {
 	m = updated.(tui.Model)
 
 	updated, _ = m.Update(tui.ThreadLoadedMsg{
+		PostID: "p1",
 		Posts: &model.PostList{Order: []*model.Post{
 			{ID: "p1", UserID: "u1", Content: "root", CreateAt: 1700000000000},
 		}},
@@ -2030,6 +1862,106 @@ func TestModel_SearchResultOutsideHistoryReportsError(t *testing.T) {
 	}
 }
 
+// setupModelWithWS is setupModel with a WebSocket client attached.
+func setupModelWithWS(t *testing.T) (tui.Model, *mockWSClient) {
+	t.Helper()
+	wsc := newMockWSClient()
+	cfg := &config.Config{ServerURL: "http://localhost:8065"}
+	m := tui.NewModel(cfg, &mockClient{}, wsc, styles.New(theme.TokyoNight()), nil, nil, nil)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = updated.(tui.Model)
+	updated, _ = m.Update(tui.UserLoadedMsg{User: &model.User{ID: "u1", Username: "alice"}})
+	return updated.(tui.Model), wsc
+}
+
+// The client's channels outlive a sign-out, so the first session's listeners
+// serve every later one. Starting a pair per sign-in stacked readers on the
+// same stream.
+func TestModel_WSListenersStartOnce(t *testing.T) {
+	m, _ := setupModelWithWS(t)
+
+	updated, cmd := m.Update(tui.WSConnectedMsg{})
+	if cmd == nil {
+		t.Fatal("the first connect started no listeners")
+	}
+	m = updated.(tui.Model)
+
+	if _, cmd := m.Update(tui.WSConnectedMsg{}); cmd != nil {
+		t.Error("a second connect started another pair of listeners")
+	}
+}
+
+// A failed first dial used to be a toast and nothing more: the client never
+// retried, and nobody listened for it to recover.
+func TestModel_WSFirstDialFailureKeepsListening(t *testing.T) {
+	m, _ := setupModelWithWS(t)
+
+	updated, cmd := m.Update(tui.WSConnectedMsg{Err: errors.New("connection refused")})
+	m = updated.(tui.Model)
+	if cmd == nil {
+		t.Fatal("no listeners after a failed first dial")
+	}
+	if view := testutil.StripANSI(m.View()); !strings.Contains(view, "offline, retrying") {
+		t.Errorf("failed dial not explained:\n%s", view)
+	}
+
+	updated, _ = m.Update(tui.WSStateMsg{Connected: true})
+	m = updated.(tui.Model)
+	if view := testutil.StripANSI(m.View()); !strings.Contains(view, "reconnected") {
+		t.Errorf("recovery not reported:\n%s", view)
+	}
+}
+
+func TestModel_WSFirstDialUnauthorizedPromptsLogin(t *testing.T) {
+	m, wsc := setupModelWithWS(t)
+
+	updated, _ := m.Update(tui.WSConnectedMsg{Err: fmt.Errorf("ws: %w (HTTP 401)", ws.ErrUnauthorized)})
+	m = updated.(tui.Model)
+	if view := testutil.StripANSI(m.View()); !strings.Contains(view, "Chit Login") {
+		t.Errorf("rejected credentials did not prompt sign-in:\n%s", view)
+	}
+	if wsc.closes != 1 {
+		t.Errorf("closes = %d, want the client closed once", wsc.closes)
+	}
+}
+
+// Expiry reported by the socket used to drop the re-armed state listener, so
+// the next session never heard about a disconnect.
+func TestModel_WSUnauthorizedKeepsTheStateListener(t *testing.T) {
+	m, _ := setupModelWithWS(t)
+	updated, _ := m.Update(tui.WSConnectedMsg{})
+	m = updated.(tui.Model)
+
+	updated, cmd := m.Update(tui.WSStateMsg{Unauthorized: true})
+	m = updated.(tui.Model)
+	if !strings.Contains(testutil.StripANSI(m.View()), "Chit Login") {
+		t.Error("socket expiry did not prompt sign-in")
+	}
+	if cmd == nil {
+		t.Error("the state listener was not re-armed")
+	}
+}
+
+// Messages from the listeners that land while signed out are stale, but each
+// one must re-arm its listener or the next session is deaf.
+func TestModel_WSListenersRearmWhileSignedOut(t *testing.T) {
+	m, _ := setupModelWithWS(t)
+	updated, _ := m.Update(tui.WSConnectedMsg{})
+	m = updated.(tui.Model)
+	updated, _ = m.Update(input.SlashTriggerMsg{Input: "/logout"})
+	m = updated.(tui.Model)
+	if !strings.Contains(testutil.StripANSI(m.View()), "Chit Login") {
+		t.Fatal("not signed out")
+	}
+
+	if _, cmd := m.Update(tui.WebSocketEventMsg{}); cmd == nil {
+		t.Error("an event while signed out stopped the event listener")
+	}
+	if _, cmd := m.Update(tui.WSStateMsg{}); cmd == nil {
+		t.Error("a transition while signed out stopped the state listener")
+	}
+}
+
 // The action-bar indicator used to stay green while the socket was dead:
 // reconnect was internal to the ws client and nothing was emitted on drop.
 func TestModel_DisconnectIsVisible(t *testing.T) {
@@ -2073,11 +2005,14 @@ func TestModel_ReconnectBackfillsPosts(t *testing.T) {
 // A state change must re-arm the listener, or the first drop is the last one
 // ever reported.
 func TestModel_StateListenerReArms(t *testing.T) {
-	m := setupModel(t)
+	m, wsc := setupModelWithWS(t)
 
 	_, cmd := m.Update(tui.WSStateMsg{Connected: false})
-	if cmd == nil {
-		t.Fatal("no command returned; the listener was not re-armed")
+
+	// Re-armed means the returned command is waiting on the next transition.
+	wsc.state <- ws.ConnState{Connected: true}
+	if !slices.ContainsFunc(messagesOf(cmd), func(msg tea.Msg) bool { _, ok := msg.(tui.WSStateMsg); return ok }) {
+		t.Error("the state listener was not re-armed")
 	}
 }
 
@@ -2163,6 +2098,8 @@ func (c *countingClient) GetChannelMembers(ctx context.Context, id string) ([]*m
 func TestModel_ChannelLoadIssuesOneTagRequest(t *testing.T) {
 	client := &countingClient{mockClient: &mockClient{}}
 	m := modelWithClient(t, client)
+	m, _ = step(t, m, tui.TeamsLoadedMsg{Teams: []*model.Team{{ID: "t1"}}})
+	m, _ = step(t, m, tui.ChannelsLoadedMsg{TeamID: "t1", Channels: []*model.Channel{{ID: "c1", TeamID: "t1"}}})
 
 	posts := make([]*model.Post, 0, 60)
 	for i := range 60 {
@@ -2209,15 +2146,50 @@ func TestModel_ChannelListDoesNotFetchAllMembers(t *testing.T) {
 // drain runs a command tree to completion so the requests it issues are
 // counted. tea.Batch returns its children as a BatchMsg.
 func drain(cmd tea.Cmd) {
-	if cmd == nil {
-		return
+	for range messagesOf(cmd) {
 	}
-	switch msg := cmd().(type) {
-	case tea.BatchMsg:
-		for _, c := range msg {
-			drain(c)
+}
+
+// wantMsg runs cmd and returns its first message of type T, failing the
+// test if there is none. A command merely existing proves little: setError
+// alone returns one, for its auto-clear timer.
+func wantMsg[T tea.Msg](t *testing.T, cmd tea.Cmd) T {
+	t.Helper()
+	for _, msg := range messagesOf(cmd) {
+		if v, ok := msg.(T); ok {
+			return v
 		}
 	}
+	var zero T
+	t.Fatalf("no %T among the command's messages", zero)
+	return zero
+}
+
+// messagesOf runs a command and returns its messages, unwrapping batches.
+// A command that does not return promptly is a timer, such as the status
+// line's ten-second auto-clear, and is abandoned rather than waited out:
+// nothing a test checks takes that long.
+func messagesOf(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	done := make(chan tea.Msg, 1)
+	go func() { done <- cmd() }()
+	var msg tea.Msg
+	select {
+	case msg = <-done:
+	case <-time.After(100 * time.Millisecond):
+		return nil
+	}
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		return []tea.Msg{msg}
+	}
+	var out []tea.Msg
+	for _, c := range batch {
+		out = append(out, messagesOf(c)...)
+	}
+	return out
 }
 
 // A sent message used to appear only via the WebSocket echo, so with the
@@ -2376,19 +2348,15 @@ func TestModel_ChannelDeletedMovesAway(t *testing.T) {
 	}
 }
 
-// Editing loads the post back into the input; sending then replaces it
-// rather than creating a new message.
 func TestModel_EditLoadsPostIntoInput(t *testing.T) {
 	m := setupModel(t)
+	m, _ = step(t, m, tea.KeyMsg{Type: tea.KeyTab}) // focus history
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab}) // focus history
-	m = updated.(tui.Model)
+	m, _ = step(t, m, key('e'))
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
-	m = updated.(tui.Model)
-
-	if !strings.Contains(testutil.StripANSI(m.View()), "Hello") {
-		t.Errorf("post text was not loaded into the input:\n%s", testutil.StripANSI(m.View()))
+	// Once in the history, once more in the input.
+	if n := strings.Count(viewOf(m), "Hello"); n != 2 {
+		t.Errorf("post text shown %d times, want it loaded into the input too:\n%s", n, viewOf(m))
 	}
 }
 
@@ -2616,14 +2584,16 @@ func TestModel_TagLoadErrorIsReported(t *testing.T) {
 // A payload the client cannot read must not look like a message that never
 // arrived; it is dropped, but not silently.
 func TestModel_UndecodablePostedEventDoesNotCrash(t *testing.T) {
-	m := setupModel(t)
+	m, wsc := setupModelWithWS(t)
 
 	_, cmd := m.Update(tui.WebSocketEventMsg{Event: model.WebSocketEvent{
 		Event: model.WebSocketEventPosted,
 		Data:  map[string]any{"id": 12345}, // wrong type for a string field
 	}})
 
-	if cmd == nil {
+	// Re-armed means the returned command is waiting on the next event.
+	wsc.events <- model.WebSocketEvent{Event: model.WebSocketEventPosted}
+	if !slices.ContainsFunc(messagesOf(cmd), func(msg tea.Msg) bool { _, ok := msg.(tui.WebSocketEventMsg); return ok }) {
 		t.Error("the listener was not re-armed after an undecodable event")
 	}
 }

@@ -21,6 +21,10 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.scrollUnderPointer(msg.Y, -wheelScrollLines)
+		// An open thread covers the channel history; only that is paged.
+		if m.mainPane != paneChannel {
+			return m, nil
+		}
 		return m, m.maybeLoadOlder()
 	case tea.MouseButtonWheelDown:
 		if m.palette.Visible() {
@@ -126,6 +130,11 @@ func (m Model) handlePaletteClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	if idx, ok := m.palette.RowAt(msg.Y - py); ok {
 		cmd := m.palette.ChooseRow(idx)
+		// Choosing closes the palette, which then has to hand focus back
+		// as the keyboard path does; left on it, keys went nowhere.
+		if !m.palette.Visible() {
+			cmd = tea.Batch(cmd, m.setFocus(FocusInput))
+		}
 		return m, cmd
 	}
 	return m, nil

@@ -5,17 +5,14 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/infrashift/chit/clients/chit-tui/internal/testutil"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/skinpicker"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
 
-func testStyles() styles.Styles {
-	return styles.New(theme.TokyoNight())
-}
-
 func TestSkinPicker_OpenClose(t *testing.T) {
-	m := skinpicker.New(testStyles())
+	m := skinpicker.New(testutil.Styles())
 	if m.Visible() {
 		t.Error("should not be visible initially")
 	}
@@ -30,7 +27,7 @@ func TestSkinPicker_OpenClose(t *testing.T) {
 }
 
 func TestSkinPicker_EscapeCloses(t *testing.T) {
-	m := skinpicker.New(testStyles())
+	m := skinpicker.New(testutil.Styles())
 	m.SetSkins([]string{"tokyo-night", "catppuccin"})
 	m.SetSize(80, 40)
 	m.Open()
@@ -42,7 +39,7 @@ func TestSkinPicker_EscapeCloses(t *testing.T) {
 }
 
 func TestSkinPicker_NavigateAndSelect(t *testing.T) {
-	m := skinpicker.New(testStyles())
+	m := skinpicker.New(testutil.Styles())
 	m.SetSkins([]string{"tokyo-night", "catppuccin", "kanagawa"})
 	m.SetSize(80, 40)
 	m.Open()
@@ -68,7 +65,7 @@ func TestSkinPicker_NavigateAndSelect(t *testing.T) {
 }
 
 func TestSkinPicker_JKNavigation(t *testing.T) {
-	m := skinpicker.New(testStyles())
+	m := skinpicker.New(testutil.Styles())
 	m.SetSkins([]string{"tokyo-night", "catppuccin"})
 	m.SetSize(80, 40)
 	m.Open()
@@ -89,7 +86,7 @@ func TestSkinPicker_JKNavigation(t *testing.T) {
 }
 
 func TestSkinPicker_KNavigatesUp(t *testing.T) {
-	m := skinpicker.New(testStyles())
+	m := skinpicker.New(testutil.Styles())
 	m.SetSkins([]string{"tokyo-night", "catppuccin"})
 	m.SetSize(80, 40)
 	m.Open()
@@ -108,7 +105,7 @@ func TestSkinPicker_KNavigatesUp(t *testing.T) {
 }
 
 func TestSkinPicker_UpBounds(t *testing.T) {
-	m := skinpicker.New(testStyles())
+	m := skinpicker.New(testutil.Styles())
 	m.SetSkins([]string{"tokyo-night", "catppuccin"})
 	m.SetSize(80, 40)
 	m.Open()
@@ -126,7 +123,7 @@ func TestSkinPicker_UpBounds(t *testing.T) {
 }
 
 func TestSkinPicker_DownBounds(t *testing.T) {
-	m := skinpicker.New(testStyles())
+	m := skinpicker.New(testutil.Styles())
 	m.SetSkins([]string{"tokyo-night", "catppuccin"})
 	m.SetSize(80, 40)
 	m.Open()
@@ -146,7 +143,7 @@ func TestSkinPicker_DownBounds(t *testing.T) {
 }
 
 func TestSkinPicker_EnterEmpty(t *testing.T) {
-	m := skinpicker.New(testStyles())
+	m := skinpicker.New(testutil.Styles())
 	m.SetSize(80, 40)
 	m.Open()
 
@@ -159,7 +156,7 @@ func TestSkinPicker_EnterEmpty(t *testing.T) {
 }
 
 func TestSkinPicker_ViewShowsSkins(t *testing.T) {
-	m := skinpicker.New(testStyles())
+	m := skinpicker.New(testutil.Styles())
 	m.SetSkins([]string{"tokyo-night", "catppuccin"})
 	m.SetSize(80, 40)
 	m.Open()
@@ -177,14 +174,14 @@ func TestSkinPicker_ViewShowsSkins(t *testing.T) {
 }
 
 func TestSkinPicker_ViewHiddenEmpty(t *testing.T) {
-	m := skinpicker.New(testStyles())
+	m := skinpicker.New(testutil.Styles())
 	if m.View() != "" {
 		t.Error("expected empty view when not visible")
 	}
 }
 
 func TestSkinPicker_IgnoresInputWhenNotVisible(t *testing.T) {
-	m := skinpicker.New(testStyles())
+	m := skinpicker.New(testutil.Styles())
 	m.SetSkins([]string{"tokyo-night"})
 
 	// Not visible — should not respond
@@ -195,7 +192,7 @@ func TestSkinPicker_IgnoresInputWhenNotVisible(t *testing.T) {
 }
 
 func TestSkinPicker_FocusBlur(t *testing.T) {
-	m := skinpicker.New(testStyles())
+	m := skinpicker.New(testutil.Styles())
 	m.SetSkins([]string{"tokyo-night"})
 	m.SetSize(80, 40)
 	m.Open()
@@ -216,7 +213,7 @@ func TestSkinPicker_FocusBlur(t *testing.T) {
 }
 
 func TestSkinPicker_SetStyles(t *testing.T) {
-	m := skinpicker.New(testStyles())
+	m := skinpicker.New(testutil.Styles())
 	m.SetSkins([]string{"tokyo-night"})
 	m.SetSize(80, 40)
 

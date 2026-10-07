@@ -16,6 +16,7 @@ const (
 	WebSocketEventStatusChange       = "status_change"
 	WebSocketEventMentioned          = "mentioned"
 	WebSocketEventCommandResponse    = "command_response"
+	WebSocketEventPostTagsUpdated    = "post_tags_updated" // a post's whole tag list, after a change
 )
 
 // WebSocketEvent is sent to clients over WebSocket connections.

@@ -50,7 +50,7 @@ Connection lifecycle:
 
 ## Event Types
 
-The server emits 14 event types to connected clients:
+The server emits 16 event types to connected clients:
 
 | Event | Description |
 |---|---|
@@ -65,9 +65,11 @@ The server emits 14 event types to connected clients:
 | `channel_deleted` | A channel was deleted |
 | `user_added` | A user was added to a channel |
 | `user_removed` | A user was removed from a channel |
-| `thread_updated` | A thread received a new reply |
+| `thread_updated` | A thread's counters changed |
+| `post_tags_updated` | A post's tags changed |
 | `status_change` | A user's online status changed |
 | `mentioned` | The connected user was @mentioned |
+| `command_response` | A slash command's reply, for the user who ran it |
 
 ## Broadcast Targeting
 
