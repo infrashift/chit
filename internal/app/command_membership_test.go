@@ -33,6 +33,10 @@ func (s *membershipChannelStore) Get(_ context.Context, id string) (*model.Chann
 	return &c, nil
 }
 
+// memberChannelID is the channel the membership tests act on. It must be a
+// real UUID: UpdateChannel validates the channel before saving it.
+const memberChannelID = "019421a0-0000-7000-8000-0000000000c1"
+
 // membershipTestApp reuses the command test harness and seeds a couple of
 // users so the membership commands have somebody to resolve.
 func membershipTestApp(t *testing.T) *App {
@@ -47,9 +51,9 @@ func membershipTestApp(t *testing.T) *App {
 	// Seed membership so the actor passes requireChannelMember; the rules
 	// under test are the ones layered on top of it.
 	ms.channel.members = map[string][]*model.ChannelMember{
-		"c1": {
-			{ChannelID: "c1", UserID: "u-alice"},
-			{ChannelID: "c1", UserID: "u-bob"},
+		memberChannelID: {
+			{ChannelID: memberChannelID, UserID: "u-alice"},
+			{ChannelID: memberChannelID, UserID: "u-bob"},
 		},
 	}
 
@@ -57,7 +61,10 @@ func membershipTestApp(t *testing.T) *App {
 		cmdMockStore: ms,
 		channels: &membershipChannelStore{
 			mentionMockChannelStore: ms.channel,
-			channel:                 &model.Channel{Type: model.ChannelOpen, TeamID: "t1"},
+			channel: &model.Channel{
+				Type: model.ChannelOpen, TeamID: "t1",
+				Name: "general", DisplayName: "General", CreateAt: 1,
+			},
 		},
 		users: &membershipUserStore{
 			mentionMockUserStore: &ms.user.mentionMockUserStore,
@@ -149,14 +156,14 @@ func TestMembershipCommandsReportFailureAsText(t *testing.T) {
 		run  func() (string, error)
 	}{
 		{name: "invite", run: func() (string, error) {
-			res, err := a.HandleInvite(ctx, "u-alice", "c1", "nosuchperson")
+			res, err := a.HandleInvite(ctx, "u-alice", memberChannelID, "nosuchperson")
 			if res == nil {
 				return "", err
 			}
 			return res.ResponseText, err
 		}},
 		{name: "kick", run: func() (string, error) {
-			res, err := a.HandleKick(ctx, "u-alice", "c1", "nosuchperson")
+			res, err := a.HandleKick(ctx, "u-alice", memberChannelID, "nosuchperson")
 			if res == nil {
 				return "", err
 			}
@@ -188,10 +195,10 @@ func TestMembershipCommandsNameTheTarget(t *testing.T) {
 			var text string
 			var err error
 			if name == "invite" {
-				r, e := a.HandleInvite(ctx, "u-alice", "c1", "bob")
+				r, e := a.HandleInvite(ctx, "u-alice", memberChannelID, "bob")
 				text, err = r.ResponseText, e
 			} else {
-				r, e := a.HandleKick(ctx, "u-alice", "c1", "bob")
+				r, e := a.HandleKick(ctx, "u-alice", memberChannelID, "bob")
 				text, err = r.ResponseText, e
 			}
 			if err != nil {
@@ -241,7 +248,7 @@ func TestRemoveChannelMemberRequiresAdminForOthers(t *testing.T) {
 			ms := a.Store.(*membershipStore)
 			ms.users.byID = map[string]*model.User{tc.actor.ID: tc.actor}
 
-			err := a.RemoveChannelMember(context.Background(), "c1", tc.target, tc.actor.ID)
+			err := a.RemoveChannelMember(context.Background(), memberChannelID, tc.target, tc.actor.ID)
 
 			if tc.wantAllow && err != nil {
 				t.Errorf("removal was refused: %v", err)
@@ -265,7 +272,7 @@ func TestHandleTopic(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("with no argument reports the current topic", func(t *testing.T) {
-		res, err := a.HandleTopic(ctx, "u-alice", "c1", "")
+		res, err := a.HandleTopic(ctx, "u-alice", memberChannelID, "")
 		if err != nil {
 			t.Fatalf("HandleTopic: %v", err)
 		}
@@ -275,7 +282,7 @@ func TestHandleTopic(t *testing.T) {
 	})
 
 	t.Run("sets the topic", func(t *testing.T) {
-		res, err := a.HandleTopic(ctx, "u-alice", "c1", "  release planning  ")
+		res, err := a.HandleTopic(ctx, "u-alice", memberChannelID, "  release planning  ")
 		if err != nil {
 			t.Fatalf("HandleTopic: %v", err)
 		}

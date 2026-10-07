@@ -104,8 +104,7 @@ func (a *App) HandleTopic(ctx context.Context, actorID, channelID, args string) 
 		}, nil
 	}
 
-	channel.Header = topic
-	if _, err := a.UpdateChannel(ctx, channel, actorID); err != nil {
+	if _, err := a.UpdateChannel(ctx, channelID, ChannelPatch{Header: &topic}, actorID); err != nil {
 		return &command.CommandResult{
 			ResponseText: fmt.Sprintf("Could not set the topic: %s", err.Error()),
 		}, nil

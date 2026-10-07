@@ -13,14 +13,30 @@ import (
 func createChannel(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
-		var channel model.Channel
-		if err := json.NewDecoder(r.Body).Decode(&channel); err != nil {
+		// Only the fields a client may choose. Decoding straight into
+		// model.Channel let a caller set id, create_at or delete_at.
+		var body struct {
+			TeamID      string `json:"team_id"`
+			Name        string `json:"name"`
+			DisplayName string `json:"display_name"`
+			Type        string `json:"type"`
+			Header      string `json:"header"`
+			Purpose     string `json:"purpose"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			WriteError(w, model.NewBadRequestError("createChannel", "invalid request body"))
 			return
 		}
-		channel.CreatorID = user.ID
 
-		saved, err := a.CreateChannel(r.Context(), &channel)
+		saved, err := a.CreateChannel(r.Context(), &model.Channel{
+			TeamID:      body.TeamID,
+			Name:        body.Name,
+			DisplayName: body.DisplayName,
+			Type:        body.Type,
+			Header:      body.Header,
+			Purpose:     body.Purpose,
+			CreatorID:   user.ID,
+		})
 		if err != nil {
 			WriteAppError(w, "createChannel", err)
 			return
@@ -32,10 +48,9 @@ func createChannel(a *app.App) http.HandlerFunc {
 
 func getChannel(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := chi.URLParam(r, "id")
-		channel, err := a.GetChannel(r.Context(), id)
+		channel, err := a.GetChannel(r.Context(), chi.URLParam(r, "id"), ContextGetUser(r).ID)
 		if err != nil {
-			WriteError(w, model.NewNotFoundError("getChannel", id))
+			WriteAppError(w, "getChannel", err)
 			return
 		}
 		WriteJSON(w, http.StatusOK, channel)
@@ -44,35 +59,26 @@ func getChannel(a *app.App) http.HandlerFunc {
 
 func updateChannel(a *app.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user := ContextGetUser(r)
-		id := chi.URLParam(r, "id")
-
-		existing, err := a.GetChannel(r.Context(), id)
-		if err != nil {
-			WriteAppError(w, "updateChannel", err)
-			return
+		var body struct {
+			Name        *string `json:"name"`
+			DisplayName *string `json:"display_name"`
+			Header      *string `json:"header"`
+			Purpose     *string `json:"purpose"`
 		}
-
-		var patch model.Channel
-		if err = json.NewDecoder(r.Body).Decode(&patch); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			WriteError(w, model.NewBadRequestError("updateChannel", "invalid request body"))
 			return
 		}
-
-		if patch.DisplayName != "" {
-			existing.DisplayName = patch.DisplayName
-		}
-		if patch.Header != "" {
-			existing.Header = patch.Header
-		}
-		if patch.Purpose != "" {
-			existing.Purpose = patch.Purpose
-		}
-		if patch.Name != "" {
-			existing.Name = patch.Name
+		if body.Name != nil {
+			WriteError(w, model.NewBadRequestError("updateChannel", "channel name cannot be changed"))
+			return
 		}
 
-		updated, err := a.UpdateChannel(r.Context(), existing, user.ID)
+		updated, err := a.UpdateChannel(r.Context(), chi.URLParam(r, "id"), app.ChannelPatch{
+			DisplayName: body.DisplayName,
+			Header:      body.Header,
+			Purpose:     body.Purpose,
+		}, ContextGetUser(r).ID)
 		if err != nil {
 			WriteAppError(w, "updateChannel", err)
 			return

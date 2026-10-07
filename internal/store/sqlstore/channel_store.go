@@ -242,7 +242,7 @@ func (s *SqlChannelStore) UpdateLastViewedAt(ctx context.Context, channelID, use
 
 func (s *SqlChannelStore) GetDirectChannelByName(ctx context.Context, name string) (*model.Channel, error) {
 	query := `SELECT id, COALESCE(team_id::text, ''), creator_id, name, display_name, header, purpose, type, total_msg_count, last_post_at, create_at, update_at, delete_at
-		FROM channels WHERE team_id IS NULL AND name = $1 AND delete_at = 0`
+		FROM channels WHERE team_id IS NULL AND type IN ('D', 'G') AND name = $1 AND delete_at = 0`
 
 	ch := &model.Channel{}
 	err := s.sqlStore.pool.QueryRow(ctx, query, name).Scan(

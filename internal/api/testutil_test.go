@@ -339,10 +339,12 @@ func (s *mockChannelStore) Get(_ context.Context, id string) (*model.Channel, er
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	c, ok := s.byID[id]
-	if !ok {
-		return nil, fmt.Errorf("channel %s not found", id)
+	if !ok || c.DeleteAt != 0 {
+		return nil, model.NewNotFoundError("mockChannelStore.Get", id)
 	}
-	return c, nil
+	// A copy, as the SQL store returns: see mockTeamStore.Get.
+	cp := *c
+	return &cp, nil
 }
 
 func (s *mockChannelStore) Update(_ context.Context, c *model.Channel) (*model.Channel, error) {
