@@ -95,13 +95,20 @@ starting.
 
 ## chit-reconcile
 
-`chit-reconcile` reads the same `CHIT_` variables but uses only two of them,
-and does not need `CHIT_DATABASE_URL`:
+`chit-reconcile` reads the same `CHIT_` variables but uses only three of
+them, and does not need `CHIT_DATABASE_URL`:
 
 | Variable | Default | Description |
 |---|---|---|
-| `CHIT_KETO_WRITE_URL` | `http://localhost:4467` | Keto write API the tuples are pushed to |
+| `CHIT_KETO_READ_URL` | `http://localhost:4466` | Keto read API, to list what is already granted |
+| `CHIT_KETO_WRITE_URL` | `http://localhost:4467` | Keto write API the tuples are written to and revoked from |
 | `CHIT_COMMANDS_CUE_DIR` | `auth` | CUE definitions to load |
+
+It makes the `chit/command` namespace match the CUE exactly: it writes every
+declared grant and role membership, then deletes every other tuple in that
+namespace, so a command taken from a role or a role taken from an actor is
+revoked. Nothing else writes `chit/command`. If the namespace cannot be
+listed, it exits with an error and deletes nothing.
 
 The other checks under [Validation](#validation), apart from the database URL,
 still apply to whatever values are set.

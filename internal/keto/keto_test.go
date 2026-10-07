@@ -79,3 +79,52 @@ func TestWrite_ErrorStatusIsAnError(t *testing.T) {
 		t.Fatal("a 403 from Keto was not an error")
 	}
 }
+
+// ListRelations follows next_page_token until Keto returns an empty one.
+func TestListRelations_FollowsPages(t *testing.T) {
+	var tokens []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tok := r.URL.Query().Get("page_token")
+		tokens = append(tokens, tok)
+		next, subject := "p2", "a"
+		if tok == "p2" {
+			next, subject = "", "b"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"relation_tuples": []Tuple{{Namespace: "ns", Object: "o", Relation: "r", SubjectID: subject}},
+			"next_page_token": next,
+		})
+	}))
+	defer srv.Close()
+
+	got, err := New(srv.URL, "", srv.Client()).ListRelations(t.Context(), "ns")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].SubjectID != "a" || got[1].SubjectID != "b" || len(tokens) != 2 || tokens[1] != "p2" {
+		t.Fatalf("got %+v after tokens %q", got, tokens)
+	}
+}
+
+func TestDeleteTuple_SubjectSet(t *testing.T) {
+	c, got := fakeKeto(t, http.StatusNoContent, ``)
+	err := c.DeleteTuple(t.Context(), &Tuple{
+		Namespace: "ns", Object: "Command:help", Relation: "execute",
+		SubjectSet: &SubjectSet{Namespace: "ns", Object: "Role:admin", Relation: "member"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q := (*got)[0].query; q != "namespace=ns&object=Command%3Ahelp&relation=execute&subject_set.namespace=ns&subject_set.object=Role%3Aadmin&subject_set.relation=member" {
+		t.Fatalf("query = %s", q)
+	}
+}
+
+func TestTupleString(t *testing.T) {
+	id := Tuple{Namespace: "ns", Object: "Role:a", Relation: "member", SubjectID: "Actor:x"}
+	set := Tuple{Namespace: "ns", Object: "Command:c", Relation: "execute",
+		SubjectSet: &SubjectSet{Namespace: "ns", Object: "Role:a", Relation: "member"}}
+	if id.String() != "ns:Role:a#member@Actor:x" || set.String() != "ns:Command:c#execute@ns:Role:a#member" {
+		t.Fatalf("%s / %s", id.String(), set.String())
+	}
+}

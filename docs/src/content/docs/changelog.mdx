@@ -14,6 +14,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Behaviour changes an operator must act on or know about:
 
+- **`chit-reconcile` now revokes, and needs the Keto read API.** It makes
+  the `chit/command` namespace match the CUE, deleting any tuple there the CUE
+  does not declare (including grants added to Keto by hand). It lists through
+  `CHIT_KETO_READ_URL` (default `http://localhost:4466`); set it wherever the
+  job runs.
 - **`chit-mcp` and `chit-claude` take exactly one auth mode.** Setting both
   `*_OAUTH_CLIENT_ID` and `*_AGENT_KRATOS_ID` now stops them at startup;
   OAuth2 used to win silently. Unset the one you do not use.
@@ -237,6 +242,9 @@ Behaviour changes an operator must act on or know about:
 
 ### Fixed
 
+- `chit-reconcile` revokes what the CUE no longer grants. It only ever wrote
+  tuples, so a command taken from a role, or a role taken from an actor,
+  stayed in force in Keto.
 - A user removed from a channel now receives `user_removed` themselves, so
   their client can drop the channel; it went only to the remaining members.
 - A malformed (non-UUID) channel or team ID in a path or request body is a

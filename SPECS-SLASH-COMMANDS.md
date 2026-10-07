@@ -133,8 +133,11 @@ ran, the invoker also gets a `command_response` WebSocket event
 2. **Command Grant:** `Command:<cmd_id>#execute@(chit/command:Role:<role_name>#member)`,
    written as a Keto **subject set** so Keto expands it.
 
-The reconciler only writes; it does not delete tuples for a removed role,
-grant or binding.
+The CUE is the source of truth for this namespace: the reconciler writes every
+declared tuple, then deletes every other tuple in `chit/command`, so removing
+a grant, role or binding from the CUE revokes it on the next run. It lists
+through the Keto read API (`CHIT_KETO_READ_URL`); if listing fails, it deletes
+nothing.
 
 ### 2.3 Handlers
 

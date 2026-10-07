@@ -44,7 +44,9 @@ func main() {
 		"roles", len(cueCfg.Roles),
 		"actors", len(cueCfg.Actors))
 
-	rec := command.NewReconciler(keto.New("", cfg.KetoWriteURL, &http.Client{Timeout: 10 * time.Second}))
+	// The read URL lists what is already granted, so grants the CUE no longer
+	// declares can be revoked.
+	rec := command.NewReconciler(keto.New(cfg.KetoReadURL, cfg.KetoWriteURL, &http.Client{Timeout: 10 * time.Second}))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	err = rec.Reconcile(ctx, cueCfg)

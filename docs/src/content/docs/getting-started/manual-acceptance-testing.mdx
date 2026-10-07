@@ -203,11 +203,12 @@ silent refusal with `"authorized":false` in the chitd log.
 ### 1. Push the command grants
 
 `make uat-up` does not run the reconciler, so the role→command tuples do not
-exist yet. `chit-reconcile` reads only `CHIT_KETO_WRITE_URL` and
-`CHIT_COMMANDS_CUE_DIR` (default `auth`), and needs no database:
+exist yet. `chit-reconcile` reads only `CHIT_KETO_READ_URL`,
+`CHIT_KETO_WRITE_URL` and `CHIT_COMMANDS_CUE_DIR` (default `auth`), and needs
+no database. It also revokes any `chit/command` tuple the CUE does not declare:
 
 ```bash
-CHIT_KETO_WRITE_URL=http://localhost:4467 make reconcile
+CHIT_KETO_READ_URL=http://localhost:4466 CHIT_KETO_WRITE_URL=http://localhost:4467 make reconcile
 ```
 
 ### 2. Bind the seeded users to roles

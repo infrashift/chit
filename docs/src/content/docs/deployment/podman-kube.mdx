@@ -88,7 +88,7 @@ and Oathkeeper forwards `/api/v1/**` to whatever listens on `localhost:8065`.
 | `make kube-migrate` | Re-apply Chit schema migrations against the pod's PostgreSQL with a one-shot `migrate/migrate` container (only needed for new migration files without restarting the pod) |
 | `make migrate-up` | Apply Chit schema migrations with a host-installed `migrate` (`MIGRATE_URL` overrides the target) |
 | `make migrate-down` | Roll back one Chit migration with a host-installed `migrate` |
-| `make reconcile` | Build and run `chit-reconcile`, which pushes the CUE roles, commands and actors in `auth/` into Keto (reads `CHIT_KETO_WRITE_URL`, `CHIT_COMMANDS_CUE_DIR`) |
+| `make reconcile` | Build and run `chit-reconcile`, which pushes the CUE roles, commands and actors in `auth/` into Keto and revokes any `chit/command` tuple they no longer declare (reads `CHIT_KETO_READ_URL`, `CHIT_KETO_WRITE_URL`, `CHIT_COMMANDS_CUE_DIR`) |
 
 ### UAT environment
 
