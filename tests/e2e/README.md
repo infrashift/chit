@@ -28,14 +28,13 @@ To test a locally built chitd instead of the image, stop the pod's chitd
 `cp .env.example .env && make run`. Oathkeeper forwards to whatever listens
 there.
 
-### Known issue: the script expects an anonymous gateway
+### Unauthenticated checks
 
-The setup health check (`Oathkeeper Proxy`) and assertions 1.1 and 1.2 call
-`/api/v1/system/ping` and `/api/v1/system/config/client` through Oathkeeper
-without credentials and expect 200. The access rules in
-`deploy/chit.kube.yml` no longer have an anonymous fallback, so through the
-gateway every `/api/v1` route answers 401 without a session or token, and the
-script stops at setup against `make kube-up`.
+Through the gateway every `/api/v1` route needs a session or token, ping
+included; `/system/ping` and `/system/config/client` are public only at chitd
+itself (`:8065`). The script checks them there (assertions 1.1 and 1.2), and
+checks that the gateway refuses the same unauthenticated ping with 401 (the
+setup health check, and 1.1b).
 
 ## Details
 
@@ -45,7 +44,7 @@ Created/Modified Files
 
   Executable bash script with:
   - Setup: Health checks for all 6 services (PG, Kratos, Oathkeeper, Keto, ZincSearch, chitd), creates 3 test users via Kratos Admin API, logs in each via API flow to get session tokens
-  - Scenario 1: User provisioning — system ping/config, auto-provision on first /users/me, user lookup by ID/username, user search, unauthenticated 401, idempotent provisioning
+  - Scenario 1: User provisioning — system ping/config at chitd and 401 through the gateway, auto-provision on first /users/me, user lookup by ID/username, user search, unauthenticated 401, idempotent provisioning
   - Scenario 2: Team & channel lifecycle — team creation with auto team_admin role, adding members, public/private channels, Keto relation tuple verification (write & delete), "my channels" filtering, updates
   - Scenario 3: Channel messaging — posting, pagination, get/edit/pin/unpin/delete posts, mark channel viewed
   - Scenario 4: DM & group channels — DM creation (type "D", null team_id, 2 members), Keto DM relations, group channel (type "G", 3 members), cross-user message reading

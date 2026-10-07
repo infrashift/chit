@@ -270,7 +270,10 @@ check_service() {
 check_service "PostgreSQL (via chitd)" "${CHITD}/api/v1/system/ping"
 check_service "Kratos Public"         "${KRATOS_PUBLIC}/health/alive"
 check_service "Kratos Admin"          "${KRATOS_ADMIN}/admin/identities" "200"
-check_service "Oathkeeper Proxy"      "${PROXY}/api/v1/system/ping"
+# The gateway requires a session or token for every /api/v1 route, ping
+# included, so an unauthenticated ping answering 401 is the proxy up and
+# guarding chitd. (Ping and config/client are public only at chitd itself.)
+check_service "Oathkeeper Proxy"      "${PROXY}/api/v1/system/ping" "401"
 check_service "Keto Read"             "${KETO_READ}/health/alive"
 check_service "Keto Write"            "${KETO_WRITE}/health/alive"
 # ZincSearch may return 200 or other codes on root
@@ -324,15 +327,19 @@ echo -e "${BOLD}Setup complete. Running test scenarios...${NC}"
 # ============================================================================
 section "Scenario 1: User Provisioning"
 
-# 1.1 System ping (unauthenticated)
+# 1.1 System ping, unauthenticated, at chitd: public there, and only there.
 CURRENT_TOKEN=""
-curl_api_full GET "/system/ping"
-assert_status "1.1 system/ping" 200 "$LAST_STATUS"
+API="${CHITD}/api/v1" curl_api_full GET "/system/ping"
+assert_status "1.1 system/ping at chitd" 200 "$LAST_STATUS"
 assert_json   "1.1 ping status" ".status" "OK" "$LAST_BODY"
 
-# 1.2 Client config (unauthenticated)
-curl_api_full GET "/system/config/client"
-assert_status "1.2 system/config/client" 200 "$LAST_STATUS"
+# 1.1b Through the gateway the same request needs credentials.
+curl_api_full GET "/system/ping"
+assert_status "1.1b system/ping through the gateway needs auth" 401 "$LAST_STATUS"
+
+# 1.2 Client config, unauthenticated, at chitd
+API="${CHITD}/api/v1" curl_api_full GET "/system/config/client"
+assert_status "1.2 system/config/client at chitd" 200 "$LAST_STATUS"
 assert_json_not_empty "1.2 version present" ".version" "$LAST_BODY"
 
 # 1.3 Unauthenticated request to protected endpoint → 401
