@@ -28,9 +28,19 @@ type MachineActor struct {
 	// it is what lets an actor create users, which the forge notifier must do
 	// to address a person who has never signed in.
 	Roles string `json:"roles"`
-	// user, agent or bot. A machine is not a "user"; the distinction is
-	// recorded on the row and the model rejects anything else.
+	// agent or bot, and required. A machine is not a "user": left empty,
+	// PreSave would default it to one, so the declaration must say which.
 	ActorType string `json:"actor_type"`
+}
+
+// normalize applies defaults as PreSave applies them to a row, so the
+// declaration and the row compare like for like. Comparing the raw
+// declaration made an omitted roles field read as "" against the row's
+// defaulted "system_user", and the second boot stripped every role.
+func (m *MachineActor) normalize() {
+	if m.Roles == "" {
+		m.Roles = "system_user"
+	}
 }
 
 // ParseMachineActors reads the declared actors from their JSON encoding.
@@ -44,15 +54,28 @@ func ParseMachineActors(raw string) ([]MachineActor, error) {
 	if err := json.Unmarshal([]byte(raw), &actors); err != nil {
 		return nil, fmt.Errorf("parse machine actors: %w", err)
 	}
-	for i, a := range actors {
-		if a.ClientID == "" {
-			return nil, fmt.Errorf("machine actor %d has no client_id", i)
-		}
-		if a.Username == "" {
-			return nil, fmt.Errorf("machine actor %q has no username", a.ClientID)
+	for i := range actors {
+		if err := actors[i].validate(); err != nil {
+			return nil, fmt.Errorf("machine actor %d: %w", i, err)
 		}
 	}
 	return actors, nil
+}
+
+// validate checks what the declaration itself must supply; the rest is left
+// to the user model's validation.
+func (m *MachineActor) validate() error {
+	if m.ClientID == "" {
+		return fmt.Errorf("no client_id")
+	}
+	if m.Username == "" {
+		return fmt.Errorf("%q has no username", m.ClientID)
+	}
+	if m.ActorType != model.ActorTypeAgent && m.ActorType != model.ActorTypeBot {
+		return fmt.Errorf("%q: actor_type must be %q or %q, got %q",
+			m.ClientID, model.ActorTypeAgent, model.ActorTypeBot, m.ActorType)
+	}
+	return nil
 }
 
 // EnsureMachineActors makes the declared actors exist, and is safe to run on
@@ -65,15 +88,28 @@ func ParseMachineActors(raw string) ([]MachineActor, error) {
 // leaves the row, since deleting a user cascades into messages and membership
 // and is not a thing to do as a side effect of an edit to a config value.
 func (a *App) EnsureMachineActors(ctx context.Context, actors []MachineActor) error {
-	for _, actor := range actors {
+	for i := range actors {
+		actor := actors[i] // a copy: normalizing must not edit the caller's slice
+		if err := actor.validate(); err != nil {
+			return fmt.Errorf("machine actor: %w", err)
+		}
+		actor.normalize()
 		existing, err := a.Store.User().GetByOAuthClientID(ctx, actor.ClientID)
 		if err == nil {
-			if existing.Roles == actor.Roles && existing.DisplayName == actor.DisplayName {
+			if existing.Roles == actor.Roles && existing.DisplayName == actor.DisplayName &&
+				existing.Username == actor.Username && existing.ActorType == actor.ActorType {
 				continue
 			}
 			existing.Roles = actor.Roles
 			existing.DisplayName = actor.DisplayName
+			existing.Username = actor.Username
+			existing.ActorType = actor.ActorType
 			existing.PreUpdate()
+			// Validated as creation is: a declared empty display_name was
+			// refused on create and silently written on update.
+			if verr := existing.IsValid(); verr != nil {
+				return fmt.Errorf("machine actor %q is invalid: %w", actor.ClientID, verr)
+			}
 			if _, err := a.Store.User().Update(ctx, existing); err != nil {
 				return fmt.Errorf("update machine actor %q: %w", actor.ClientID, err)
 			}

@@ -146,8 +146,84 @@ func TestParseMachineActors(t *testing.T) {
 	if _, err := ParseMachineActors(`[{"client_id":"x"}]`); err == nil {
 		t.Fatal("an actor with no username must be refused")
 	}
+	if _, err := ParseMachineActors(`[{"client_id":"x","username":"y"}]`); err == nil {
+		t.Fatal("an actor with no actor_type must be refused: PreSave would make it a user")
+	}
 	got, err := ParseMachineActors(`[{"client_id":"a","username":"b","roles":"system_user","actor_type":"bot"}]`)
 	if err != nil || len(got) != 1 || got[0].ClientID != "a" {
 		t.Fatalf("well-formed declaration did not parse: %v %v", got, err)
+	}
+}
+
+// Omitting roles defaulted the row to system_user on create, then compared
+// the raw "" against it on the next boot and wrote "" back: every second boot
+// stripped the actor's roles.
+func TestEnsureMachineActors_OmittedRolesAreStable(t *testing.T) {
+	a, us := newMAApp()
+	actors := []MachineActor{{ClientID: notifier, Username: "notifier", DisplayName: "Forge Notifier", ActorType: model.ActorTypeBot}}
+
+	for i := range 2 {
+		if err := a.EnsureMachineActors(context.Background(), actors); err != nil {
+			t.Fatalf("boot %d: %v", i, err)
+		}
+	}
+	got, _ := a.Store.User().GetByOAuthClientID(context.Background(), notifier)
+	if got.Roles != "system_user" {
+		t.Fatalf("roles = %q after a second boot, want system_user", got.Roles)
+	}
+	if us.updates != 0 {
+		t.Fatalf("updates = %d, want 0: nothing changed", us.updates)
+	}
+}
+
+func TestEnsureMachineActors_ReconcilesEveryDeclaredField(t *testing.T) {
+	a, _ := newMAApp()
+	base := MachineActor{ClientID: notifier, Username: "notifier", DisplayName: "Forge Notifier", ActorType: model.ActorTypeBot}
+	if err := a.EnsureMachineActors(context.Background(), []MachineActor{base}); err != nil {
+		t.Fatal(err)
+	}
+
+	changed := base
+	changed.Username, changed.DisplayName, changed.ActorType = "forge", "Forge", model.ActorTypeAgent
+	if err := a.EnsureMachineActors(context.Background(), []MachineActor{changed}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := a.Store.User().GetByOAuthClientID(context.Background(), notifier)
+	if got.Username != "forge" || got.DisplayName != "Forge" || got.ActorType != model.ActorTypeAgent {
+		t.Fatalf("row = %+v, want every declared field applied", got)
+	}
+
+	blank := changed
+	blank.DisplayName = ""
+	if err := a.EnsureMachineActors(context.Background(), []MachineActor{blank}); err == nil {
+		t.Fatal("an update to an empty display_name was accepted; create refuses it")
+	}
+}
+
+func TestEnsureMachineActors_RefusesAnActorWithoutAMachineType(t *testing.T) {
+	for _, typ := range []string{"", model.ActorTypeUser} {
+		a, us := newMAApp()
+		err := a.EnsureMachineActors(context.Background(), []MachineActor{{
+			ClientID: notifier, Username: "notifier", DisplayName: "Forge Notifier", ActorType: typ,
+		}})
+		if err == nil || us.saves != 0 {
+			t.Fatalf("actor_type %q: err=%v saves=%d, want a refusal before any write", typ, err, us.saves)
+		}
+	}
+}
+
+// A declared username already held by a person cannot be created; boot must
+// fail saying so rather than retry forever.
+func TestEnsureMachineActors_UsernameClash(t *testing.T) {
+	a, _ := newMAApp()
+	person := &model.User{KratosID: model.NewID(), Username: "notifier", DisplayName: "A Person", Email: "p@example.com"}
+	if _, err := a.Store.User().Save(context.Background(), person); err != nil {
+		t.Fatal(err)
+	}
+	err := a.EnsureMachineActors(context.Background(), []MachineActor{{
+		ClientID: notifier, Username: "notifier", DisplayName: "Forge Notifier", ActorType: model.ActorTypeBot,
+	}})
+	if err == nil {
+		t.Fatal("a machine actor was created over a person's username")
 	}
 }

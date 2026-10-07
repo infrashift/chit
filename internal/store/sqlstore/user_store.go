@@ -32,6 +32,9 @@ func (s *SqlUserStore) Save(ctx context.Context, user *model.User) (*model.User,
 		user.Roles, user.ActorType, user.OAuthClientID, user.CreateAt, user.UpdateAt, user.DeleteAt,
 	)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return nil, model.NewConflictError("SqlUserStore.Save", "username, email or identity is already taken")
+		}
 		return nil, fmt.Errorf("save user: %w", err)
 	}
 
