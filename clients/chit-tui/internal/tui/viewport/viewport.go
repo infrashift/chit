@@ -146,6 +146,11 @@ func (m *Model) RemovePost(id string) bool {
 		}
 		m.posts = append(m.posts[:i], m.posts[i+1:]...)
 		delete(m.cache, id)
+		// A post removed above the cursor shifts the selected one up a
+		// place; follow it rather than land on its neighbor.
+		if i < m.cursor {
+			m.cursor--
+		}
 		if m.cursor >= len(m.posts) {
 			m.cursor = len(m.posts) - 1
 		}

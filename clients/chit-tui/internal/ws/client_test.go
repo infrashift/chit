@@ -607,3 +607,41 @@ func TestWSClient_ReportsOneDesyncPerOverflow(t *testing.T) {
 		t.Errorf("desync reports = %d, want 1", desyncs)
 	}
 }
+
+// A new token, set after signing in again, is what redials present; the
+// header name is the configured one.
+func TestWSClient_RedialsWithTheCurrentTokenAndHeader(t *testing.T) {
+	tokens := make(chan string, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tokens <- r.Header.Get("X-Custom-Auth")
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		_ = conn.Close() // hang up, so the client redials
+	}))
+	t.Cleanup(srv.Close)
+
+	c := ws.NewWSClientWithHeader(wsURL(srv), "first", 8, "X-Custom-Auth")
+	ws.SetTimings(c, 10*time.Millisecond, time.Minute, 20*time.Second)
+	defer func() { _ = c.Close() }()
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-tokens; got != "first" {
+		t.Fatalf("first dial sent %q, want first", got)
+	}
+
+	c.SetToken("second")
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case got := <-tokens:
+			if got == "second" {
+				return
+			}
+		case <-deadline:
+			t.Fatal("no redial with the new token")
+		}
+	}
+}

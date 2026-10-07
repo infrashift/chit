@@ -5,5 +5,6 @@ CHANGELOG.
 
 ## Tests
 
-- [ ] Coverage under the 90% target: `tui` 87%, `thread` 77%, `viewport` 82%,
-      `ws` 85%, `input` 84%, `auth` 84%.
+- [ ] `auth` is at 88%. What is left are failures of a just-created temp
+      file (Chmod, Write, Close) and of building a request; reaching them
+      needs fault-injection hooks, which may not be worth adding.

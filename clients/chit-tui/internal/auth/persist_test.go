@@ -374,3 +374,87 @@ func TestSessionStore_OverrideIgnoresTheLegacySession(t *testing.T) {
 		t.Error("loaded a session into an explicit path that has none")
 	}
 }
+
+// A save that cannot be written fails, and leaves no temporary file behind.
+func TestSessionStore_FailedSaveLeavesNothingBehind(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root can write to a read-only directory")
+	}
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	err := auth.NewSessionStore(filepath.Join(dir, "session.json")).Save(auth.StoredSession{Token: "t"})
+	if err == nil {
+		t.Fatal("saved into a read-only directory")
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Errorf("left %d files behind", len(entries))
+	}
+}
+
+// A save whose target is a directory cannot replace it; the temporary file
+// it wrote is cleaned up.
+func TestSessionStore_SaveOverADirectoryFails(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "session.json")
+	if err := os.MkdirAll(filepath.Join(target, "occupied"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := auth.NewSessionStore(target).Save(auth.StoredSession{Token: "t"}); err == nil {
+		t.Fatal("replaced a directory with the session")
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Errorf("dir holds %d entries, want only the directory that was there", len(entries))
+	}
+}
+
+// Signing out reports an old session it could not remove: left behind, it
+// would sign the user back in on the next start.
+func TestSessionStore_ClearReportsALegacySessionItCannotRemove(t *testing.T) {
+	home := t.TempDir()
+	useConfigHome(t, home)
+	legacy := filepath.Join(home, "chit-tui", "session.json")
+	if err := os.MkdirAll(filepath.Join(legacy, "occupied"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := auth.NewSessionStore("").Clear(); err == nil {
+		t.Error("Clear succeeded with the old session still in place")
+	}
+}
+
+// Saving creates the config directory when it is missing, and fails when
+// it cannot.
+func TestSessionStore_SaveNeedsAWritableParent(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := auth.NewSessionStore(filepath.Join(file, "session.json")).Save(auth.StoredSession{Token: "t"})
+	if err == nil {
+		t.Error("saved under a file")
+	}
+}
+
+// An old session that cannot be moved is reported, not silently lost.
+func TestSessionStore_LegacySessionThatCannotBeMoved(t *testing.T) {
+	home := t.TempDir()
+	useConfigHome(t, home)
+	writeLegacySession(t, home, "kept")
+	// The new location's directory is taken by a file.
+	if err := os.WriteFile(filepath.Join(home, "chit"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := auth.NewSessionStore("").Load(); err == nil {
+		t.Error("Load succeeded though the session could not be moved")
+	}
+	if _, err := os.Stat(filepath.Join(home, "chit-tui", "session.json")); err != nil {
+		t.Errorf("the old session was lost: %v", err)
+	}
+}

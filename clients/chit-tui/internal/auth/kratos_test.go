@@ -376,3 +376,25 @@ func TestIsSessionRejected(t *testing.T) {
 		t.Error("an unreachable Kratos is not")
 	}
 }
+
+// A success status with a body that is not what Kratos sends is an error,
+// not an empty session.
+func TestKratos_UnreadableSuccessBodies(t *testing.T) {
+	mux := http.NewServeMux()
+	garbage := func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("<html>proxy page</html>")) }
+	mux.HandleFunc("GET /self-service/login/api", garbage)
+	mux.HandleFunc("POST /self-service/login", garbage)
+	mux.HandleFunc("GET /sessions/whoami", garbage)
+	client, _ := kratosServer(t, mux)
+	ctx := context.Background()
+
+	if _, err := client.InitLoginFlow(ctx); err == nil {
+		t.Error("InitLoginFlow accepted a non-JSON body")
+	}
+	if _, err := client.SubmitLogin(ctx, "flow-1", "alice", "pw"); err == nil {
+		t.Error("SubmitLogin accepted a non-JSON body")
+	}
+	if _, err := client.CheckSession(ctx, "tok"); err == nil {
+		t.Error("CheckSession accepted a non-JSON body")
+	}
+}

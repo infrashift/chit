@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Deleting a post above the selection** moved the selection onto the next post
 - **Requests outlived the session** — requests still running at sign-out or session expiry now stop there, rather than running on until they time out
 - **Smaller behaviour** —
   - pinning shows at once instead of waiting for the WebSocket echo, so a second `p` unpins;
