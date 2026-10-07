@@ -10,9 +10,10 @@ import (
 )
 
 // publishEvent delivers the event to local WebSocket clients via the hub and
-// publishes a thin envelope to pubsub for other processes (currently the MCP
-// server's event buffer). chitd itself does not re-consume the topic, so
-// WebSocket fan-out remains single-node.
+// publishes a thin envelope to pubsub for out-of-process consumers. Nothing in
+// this repository subscribes: chit-mcp and the bridge read chitd's WebSocket.
+// chitd itself does not re-consume the topic, so WebSocket fan-out remains
+// single-node.
 func (a *App) publishEvent(ctx context.Context, event *model.WebSocketEvent, env *pubsub.EventEnvelope) {
 	a.Hub.Broadcast(event)
 

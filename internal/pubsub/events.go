@@ -1,7 +1,8 @@
 package pubsub
 
-// TopicEvents carries thin real-time event envelopes between processes
-// (e.g. chitd → chit-mcp).
+// TopicEvents carries thin real-time event envelopes from chitd to any
+// out-of-process consumer. None in this repository subscribes; clients use
+// chitd's WebSocket.
 const TopicEvents = "chit_events"
 
 // EventEnvelope is the cross-process form of a WebSocket event. PostgreSQL

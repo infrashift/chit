@@ -36,8 +36,10 @@ build-all: build build-mcp build-reconcile build-claude build-tui
 validate-spec:
 	go run github.com/getkin/kin-openapi/cmd/validate@latest api/openapi.yaml
 
+# Loads .env when present, so `cp .env.example .env && make run` works. A
+# variable set in .env overrides the same one in your shell.
 run: build
-	./$(BINARY)
+	set -a; [ ! -f .env ] || . ./.env; set +a; ./$(BINARY)
 
 test:
 	GOWORK=off go test -race -count=1 ./...
