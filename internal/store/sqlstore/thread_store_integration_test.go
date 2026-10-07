@@ -142,3 +142,58 @@ func TestThreadStoreIntegration_SaveOrUpdateIsIdempotent(t *testing.T) {
 		t.Errorf("Participants after redundant SaveOrUpdate: got %v, want 1 entry", got.Participants)
 	}
 }
+
+// The thread inbox lists only threads the user can still read. Following is
+// not access: it used to keep showing a thread's root after the user left the
+// channel, and kept showing deleted roots.
+func TestThreadStoreIntegration_InboxRequiresAccess(t *testing.T) {
+	ss := testStore(t)
+	user, channel := newTestChannelFixture(t, ss)
+
+	if _, err := ss.Channel().SaveMember(t.Context(), &model.ChannelMember{ChannelID: channel.ID, UserID: user.ID}); err != nil {
+		t.Fatalf("SaveMember: %v", err)
+	}
+	follow := func(content string, at int64) *model.Post {
+		t.Helper()
+		root := savePost(t, ss, channel.ID, user.ID, "", content, at)
+		if err := ss.Thread().SaveOrUpdate(t.Context(), &model.Thread{PostID: root.ID, ChannelID: channel.ID, Participants: []string{}}); err != nil {
+			t.Fatalf("SaveOrUpdate: %v", err)
+		}
+		if err := ss.Thread().SaveMembership(t.Context(), &model.ThreadMembership{PostID: root.ID, UserID: user.ID, Following: true}); err != nil {
+			t.Fatalf("SaveMembership: %v", err)
+		}
+		return root
+	}
+	kept := follow("kept", 1000)
+	deleted := follow("deleted", 2000)
+	if err := ss.Post().Delete(t.Context(), deleted.ID, model.GetMillis()); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	inbox := func() []string {
+		t.Helper()
+		list, err := ss.Thread().GetThreadsForUser(t.Context(), user.ID, channel.TeamID, 0, 50)
+		if err != nil {
+			t.Fatalf("GetThreadsForUser: %v", err)
+		}
+		var ids []string
+		for _, tr := range list.Threads {
+			ids = append(ids, tr.Thread.PostID)
+		}
+		if int(list.Total) != len(ids) {
+			t.Errorf("Total = %d but %d threads listed", list.Total, len(ids))
+		}
+		return ids
+	}
+
+	if got := inbox(); len(got) != 1 || got[0] != kept.ID {
+		t.Fatalf("member inbox = %v, want only %s (deleted root hidden)", got, kept.ID)
+	}
+
+	if err := ss.Channel().RemoveMember(t.Context(), channel.ID, user.ID); err != nil {
+		t.Fatalf("RemoveMember: %v", err)
+	}
+	if got := inbox(); len(got) != 0 {
+		t.Fatalf("inbox after leaving the channel = %v, want empty", got)
+	}
+}

@@ -31,7 +31,7 @@ func getMyThreads(a *app.App) http.HandlerFunc {
 
 		threads, err := a.GetThreadsForUser(r.Context(), user.ID, teamID, page, perPage)
 		if err != nil {
-			WriteError(w, model.NewInternalError("getMyThreads", err))
+			WriteAppError(w, "getMyThreads", err)
 			return
 		}
 
@@ -45,7 +45,7 @@ func markThreadAsRead(a *app.App) http.HandlerFunc {
 		threadID := chi.URLParam(r, "id")
 
 		if err := a.MarkThreadAsRead(r.Context(), threadID, user.ID); err != nil {
-			WriteError(w, model.NewInternalError("markThreadAsRead", err))
+			WriteAppError(w, "markThreadAsRead", err)
 			return
 		}
 
@@ -67,7 +67,7 @@ func updateThreadFollowing(a *app.App) http.HandlerFunc {
 		}
 
 		if err := a.UpdateThreadFollowing(r.Context(), threadID, user.ID, body.Following); err != nil {
-			WriteError(w, model.NewInternalError("updateThreadFollowing", err))
+			WriteAppError(w, "updateThreadFollowing", err)
 			return
 		}
 

@@ -11,6 +11,13 @@ import (
 
 // CreatePost creates a new post and handles threading, channel stats, mentions, and WebSocket broadcast.
 func (a *App) CreatePost(ctx context.Context, post *model.Post) (*model.Post, error) {
+	// Membership comes first, before slash commands are intercepted: a command
+	// runs in the context of the channel it was typed in, and `/topic` with no
+	// argument reads the channel header back to whoever asked.
+	if err := a.requireChannelMember(ctx, post.ChannelID, post.UserID); err != nil {
+		return nil, err
+	}
+
 	// Intercept slash commands — they are NOT persisted.
 	if a.CommandRegistry != nil {
 		resp, handled, err := a.InterceptSlashCommand(ctx, post.UserID, post.ChannelID, post.Content)
@@ -30,8 +37,10 @@ func (a *App) CreatePost(ctx context.Context, post *model.Post) (*model.Post, er
 		}
 	}
 
-	if err := a.requireChannelMember(ctx, post.ChannelID, post.UserID); err != nil {
-		return nil, err
+	if post.RootID != "" {
+		if err := a.requireReplyableRoot(ctx, post); err != nil {
+			return nil, err
+		}
 	}
 
 	// Process mentions
@@ -71,6 +80,28 @@ func (a *App) CreatePost(ctx context.Context, post *model.Post) (*model.Post, er
 	return saved, nil
 }
 
+// requireReplyableRoot returns a 400 unless post.RootID names a live root post
+// in post's own channel. Membership was only ever checked on the reply's
+// channel, so a reply could name a root in a channel the author could not
+// read: the thread row was then created under the author's channel and the
+// author auto-followed it, which put the private root into their thread inbox.
+func (a *App) requireReplyableRoot(ctx context.Context, post *model.Post) error {
+	root, err := a.Store.Post().Get(ctx, post.RootID)
+	if err != nil {
+		if isNotFound(err) {
+			return model.NewBadRequestError("App.CreatePost", "root_id does not name a post")
+		}
+		return err
+	}
+	if root.ChannelID != post.ChannelID {
+		return model.NewBadRequestError("App.CreatePost", "a reply must be in its root post's channel")
+	}
+	if root.RootID != "" {
+		return model.NewBadRequestError("App.CreatePost", "root_id names a reply; reply to its root instead")
+	}
+	return nil
+}
+
 // GetPost retrieves a post by ID, requiring the caller to be a member of its channel.
 func (a *App) GetPost(ctx context.Context, id, userID string) (*model.Post, error) {
 	post, err := a.Store.Post().Get(ctx, id)
@@ -85,27 +116,49 @@ func (a *App) GetPost(ctx context.Context, id, userID string) (*model.Post, erro
 	return post, nil
 }
 
-// UpdatePost updates a post's content on behalf of actorID, who must be the
-// author or a system admin. Re-parses mentions for Props but does not
-// re-increment counters.
-func (a *App) UpdatePost(ctx context.Context, post *model.Post, actorID string) (*model.Post, error) {
-	// Fetch original post to carry forward immutable fields (ChannelID, UserID)
-	// needed for mention resolution when the update payload omits them.
-	existing, err := a.Store.Post().Get(ctx, post.ID)
+// PostPatch is an edit to a post. A nil Content leaves the text unchanged.
+// Props are merged key by key into the existing props, and a null value
+// removes its key; props the edit does not mention are kept. The server-owned
+// "mentions" prop is always recomputed from the content.
+type PostPatch struct {
+	Content *string
+	Props   map[string]any
+}
+
+// UpdatePost edits a post on behalf of actorID, who must be the author or a
+// system admin. Re-parses mentions for Props but does not re-increment
+// counters. It returns, and broadcasts, the whole post: the edit used to be
+// echoed back with only the fields the client sent, so post_edited carried
+// create_at 0 and an empty root_id, and clients moved the post out of its
+// thread.
+func (a *App) UpdatePost(ctx context.Context, id string, patch PostPatch, actorID string) (*model.Post, error) {
+	post, err := a.Store.Post().Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if authErr := a.requirePostOwner(ctx, existing, actorID); authErr != nil {
+	if authErr := a.requirePostOwner(ctx, post, actorID); authErr != nil {
 		return nil, authErr
 	}
-	post.ChannelID = existing.ChannelID
-	post.UserID = existing.UserID
 
-	// Re-parse mentions on plaintext for correct client rendering
-	mentionedUserIDs, _ := a.processMentions(ctx, post)
+	if patch.Content != nil {
+		post.Content = *patch.Content
+	}
 	if post.Props == nil {
 		post.Props = make(map[string]any)
 	}
+	for k, v := range patch.Props {
+		if v == nil {
+			delete(post.Props, k)
+		} else {
+			post.Props[k] = v
+		}
+	}
+	if err := post.IsValid(); err != nil {
+		return nil, err
+	}
+
+	// Re-parse mentions on plaintext for correct client rendering
+	mentionedUserIDs, _ := a.processMentions(ctx, post)
 	if len(mentionedUserIDs) > 0 {
 		post.Props["mentions"] = mentionedUserIDs
 	} else {

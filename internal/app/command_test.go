@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -273,5 +274,29 @@ func TestCreatePost_NormalPostStillPersisted(t *testing.T) {
 	}
 	if len(ms.post.saved) != 1 {
 		t.Errorf("expected 1 saved post, got %d", len(ms.post.saved))
+	}
+}
+
+// A slash command used to run before the channel membership check, so a
+// non-member could run commands in any channel by ID: `/topic` with no
+// argument read a private channel's header back to them.
+func TestCreatePost_SlashCommandRequiresMembership(t *testing.T) {
+	a := newCommandTestApp(t, true)
+	ran := false
+	a.CommandHandlers["help"] = command.HandlerFunc(func(context.Context, string, string, string) (*command.CommandResult, error) {
+		ran = true
+		return &command.CommandResult{ResponseText: "help"}, nil
+	})
+
+	_, err := a.CreatePost(context.Background(), &model.Post{
+		ChannelID: "ch-001", UserID: "user-not-a-member", Content: "/help",
+	})
+
+	var appErr *model.AppError
+	if !errors.As(err, &appErr) || appErr.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403, got %v", err)
+	}
+	if ran {
+		t.Fatal("the command ran for a non-member")
 	}
 }

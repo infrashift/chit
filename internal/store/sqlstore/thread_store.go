@@ -140,6 +140,10 @@ func (s *SqlThreadStore) UpdateMembership(ctx context.Context, membership *model
 }
 
 func (s *SqlThreadStore) GetThreadsForUser(ctx context.Context, userID, teamID string, page, perPage int) (*model.UserThreadList, error) {
+	// Only threads the user can still read: a member of the channel, with the
+	// root and channel not deleted. Following is not access, and a user removed
+	// from a channel kept seeing its thread roots here.
+	//
 	// The root post and the caller's read state come back with the list. The
 	// endpoint is documented to report unread status, and a client that had to
 	// fetch each root separately would issue one request per thread.
@@ -151,8 +155,10 @@ func (s *SqlThreadStore) GetThreadsForUser(ctx context.Context, userID, teamID s
 		FROM threads t
 		INNER JOIN thread_memberships tm ON t.post_id = tm.post_id
 		INNER JOIN channels c ON t.channel_id = c.id
+		INNER JOIN channel_members cm ON cm.channel_id = c.id AND cm.user_id = tm.user_id
 		INNER JOIN posts p ON p.id = t.post_id
 		WHERE tm.user_id = $1 AND tm.following = TRUE AND c.team_id = $2
+			AND c.delete_at = 0 AND p.delete_at = 0
 		ORDER BY t.last_reply_at DESC
 		LIMIT $3 OFFSET $4`
 
@@ -187,7 +193,10 @@ func (s *SqlThreadStore) GetThreadsForUser(ctx context.Context, userID, teamID s
 		FROM threads t
 		INNER JOIN thread_memberships tm ON t.post_id = tm.post_id
 		INNER JOIN channels c ON t.channel_id = c.id
-		WHERE tm.user_id = $1 AND tm.following = TRUE AND c.team_id = $2`
+		INNER JOIN channel_members cm ON cm.channel_id = c.id AND cm.user_id = tm.user_id
+		INNER JOIN posts p ON p.id = t.post_id
+		WHERE tm.user_id = $1 AND tm.following = TRUE AND c.team_id = $2
+			AND c.delete_at = 0 AND p.delete_at = 0`
 
 	var total int64
 	if err := s.sqlStore.pool.QueryRow(ctx, countQuery, userID, teamID).Scan(&total); err != nil {
