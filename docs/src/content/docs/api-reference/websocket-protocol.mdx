@@ -85,7 +85,7 @@ chitd sends 14 event types.
 | `channel_updated` | The full channel object | As for `channel_created` | A channel's display name, header or purpose changes (including via `/topic`) |
 | `channel_deleted` | `channel_id` | `channel_id` | A channel is deleted, or its team is deleted |
 | `user_added` | `channel_id`, `user_id` (the user added) | `channel_id` | A user joins or is added through `POST /channels/{id}/members` or `/invite`. Members added when a channel is created are announced by `channel_created` instead. |
-| `user_removed` | `channel_id`, `user_id` (the user removed) | `channel_id` | A user leaves or is removed from a channel, including by leaving or being removed from its team |
+| `user_removed` | `channel_id`, `user_id` (the user removed) | `channel_id`, and separately `user_id` (the user removed) | A user leaves or is removed from a channel, including by leaving or being removed from its team |
 | `thread_updated` | `thread`: `{post_id, channel_id, reply_count, last_reply_at, participants}` | `channel_id` | After every reply, and after every reply deletion |
 | `mentioned` | `post_id`, `channel_id`, `user_id` (the post's **author**) | `user_id` (the mentioned user) | A post mentions the user, by `@username` or `@all` |
 | `command_response` | `text`, `command_slug`, `channel_id` | `user_id` (the invoker) | A slash command handler ran. See [MCP and Slash Commands](/chit/reference/mcp-and-commands/). |
@@ -96,8 +96,10 @@ Notes:
   is no `post` wrapper.
 - `thread_updated` deliberately does not carry the reply. The reply itself
   arrives as `posted`.
-- The user removed from a channel is dropped from the hub's membership cache
-  before `user_removed` is sent, so they do not receive it themselves.
+- `user_removed` is sent twice: to the channel's remaining members, and
+  addressed to the removed user, who is no longer in the channel's audience
+  by the time the channel copy is delivered. Each connection receives it
+  once.
 - A `command_response` is sent only when a handler executed, whatever text it
   returned. An unknown command, a permission denial, a command with no
   handler, or a handler error answers only through the `POST /posts`

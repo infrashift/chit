@@ -387,12 +387,24 @@ func (a *App) RemoveChannelMember(ctx context.Context, channelID, userID, actorI
 	return nil
 }
 
+// publishUserRemoved tells the channel, and the user removed from it.
+//
+// The channel broadcast alone never reached the removed user: by the time the
+// hub delivers it, the membership change has already dropped them from the
+// channel's audience. So they also get the event addressed to them directly,
+// which is how their client learns to take the channel out of its sidebar.
 func (a *App) publishUserRemoved(ctx context.Context, channelID, userID string) {
+	data := map[string]any{"channel_id": channelID, "user_id": userID}
 	a.publishEvent(ctx, &model.WebSocketEvent{
 		Event:     model.WebSocketEventUserRemoved,
-		Data:      map[string]any{"channel_id": channelID, "user_id": userID},
+		Data:      data,
 		Broadcast: &model.WebSocketBroadcast{ChannelID: channelID},
 	}, &pubsub.EventEnvelope{Event: model.WebSocketEventUserRemoved, ChannelID: channelID})
+	a.Hub.Broadcast(&model.WebSocketEvent{
+		Event:     model.WebSocketEventUserRemoved,
+		Data:      data,
+		Broadcast: &model.WebSocketBroadcast{UserID: userID},
+	})
 }
 
 // GetChannelMembers retrieves members of a channel, requiring the caller to be

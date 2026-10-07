@@ -227,6 +227,8 @@ Behaviour changes an operator must act on or know about:
 
 ### Fixed
 
+- A user removed from a channel now receives `user_removed` themselves, so
+  their client can drop the channel; it went only to the remaining members.
 - A malformed (non-UUID) channel or team ID in a path or request body is a
   `404`, not a `500` from a failed UUID cast.
 - Keto mirror failures when adding or removing channel members are logged,

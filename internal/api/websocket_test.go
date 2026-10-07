@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/infrashift/chit/internal/model"
+	ws "github.com/infrashift/chit/internal/websocket"
 )
 
 // serveWS runs handleWebSocket behind a test server that authenticates every
@@ -97,5 +99,85 @@ func TestWebSocket_TypingIsRebroadcast(t *testing.T) {
 	}
 	if ev.Event != model.WebSocketEventTyping || ev.Data["user_id"] != testUserID || ev.Broadcast.ChannelID != testChannelID {
 		t.Fatalf("got %+v, want a typing event from the sender in the channel", ev)
+	}
+}
+
+// storeMembership is the hub's membership checker over the test store, as
+// server.hubMembershipAdapter is over the SQL store, so channel events are
+// filtered by membership the way they are in production.
+type storeMembership struct{ ms *mockStore }
+
+func (s storeMembership) GetChannelIDsForUser(userID string) ([]string, error) {
+	return s.ms.Channels.GetChannelIDsForUser(context.Background(), userID)
+}
+
+func (s storeMembership) GetTeamIDsForUser(userID string) ([]string, error) {
+	teams, err := s.ms.Teams.GetTeamsForUser(context.Background(), userID)
+	ids := make([]string, 0, len(teams))
+	for _, tm := range teams {
+		ids = append(ids, tm.ID)
+	}
+	return ids, err
+}
+
+// A user removed from a channel never got user_removed: the hub drops them
+// from the channel's audience before it delivers the channel broadcast.
+func TestWebSocket_RemovedUserIsTold(t *testing.T) {
+	a, ms, cleanup := setupTestApp(t)
+	defer cleanup()
+	a.Hub = ws.NewHub(storeMembership{ms})
+	defer a.Hub.Stop()
+
+	h := handleWebSocket(a)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.ServeHTTP(w, authedRequest(r, testUser()))
+	}))
+	defer srv.Close()
+	conn, resp, err := websocket.DefaultDialer.DialContext(t.Context(), "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	_ = resp.Body.Close()
+
+	read := func() model.WebSocketEvent {
+		t.Helper()
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		var ev model.WebSocketEvent
+		if err := conn.ReadJSON(&ev); err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		return ev
+	}
+	// Wait until the hub has loaded the user's memberships: channel events
+	// are dropped until it has. Probes keep coming until one arrives; a read
+	// timeout would be permanent on a gorilla conn, so the read just blocks.
+	stop := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(20 * time.Millisecond):
+				a.Hub.Broadcast(&model.WebSocketEvent{Event: "probe", Broadcast: &model.WebSocketBroadcast{ChannelID: testChannelID}})
+			}
+		}
+	}()
+	if ev := read(); ev.Event != "probe" {
+		t.Fatalf("got %+v before any probe", ev)
+	}
+	close(stop)
+
+	// Leaving is removal too, and needs no admin.
+	if err := a.RemoveChannelMember(t.Context(), testChannelID, testUserID, testUserID); err != nil {
+		t.Fatalf("RemoveChannelMember: %v", err)
+	}
+	// Probes already queued may still arrive; skip them.
+	ev := read()
+	for ev.Event == "probe" {
+		ev = read()
+	}
+	if ev.Event != model.WebSocketEventUserRemoved || ev.Data["user_id"] != testUserID || ev.Data["channel_id"] != testChannelID {
+		t.Fatalf("got %+v, want user_removed for the removed user", ev)
 	}
 }
