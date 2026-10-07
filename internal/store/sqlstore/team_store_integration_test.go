@@ -43,7 +43,7 @@ func TestTeamStoreIntegration_CRUDAndMembers(t *testing.T) {
 	}
 
 	// Membership
-	if _, err := ss.Team().SaveMember(t.Context(), &model.TeamMember{
+	if _, err = ss.Team().SaveMember(t.Context(), &model.TeamMember{
 		TeamID: team.ID,
 		UserID: user.ID,
 		Roles:  "team_admin",

@@ -53,7 +53,7 @@ func updateTeam(a *app.App) http.HandlerFunc {
 		}
 
 		var patch model.Team
-		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+		if err = json.NewDecoder(r.Body).Decode(&patch); err != nil {
 			WriteError(w, model.NewBadRequestError("updateTeam", "invalid request body"))
 			return
 		}

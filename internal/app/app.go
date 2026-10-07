@@ -106,7 +106,7 @@ func (a *App) CheckChannelPermission(ctx context.Context, channelID, userID, rel
 	if err != nil {
 		return false, fmt.Errorf("keto check: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Allowed bool `json:"allowed"`
@@ -143,7 +143,7 @@ func (a *App) WriteKetoRelation(ctx context.Context, namespace, object, relation
 	if err != nil {
 		return fmt.Errorf("keto write: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("keto write: status %d", resp.StatusCode)
@@ -157,7 +157,7 @@ func (a *App) DeleteKetoRelation(ctx context.Context, namespace, object, relatio
 	url := fmt.Sprintf("%s/admin/relation-tuples?namespace=%s&object=%s&relation=%s&subject_id=%s",
 		a.ketoWriteURL, namespace, object, relation, subjectID)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("create keto delete request: %w", err)
 	}
@@ -166,7 +166,7 @@ func (a *App) DeleteKetoRelation(ctx context.Context, namespace, object, relatio
 	if err != nil {
 		return fmt.Errorf("keto delete: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("keto delete: status %d", resp.StatusCode)
@@ -179,7 +179,7 @@ func (a *App) DeleteKetoRelation(ctx context.Context, namespace, object, relatio
 func (a *App) FetchKratosIdentity(ctx context.Context, kratosID string) (username, displayName, email string, err error) {
 	url := fmt.Sprintf("%s/admin/identities/%s", a.Config.KratosAdminURL, kratosID)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return "", "", "", fmt.Errorf("create kratos request: %w", err)
 	}
@@ -188,7 +188,7 @@ func (a *App) FetchKratosIdentity(ctx context.Context, kratosID string) (usernam
 	if err != nil {
 		return "", "", "", fmt.Errorf("fetch kratos identity: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)

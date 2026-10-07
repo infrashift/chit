@@ -17,7 +17,9 @@ func New(a *app.App) http.Handler {
 	r := chi.NewRouter()
 
 	// Global middleware
-	r.Use(chimiddleware.RealIP)
+	// No RealIP: chitd only ever sees Oathkeeper, and RealIP would let any
+	// caller rewrite RemoteAddr with a forged X-Forwarded-For. The logger
+	// records the header separately, as the unverified value it is.
 	r.Use(chimiddleware.RequestID)
 	r.Use(StructuredLogger)
 	r.Use(chimiddleware.Recoverer)

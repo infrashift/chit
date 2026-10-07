@@ -150,7 +150,7 @@ func (a *App) notifyMentionedUsers(ctx context.Context, post *model.Post, userID
 			Broadcast: &model.WebSocketBroadcast{
 				UserID: userID,
 			},
-		}, pubsub.EventEnvelope{
+		}, &pubsub.EventEnvelope{
 			Event:        model.WebSocketEventMentioned,
 			PostID:       post.ID,
 			ChannelID:    post.ChannelID,

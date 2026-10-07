@@ -40,10 +40,10 @@ func (c *Channel) IsValid() *AppError {
 		}
 	}
 	if c.Type == ChannelDirect || c.Type == ChannelGroup {
-		if len(c.DisplayName) == 0 || len(c.DisplayName) > 256 {
+		if c.DisplayName == "" || len(c.DisplayName) > 256 {
 			return NewAppError("Channel.IsValid", "display_name must be 1–256 characters", "", http.StatusBadRequest)
 		}
-	} else if len(c.DisplayName) == 0 || len(c.DisplayName) > 64 {
+	} else if c.DisplayName == "" || len(c.DisplayName) > 64 {
 		return NewAppError("Channel.IsValid", "display_name must be 1–64 characters", "", http.StatusBadRequest)
 	}
 	if len(c.Header) > 1024 {

@@ -33,7 +33,7 @@ func TestAuthExtract_Success(t *testing.T) {
 
 	handler := AuthExtract(a)(next)
 
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r.Header.Set("X-User-Id", testKratosID) // matches TrustedProxyHeader default
 	w := httptest.NewRecorder()
 
@@ -69,7 +69,7 @@ func TestAuthExtract_OAuthClientResolvesToUser(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r.Header.Set("X-Client-Id", testOAuthClientID)
 	w := httptest.NewRecorder()
 	AuthExtract(a)(next).ServeHTTP(w, r)
@@ -92,7 +92,7 @@ func TestAuthExtract_UnknownOAuthClientRejected(t *testing.T) {
 		t.Error("next handler should not be called for an unknown client")
 	})
 
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r.Header.Set("X-Client-Id", "client-that-was-never-bound")
 	w := httptest.NewRecorder()
 	AuthExtract(a)(next).ServeHTTP(w, r)
@@ -127,7 +127,7 @@ func TestAuthExtract_ClientHeaderBeatsForgedUserHeader(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r.Header.Set("X-Client-Id", testOAuthClientID)
 	r.Header.Set("X-User-Id", testKratosID) // would be a different, human user
 	w := httptest.NewRecorder()
@@ -148,7 +148,7 @@ func TestAuthExtract_MissingHeader(t *testing.T) {
 
 	handler := AuthExtract(a)(next)
 
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	// No X-User-Id header
 	w := httptest.NewRecorder()
 
@@ -164,12 +164,12 @@ func TestStructuredLogger(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	})
 
 	handler := StructuredLogger(next)
 
-	r := httptest.NewRequest(http.MethodGet, "/test", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/test", http.NoBody)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, r)
@@ -201,7 +201,7 @@ func TestRateLimit_Allows(t *testing.T) {
 
 	handler := RateLimit(100, 100)(next)
 
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r.RemoteAddr = "1.2.3.4:5678"
 	w := httptest.NewRecorder()
 
@@ -221,7 +221,7 @@ func TestRateLimit_Blocks(t *testing.T) {
 	handler := RateLimit(1, 1)(next)
 
 	// First request should pass
-	r1 := httptest.NewRequest(http.MethodGet, "/", nil)
+	r1 := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r1.RemoteAddr = "10.0.0.1:9999"
 	w1 := httptest.NewRecorder()
 	handler.ServeHTTP(w1, r1)
@@ -230,7 +230,7 @@ func TestRateLimit_Blocks(t *testing.T) {
 	}
 
 	// Second request should be rate limited
-	r2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	r2 := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r2.RemoteAddr = "10.0.0.1:9999"
 	w2 := httptest.NewRecorder()
 	handler.ServeHTTP(w2, r2)
@@ -250,7 +250,7 @@ func TestAuthExtract_ProxySecretRequired(t *testing.T) {
 	})
 
 	// Correct user header but missing proxy secret → 401.
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r.Header.Set("X-User-Id", testKratosID)
 	w := httptest.NewRecorder()
 	mw(next).ServeHTTP(w, r)
@@ -259,7 +259,7 @@ func TestAuthExtract_ProxySecretRequired(t *testing.T) {
 	}
 
 	// Wrong secret → 401.
-	r = httptest.NewRequest(http.MethodGet, "/", nil)
+	r = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r.Header.Set("X-User-Id", testKratosID)
 	r.Header.Set("X-Proxy-Secret", "wrong")
 	w = httptest.NewRecorder()
@@ -269,7 +269,7 @@ func TestAuthExtract_ProxySecretRequired(t *testing.T) {
 	}
 
 	// Correct secret → passes through.
-	r = httptest.NewRequest(http.MethodGet, "/", nil)
+	r = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r.Header.Set("X-User-Id", testKratosID)
 	r.Header.Set("X-Proxy-Secret", "s3cret")
 	w = httptest.NewRecorder()

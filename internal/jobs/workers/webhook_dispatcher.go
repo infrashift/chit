@@ -115,7 +115,7 @@ func (d *WebhookDispatcher) deliver(ctx context.Context, evt *command.WebhookEve
 	if err != nil {
 		return fmt.Errorf("webhook post: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("webhook target returned status %d", resp.StatusCode)

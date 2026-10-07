@@ -107,7 +107,7 @@ func (a *App) DeleteChannel(ctx context.Context, id, actorID string) error {
 		Broadcast: &model.WebSocketBroadcast{
 			ChannelID: id,
 		},
-	}, pubsub.EventEnvelope{Event: model.WebSocketEventChannelDeleted, ChannelID: id})
+	}, &pubsub.EventEnvelope{Event: model.WebSocketEventChannelDeleted, ChannelID: id})
 	return nil
 }
 
@@ -252,7 +252,7 @@ func (a *App) AddChannelMember(ctx context.Context, channelID, userID, actorID s
 			"user_id":    userID,
 		},
 		Broadcast: &model.WebSocketBroadcast{ChannelID: channelID},
-	}, pubsub.EventEnvelope{Event: model.WebSocketEventUserAdded, ChannelID: channelID})
+	}, &pubsub.EventEnvelope{Event: model.WebSocketEventUserAdded, ChannelID: channelID})
 
 	return saved, nil
 }
@@ -289,7 +289,7 @@ func (a *App) RemoveChannelMember(ctx context.Context, channelID, userID, actorI
 			"user_id":    userID,
 		},
 		Broadcast: &model.WebSocketBroadcast{ChannelID: channelID},
-	}, pubsub.EventEnvelope{Event: model.WebSocketEventUserRemoved, ChannelID: channelID})
+	}, &pubsub.EventEnvelope{Event: model.WebSocketEventUserRemoved, ChannelID: channelID})
 
 	return nil
 }
@@ -334,5 +334,5 @@ func (a *App) broadcastChannelEvent(ctx context.Context, event string, channel *
 		Event:     event,
 		Data:      dataMap,
 		Broadcast: broadcast,
-	}, pubsub.EventEnvelope{Event: event, ChannelID: channel.ID, TeamID: channel.TeamID})
+	}, &pubsub.EventEnvelope{Event: event, ChannelID: channel.ID, TeamID: channel.TeamID})
 }

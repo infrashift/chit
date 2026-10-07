@@ -22,15 +22,15 @@ func newMAUserStore() *maUserStore {
 
 func (s *maUserStore) Save(_ context.Context, u *model.User) (*model.User, error) {
 	s.saves++
-	copy := *u
-	s.byClient[u.OAuthClientID] = &copy
-	return &copy, nil
+	cp := *u
+	s.byClient[u.OAuthClientID] = &cp
+	return &cp, nil
 }
 func (s *maUserStore) Update(_ context.Context, u *model.User) (*model.User, error) {
 	s.updates++
-	copy := *u
-	s.byClient[u.OAuthClientID] = &copy
-	return &copy, nil
+	cp := *u
+	s.byClient[u.OAuthClientID] = &cp
+	return &cp, nil
 }
 func (s *maUserStore) GetByOAuthClientID(_ context.Context, id string) (*model.User, error) {
 	if u, ok := s.byClient[id]; ok {

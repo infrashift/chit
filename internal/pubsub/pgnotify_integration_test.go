@@ -3,6 +3,7 @@
 package pubsub
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"testing"
@@ -31,7 +32,7 @@ func TestPGNotifyIntegration_PublishSubscribeRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPGNotify: %v", err)
 	}
-	defer ps.Close()
+	defer func() { _ = ps.Close() }()
 
 	received := make(chan []byte, 1)
 	if err := ps.Subscribe(context.Background(), "chit_test_topic", func(data []byte) {
@@ -51,7 +52,7 @@ func TestPGNotifyIntegration_PublishSubscribeRoundTrip(t *testing.T) {
 		}
 		select {
 		case got := <-received:
-			if string(got) != string(payload) {
+			if !bytes.Equal(got, payload) {
 				t.Fatalf("payload: got %q, want %q (double-encoded?)", got, payload)
 			}
 			return
@@ -77,7 +78,7 @@ func TestPGNotify_RejectsInvalidTopics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPGNotify: %v", err)
 	}
-	defer ps.Close()
+	defer func() { _ = ps.Close() }()
 
 	if err := ps.Publish(context.Background(), "bad; DROP TABLE users", []byte("x")); err == nil {
 		t.Error("Publish with invalid topic: expected error")

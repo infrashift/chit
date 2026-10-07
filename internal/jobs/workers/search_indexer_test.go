@@ -68,7 +68,7 @@ func TestSearchIndexer_IndexPost_Success(t *testing.T) {
 		gotContentType = r.Header.Get("Content-Type")
 		gotBody, _ = io.ReadAll(r.Body)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"doc-1"}`))
+		_, _ = w.Write([]byte(`{"id":"doc-1"}`))
 	}))
 	defer srv.Close()
 
@@ -126,7 +126,7 @@ func TestSearchIndexer_Search_Success(t *testing.T) {
 			t.Errorf("expected URL=/api/chit-posts/_search, got %q", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer srv.Close()
 
@@ -152,7 +152,7 @@ func TestSearchIndexer_Search_EmptyHits(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer srv.Close()
 

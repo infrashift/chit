@@ -32,7 +32,7 @@ func TestCreateTeam(t *testing.T) {
 
 	handler := createTeam(a)
 	body := `{"name":"newteam","display_name":"New Team","type":"O"}`
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/teams", strings.NewReader(body))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/teams", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	r = authedRequest(r, testUser())
 
@@ -55,7 +55,7 @@ func TestCreateTeam_InvalidBody(t *testing.T) {
 	defer cleanup()
 
 	handler := createTeam(a)
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/teams", strings.NewReader("{bad"))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/teams", strings.NewReader("{bad"))
 	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()
 
@@ -71,7 +71,7 @@ func TestGetTeam(t *testing.T) {
 	defer cleanup()
 
 	handler := getTeam(a)
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/teams/"+testTeamID, nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/teams/"+testTeamID, http.NoBody)
 	r = withChiParam(r, "id", testTeamID)
 	w := httptest.NewRecorder()
 
@@ -87,7 +87,7 @@ func TestGetTeam_NotFound(t *testing.T) {
 	defer cleanup()
 
 	handler := getTeam(a)
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/teams/nonexistent", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/teams/nonexistent", http.NoBody)
 	r = withChiParam(r, "id", "nonexistent")
 	w := httptest.NewRecorder()
 
@@ -104,7 +104,7 @@ func TestUpdateTeam(t *testing.T) {
 
 	handler := updateTeam(a)
 	body := `{"display_name":"Updated Team"}`
-	r := httptest.NewRequest(http.MethodPut, "/api/v1/teams/"+testTeamID, strings.NewReader(body))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/api/v1/teams/"+testTeamID, strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	r = withChiParam(r, "id", testTeamID)
 	w := httptest.NewRecorder()
@@ -121,7 +121,7 @@ func TestDeleteTeam(t *testing.T) {
 	defer cleanup()
 
 	handler := deleteTeam(a)
-	r := httptest.NewRequest(http.MethodDelete, "/api/v1/teams/"+testTeamID, nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/api/v1/teams/"+testTeamID, http.NoBody)
 	r = withChiParam(r, "id", testTeamID)
 	w := httptest.NewRecorder()
 
@@ -137,7 +137,7 @@ func TestGetAllTeams(t *testing.T) {
 	defer cleanup()
 
 	handler := getAllTeams(a)
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/teams", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/teams", http.NoBody)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, r)
@@ -152,7 +152,7 @@ func TestGetMyTeams(t *testing.T) {
 	defer cleanup()
 
 	handler := getMyTeams(a)
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/users/me/teams", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/users/me/teams", http.NoBody)
 	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()
 
@@ -169,7 +169,7 @@ func TestAddTeamMember(t *testing.T) {
 
 	handler := addTeamMember(a)
 	body := `{"user_id":"` + extraUserID + `"}`
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/teams/"+testTeamID+"/members", strings.NewReader(body))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/teams/"+testTeamID+"/members", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	r = withChiParam(r, "id", testTeamID)
 	// testUser is a member of testTeamID, which is what AddTeamMember requires.
@@ -188,7 +188,7 @@ func TestRemoveTeamMember(t *testing.T) {
 	defer cleanup()
 
 	handler := removeTeamMember(a)
-	r := httptest.NewRequest(http.MethodDelete, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/", http.NoBody)
 	r = withChiParams(r, map[string]string{"id": testTeamID, "user_id": extraUserID})
 	// Removing SOMEBODY ELSE requires system_admin, so the actor is dana.
 	r = authedRequest(r, adminUser())
@@ -206,7 +206,7 @@ func TestGetTeamMembers(t *testing.T) {
 	defer cleanup()
 
 	handler := getTeamMembers(a)
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/teams/"+testTeamID+"/members", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/teams/"+testTeamID+"/members", http.NoBody)
 	r = withChiParam(r, "id", testTeamID)
 	w := httptest.NewRecorder()
 

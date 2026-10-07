@@ -22,7 +22,7 @@ func TestListCommands(t *testing.T) {
 	a.CommandRegistry = command.NewRegistry(cmds)
 
 	handler := listCommands(a)
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/commands", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/commands", http.NoBody)
 	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()
 
@@ -55,7 +55,7 @@ func TestListCommands_NoRegistry(t *testing.T) {
 
 	// CommandRegistry is nil by default.
 	handler := listCommands(a)
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/commands", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/commands", http.NoBody)
 	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()
 
@@ -79,7 +79,7 @@ func TestListCommands_EmptyRegistry(t *testing.T) {
 	a.CommandRegistry = command.NewRegistry([]*command.Command{})
 
 	handler := listCommands(a)
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/commands", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/commands", http.NoBody)
 	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()
 
@@ -104,7 +104,7 @@ func TestCreatePost_SlashCommandIntercepted(t *testing.T) {
 	// Verify that /help goes through as a normal post.
 	handler := createPost(a)
 	body := `{"channel_id":"` + testChannelID + `","content":"/help"}`
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/posts", strings.NewReader(body))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/posts", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()

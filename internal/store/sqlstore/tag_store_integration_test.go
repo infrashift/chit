@@ -28,7 +28,7 @@ func TestTagStoreIntegration_TagsAndAssociations(t *testing.T) {
 		t.Errorf("GetAll: got %v", all)
 	}
 
-	if err := ss.Tag().AddTagToPost(t.Context(), post1.ID, tag.ID); err != nil {
+	if err = ss.Tag().AddTagToPost(t.Context(), post1.ID, tag.ID); err != nil {
 		t.Fatalf("AddTagToPost: %v", err)
 	}
 
@@ -56,7 +56,7 @@ func TestTagStoreIntegration_TagsAndAssociations(t *testing.T) {
 		t.Errorf("FilterPostIDsByTags: got %v, want [%s]", filtered, post1.ID)
 	}
 
-	if err := ss.Tag().RemoveTagFromPost(t.Context(), post1.ID, tag.ID); err != nil {
+	if err = ss.Tag().RemoveTagFromPost(t.Context(), post1.ID, tag.ID); err != nil {
 		t.Fatalf("RemoveTagFromPost: %v", err)
 	}
 	tags, err = ss.Tag().GetTagsForPost(t.Context(), post1.ID)

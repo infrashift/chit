@@ -12,7 +12,7 @@ func TestSearchPostsInTeam_InvalidBody(t *testing.T) {
 	defer cleanup()
 
 	handler := searchPostsInTeam(a)
-	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("{bad"))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader("{bad"))
 	r = withChiParam(r, "id", testTeamID)
 	w := httptest.NewRecorder()
 
@@ -29,7 +29,7 @@ func TestSearchPostsGlobal_InvalidBody(t *testing.T) {
 	defer cleanup()
 
 	handler := searchPostsGlobal(a)
-	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("{bad"))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader("{bad"))
 	w := httptest.NewRecorder()
 
 	r = authedRequest(r, testUser())
@@ -45,7 +45,7 @@ func TestSearchPostsGlobal_RequiresTermsOrTags(t *testing.T) {
 	defer cleanup()
 
 	handler := searchPostsGlobal(a)
-	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
 
 	r = authedRequest(r, testUser())
@@ -61,7 +61,7 @@ func TestSearchPostsInChannel_InvalidBody(t *testing.T) {
 	defer cleanup()
 
 	handler := searchPostsInChannel(a)
-	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("{bad"))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader("{bad"))
 	r = withChiParam(r, "id", testChannelID)
 	w := httptest.NewRecorder()
 

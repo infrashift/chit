@@ -132,7 +132,7 @@ func (si *SearchIndexer) IndexPost(ctx context.Context, id string, doc map[strin
 	if err != nil {
 		return fmt.Errorf("index post: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("index post: status %d", resp.StatusCode)
@@ -156,7 +156,7 @@ func (si *SearchIndexer) DeletePost(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("delete post from index: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 300 && resp.StatusCode != http.StatusNotFound && resp.StatusCode != http.StatusBadRequest {
 		return fmt.Errorf("delete post from index: status %d", resp.StatusCode)
@@ -194,7 +194,7 @@ func (si *SearchIndexer) Search(ctx context.Context, query string, from, size in
 	if err != nil {
 		return nil, fmt.Errorf("search: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Hits struct {

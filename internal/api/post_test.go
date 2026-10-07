@@ -15,7 +15,7 @@ func TestCreatePost(t *testing.T) {
 
 	handler := createPost(a)
 	body := `{"channel_id":"` + testChannelID + `","content":"test message"}`
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/posts", strings.NewReader(body))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/posts", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()
@@ -38,7 +38,7 @@ func TestCreatePost_InvalidBody(t *testing.T) {
 	defer cleanup()
 
 	handler := createPost(a)
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/posts", strings.NewReader("{bad"))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/posts", strings.NewReader("{bad"))
 	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()
 
@@ -54,7 +54,7 @@ func TestGetPost(t *testing.T) {
 	defer cleanup()
 
 	handler := getPost(a)
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r = withChiParam(r, "id", testRootPost)
 	w := httptest.NewRecorder()
 
@@ -77,7 +77,7 @@ func TestGetPost_NotFound(t *testing.T) {
 	defer cleanup()
 
 	handler := getPost(a)
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r = withChiParam(r, "id", "nonexistent")
 	w := httptest.NewRecorder()
 
@@ -95,7 +95,7 @@ func TestUpdatePost(t *testing.T) {
 
 	handler := updatePost(a)
 	body := `{"content":"updated content","channel_id":"` + testChannelID + `"}`
-	r := httptest.NewRequest(http.MethodPut, "/", strings.NewReader(body))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	r = withChiParam(r, "id", testRootPost)
 	w := httptest.NewRecorder()
@@ -113,7 +113,7 @@ func TestDeletePost(t *testing.T) {
 	defer cleanup()
 
 	handler := deletePost(a)
-	r := httptest.NewRequest(http.MethodDelete, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/", http.NoBody)
 	r = withChiParam(r, "id", testRootPost)
 	w := httptest.NewRecorder()
 
@@ -130,7 +130,7 @@ func TestPinPost(t *testing.T) {
 	defer cleanup()
 
 	handler := pinPost(a)
-	r := httptest.NewRequest(http.MethodPost, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", http.NoBody)
 	r = withChiParam(r, "id", testRootPost)
 	w := httptest.NewRecorder()
 
@@ -147,7 +147,7 @@ func TestUnpinPost(t *testing.T) {
 	defer cleanup()
 
 	handler := unpinPost(a)
-	r := httptest.NewRequest(http.MethodPost, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", http.NoBody)
 	r = withChiParam(r, "id", testRootPost)
 	w := httptest.NewRecorder()
 
@@ -164,7 +164,7 @@ func TestGetChannelPosts(t *testing.T) {
 	defer cleanup()
 
 	handler := getChannelPosts(a)
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r = withChiParam(r, "id", testChannelID)
 	w := httptest.NewRecorder()
 
@@ -181,7 +181,7 @@ func TestGetPinnedPosts(t *testing.T) {
 	defer cleanup()
 
 	handler := getPinnedPosts(a)
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r = withChiParam(r, "id", testChannelID)
 	w := httptest.NewRecorder()
 

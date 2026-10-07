@@ -48,8 +48,8 @@ func Defaults() *Config {
 func (c *Config) UseOAuth() bool { return c.OAuthClientID != "" }
 
 // OAuth returns the client-credentials configuration for chitclient.
-func (c *Config) OAuth() chitclient.OAuthConfig {
-	return chitclient.OAuthConfig{
+func (c *Config) OAuth() *chitclient.OAuthConfig {
+	return &chitclient.OAuthConfig{
 		TokenURL:     c.OAuthTokenURL,
 		ClientID:     c.OAuthClientID,
 		ClientSecret: c.OAuthClientSecret,

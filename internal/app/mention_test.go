@@ -322,7 +322,7 @@ func (mentionMockTagStore) GetTagsForPosts(_ context.Context, _ []string) (map[s
 func (mentionMockTagStore) GetPostIDsByTags(_ context.Context, _ []string, _, _ int) ([]string, error) {
 	return nil, nil
 }
-func (mentionMockTagStore) FilterPostIDsByTags(_ context.Context, _ []string, _ []string) ([]string, error) {
+func (mentionMockTagStore) FilterPostIDsByTags(_ context.Context, _, _ []string) ([]string, error) {
 	return nil, nil
 }
 

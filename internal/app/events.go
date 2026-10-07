@@ -13,7 +13,7 @@ import (
 // publishes a thin envelope to pubsub for other processes (currently the MCP
 // server's event buffer). chitd itself does not re-consume the topic, so
 // WebSocket fan-out remains single-node.
-func (a *App) publishEvent(ctx context.Context, event *model.WebSocketEvent, env pubsub.EventEnvelope) {
+func (a *App) publishEvent(ctx context.Context, event *model.WebSocketEvent, env *pubsub.EventEnvelope) {
 	a.Hub.Broadcast(event)
 
 	if a.PubSub == nil {

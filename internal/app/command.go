@@ -42,7 +42,7 @@ func (a *App) CheckCommandPermission(ctx context.Context, actorID, commandID str
 	if err != nil {
 		return false, fmt.Errorf("keto check command: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Allowed bool `json:"allowed"`

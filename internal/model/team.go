@@ -31,7 +31,7 @@ func (t *Team) IsValid() *AppError {
 	if !validTeamNameRe.MatchString(t.Name) {
 		return NewAppError("Team.IsValid", "invalid team name", "", http.StatusBadRequest)
 	}
-	if len(t.DisplayName) == 0 || len(t.DisplayName) > 64 {
+	if t.DisplayName == "" || len(t.DisplayName) > 64 {
 		return NewAppError("Team.IsValid", "display_name must be 1–64 characters", "", http.StatusBadRequest)
 	}
 	if len(t.Description) > 255 {

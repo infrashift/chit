@@ -265,7 +265,7 @@ func (s *SqlChannelStore) SaveDirectChannel(ctx context.Context, channel *model.
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }() // no-op after Commit
 
 	channel.PreSave()
 	if err := channel.IsValid(); err != nil {

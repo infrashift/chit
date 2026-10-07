@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/infrashift/chit/internal/model"
@@ -13,7 +14,7 @@ func WriteJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if data != nil {
-		json.NewEncoder(w).Encode(data)
+		writeBody(w, data)
 	}
 }
 
@@ -21,7 +22,16 @@ func WriteJSON(w http.ResponseWriter, status int, data any) {
 func WriteError(w http.ResponseWriter, appErr *model.AppError) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(appErr.StatusCode)
-	json.NewEncoder(w).Encode(appErr)
+	writeBody(w, appErr)
+}
+
+// writeBody encodes data after the header is sent. The status can no longer
+// change at that point, so a failure (almost always the client going away)
+// is logged rather than returned.
+func writeBody(w http.ResponseWriter, data any) {
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		slog.Debug("write response body", "error", err)
+	}
 }
 
 // WriteAppError writes err preserving its AppError status code (403, 404, …)

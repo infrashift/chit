@@ -38,29 +38,36 @@ func isNotFound(err error) bool {
 }
 
 func main() {
+	if err := run(context.Background()); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// run does the seeding; it is split from main so the deferred store.Close
+// runs on every exit path, including failures.
+func run(ctx context.Context) error {
 	dbURL := os.Getenv("CHIT_DATABASE_URL")
 	if dbURL == "" {
-		log.Fatal("CHIT_DATABASE_URL is not set")
+		return errors.New("CHIT_DATABASE_URL is not set")
 	}
 
-	ctx := context.Background()
 	store, err := sqlstore.New(ctx, dbURL, 5, 2)
 	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+		return fmt.Errorf("connect to database: %w", err)
 	}
 	defer store.Close()
 
 	// Create users (idempotent — skip if already exists).
 	userIDs := make([]string, len(users))
 	for i, u := range users {
-		existing, err := store.User().GetByKratosID(ctx, u.KratosID)
-		if err == nil {
+		existing, lookupErr := store.User().GetByKratosID(ctx, u.KratosID)
+		if lookupErr == nil {
 			userIDs[i] = existing.ID
 			fmt.Printf("  User %-8s already exists  id=%s\n", u.Username, existing.ID)
 			continue
 		}
-		if !isNotFound(err) {
-			log.Fatalf("Failed to check user %s: %v", u.Username, err)
+		if !isNotFound(lookupErr) {
+			return fmt.Errorf("check user %s: %w", u.Username, lookupErr)
 		}
 
 		// The Kratos ID may have moved: seed-kratos creates real identities
@@ -68,16 +75,18 @@ func main() {
 		// matching. Fall back to the username, which is the stable identity
 		// here and is what the unique constraint is on — without this, a
 		// second `make uat-up` after seeding Kratos fails on a duplicate.
-		if existing, err := store.User().GetByUsername(ctx, u.Username); err == nil {
-			userIDs[i] = existing.ID
+		byName, nameErr := store.User().GetByUsername(ctx, u.Username)
+		if nameErr == nil {
+			userIDs[i] = byName.ID
 			fmt.Printf("  User %-8s already exists  id=%s (kratos_id=%s)\n",
-				u.Username, existing.ID, existing.KratosID)
+				u.Username, byName.ID, byName.KratosID)
 			continue
-		} else if !isNotFound(err) {
-			log.Fatalf("Failed to check user %s by username: %v", u.Username, err)
+		}
+		if !isNotFound(nameErr) {
+			return fmt.Errorf("check user %s by username: %w", u.Username, nameErr)
 		}
 
-		saved, err := store.User().Save(ctx, &model.User{
+		saved, saveErr := store.User().Save(ctx, &model.User{
 			KratosID:    u.KratosID,
 			Username:    u.Username,
 			DisplayName: u.DisplayName,
@@ -85,8 +94,8 @@ func main() {
 			Roles:       u.Roles,
 			ActorType:   u.ActorType,
 		})
-		if err != nil {
-			log.Fatalf("Failed to create user %s: %v", u.Username, err)
+		if saveErr != nil {
+			return fmt.Errorf("create user %s: %w", u.Username, saveErr)
 		}
 		userIDs[i] = saved.ID
 		fmt.Printf("  Created user %-8s  id=%s\n", u.Username, saved.ID)
@@ -96,7 +105,7 @@ func main() {
 	var team *model.Team
 	team, err = store.Team().GetByName(ctx, "uat-team")
 	if err != nil && !isNotFound(err) {
-		log.Fatalf("Failed to check team: %v", err)
+		return fmt.Errorf("check team: %w", err)
 	}
 	if team == nil {
 		team, err = store.Team().Save(ctx, &model.Team{
@@ -106,7 +115,7 @@ func main() {
 			CreatorID:   userIDs[0],
 		})
 		if err != nil {
-			log.Fatalf("Failed to create team: %v", err)
+			return fmt.Errorf("create team: %w", err)
 		}
 		fmt.Printf("  Created team %-8s  id=%s\n", team.Name, team.ID)
 	} else {
@@ -115,12 +124,11 @@ func main() {
 
 	// Add all users to team (SaveMember is already idempotent via ON CONFLICT).
 	for i, uid := range userIDs {
-		_, err := store.Team().SaveMember(ctx, &model.TeamMember{
+		if _, err = store.Team().SaveMember(ctx, &model.TeamMember{
 			TeamID: team.ID,
 			UserID: uid,
-		})
-		if err != nil {
-			log.Fatalf("Failed to add user %s to team: %v", users[i].Username, err)
+		}); err != nil {
+			return fmt.Errorf("add user %s to team: %w", users[i].Username, err)
 		}
 	}
 	fmt.Printf("  Ensured %d members in team\n", len(userIDs))
@@ -129,7 +137,7 @@ func main() {
 	var channel *model.Channel
 	channel, err = store.Channel().GetByName(ctx, team.ID, "town-square")
 	if err != nil && !isNotFound(err) {
-		log.Fatalf("Failed to check channel: %v", err)
+		return fmt.Errorf("check channel: %w", err)
 	}
 	if channel == nil {
 		channel, err = store.Channel().Save(ctx, &model.Channel{
@@ -140,7 +148,7 @@ func main() {
 			Type:        model.ChannelOpen,
 		})
 		if err != nil {
-			log.Fatalf("Failed to create channel: %v", err)
+			return fmt.Errorf("create channel: %w", err)
 		}
 		fmt.Printf("  Created channel %-14s  id=%s\n", channel.Name, channel.ID)
 	} else {
@@ -149,12 +157,11 @@ func main() {
 
 	// Add all users to channel (SaveMember is already idempotent via ON CONFLICT).
 	for i, uid := range userIDs {
-		_, err := store.Channel().SaveMember(ctx, &model.ChannelMember{
+		if _, err = store.Channel().SaveMember(ctx, &model.ChannelMember{
 			ChannelID: channel.ID,
 			UserID:    uid,
-		})
-		if err != nil {
-			log.Fatalf("Failed to add user %s to channel: %v", users[i].Username, err)
+		}); err != nil {
+			return fmt.Errorf("add user %s to channel: %w", users[i].Username, err)
 		}
 	}
 	fmt.Printf("  Ensured %d members in channel\n", len(userIDs))
@@ -200,4 +207,5 @@ func main() {
 	fmt.Printf("    http://localhost:8065/api/v1/channels/direct\n")
 	fmt.Println()
 	fmt.Println("========================")
+	return nil
 }

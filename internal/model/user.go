@@ -52,7 +52,7 @@ func (u *User) IsValid() *AppError {
 	if !validUsernameRe.MatchString(u.Username) {
 		return NewAppError("User.IsValid", "invalid username", "", http.StatusBadRequest)
 	}
-	if len(u.DisplayName) == 0 || len(u.DisplayName) > 100 {
+	if u.DisplayName == "" || len(u.DisplayName) > 100 {
 		return NewAppError("User.IsValid", "display_name must be 1–100 characters", "", http.StatusBadRequest)
 	}
 	// EMAIL BELONGS TO A PERSON. It is required for a Kratos-backed user, where
@@ -60,7 +60,7 @@ func (u *User) IsValid() *AppError {
 	// machine actor has no mailbox, and inventing one to pass a validator is
 	// the same move as inventing a Kratos identity for it.
 	if u.KratosID != "" {
-		if len(u.Email) == 0 || len(u.Email) > 128 || !strings.Contains(u.Email, "@") {
+		if u.Email == "" || len(u.Email) > 128 || !strings.Contains(u.Email, "@") {
 			return NewAppError("User.IsValid", "invalid email", "", http.StatusBadRequest)
 		}
 	}

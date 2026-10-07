@@ -117,7 +117,7 @@ func (s *SqlTagStore) GetPostIDsByTags(ctx context.Context, tagIDs []string, pag
 	return ids, rows.Err()
 }
 
-func (s *SqlTagStore) FilterPostIDsByTags(ctx context.Context, postIDs []string, tagIDs []string) ([]string, error) {
+func (s *SqlTagStore) FilterPostIDsByTags(ctx context.Context, postIDs, tagIDs []string) ([]string, error) {
 	query := `SELECT mt.message_id FROM message_tags mt
 		WHERE mt.message_id = ANY($1) AND mt.tag_id = ANY($2)
 		GROUP BY mt.message_id

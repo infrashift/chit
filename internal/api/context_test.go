@@ -10,7 +10,7 @@ import (
 
 func TestContextSetGetUser(t *testing.T) {
 	user := &model.User{ID: "user-1", Username: "alice"}
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r = ContextSetUser(r, user)
 
 	got := ContextGetUser(r)
@@ -26,7 +26,7 @@ func TestContextSetGetUser(t *testing.T) {
 }
 
 func TestContextGetUser_Missing(t *testing.T) {
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	got := ContextGetUser(r)
 	if got != nil {
 		t.Fatalf("expected nil, got %+v", got)

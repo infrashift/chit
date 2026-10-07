@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -31,6 +34,14 @@ var identities = []seedIdentity{
 }
 
 func main() {
+	if err := run(context.Background()); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// run does the seeding; it is split from main so the deferred db.Close runs
+// on every exit path, including failures.
+func run(ctx context.Context) error {
 	kratosAdminURL := os.Getenv("KRATOS_ADMIN_URL")
 	if kratosAdminURL == "" {
 		kratosAdminURL = "http://localhost:4434"
@@ -45,7 +56,7 @@ func main() {
 	fmt.Println("Waiting for Kratos admin API...")
 	client := &http.Client{Timeout: 5 * time.Second}
 	for i := range 30 {
-		resp, err := client.Get(kratosAdminURL + "/health/ready")
+		resp, err := httpDo(ctx, client, http.MethodGet, kratosAdminURL+"/health/ready", nil)
 		if err == nil {
 			_ = resp.Body.Close()
 			if resp.StatusCode == 200 {
@@ -54,7 +65,7 @@ func main() {
 			}
 		}
 		if i == 29 {
-			log.Fatal("Kratos admin API not ready after 30s")
+			return errors.New("kratos admin API not ready after 30s")
 		}
 		time.Sleep(1 * time.Second)
 	}
@@ -62,31 +73,31 @@ func main() {
 	// Connect to Chit database to sync kratos_id values.
 	db, err := sql.Open("pgx", dbURL)
 	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+		return fmt.Errorf("connect to database: %w", err)
 	}
 	defer func() { _ = db.Close() }()
 
-	if err := db.Ping(); err != nil {
-		log.Fatalf("Failed to ping database: %v", err)
+	if err = db.PingContext(ctx); err != nil {
+		return fmt.Errorf("ping database: %w", err)
 	}
 	fmt.Println("Connected to Chit database.")
 
 	fmt.Println()
 	fmt.Println("Creating Kratos identities...")
 	for _, id := range identities {
-		kratosID, err := ensureIdentity(client, kratosAdminURL, id)
+		kratosID, err := ensureIdentity(ctx, client, kratosAdminURL, id)
 		if err != nil {
-			log.Fatalf("Failed to ensure identity for %s: %v", id.Username, err)
+			return fmt.Errorf("ensure identity for %s: %w", id.Username, err)
 		}
 		fmt.Printf("  %-8s  kratos_id=%s\n", id.Username, kratosID)
 
 		// Sync kratos_id into the Chit database users table.
-		result, err := db.Exec(
+		result, err := db.ExecContext(ctx,
 			"UPDATE users SET kratos_id = $1 WHERE email = $2 AND delete_at = 0",
 			kratosID, id.Email,
 		)
 		if err != nil {
-			log.Fatalf("Failed to update kratos_id for %s: %v", id.Username, err)
+			return fmt.Errorf("update kratos_id for %s: %w", id.Username, err)
 		}
 		rows, _ := result.RowsAffected()
 		if rows == 0 {
@@ -105,18 +116,35 @@ func main() {
 	fmt.Println()
 	fmt.Println("All users can log in via chit-tui using their email and password.")
 	fmt.Println()
+	return nil
+}
+
+// httpDo sends a request bound to ctx. body may be nil.
+func httpDo(ctx context.Context, client *http.Client, method, target string, body []byte) (*http.Response, error) {
+	var rdr io.Reader = http.NoBody
+	if body != nil {
+		rdr = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, target, rdr)
+	if err != nil {
+		return nil, err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	return client.Do(req)
 }
 
 // ensureIdentity creates a Kratos identity or returns the existing one's ID.
-func ensureIdentity(client *http.Client, baseURL string, id seedIdentity) (string, error) {
+func ensureIdentity(ctx context.Context, client *http.Client, baseURL string, id seedIdentity) (string, error) {
 	// Try to find an existing identity by credential identifier (email).
-	kratosID, err := findIdentityByEmail(client, baseURL, id.Email)
+	kratosID, err := findIdentityByEmail(ctx, client, baseURL, id.Email)
 	if err != nil {
 		return "", fmt.Errorf("search: %w", err)
 	}
 	if kratosID != "" {
 		// Identity exists — update password to ensure it matches.
-		if err := updatePassword(client, baseURL, kratosID, id); err != nil {
+		if err = updatePassword(ctx, client, baseURL, kratosID, id); err != nil {
 			return "", fmt.Errorf("update password: %w", err)
 		}
 		fmt.Printf("  Identity %-8s already exists, updated password.\n", id.Username)
@@ -124,7 +152,7 @@ func ensureIdentity(client *http.Client, baseURL string, id seedIdentity) (strin
 	}
 
 	// Create new identity.
-	kratosID, err = createIdentity(client, baseURL, id)
+	kratosID, err = createIdentity(ctx, client, baseURL, id)
 	if err != nil {
 		return "", fmt.Errorf("create: %w", err)
 	}
@@ -132,9 +160,9 @@ func ensureIdentity(client *http.Client, baseURL string, id seedIdentity) (strin
 	return kratosID, nil
 }
 
-func findIdentityByEmail(client *http.Client, baseURL, email string) (string, error) {
-	url := fmt.Sprintf("%s/admin/identities?credentials_identifier=%s", baseURL, email)
-	resp, err := client.Get(url)
+func findIdentityByEmail(ctx context.Context, client *http.Client, baseURL, email string) (string, error) {
+	target := fmt.Sprintf("%s/admin/identities?credentials_identifier=%s", baseURL, url.QueryEscape(email))
+	resp, err := httpDo(ctx, client, http.MethodGet, target, nil)
 	if err != nil {
 		return "", err
 	}
@@ -157,7 +185,7 @@ func findIdentityByEmail(client *http.Client, baseURL, email string) (string, er
 	return results[0].ID, nil
 }
 
-func createIdentity(client *http.Client, baseURL string, id seedIdentity) (string, error) {
+func createIdentity(ctx context.Context, client *http.Client, baseURL string, id seedIdentity) (string, error) {
 	body := map[string]any{
 		"schema_id": "default",
 		"traits": map[string]string{
@@ -180,13 +208,7 @@ func createIdentity(client *http.Client, baseURL string, id seedIdentity) (strin
 		return "", err
 	}
 
-	req, err := http.NewRequest("POST", baseURL+"/admin/identities", bytes.NewReader(data))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := client.Do(req)
+	resp, err := httpDo(ctx, client, http.MethodPost, baseURL+"/admin/identities", data)
 	if err != nil {
 		return "", err
 	}
@@ -206,7 +228,7 @@ func createIdentity(client *http.Client, baseURL string, id seedIdentity) (strin
 	return result.ID, nil
 }
 
-func updatePassword(client *http.Client, baseURL, kratosID string, id seedIdentity) error {
+func updatePassword(ctx context.Context, client *http.Client, baseURL, kratosID string, id seedIdentity) error {
 	body := map[string]any{
 		"schema_id": "default",
 		"traits": map[string]string{
@@ -229,14 +251,7 @@ func updatePassword(client *http.Client, baseURL, kratosID string, id seedIdenti
 		return err
 	}
 
-	url := fmt.Sprintf("%s/admin/identities/%s", baseURL, kratosID)
-	req, err := http.NewRequest("PUT", url, bytes.NewReader(data))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := client.Do(req)
+	resp, err := httpDo(ctx, client, http.MethodPut, baseURL+"/admin/identities/"+url.PathEscape(kratosID), data)
 	if err != nil {
 		return err
 	}

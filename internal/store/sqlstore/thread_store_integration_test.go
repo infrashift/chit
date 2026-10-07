@@ -84,10 +84,10 @@ func TestThreadStoreIntegration_ReplyCountAccumulates(t *testing.T) {
 			LastReplyAt:  0,
 			Participants: []string{},
 		}
-		if err := ss.Thread().SaveOrUpdate(t.Context(), thread); err != nil {
+		if err = ss.Thread().SaveOrUpdate(t.Context(), thread); err != nil {
 			t.Fatalf("SaveOrUpdate (reply %d): %v", i+1, err)
 		}
-		if err := ss.Thread().IncrementReplyCount(t.Context(), root.ID, reply.CreateAt, ru.ID); err != nil {
+		if err = ss.Thread().IncrementReplyCount(t.Context(), root.ID, reply.CreateAt, ru.ID); err != nil {
 			t.Fatalf("IncrementReplyCount (reply %d): %v", i+1, err)
 		}
 	}

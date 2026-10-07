@@ -33,7 +33,7 @@ func (p *Post) IsValid() *AppError {
 	if p.RootID != "" && !IsValidID(p.RootID) {
 		return NewAppError("Post.IsValid", "invalid root_id", "", http.StatusBadRequest)
 	}
-	if len(p.Content) == 0 {
+	if p.Content == "" {
 		return NewAppError("Post.IsValid", "content is required", "", http.StatusBadRequest)
 	}
 	if len(p.Content) > PostMaxContentSize {

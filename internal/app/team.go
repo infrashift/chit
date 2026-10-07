@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+
 	"github.com/infrashift/chit/internal/model"
 )
 

@@ -77,7 +77,7 @@ func newCommandTestApp(t *testing.T, ketoAllowed bool) *App {
 	// Fake Keto server returning allowed/denied.
 	ketoSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]bool{"allowed": ketoAllowed})
+		_ = json.NewEncoder(w).Encode(map[string]bool{"allowed": ketoAllowed})
 	}))
 	t.Cleanup(ketoSrv.Close)
 
@@ -124,7 +124,7 @@ func newCommandTestApp(t *testing.T, ketoAllowed bool) *App {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { al.Close() })
+	t.Cleanup(func() { _ = al.Close() })
 	a.AuditLogger = al
 
 	return a

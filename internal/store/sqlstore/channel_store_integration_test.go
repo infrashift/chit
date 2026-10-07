@@ -19,7 +19,7 @@ func TestChannelStoreIntegration_MembershipCRUD(t *testing.T) {
 
 	// Creator fixture does not add membership; add both users.
 	for _, uid := range []string{user.ID, other.ID} {
-		if _, err := ss.Channel().SaveMember(t.Context(), &model.ChannelMember{
+		if _, err = ss.Channel().SaveMember(t.Context(), &model.ChannelMember{
 			ChannelID: channel.ID,
 			UserID:    uid,
 		}); err != nil {
@@ -137,7 +137,7 @@ func TestChannelStoreIntegration_DirectChannel(t *testing.T) {
 
 	// Both users are members atomically.
 	for _, uid := range []string{user.ID, other.ID} {
-		if _, err := ss.Channel().GetMember(t.Context(), dm.ID, uid); err != nil {
+		if _, err = ss.Channel().GetMember(t.Context(), dm.ID, uid); err != nil {
 			t.Errorf("GetMember(%s): %v", uid, err)
 		}
 	}

@@ -82,6 +82,7 @@ func StructuredLogger(next http.Handler) http.Handler {
 			"status", wrapped.statusCode,
 			"duration_ms", time.Since(start).Milliseconds(),
 			"remote_addr", r.RemoteAddr,
+			"forwarded_for", r.Header.Get("X-Forwarded-For"),
 		)
 	})
 }

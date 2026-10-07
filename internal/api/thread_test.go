@@ -12,7 +12,7 @@ func TestGetThread(t *testing.T) {
 	defer cleanup()
 
 	handler := getThread(a)
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r = withChiParam(r, "id", testRootPost)
 	w := httptest.NewRecorder()
 
@@ -29,7 +29,7 @@ func TestGetMyThreads(t *testing.T) {
 	defer cleanup()
 
 	handler := getMyThreads(a)
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r = withChiParam(r, "id", testTeamID)
 	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()
@@ -46,7 +46,7 @@ func TestMarkThreadAsRead(t *testing.T) {
 	defer cleanup()
 
 	handler := markThreadAsRead(a)
-	r := httptest.NewRequest(http.MethodPut, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/", http.NoBody)
 	r = withChiParams(r, map[string]string{"team_id": testTeamID, "id": testRootPost})
 	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()
@@ -64,7 +64,7 @@ func TestUpdateThreadFollowing(t *testing.T) {
 
 	handler := updateThreadFollowing(a)
 	body := `{"following":true}`
-	r := httptest.NewRequest(http.MethodPut, "/", strings.NewReader(body))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	r = withChiParams(r, map[string]string{"team_id": testTeamID, "id": testRootPost})
 	r = authedRequest(r, testUser())
@@ -82,7 +82,7 @@ func TestUpdateThreadFollowing_InvalidBody(t *testing.T) {
 	defer cleanup()
 
 	handler := updateThreadFollowing(a)
-	r := httptest.NewRequest(http.MethodPut, "/", strings.NewReader("{bad"))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/", strings.NewReader("{bad"))
 	r = withChiParams(r, map[string]string{"team_id": testTeamID, "id": testRootPost})
 	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()

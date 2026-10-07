@@ -38,10 +38,10 @@ func TestValidationMiddleware_ValidRequest(t *testing.T) {
 	r.Use(mw)
 	r.Get("/api/v1/system/ping", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/system/ping", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/system/ping", http.NoBody)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -63,7 +63,7 @@ func TestValidationMiddleware_InvalidBody(t *testing.T) {
 	})
 
 	// POST with wrong content-type (text/plain instead of application/json)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/teams", strings.NewReader("not json"))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/teams", strings.NewReader("not json"))
 	req.Header.Set("Content-Type", "text/plain")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)

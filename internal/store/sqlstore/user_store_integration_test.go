@@ -229,7 +229,7 @@ func TestUserStoreIntegration_MachineActorsHaveNoIdentity(t *testing.T) {
 
 	// And a person still round-trips with both columns populated.
 	p := newTestUser("alice")
-	if _, err := store.Save(t.Context(), p); err != nil {
+	if _, err = store.Save(t.Context(), p); err != nil {
 		t.Fatalf("save person: %v", err)
 	}
 	back, err := store.GetByKratosID(t.Context(), p.KratosID)

@@ -782,7 +782,7 @@ func (s *mockTagStore) GetPostIDsByTags(_ context.Context, tagIDs []string, page
 	return result[start:end], nil
 }
 
-func (s *mockTagStore) FilterPostIDsByTags(_ context.Context, postIDs []string, tagIDs []string) ([]string, error) {
+func (s *mockTagStore) FilterPostIDsByTags(_ context.Context, postIDs, tagIDs []string) ([]string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	postSet := make(map[string]bool, len(postIDs))

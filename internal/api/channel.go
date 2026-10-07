@@ -54,7 +54,7 @@ func updateChannel(a *app.App) http.HandlerFunc {
 		}
 
 		var patch model.Channel
-		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+		if err = json.NewDecoder(r.Body).Decode(&patch); err != nil {
 			WriteError(w, model.NewBadRequestError("updateChannel", "invalid request body"))
 			return
 		}

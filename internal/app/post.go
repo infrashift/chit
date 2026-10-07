@@ -142,7 +142,7 @@ func (a *App) DeletePost(ctx context.Context, id, actorID string) error {
 		Broadcast: &model.WebSocketBroadcast{
 			ChannelID: post.ChannelID,
 		},
-	}, pubsub.EventEnvelope{Event: model.WebSocketEventPostDeleted, PostID: id, ChannelID: post.ChannelID})
+	}, &pubsub.EventEnvelope{Event: model.WebSocketEventPostDeleted, PostID: id, ChannelID: post.ChannelID})
 
 	return nil
 }
@@ -192,7 +192,7 @@ func (a *App) setPostPinned(ctx context.Context, id, userID string, pinned bool,
 		Broadcast: &model.WebSocketBroadcast{
 			ChannelID: post.ChannelID,
 		},
-	}, pubsub.EventEnvelope{Event: event, PostID: id, ChannelID: post.ChannelID})
+	}, &pubsub.EventEnvelope{Event: event, PostID: id, ChannelID: post.ChannelID})
 
 	return nil
 }
@@ -255,5 +255,5 @@ func (a *App) broadcastPostEvent(ctx context.Context, event string, post *model.
 		Broadcast: &model.WebSocketBroadcast{
 			ChannelID: post.ChannelID,
 		},
-	}, pubsub.EventEnvelope{Event: event, PostID: post.ID, ChannelID: post.ChannelID})
+	}, &pubsub.EventEnvelope{Event: event, PostID: post.ID, ChannelID: post.ChannelID})
 }

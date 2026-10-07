@@ -54,7 +54,7 @@ func (h *httpKetoWriter) WriteSubjectSetRelation(ctx context.Context, namespace,
 	if err != nil {
 		return fmt.Errorf("keto subject-set write: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("keto subject-set write returned %d", resp.StatusCode)
@@ -86,7 +86,7 @@ func (h *httpKetoWriter) WriteRelation(ctx context.Context, namespace, object, r
 	if err != nil {
 		return fmt.Errorf("keto write: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("keto write: status %d", resp.StatusCode)
@@ -98,7 +98,7 @@ func (h *httpKetoWriter) DeleteRelation(ctx context.Context, namespace, object, 
 	url := fmt.Sprintf("%s/admin/relation-tuples?namespace=%s&object=%s&relation=%s&subject_id=%s",
 		h.writeURL, namespace, object, relation, subjectID)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("create keto delete request: %w", err)
 	}
@@ -107,7 +107,7 @@ func (h *httpKetoWriter) DeleteRelation(ctx context.Context, namespace, object, 
 	if err != nil {
 		return fmt.Errorf("keto delete: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("keto delete: status %d", resp.StatusCode)
@@ -154,9 +154,9 @@ func main() {
 	rec := command.NewReconciler(keto)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	if err := rec.Reconcile(ctx, cueCfg); err != nil {
+	err = rec.Reconcile(ctx, cueCfg)
+	cancel()
+	if err != nil {
 		log.Fatalf("reconcile failed: %v", err)
 	}
 

@@ -17,7 +17,7 @@ func TestGetMe(t *testing.T) {
 	defer cleanup()
 
 	handler := getMe(a)
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/users/me", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/users/me", http.NoBody)
 	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()
 
@@ -39,7 +39,7 @@ func TestGetMe_Unauthed(t *testing.T) {
 	defer cleanup()
 
 	handler := getMe(a)
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/users/me", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/users/me", http.NoBody)
 	// No user in context
 	w := httptest.NewRecorder()
 
@@ -55,7 +55,7 @@ func TestGetUser(t *testing.T) {
 	defer cleanup()
 
 	handler := getUser(a)
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/users/"+testUserID, nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/users/"+testUserID, http.NoBody)
 
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", testUserID)
@@ -81,7 +81,7 @@ func TestGetUser_NotFound(t *testing.T) {
 	defer cleanup()
 
 	handler := getUser(a)
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/users/nonexistent", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/users/nonexistent", http.NoBody)
 
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", "nonexistent")
@@ -100,7 +100,7 @@ func TestGetUserByUsername(t *testing.T) {
 	defer cleanup()
 
 	handler := getUserByUsername(a)
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/users/username/testuser", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/users/username/testuser", http.NoBody)
 
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("username", "testuser")
@@ -126,7 +126,7 @@ func TestUpdateMe(t *testing.T) {
 
 	handler := updateMe(a)
 	body := `{"display_name":"Updated Name"}`
-	r := httptest.NewRequest(http.MethodPut, "/api/v1/users/me", strings.NewReader(body))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/api/v1/users/me", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	r = authedRequest(r, testUser())
 
@@ -149,7 +149,7 @@ func TestUpdateMe_InvalidBody(t *testing.T) {
 	defer cleanup()
 
 	handler := updateMe(a)
-	r := httptest.NewRequest(http.MethodPut, "/api/v1/users/me", strings.NewReader("not json"))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/api/v1/users/me", strings.NewReader("not json"))
 	r = authedRequest(r, testUser())
 
 	w := httptest.NewRecorder()
@@ -166,7 +166,7 @@ func TestCreateUser(t *testing.T) {
 
 	handler := createUser(a)
 	body := `{"id":"` + model.NewID() + `","kratos_id":"new-kratos","username":"newuser","display_name":"New","email":"new@test.com","roles":"system_user","create_at":1000,"update_at":1000}`
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/users", strings.NewReader(body))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/users", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	// Provisioning a user is an ADMIN action. This test used to send the
 	// request unauthenticated and assert 201, which made a passing suite out of
@@ -186,7 +186,7 @@ func TestCreateUser_InvalidBody(t *testing.T) {
 	defer cleanup()
 
 	handler := createUser(a)
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/users", strings.NewReader("{invalid"))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/users", strings.NewReader("{invalid"))
 	// Authenticated as an admin so this still exercises the 400 body-parse
 	// path rather than stopping at the 403 that now guards the endpoint.
 	r = authedRequest(r, adminUser())
