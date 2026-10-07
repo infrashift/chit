@@ -175,49 +175,6 @@ func TestHub_MultipleClientsPerUser(t *testing.T) {
 	}
 }
 
-func TestHub_SlowConsumer(t *testing.T) {
-	hub := NewHub(nil)
-	defer hub.Stop()
-
-	client := newStubClient(hub, "user-1")
-	hub.Register(client)
-	time.Sleep(20 * time.Millisecond)
-
-	// Fill the send buffer
-	for i := 0; i < sendBufferSize; i++ {
-		hub.Broadcast(&model.WebSocketEvent{
-			Event:     model.WebSocketEventPosted,
-			Data:      map[string]any{"i": i},
-			Broadcast: &model.WebSocketBroadcast{},
-		})
-	}
-
-	// Give the hub time to process all events
-	time.Sleep(50 * time.Millisecond)
-
-	// Next broadcast should trigger slow consumer disconnect
-	hub.Broadcast(&model.WebSocketEvent{
-		Event:     model.WebSocketEventPosted,
-		Data:      map[string]any{"overflow": true},
-		Broadcast: &model.WebSocketBroadcast{},
-	})
-
-	// Drain the send channel - it should eventually close
-	timeout := time.After(500 * time.Millisecond)
-	for {
-		select {
-		case _, ok := <-client.send:
-			if !ok {
-				return // send channel closed = slow consumer disconnected
-			}
-		case <-timeout:
-			// It's acceptable if the slow consumer wasn't disconnected yet
-			// since the unregister is async. The important thing is no panic.
-			return
-		}
-	}
-}
-
 func TestHub_Stop(t *testing.T) {
 	hub := NewHub(nil)
 
@@ -518,5 +475,112 @@ func TestHub_SlowConsumerIsDisconnected(t *testing.T) {
 		case <-timeout:
 			t.Fatal("expected slow consumer to be disconnected (send channel closed)")
 		}
+	}
+}
+
+// fill makes c's send buffer full, so the hub treats it as a slow consumer.
+func fill(c *Client) {
+	for len(c.send) < cap(c.send) {
+		c.send <- &model.WebSocketEvent{Event: "filler"}
+	}
+}
+
+// One user, three connections, the first and last of them slow. removeClient
+// shifted the user's slice in place while broadcastEvent was ranging over it,
+// so the loop met the last client twice: the second time after its send
+// channel was closed, and a send on a closed channel panics the hub goroutine
+// and with it the whole process. The healthy middle client also missed the
+// event.
+func TestHub_SlowConsumersAmongSeveralConnections(t *testing.T) {
+	hub := NewHub(nil)
+	defer hub.Stop()
+
+	a, b, c := newStubClient(hub, "user-1"), newStubClient(hub, "user-1"), newStubClient(hub, "user-1")
+	for _, cl := range []*Client{a, b, c} {
+		hub.Register(cl)
+	}
+	fill(a)
+	fill(c)
+
+	hub.Broadcast(&model.WebSocketEvent{Event: model.WebSocketEventPosted, Broadcast: &model.WebSocketBroadcast{}})
+
+	if ev, ok := recvWithTimeout(b.send, time.Second); !ok || ev.Event != model.WebSocketEventPosted {
+		t.Fatal("the healthy connection did not receive the event")
+	}
+	for name, cl := range map[string]*Client{"first": a, "last": c} {
+		closed := false
+		for !closed {
+			select {
+			case _, ok := <-cl.send:
+				closed = !ok
+			case <-time.After(time.Second):
+				t.Fatalf("the %s slow connection was not disconnected", name)
+			}
+		}
+	}
+}
+
+// Once the hub has stopped, nothing drains its channels. Register and
+// Broadcast used to block forever there, hanging whichever request handler
+// called them during shutdown.
+func TestHub_CallsAfterStopReturn(t *testing.T) {
+	hub := NewHub(nil)
+	hub.Stop()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		hub.Register(newStubClient(hub, "late"))
+		for range sendBufferSize + 1 {
+			hub.Broadcast(&model.WebSocketEvent{Event: model.WebSocketEventPosted, Broadcast: &model.WebSocketBroadcast{}})
+			hub.BroadcastFromUser("late", channelEvent("c1"))
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a call after Stop blocked")
+	}
+}
+
+// slowChecker holds membership loads until released, so a test can change
+// membership while a load is in flight.
+type slowChecker struct {
+	fakeMembershipChecker
+	release chan struct{}
+}
+
+func (s *slowChecker) GetChannelIDsForUser(userID string) ([]string, error) {
+	<-s.release
+	return s.fakeMembershipChecker.GetChannelIDsForUser(userID)
+}
+
+// A membership change that arrived while the user's initial load was in
+// flight was dropped ("the load will observe the change"), but the load may
+// already have read the database. A user removed from a channel in that
+// window kept receiving its events until they reconnected.
+func TestHub_MembershipChangeDuringLoadIsKept(t *testing.T) {
+	checker := &slowChecker{
+		fakeMembershipChecker: fakeMembershipChecker{channels: map[string][]string{"user-1": {"c1"}}},
+		release:               make(chan struct{}),
+	}
+	hub := NewHub(checker)
+	defer hub.Stop()
+
+	client := newStubClient(hub, "user-1")
+	hub.Register(client)
+	hub.NotifyMembershipChanged("user-1", "c1", false) // removed mid-load
+	hub.NotifyMembershipChanged("user-1", "c2", true)  // added mid-load
+	close(checker.release)
+	time.Sleep(50 * time.Millisecond)
+
+	hub.Broadcast(channelEvent("c1"))
+	hub.Broadcast(channelEvent("c2"))
+	ev, ok := recvWithTimeout(client.send, time.Second)
+	if !ok || ev.Broadcast.ChannelID != "c2" {
+		t.Fatalf("first event = %+v, want only c2's", ev)
+	}
+	if ev, ok := recvWithTimeout(client.send, 100*time.Millisecond); ok {
+		t.Fatalf("received %+v for a channel the user left during the load", ev)
 	}
 }

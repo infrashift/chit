@@ -21,9 +21,10 @@ type Client struct {
 	writeTimeout time.Duration
 }
 
-// NewClient creates a new WebSocket Client and starts its read/write pumps.
+// NewClient creates a WebSocket Client. Register it with the hub, then call
+// Start.
 func NewClient(hub *Hub, conn *websocket.Conn, userID string, pingInterval, writeTimeout time.Duration) *Client {
-	c := &Client{
+	return &Client{
 		UserID:       userID,
 		conn:         conn,
 		hub:          hub,
@@ -31,9 +32,15 @@ func NewClient(hub *Hub, conn *websocket.Conn, userID string, pingInterval, writ
 		pingInterval: pingInterval,
 		writeTimeout: writeTimeout,
 	}
+}
+
+// Start runs the client's read and write pumps. Call it after Hub.Register:
+// if the pumps started first and the peer hung up at once, the readPump's
+// Unregister would land before the Register, and the hub would then keep a
+// dead client until its send buffer filled.
+func (c *Client) Start() {
 	go c.writePump()
 	go c.readPump()
-	return c
 }
 
 func (c *Client) readPump() {

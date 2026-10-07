@@ -52,6 +52,10 @@ type Hub struct {
 	clients     map[string][]*Client   // userID → connections
 	memberships map[string]memberships // userID → channel/team sets
 	loading     map[string]bool        // userID → membership load in flight
+	// pending holds membership changes that arrived while the user's load was
+	// in flight. The load may already have read the store, so they are
+	// replayed on top of its result rather than dropped.
+	pending map[string][]membershipChange
 
 	register         chan *Client
 	unregister       chan *Client
@@ -72,6 +76,7 @@ func NewHub(checker MembershipChecker) *Hub {
 		clients:          make(map[string][]*Client),
 		memberships:      make(map[string]memberships),
 		loading:          make(map[string]bool),
+		pending:          make(map[string][]membershipChange),
 		register:         make(chan *Client),
 		unregister:       make(chan *Client),
 		broadcast:        make(chan broadcastRequest, 256),
@@ -155,19 +160,27 @@ func (h *Hub) loadMemberships(userID string) {
 
 func (h *Hub) applyMembershipLoad(load membershipLoad) {
 	delete(h.loading, load.userID)
+	pending := h.pending[load.userID]
+	delete(h.pending, load.userID)
 	if !load.ok {
-		return // next register retries the load
+		return // next register retries the load, which re-reads everything
 	}
 	if _, connected := h.clients[load.userID]; !connected {
 		return // user disconnected while loading
 	}
 	h.memberships[load.userID] = load.sets
+	for _, change := range pending {
+		h.applyMembershipChange(change)
+	}
 }
 
 func (h *Hub) applyMembershipChange(change membershipChange) {
 	sets, ok := h.memberships[change.userID]
 	if !ok {
-		return // not connected (or load still in flight — the load will observe the change)
+		if h.loading[change.userID] {
+			h.pending[change.userID] = append(h.pending[change.userID], change)
+		}
+		return // not connected: the next load reads current membership
 	}
 	set := sets.channels
 	if change.team {
@@ -193,6 +206,7 @@ func (h *Hub) removeClient(client *Client) {
 		if len(h.clients[client.UserID]) == 0 {
 			delete(h.clients, client.UserID)
 			delete(h.memberships, client.UserID)
+			delete(h.pending, client.UserID)
 		}
 		close(client.send)
 		slog.Debug("websocket: client unregistered", "user_id", client.UserID)
@@ -211,6 +225,12 @@ func (h *Hub) broadcastEvent(req broadcastRequest) {
 		return
 	}
 
+	// Slow consumers are collected and removed after the loop. Removing one
+	// inline shifts its user's slice while this loop is ranging over it, so
+	// the loop meets a later client twice, the second time after its send
+	// channel is closed: a send on a closed channel panics the hub goroutine,
+	// and with it the process.
+	var slow []*Client
 	for userID, clients := range h.clients {
 		if !h.shouldSend(event, userID) {
 			continue
@@ -219,15 +239,17 @@ func (h *Hub) broadcastEvent(req broadcastRequest) {
 			select {
 			case client.send <- event:
 			default:
-				// Slow consumer — disconnect. We are inside the event loop, so
-				// remove inline; closing the conn unwinds the pumps, and the
-				// readPump's deferred Unregister becomes a harmless no-op.
-				slog.Warn("websocket: slow consumer, disconnecting", "user_id", userID)
-				h.removeClient(client)
-				if client.conn != nil {
-					_ = client.conn.Close()
-				}
+				slow = append(slow, client)
 			}
+		}
+	}
+	for _, client := range slow {
+		// Closing the conn unwinds the pumps, and the readPump's deferred
+		// Unregister becomes a harmless no-op.
+		slog.Warn("websocket: slow consumer, disconnecting", "user_id", client.UserID)
+		h.removeClient(client)
+		if client.conn != nil {
+			_ = client.conn.Close()
 		}
 	}
 }
@@ -289,9 +311,14 @@ func (h *Hub) closeAll() {
 	h.memberships = make(map[string]memberships)
 }
 
-// Register adds a client to the hub.
+// Register adds a client to the hub. After Stop it closes the client's send
+// channel instead, so a connection accepted during shutdown is told to go.
 func (h *Hub) Register(client *Client) {
-	h.register <- client
+	select {
+	case h.register <- client:
+	case <-h.done:
+		close(client.send)
+	}
 }
 
 // Unregister removes a client from the hub.
@@ -302,15 +329,25 @@ func (h *Hub) Unregister(client *Client) {
 	}
 }
 
-// Broadcast sends a trusted server-side event to applicable clients.
+// Broadcast sends a trusted server-side event to applicable clients. After
+// Stop it is a no-op.
 func (h *Hub) Broadcast(event *model.WebSocketEvent) {
-	h.broadcast <- broadcastRequest{event: event}
+	h.send(broadcastRequest{event: event})
 }
 
 // BroadcastFromUser sends a client-originated event (e.g. typing). Channel-
 // targeted events are dropped unless the sender is a member of the channel.
 func (h *Hub) BroadcastFromUser(senderID string, event *model.WebSocketEvent) {
-	h.broadcast <- broadcastRequest{event: event, senderID: senderID}
+	h.send(broadcastRequest{event: event, senderID: senderID})
+}
+
+// send queues req, or drops it once the hub has stopped: nothing drains the
+// queue then, and blocking would hang the request that published the event.
+func (h *Hub) send(req broadcastRequest) {
+	select {
+	case h.broadcast <- req:
+	case <-h.done:
+	}
 }
 
 // NotifyMembershipChanged keeps the hub's membership cache current when users
