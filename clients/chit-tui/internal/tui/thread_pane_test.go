@@ -1,6 +1,7 @@
 package tui_test
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -97,5 +98,44 @@ func TestModel_ActionBarNamesADMLikeThePalette(t *testing.T) {
 	lines := strings.Split(viewOf(m), "\n")
 	if bar := lines[len(lines)-1]; !strings.Contains(bar, "Bob Smith") {
 		t.Errorf("action bar = %q, want the display name the palette shows", bar)
+	}
+}
+
+func tagsUpdated(postID string, names ...string) tui.WebSocketEventMsg {
+	tags := []any{}
+	for i, n := range names {
+		tags = append(tags, map[string]any{"id": fmt.Sprintf("t%d", i), "name": n})
+	}
+	// As the server sends it: the post's whole tag list.
+	return tui.WebSocketEventMsg{Event: model.WebSocketEvent{
+		Event:     model.WebSocketEventPostTagsUpdated,
+		Data:      map[string]any{"post_id": postID, "channel_id": "c1", "tags": tags},
+		Broadcast: &model.WebSocketBroadcast{ChannelID: "c1"},
+	}}
+}
+
+// Someone else tagging a post showed only after the channel reloaded; the
+// server now announces each change.
+func TestModel_TagChangesShowLive(t *testing.T) {
+	m := setupModel(t)
+
+	m, _ = step(t, m, tagsUpdated("p1", "deploy", "ops"))
+	if view := viewOf(m); !strings.Contains(view, "#deploy") || !strings.Contains(view, "#ops") {
+		t.Fatalf("new tags not shown:\n%s", view)
+	}
+
+	m, _ = step(t, m, tagsUpdated("p1", "ops"))
+	if view := viewOf(m); strings.Contains(view, "#deploy") || !strings.Contains(view, "#ops") {
+		t.Errorf("removed tag still shown, or kept tag lost:\n%s", view)
+	}
+}
+
+func TestModel_TagChangesShowInTheOpenThread(t *testing.T) {
+	m := openThread(t, setupModel(t))
+
+	m, _ = step(t, m, tagsUpdated("r1", "followup"))
+
+	if !strings.Contains(viewOf(m), "#followup") {
+		t.Errorf("tag not shown on the reply in the open thread:\n%s", viewOf(m))
 	}
 }

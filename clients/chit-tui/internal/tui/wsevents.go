@@ -139,6 +139,30 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 			m.viewport.SetUsernames(m.usernameMap())
 		}
 
+	case model.WebSocketEventPostTagsUpdated:
+		// Tags are applied after a post is created, so a post arrives
+		// untagged and its tags follow in this event. It carries the whole
+		// list, which replaces what is shown.
+		postID, _ := evt.Data["post_id"].(string)
+		channelID, _ := evt.Data["channel_id"].(string)
+		if postID == "" || m.activeChan == nil || channelID != m.activeChan.ID {
+			break
+		}
+		var tags []*model.Tag
+		if raw, ok := evt.Data["tags"]; ok && raw != nil {
+			if err := reDecode(raw, &tags); err != nil {
+				slog.Warn("could not decode a post_tags_updated payload", "error", err)
+				break
+			}
+		}
+		m.postTags[postID] = tags
+		names := make([]string, 0, len(tags))
+		for _, t := range tags {
+			names = append(names, t.Name)
+		}
+		m.viewport.SetPostsTags(map[string][]string{postID: names})
+		m.thread.SetPostTags(m.postTags)
+
 	case model.WebSocketEventThreadUpdated:
 		if threadData, ok := evt.Data["thread"]; ok {
 			var t model.Thread

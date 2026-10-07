@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Reply counts and tags did not update live** — the server now sends `thread_updated` after a reply and a new `post_tags_updated` event after a tag is added or removed, and the client shows both as they happen
 - **Live mentions were never counted** — the client read the mentioned channel from the event's broadcast, where the server never puts it; mention badges only appeared after a restart. Found running against a live server
 - **Status messages ran off the action bar** — a long message such as the delete confirmation was cut mid-word and pushed the connection dot and username off the screen. It now takes the channel name's room when it needs it, and is shortened with "…" if it still does not fit
 - **Deleting a post above the selection** moved the selection onto the next post
