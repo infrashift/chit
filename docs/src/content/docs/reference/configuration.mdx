@@ -150,7 +150,9 @@ The [headless Claude Code bridge](/chit/deployment/headless-claude/) uses the
 | `CHIT_CLAUDE_AGENT_KRATOS_ID` | _(empty)_ | Kratos identity ID to act as (development) |
 | `CHIT_CLAUDE_PROXY_SECRET` | _(empty)_ | Sent as `X-Proxy-Secret` |
 | `CHIT_CLAUDE_CHANNELS` | _(none, required)_ | Comma-separated channel IDs the bridge serves |
-| `CHIT_CLAUDE_REQUIRE_MENTION` | `false` | Only respond when the agent is @mentioned |
+| `CHIT_CLAUDE_REQUIRE_MENTION` | `true` | Answer only posts that name the agent (`false` answers every post in the channel) |
+| `CHIT_CLAUDE_FOLLOW_THREADS` | `true` | With `REQUIRE_MENTION`, replies in a thread the agent has joined need no mention |
+| `CHIT_CLAUDE_ANSWER_BROADCASTS` | `false` | Count `@all` and `@channel` as naming the agent |
 | `CHIT_CLAUDE_REPLY_TO_AGENTS` | `false` | Answer posts by other agents and bots (when they name this agent) |
 | `CHIT_CLAUDE_MAX_AGENT_HOPS` | `2` | Consecutive agent-to-agent turns before a chain stops |
 | `CHIT_CLAUDE_CLAUDE_BIN` | `claude` | Path to the `claude` CLI |
@@ -159,12 +161,21 @@ The [headless Claude Code bridge](/chit/deployment/headless-claude/) uses the
 | `CHIT_CLAUDE_PERMISSION_MODE` | `dontAsk` | Passed to `claude --permission-mode` |
 | `CHIT_CLAUDE_ALLOWED_TOOLS` | `Read,Grep,Glob` | Tool allowlist passed to `claude` |
 | `CHIT_CLAUDE_APPEND_SYSTEM_PROMPT` | _(empty)_ | Extra system prompt text |
-| `CHIT_CLAUDE_RUN_TIMEOUT` | `30m` | Per-run timeout |
-| `CHIT_CLAUDE_CONTEXT_WINDOW` | `200000` | Context size assumed for the footer's `context ~N%` estimate |
+| `CHIT_CLAUDE_RUN_TIMEOUT` | `30m` | Per-run timeout; must be positive |
+| `CHIT_CLAUDE_MCP_CONFIG` | _(empty)_ | Passed to `claude --mcp-config`. Runs always pass `--strict-mcp-config`, so these are the only MCP servers a run gets. |
+| `CHIT_CLAUDE_SETTING_SOURCES` | `project` | Passed to `claude --setting-sources`; `all` omits the flag and loads every source, the host user's included |
+| `CHIT_CLAUDE_MAX_CONCURRENT_RUNS` | `2` | Runs at once across all threads; at least 1 |
+| `CHIT_CLAUDE_SHUTDOWN_GRACE` | `60s` | How long runs in progress may finish after a stop signal |
+| `CHIT_CLAUDE_SEED_MAX_CHARS` | `8000` | How much of a thread a session starting mid-thread is given; `0` gives none |
+| `CHIT_CLAUDE_MAX_SESSION_TOKENS` | `0` | Retire a thread's session once its context reaches this many tokens; `0` never does |
+| `CHIT_CLAUDE_FOOTER` | `true` | Append the usage line to replies (the figures are in `claude_usage` either way) |
+| `CHIT_CLAUDE_CONTEXT_WINDOW` | `200000` | Context size for the footer's `context ~N%` when the CLI does not report the model's |
 
 The authentication rule is the same as chit-mcp's: exactly one of
 `CHIT_CLAUDE_OAUTH_CLIENT_ID` (secret and token URL then required) and
-`CHIT_CLAUDE_AGENT_KRATOS_ID`.
+`CHIT_CLAUDE_AGENT_KRATOS_ID`. A non-positive run timeout or concurrency cap,
+or a negative hop count, grace, seed size, session ceiling or context window,
+stops the bridge at startup.
 
 ## Notes
 

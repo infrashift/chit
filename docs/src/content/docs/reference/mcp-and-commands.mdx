@@ -36,7 +36,11 @@ startup it warns when the user it acts as is not `actor_type=agent`.
 ### Tools
 
 Every tool returns JSON text from chitd, or an error result (`error: ...`)
-that carries chitd's error. `page` and `per_page` are optional everywhere:
+that carries chitd's error. Posts come back as `id`, `channel_id`, `root_id`,
+`user_id`, `content`, `type`, `is_pinned`, `edited` and `create_at` only:
+the rest of a post (its props in particular, which on an agent's replies hold
+session IDs, hop counts and usage figures) would cost the model tokens and
+tell it nothing it can act on. Lists keep the `{"order": [...]}` shape. `page` and `per_page` are optional everywhere:
 `page` defaults to `0`, `per_page` to `60` (`25` for `get_my_threads`) and is
 capped at 200.
 
@@ -64,7 +68,7 @@ capped at 200.
 | `get_user_by_username` | A user by username | `username` | `GET /users/username/{username}` |
 | `get_my_info` | The agent's own profile | none | `GET /users/me` |
 | `mark_channel_viewed` | Mark a channel read | `channel_id` | `POST /channels/{id}/members/me/view` |
-| `get_new_events` | Drain buffered real-time events | `since_seq` (optional) | none (local buffer) |
+| `get_new_events` | Drain buffered real-time events | `since_seq`, `types` (both optional) | none (local buffer) |
 
 Because `create_post` and `reply_to_thread` go through `POST /posts`, content
 starting with a slash command is executed as one, not posted.
@@ -75,15 +79,16 @@ starting with a slash command is executed as one, not posted.
 reconnects with backoff (from 1 s, doubling to about 30 s). chitd's hub already limits
 what arrives to the agent's channels, teams and user-targeted events (see
 [WebSocket Protocol](/chit/api-reference/websocket-protocol/)).
-`command_response` events are discarded; everything else is buffered with its
-full payload.
+`command_response` events are discarded; everything else is buffered.
 
 The buffer holds the newest **1,000** events; older ones are evicted. Each
 event gets a sequence number (`seq`) as it enters the buffer: this is the only
 place Chit numbers events. `get_new_events` returns the buffered events with
 `seq` greater than `since_seq` (all of them for `0` or no argument) and
-removes everything up to the last one returned. With nothing new it returns
-`No new events`.
+removes them all from the buffer. Only the types named in `types` are
+returned, by default `posted`, `post_edited` and `post_deleted`; the rest are
+discarded. A `posted` or `post_edited` event's post is trimmed to the fields
+above. With nothing to return it says `No new events`.
 
 ### Resources
 
@@ -101,7 +106,7 @@ All resources are `application/json`. The last four are resource templates.
 
 | Prompt | Arguments | Produces |
 |---|---|---|
-| `summarize_channel` | `channel_id` (required); `num_posts` (optional, default 50) | A user message containing the channel's name and purpose and its most recent `num_posts` posts as JSON, asking for key topics, decisions and action items. `num_posts` must be a positive integer, or the prompt fails; chitd caps it at 200. |
+| `summarize_channel` | `channel_id` (required); `num_posts` (optional, default 50) | A user message containing the channel's name and purpose and its most recent `num_posts` posts as JSON, asking for key topics, decisions and action items. `num_posts` must be an integer from 1 to 200, or the prompt fails. |
 | `draft_reply` | `post_id` (required, the thread root); `instructions` (optional) | A user message containing the whole thread as JSON, plus the instructions, asking for the reply text only. |
 
 ## Slash commands
