@@ -3,11 +3,13 @@ package bridge
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/infrashift/chit/internal/chitclient"
 	"github.com/infrashift/chit/internal/model"
@@ -26,6 +28,14 @@ const hopsProp = "claude_agent_hops"
 // perThreadQueueSize bounds how many pending messages a single thread can
 // accumulate while a claude run is in progress.
 const perThreadQueueSize = 16
+
+// seenPostsSize is how many recent post IDs are remembered to drop a post
+// delivered twice (around a WebSocket reconnect) instead of running it twice.
+const seenPostsSize = 1024
+
+// queueFullNotice answers a post dropped because its thread's queue is full.
+const queueFullNotice = "⚠️ I'm still working through earlier messages in this thread " +
+	"and could not queue this one. Please send it again once I have replied."
 
 // mentionRe matches @username patterns at word boundaries. Copied verbatim
 // from internal/app/mention.go, which is the source of truth — the bridge
@@ -51,6 +61,9 @@ type Bridge struct {
 	queues     map[string]chan *model.Post // thread root ID → pending posts
 	actorTypes map[string]string           // author user ID → resolved actor_type
 	offlist    map[string]struct{}         // channels already warned about
+	busy       map[string]struct{}         // threads told their queue is full
+	seen       map[string]struct{}         // recently enqueued post IDs
+	seenOrder  []string                    // seen, oldest first
 	wg         sync.WaitGroup
 }
 
@@ -74,6 +87,8 @@ func New(cfg *Config) *Bridge {
 		queues:     make(map[string]chan *model.Post),
 		actorTypes: make(map[string]string),
 		offlist:    make(map[string]struct{}),
+		busy:       make(map[string]struct{}),
+		seen:       make(map[string]struct{}),
 	}
 }
 
@@ -120,7 +135,7 @@ func (b *Bridge) handleEvent(ctx context.Context, event *model.WebSocketEvent) {
 	if post == nil {
 		return
 	}
-	if !b.shouldEnqueue(post) {
+	if !b.shouldEnqueue(post) || !b.firstSighting(post.ID) {
 		return
 	}
 
@@ -143,7 +158,43 @@ func (b *Bridge) handleEvent(ctx context.Context, event *model.WebSocketEvent) {
 	case queue <- post:
 	default:
 		slog.Warn("thread queue full, dropping message", "root_id", root, "post_id", post.ID)
+		b.noticeQueueFull(ctx, root, post)
 	}
+}
+
+// firstSighting records postID and reports whether it is new. A post delivered
+// twice would otherwise run claude twice and answer twice.
+func (b *Bridge) firstSighting(postID string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, ok := b.seen[postID]; ok {
+		return false
+	}
+	b.seen[postID] = struct{}{}
+	b.seenOrder = append(b.seenOrder, postID)
+	if len(b.seenOrder) > seenPostsSize {
+		delete(b.seen, b.seenOrder[0])
+		b.seenOrder = b.seenOrder[1:]
+	}
+	return true
+}
+
+// noticeQueueFull tells the thread, once until its worker catches up, that a
+// post was dropped. It posts from its own goroutine: the caller is the
+// WebSocket read loop, which must not wait on the network.
+func (b *Bridge) noticeQueueFull(ctx context.Context, root string, post *model.Post) {
+	b.mu.Lock()
+	_, told := b.busy[root]
+	b.busy[root] = struct{}{}
+	b.mu.Unlock()
+	if told {
+		return
+	}
+	b.wg.Add(1)
+	go func() {
+		defer b.wg.Done()
+		b.reply(ctx, post.ChannelID, root, queueFullNotice, map[string]any{hopsProp: agentHops(post)})
+	}()
 }
 
 // shouldEnqueue applies the cheap event filters: configured channel, not
@@ -301,6 +352,9 @@ func (b *Bridge) threadWorker(ctx context.Context, root string, queue chan *mode
 		case <-ctx.Done():
 			return
 		case post := <-queue:
+			b.mu.Lock()
+			delete(b.busy, root)
+			b.mu.Unlock()
 			b.processPost(ctx, root, post)
 		}
 	}
@@ -315,35 +369,40 @@ func (b *Bridge) processPost(ctx context.Context, root string, post *model.Post)
 	}
 
 	// Replying to a human resets the chain; replying to an agent extends it.
-	// Error replies carry the count too — they echo a stderr tail, which can
-	// contain an @mention that would otherwise restart an exchange at hop 0.
+	// Error replies carry the count too: an error text could contain an
+	// @mention that would otherwise restart an exchange at hop 0.
 	hops := 0
 	if authorActor == model.ActorTypeAgent || authorActor == model.ActorTypeBot {
 		hops = agentHops(post) + 1
 	}
 
-	sessionID := b.lookupSession(ctx, root)
-
-	select {
-	case b.runSlots <- struct{}{}:
-	case <-ctx.Done():
-		return
+	sessionID := ""
+	if root != post.ID {
+		sessionID = b.lookupSession(ctx, root)
 	}
-	slog.Info("running claude", "root_id", root, "post_id", post.ID,
-		"resume", sessionID != "", "content_len", len(post.Content))
-	result, err := b.runner.Run(ctx, post.Content, sessionID)
-	<-b.runSlots
+
+	result, notice, err := b.runClaude(ctx, root, post, sessionID)
+	if result != nil && result.SessionID != "" {
+		b.mu.Lock()
+		b.sessions[root] = result.SessionID
+		b.mu.Unlock()
+	}
 	if err != nil {
-		slog.Error("claude run failed", "root_id", root, "error", err)
-		b.reply(ctx, post.ChannelID, root,
-			fmt.Sprintf("⚠️ Claude run failed: %v", err),
-			map[string]any{hopsProp: hops})
+		var runErr *RunError
+		if errors.As(err, &runErr) && runErr.Detail != "" {
+			slog.Error("claude run failed", "root_id", root, "error", err, "detail", runErr.Detail)
+		} else {
+			slog.Error("claude run failed", "root_id", root, "error", err)
+		}
+		props := map[string]any{hopsProp: hops}
+		// A failed run can still have started a session worth resuming
+		// (an API error mid-task leaves the work done so far).
+		if result != nil && result.SessionID != "" {
+			props[sessionProp] = result.SessionID
+		}
+		b.reply(ctx, post.ChannelID, root, notice+"⚠️ Claude run failed: "+err.Error(), props)
 		return
 	}
-
-	b.mu.Lock()
-	b.sessions[root] = result.SessionID
-	b.mu.Unlock()
 
 	content := result.Result
 	if content == "" {
@@ -353,20 +412,85 @@ func (b *Bridge) processPost(ctx context.Context, root string, post *model.Post)
 		sessionProp: result.SessionID,
 		hopsProp:    hops,
 		"claude_usage": map[string]any{
-			"input_tokens":            result.Usage.InputTokens,
-			"output_tokens":           result.Usage.OutputTokens,
-			"cache_read_input_tokens": result.Usage.CacheReadInputTokens,
-			"total_cost_usd":          result.TotalCostUSD,
-			"num_turns":               result.NumTurns,
+			"input_tokens":                result.Usage.InputTokens,
+			"output_tokens":               result.Usage.OutputTokens,
+			"cache_read_input_tokens":     result.Usage.CacheReadInputTokens,
+			"cache_creation_input_tokens": result.Usage.CacheCreationInputTokens,
+			"total_cost_usd":              result.TotalCostUSD,
+			"num_turns":                   result.NumTurns,
 		},
 	}
-	b.reply(ctx, post.ChannelID, root, content+b.runner.Footer(result), props)
+	b.reply(ctx, post.ChannelID, root, notice+content+b.runner.Footer(result), props)
 }
 
-func (b *Bridge) reply(ctx context.Context, channelID, root, content string, props map[string]any) {
-	if _, err := b.client.CreatePost(ctx, channelID, root, content, props); err != nil {
-		slog.Error("failed to post reply", "root_id", root, "error", err)
+// sessionLostNotice opens a reply whose thread's session could not be resumed.
+const sessionLostNotice = "_The Claude session for this thread could not be found " +
+	"(the bridge's working directory or Claude's state changed), " +
+	"so this reply starts a new one without the earlier context._\n\n"
+
+// runClaude runs one turn under a concurrency slot. When the thread's session
+// no longer exists it retries once as a new session — otherwise every later
+// reply in the thread would fail the same way — and returns a notice saying
+// so, for the reply to lead with.
+func (b *Bridge) runClaude(ctx context.Context, root string, post *model.Post, sessionID string) (*ClaudeResult, string, error) {
+	select {
+	case b.runSlots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, "", ctx.Err()
 	}
+	defer func() { <-b.runSlots }()
+
+	slog.Info("running claude", "root_id", root, "post_id", post.ID,
+		"resume", sessionID != "", "content_len", len(post.Content))
+	result, err := b.runner.Run(ctx, post.Content, sessionID)
+	if !errors.Is(err, ErrSessionNotFound) {
+		return result, "", err
+	}
+	slog.Warn("thread's claude session not found; starting a new one",
+		"root_id", root, "session_id", sessionID)
+	b.mu.Lock()
+	delete(b.sessions, root)
+	b.mu.Unlock()
+	result, err = b.runner.Run(ctx, post.Content, "")
+	return result, sessionLostNotice, err
+}
+
+// reply posts content into the thread, split across several posts when it is
+// longer than one post may be. Every part carries the hop count, since another
+// agent may answer any of them; the remaining props go on the last part, which
+// is where session recovery looks first.
+func (b *Bridge) reply(ctx context.Context, channelID, root, content string, props map[string]any) {
+	parts := splitContent(content, model.PostMaxContentSize)
+	for i, part := range parts {
+		partProps := props
+		if i < len(parts)-1 {
+			partProps = map[string]any{hopsProp: props[hopsProp]}
+		}
+		if _, err := b.client.CreatePost(ctx, channelID, root, part, partProps); err != nil {
+			slog.Error("failed to post reply", "root_id", root,
+				"part", i+1, "parts", len(parts), "error", err)
+			return
+		}
+	}
+}
+
+// splitContent cuts s into pieces of at most limit bytes, preferring to break
+// at a line end in the second half of each piece and never splitting a UTF-8
+// sequence.
+func splitContent(s string, limit int) []string {
+	var parts []string
+	for len(s) > limit {
+		cut := strings.LastIndexByte(s[:limit], '\n') + 1
+		if cut <= limit/2 {
+			cut = limit
+			for cut > 0 && !utf8.RuneStart(s[cut]) {
+				cut--
+			}
+		}
+		parts = append(parts, s[:cut])
+		s = s[cut:]
+	}
+	return append(parts, s)
 }
 
 // lookupSession returns the claude session for a thread: the in-memory map

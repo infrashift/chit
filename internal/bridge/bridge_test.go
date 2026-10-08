@@ -75,6 +75,7 @@ type fakeChitd struct {
 	users        map[string]*model.User // user ID → user; absent → 404
 	lastAuth     string
 	getUserCalls int
+	threadCalls  int
 }
 
 func (f *fakeChitd) server(t *testing.T) *httptest.Server {
@@ -108,9 +109,9 @@ func (f *fakeChitd) server(t *testing.T) *httptest.Server {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		f.mu.Lock()
 		post.ID = fmt.Sprintf("post-%d", len(f.posts)+1)
 		post.UserID = testAgentID
-		f.mu.Lock()
 		f.posts = append(f.posts, &post)
 		f.mu.Unlock()
 		w.WriteHeader(http.StatusCreated)
@@ -119,6 +120,7 @@ func (f *fakeChitd) server(t *testing.T) *httptest.Server {
 	mux.HandleFunc("GET /api/v1/posts/{id}/thread", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
+		f.threadCalls++
 		_ = json.NewEncoder(w).Encode(&model.PostList{Order: f.thread})
 	})
 	srv := httptest.NewServer(mux)
@@ -347,8 +349,10 @@ func TestClaudeRunner_Footer(t *testing.T) {
 	}
 	footer := runner.Footer(&res)
 
-	// context = (38000 + 4500) / 200000 = 21%
-	for _, want := range []string{"in 4.5k", "out 1.2k", "cache 38.0k", "$0.42", "context ~21%"} {
+	// No per-call breakdown and no reported window: context is the run's
+	// whole input, cache writes included, over CHIT_CLAUDE_CONTEXT_WINDOW:
+	// (4500 + 38000 + 900) / 200000 = 21%.
+	for _, want := range []string{"in 4.5k", "out 1.2k", "cache read 38.0k", "write 900", "$0.42", "context ~21%"} {
 		if !strings.Contains(footer, want) {
 			t.Errorf("footer missing %q: %s", want, footer)
 		}
@@ -603,7 +607,7 @@ func TestBridge_PostTriggersRunAndThreadedReply(t *testing.T) {
 	b := New(cfg)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	t.Cleanup(func() { cancel(); b.wg.Wait() })
 
 	me, err := b.client.Me(ctx)
 	if err != nil {
@@ -627,6 +631,9 @@ func TestBridge_PostTriggersRunAndThreadedReply(t *testing.T) {
 	}
 	if got := reply.Props[sessionProp]; got != fakeSessionID {
 		t.Errorf("session prop: got %v, want %s", got, fakeSessionID)
+	}
+	if got := readArgv(t, argvFile); slices.Contains(got, "--resume") {
+		t.Errorf("a root post starts a new session: %q", got)
 	}
 
 	// A thread reply resumes the same session.
@@ -677,11 +684,7 @@ func TestBridge_ReplyCarriesHopCount(t *testing.T) {
 
 	cfg := testConfig(t, srv.URL, bin)
 	cfg.ReplyToAgents = true
-	b := New(cfg)
-	b.agentUserID = testAgentID
-	b.agentUsername = testAgentUsername
-
-	ctx := context.Background()
+	b, ctx := liveBridge(t, cfg)
 
 	// A human turn resets the chain: the reply starts at hop 0.
 	b.handleEvent(ctx, postedEvent(&model.Post{ID: "root-1", ChannelID: testChannelID,
@@ -701,13 +704,20 @@ func TestBridge_ReplyCarriesHopCount(t *testing.T) {
 		t.Errorf("reply to an agent: hops = %d, want 1", got)
 	}
 
-	// At the cap the chain stops: no third post is ever created.
+	// At the cap the chain stops. A human post queued behind the capped one
+	// in the same thread is answered only after the capped one was handled,
+	// so once that answer lands, a reply to the capped post would have too.
 	b.handleEvent(ctx, postedEvent(&model.Post{ID: "root-3", ChannelID: testChannelID,
 		UserID: testAgentID2, Content: "@chit-agent one more?",
 		Props: map[string]any{hopsProp: float64(2)}}))
-	time.Sleep(200 * time.Millisecond)
-	if n := len(chitd.createdPosts()); n != 2 {
-		t.Errorf("hop cap should suppress the reply; got %d posts, want 2", n)
+	b.handleEvent(ctx, postedEvent(&model.Post{ID: "msg-4", ChannelID: testChannelID,
+		UserID: testOtherUser, RootID: "root-3", Content: "never mind"}))
+	posts = waitForPosts(t, chitd, 3)
+	if n := len(posts); n != 3 {
+		t.Errorf("hop cap should suppress the reply; got %d posts, want 3", n)
+	}
+	if got := agentHops(posts[2]); got != 0 {
+		t.Errorf("the third post should answer the human (hops 0), got hops %d", got)
 	}
 }
 
@@ -798,10 +808,7 @@ func TestBridge_RunFailurePostsErrorReply(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	b := New(testConfig(t, srv.URL, bin))
-	b.agentUserID = testAgentID
-
-	ctx := context.Background()
+	b, ctx := liveBridge(t, testConfig(t, srv.URL, bin))
 	post := &model.Post{ID: "root-9", ChannelID: testChannelID, UserID: testOtherUser, Content: "do a thing"}
 	b.handleEvent(ctx, postedEvent(post))
 
@@ -811,5 +818,204 @@ func TestBridge_RunFailurePostsErrorReply(t *testing.T) {
 	}
 	if posts[0].RootID != "root-9" {
 		t.Errorf("error reply must stay in the thread: root_id=%q", posts[0].RootID)
+	}
+}
+
+// writeEchoClaude writes a fake claude whose result is the prompt it read on
+// stdin, so each reply names the post it answers. Prompts must not contain
+// characters that need escaping in JSON.
+func writeEchoClaude(t *testing.T, dir string) string {
+	t.Helper()
+	return writeScript(t, dir, `p=$(cat)
+printf '{"result":"re: %s","session_id":"`+fakeSessionID+`"}\n' "$p"
+`)
+}
+
+// liveBridge returns a bridge talking to chitd, resolved as the test agent,
+// whose workers stop when the test ends.
+func liveBridge(t *testing.T, cfg *Config) (*Bridge, context.Context) {
+	t.Helper()
+	b := New(cfg)
+	b.agentUserID = testAgentID
+	b.agentUsername = testAgentUsername
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() { cancel(); b.wg.Wait() })
+	return b, ctx
+}
+
+// When the thread's session is gone (WORKDIR or ~/.claude changed), the reply
+// starts a new session and says so, rather than failing every later reply.
+func TestBridge_LostSessionStartsFresh(t *testing.T) {
+	chitd := &fakeChitd{
+		users: humanUsers(),
+		thread: []*model.Post{
+			{ID: "root-1", ChannelID: testChannelID, UserID: testOtherUser, Content: "task"},
+			{ID: "old-reply", ChannelID: testChannelID, UserID: testAgentID, RootID: "root-1",
+				Props: map[string]any{sessionProp: "gone-session"}},
+		},
+	}
+	srv := chitd.server(t)
+
+	dir := t.TempDir()
+	argvFile := filepath.Join(dir, "argv")
+	bin := writeScript(t, dir, `printf '%s\n' "$@" > `+argvFile+`
+cat > /dev/null
+case "$*" in
+*--resume*) echo "No conversation found with session ID: gone-session" >&2; exit 1 ;;
+esac
+echo '{"result":"fresh answer","session_id":"`+fakeSessionID2+`"}'
+`)
+	b, ctx := liveBridge(t, testConfig(t, srv.URL, bin))
+	b.handleEvent(ctx, postedEvent(&model.Post{ID: "msg-2", ChannelID: testChannelID,
+		UserID: testOtherUser, RootID: "root-1", Content: "carry on"}))
+
+	reply := waitForPosts(t, chitd, 1)[0]
+	if !strings.Contains(reply.Content, "could not be found") || !strings.Contains(reply.Content, "fresh answer") {
+		t.Errorf("reply should explain the new session and answer: %s", reply.Content)
+	}
+	if got := reply.Props[sessionProp]; got != fakeSessionID2 {
+		t.Errorf("reply must record the new session, got %v", got)
+	}
+	if argv := readArgv(t, argvFile); slices.Contains(argv, "--resume") {
+		t.Errorf("the retry must not resume: %q", argv)
+	}
+}
+
+// A root post cannot have a session yet, so looking one up is a wasted call.
+func TestBridge_RootPostSkipsSessionLookup(t *testing.T) {
+	chitd := &fakeChitd{users: humanUsers()}
+	srv := chitd.server(t)
+	b, ctx := liveBridge(t, testConfig(t, srv.URL, writeEchoClaude(t, t.TempDir())))
+
+	b.handleEvent(ctx, postedEvent(&model.Post{ID: "root-1", ChannelID: testChannelID,
+		UserID: testOtherUser, Content: "hello"}))
+	waitForPosts(t, chitd, 1)
+	chitd.mu.Lock()
+	defer chitd.mu.Unlock()
+	if chitd.threadCalls != 0 {
+		t.Errorf("root post fetched the thread %d times, want 0", chitd.threadCalls)
+	}
+}
+
+// A reply longer than one post may be is split, not lost; the session and
+// usage props ride on the last part, the hop count on every part.
+func TestBridge_LongReplyIsSplit(t *testing.T) {
+	chitd := &fakeChitd{users: humanUsers()}
+	srv := chitd.server(t)
+	bin := writeScript(t, t.TempDir(), `cat > /dev/null
+printf '{"result":"'
+i=0; while [ $i -lt 1100 ]; do printf '%s\\n' "0123456789012345678901234567890123456789012345678901234567890123"; i=$((i+1)); done
+printf '","session_id":"`+fakeSessionID+`"}'
+`)
+	b, ctx := liveBridge(t, testConfig(t, srv.URL, bin))
+	b.handleEvent(ctx, postedEvent(&model.Post{ID: "root-1", ChannelID: testChannelID,
+		UserID: testOtherUser, Content: "write a lot"}))
+
+	// ~71.5k bytes is two parts. Were it split into more, the second would
+	// not be the last and the session check below would fail.
+	posts := waitForPosts(t, chitd, 2)[:2]
+	for i, p := range posts {
+		if len(p.Content) > model.PostMaxContentSize {
+			t.Errorf("part %d is %d bytes", i, len(p.Content))
+		}
+		if _, ok := p.Props[hopsProp]; !ok {
+			t.Errorf("part %d lacks the hop count", i)
+		}
+	}
+	if _, ok := posts[0].Props[sessionProp]; ok {
+		t.Error("the session prop belongs on the last part only")
+	}
+	if posts[1].Props[sessionProp] != fakeSessionID || !strings.Contains(posts[1].Content, "⚙") {
+		t.Errorf("last part must carry the session and the footer: %v", posts[1].Props)
+	}
+}
+
+// A post delivered twice is answered once.
+func TestBridge_DuplicateDeliveryRunsOnce(t *testing.T) {
+	chitd := &fakeChitd{users: humanUsers()}
+	srv := chitd.server(t)
+	b, ctx := liveBridge(t, testConfig(t, srv.URL, writeEchoClaude(t, t.TempDir())))
+
+	first := &model.Post{ID: "root-1", ChannelID: testChannelID, UserID: testOtherUser, Content: "alpha"}
+	b.handleEvent(ctx, postedEvent(first))
+	b.handleEvent(ctx, postedEvent(first))
+	b.handleEvent(ctx, postedEvent(&model.Post{ID: "msg-2", ChannelID: testChannelID,
+		UserID: testOtherUser, RootID: "root-1", Content: "beta"}))
+
+	// The thread's queue is FIFO, so a duplicate run would land before beta.
+	posts := waitForPosts(t, chitd, 2)
+	if !strings.HasPrefix(posts[0].Content, "re: alpha") || !strings.HasPrefix(posts[1].Content, "re: beta") {
+		t.Errorf("want replies to alpha then beta, got %q, %q", posts[0].Content, posts[1].Content)
+	}
+}
+
+func TestFirstSightingForgetsOldest(t *testing.T) {
+	b := New(testConfig(t, "http://unused", "claude"))
+	if !b.firstSighting("p-0") || b.firstSighting("p-0") {
+		t.Fatal("a post is new once")
+	}
+	for i := 1; i <= seenPostsSize; i++ {
+		b.firstSighting(fmt.Sprintf("p-%d", i))
+	}
+	if !b.firstSighting("p-0") {
+		t.Error("the oldest ID should have been forgotten")
+	}
+	if len(b.seen) != seenPostsSize || len(b.seenOrder) != seenPostsSize {
+		t.Errorf("seen holds %d/%d, want %d", len(b.seen), len(b.seenOrder), seenPostsSize)
+	}
+}
+
+// A thread whose queue overflows says so once, rather than dropping posts in
+// silence or answering every dropped post.
+func TestBridge_QueueFullIsAnnouncedOnce(t *testing.T) {
+	chitd := &fakeChitd{users: humanUsers()}
+	srv := chitd.server(t)
+
+	dir := t.TempDir()
+	release := filepath.Join(dir, "release")
+	started := filepath.Join(dir, "started")
+	bin := writeScript(t, dir, `cat > /dev/null
+touch `+started+`
+while [ ! -f `+release+` ]; do sleep 0.02; done
+echo '{"result":"done","session_id":"`+fakeSessionID+`"}'
+`)
+	b, ctx := liveBridge(t, testConfig(t, srv.URL, bin))
+
+	post := func(i int) {
+		b.handleEvent(ctx, postedEvent(&model.Post{ID: fmt.Sprintf("msg-%d", i), ChannelID: testChannelID,
+			UserID: testOtherUser, RootID: "root-1", Content: "more"}))
+	}
+	// The first post is taken off the queue and blocks in claude ...
+	post(0)
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		if _, err := os.Stat(started); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("first run never started")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// ... the next perThreadQueueSize fill the queue, and two more overflow.
+	for i := 1; i <= perThreadQueueSize+2; i++ {
+		post(i)
+	}
+	notice := waitForPosts(t, chitd, 1)[0]
+	if notice.Content != queueFullNotice || notice.RootID != "root-1" {
+		t.Errorf("want the queue-full notice in the thread, got %+v", notice)
+	}
+
+	if err := os.WriteFile(release, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	posts := waitForPosts(t, chitd, 1+1+perThreadQueueSize)
+	n := 0
+	for _, p := range posts {
+		if p.Content == queueFullNotice {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("queue-full notice posted %d times, want 1", n)
 	}
 }
