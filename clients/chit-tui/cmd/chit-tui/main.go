@@ -78,18 +78,7 @@ func main() {
 	m := tui.NewModel(cfg, client, wsClient, s, tokenStore, kratosClient, sessionStore)
 	m.SetThemeSetting(themeSetting(opts, cfg))
 
-	// Filter out terminal response sequences (OSC replies, cursor position
-	// reports) that can leak into the textarea as garbage text.
-	termFilter := func(_ tea.Model, msg tea.Msg) tea.Msg {
-		if k, ok := msg.(tea.KeyMsg); ok && k.Type == tea.KeyRunes {
-			if termResponseRe.MatchString(string(k.Runes)) {
-				return nil
-			}
-		}
-		return msg
-	}
-
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFilter(termFilter))
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg { return filterInput(msg) }))
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
