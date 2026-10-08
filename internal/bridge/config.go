@@ -55,10 +55,26 @@ type Config struct {
 	AppendSystemPrompt string        `koanf:"append_system_prompt"`
 	RunTimeout         time.Duration `koanf:"run_timeout"`
 
+	// What the run inherits from the host. Runs always pass
+	// --strict-mcp-config, so MCPConfig (a path or JSON string handed to
+	// --mcp-config) is the only way to give Claude MCP servers.
+	// SettingSources is passed to --setting-sources; SettingSourcesAll omits
+	// the flag and lets the CLI load every source, the host user's included.
+	MCPConfig      string `koanf:"mcp_config"`
+	SettingSources string `koanf:"setting_sources"`
+
+	// MaxConcurrentRuns caps claude processes across all threads. Each thread
+	// already runs one at a time; this bounds how many threads run at once.
+	MaxConcurrentRuns int `koanf:"max_concurrent_runs"`
+
 	// ContextWindow is the assumed model context size (tokens) used for the
 	// "context ~N%" footer estimate.
 	ContextWindow int `koanf:"context_window"`
 }
+
+// SettingSourcesAll is the CHIT_CLAUDE_SETTING_SOURCES value that passes no
+// --setting-sources flag at all.
+const SettingSourcesAll = "all"
 
 // Defaults returns a Config populated with default values.
 func Defaults() *Config {
@@ -72,6 +88,9 @@ func Defaults() *Config {
 		MaxAgentHops:   2,
 		OAuthScopes:    "chit:read chit:write",
 		OAuthAudience:  "chit",
+
+		SettingSources:    "project",
+		MaxConcurrentRuns: 2,
 	}
 }
 
@@ -143,6 +162,28 @@ func Load() (*Config, error) {
 	if cfg.WorkDir == "" {
 		return nil, fmt.Errorf("CHIT_CLAUDE_WORKDIR is required")
 	}
+	if err := cfg.validateLimits(); err != nil {
+		return nil, err
+	}
 
 	return cfg, nil
+}
+
+// validateLimits rejects numeric settings that would parse but break the
+// bridge quietly: a zero timeout fails every run the moment it starts, and a
+// zero concurrency cap never starts one.
+func (c *Config) validateLimits() error {
+	switch {
+	case c.RunTimeout <= 0:
+		return fmt.Errorf("CHIT_CLAUDE_RUN_TIMEOUT must be positive, got %s", c.RunTimeout)
+	case c.MaxConcurrentRuns < 1:
+		return fmt.Errorf("CHIT_CLAUDE_MAX_CONCURRENT_RUNS must be at least 1, got %d", c.MaxConcurrentRuns)
+	case c.MaxAgentHops < 0:
+		return fmt.Errorf("CHIT_CLAUDE_MAX_AGENT_HOPS must not be negative, got %d", c.MaxAgentHops)
+	case c.ContextWindow < 0:
+		return fmt.Errorf("CHIT_CLAUDE_CONTEXT_WINDOW must not be negative, got %d", c.ContextWindow)
+	case strings.TrimSpace(c.SettingSources) == "":
+		return fmt.Errorf("CHIT_CLAUDE_SETTING_SOURCES must name sources (e.g. project) or be %q", SettingSourcesAll)
+	}
+	return nil
 }

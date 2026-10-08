@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -30,16 +31,18 @@ const (
 )
 
 // writeFakeClaude creates an executable script that records its argv (one per
-// line) into argvFile and prints the given JSON on stdout.
+// line) into argvFile and its stdin into argvFile+".stdin", then prints the
+// given JSON on stdout.
 func writeFakeClaude(t *testing.T, dir, argvFile, stdout string, exitCode int) string {
 	t.Helper()
 	script := fmt.Sprintf(`#!/bin/sh
 printf '%%s\n' "$@" > %q
+cat > %q
 cat <<'FAKEEOF'
 %s
 FAKEEOF
 exit %d
-`, argvFile, stdout, exitCode)
+`, argvFile, argvFile+".stdin", stdout, exitCode)
 	path := filepath.Join(dir, "claude")
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake claude: %v", err)
@@ -179,6 +182,26 @@ func waitForPosts(t *testing.T, f *fakeChitd, n int) []*model.Post {
 
 // ─── ClaudeRunner ────────────────────────────────────────────────
 
+// readArgv returns the argv the fake claude recorded, one element per entry.
+func readArgv(t *testing.T, argvFile string) []string {
+	t.Helper()
+	data, err := os.ReadFile(argvFile)
+	if err != nil {
+		t.Fatalf("read argv: %v", err)
+	}
+	return strings.Split(strings.TrimSpace(string(data)), "\n")
+}
+
+// hasFlag reports whether argv holds flag immediately followed by value.
+func hasFlag(argv []string, flag, value string) bool {
+	for i, a := range argv {
+		if a == flag && i+1 < len(argv) && argv[i+1] == value {
+			return true
+		}
+	}
+	return false
+}
+
 func TestClaudeRunner_NewSessionAndResumeArgv(t *testing.T) {
 	dir := t.TempDir()
 	argvFile := filepath.Join(dir, "argv")
@@ -195,31 +218,79 @@ func TestClaudeRunner_NewSessionAndResumeArgv(t *testing.T) {
 	if res.SessionID != fakeSessionID {
 		t.Errorf("SessionID: got %q", res.SessionID)
 	}
-	argv, _ := os.ReadFile(argvFile)
-	if strings.Contains(string(argv), "--resume") {
-		t.Errorf("new session must not pass --resume; argv:\n%s", argv)
+	argv := readArgv(t, argvFile)
+	if slices.Contains(argv, "--resume") {
+		t.Errorf("new session must not pass --resume; argv: %q", argv)
 	}
-	if !strings.Contains(string(argv), "plan the migration") {
-		t.Errorf("prompt missing from argv:\n%s", argv)
-	}
-	if !strings.Contains(string(argv), "dontAsk") {
-		t.Errorf("permission mode missing from argv:\n%s", argv)
+	if !hasFlag(argv, "--permission-mode", "dontAsk") {
+		t.Errorf("permission mode missing from argv: %q", argv)
 	}
 
 	// Resume: --resume <id> present.
 	if _, err := runner.Run(context.Background(), "continue", fakeSessionID); err != nil {
 		t.Fatalf("Run (resume): %v", err)
 	}
-	argv, _ = os.ReadFile(argvFile)
-	lines := strings.Split(strings.TrimSpace(string(argv)), "\n")
-	found := false
-	for i, l := range lines {
-		if l == "--resume" && i+1 < len(lines) && lines[i+1] == fakeSessionID {
-			found = true
+	if argv := readArgv(t, argvFile); !hasFlag(argv, "--resume", fakeSessionID) {
+		t.Errorf("expected --resume %s in argv: %q", fakeSessionID, argv)
+	}
+}
+
+// The prompt is the CLI's positional argument and -p is a boolean, so a
+// prompt in argv that reads like an option is parsed as one: a post saying
+// "--version" would print the version instead of reaching Claude. The prompt
+// therefore travels on stdin, and argv carries only the bridge's own flags.
+func TestClaudeRunner_PromptOnStdinNotArgv(t *testing.T) {
+	dir := t.TempDir()
+	argvFile := filepath.Join(dir, "argv")
+	bin := writeFakeClaude(t, dir, argvFile, fakeResultJSON(fakeSessionID), 0)
+
+	for _, prompt := range []string{"--version", "--continue", "plan the migration"} {
+		if _, err := NewClaudeRunner(testConfig(t, "http://unused", bin)).Run(context.Background(), prompt, ""); err != nil {
+			t.Fatalf("Run(%q): %v", prompt, err)
+		}
+		if argv := readArgv(t, argvFile); slices.Contains(argv, prompt) {
+			t.Errorf("prompt %q must not be in argv: %q", prompt, argv)
+		}
+		stdin, _ := os.ReadFile(argvFile + ".stdin")
+		if string(stdin) != prompt {
+			t.Errorf("stdin = %q, want %q", stdin, prompt)
 		}
 	}
-	if !found {
-		t.Errorf("expected --resume %s in argv:\n%s", fakeSessionID, argv)
+}
+
+// Runs are isolated from the host's Claude Code setup: no MCP server loads
+// unless configured, and only the configured settings sources are read.
+func TestClaudeRunner_IsolatedFromHostConfig(t *testing.T) {
+	dir := t.TempDir()
+	argvFile := filepath.Join(dir, "argv")
+	bin := writeFakeClaude(t, dir, argvFile, fakeResultJSON(fakeSessionID), 0)
+
+	cfg := testConfig(t, "http://unused", bin)
+	if _, err := NewClaudeRunner(cfg).Run(context.Background(), "hi", ""); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	argv := readArgv(t, argvFile)
+	if !slices.Contains(argv, "--strict-mcp-config") {
+		t.Errorf("--strict-mcp-config missing: %q", argv)
+	}
+	if slices.Contains(argv, "--mcp-config") {
+		t.Errorf("no --mcp-config unless configured: %q", argv)
+	}
+	if !hasFlag(argv, "--setting-sources", "project") {
+		t.Errorf("default --setting-sources project missing: %q", argv)
+	}
+
+	cfg.MCPConfig = "/etc/chit-claude/mcp.json"
+	cfg.SettingSources = SettingSourcesAll
+	if _, err := NewClaudeRunner(cfg).Run(context.Background(), "hi", ""); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	argv = readArgv(t, argvFile)
+	if !slices.Contains(argv, "--strict-mcp-config") || !hasFlag(argv, "--mcp-config", cfg.MCPConfig) {
+		t.Errorf("configured MCP servers must be the only ones: %q", argv)
+	}
+	if slices.Contains(argv, "--setting-sources") {
+		t.Errorf("%q must omit --setting-sources: %q", SettingSourcesAll, argv)
 	}
 }
 
@@ -230,20 +301,12 @@ func TestClaudeRunner_ModelFlag(t *testing.T) {
 
 	// Configured model is passed through as --model <id>.
 	cfg := testConfig(t, "http://unused", bin)
-	cfg.Model = "claude-fable-5"
+	cfg.Model = "claude-fable-5-1"
 	if _, err := NewClaudeRunner(cfg).Run(context.Background(), "hi", ""); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	argv, _ := os.ReadFile(argvFile)
-	lines := strings.Split(strings.TrimSpace(string(argv)), "\n")
-	found := false
-	for i, l := range lines {
-		if l == "--model" && i+1 < len(lines) && lines[i+1] == "claude-fable-5" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected --model claude-fable-5 in argv:\n%s", argv)
+	if argv := readArgv(t, argvFile); !hasFlag(argv, "--model", "claude-fable-5-1") {
+		t.Errorf("expected --model claude-fable-5-1 in argv: %q", argv)
 	}
 
 	// Unset model omits the flag entirely, leaving the CLI default in place.
@@ -251,9 +314,8 @@ func TestClaudeRunner_ModelFlag(t *testing.T) {
 	if _, err := NewClaudeRunner(cfg).Run(context.Background(), "hi", ""); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	argv, _ = os.ReadFile(argvFile)
-	if strings.Contains(string(argv), "--model") {
-		t.Errorf("empty model must not pass --model; argv:\n%s", argv)
+	if argv := readArgv(t, argvFile); slices.Contains(argv, "--model") {
+		t.Errorf("empty model must not pass --model; argv: %q", argv)
 	}
 }
 
@@ -422,6 +484,17 @@ func TestShouldRun(t *testing.T) {
 			props: map[string]any{hopsProp: float64(1)}, want: true},
 		{name: "unresolvable author treated as human", authorID: "ghost-user",
 			content: "hello", want: true},
+		// Only bridges write the hop count, so a post carrying one is an
+		// agent's even when its author cannot be looked up. Reading it as
+		// human would reset the count and lift the hop cap.
+		{name: "unresolvable author with a hop count is an agent", authorID: "ghost-user",
+			content: "@chit-agent thoughts?", props: map[string]any{hopsProp: float64(1)}, want: false},
+		{name: "unresolvable agent still obeys the hop cap", authorID: "ghost-user",
+			replyToAgents: true, maxHops: 2, content: "@chit-agent again?",
+			props: map[string]any{hopsProp: float64(2)}, want: false},
+		{name: "unresolvable agent under the cap may be answered", authorID: "ghost-user",
+			replyToAgents: true, maxHops: 2, content: "@chit-agent again?",
+			props: map[string]any{hopsProp: float64(1)}, want: true},
 	}
 
 	for _, tc := range tests {
@@ -468,14 +541,28 @@ func TestActorTypeCacheIsSingleFetch(t *testing.T) {
 		t.Errorf("resolved author should be fetched once, got %d lookups", n)
 	}
 
-	// Failures are cached too, so an unknown author is not re-fetched forever.
+	// Failures are not cached: a lookup that failed once (a chitd restart,
+	// a timeout) is retried, so the author is not misclassified for good.
 	for range 3 {
 		if got := b.actorType(ctx, "ghost-user"); got != "" {
 			t.Fatalf("failed lookup should yield %q, got %q", "", got)
 		}
 	}
-	if n := chitd.userLookups(); n != 2 {
-		t.Errorf("failed lookup should be negative-cached; got %d total lookups, want 2", n)
+	if n := chitd.userLookups(); n != 4 {
+		t.Errorf("failed lookups must be retried; got %d total lookups, want 4", n)
+	}
+
+	// Once the author resolves, the answer is cached like any other.
+	chitd.mu.Lock()
+	chitd.users["ghost-user"] = &model.User{ID: "ghost-user", ActorType: model.ActorTypeAgent}
+	chitd.mu.Unlock()
+	for range 2 {
+		if got := b.actorType(ctx, "ghost-user"); got != model.ActorTypeAgent {
+			t.Fatalf("actorType = %q after recovery, want %q", got, model.ActorTypeAgent)
+		}
+	}
+	if n := chitd.userLookups(); n != 5 {
+		t.Errorf("recovered author should be fetched once more, then cached; got %d lookups, want 5", n)
 	}
 }
 
@@ -621,6 +708,55 @@ func TestBridge_ReplyCarriesHopCount(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	if n := len(chitd.createdPosts()); n != 2 {
 		t.Errorf("hop cap should suppress the reply; got %d posts, want 2", n)
+	}
+}
+
+// Runs across threads are capped by MaxConcurrentRuns: each thread has its
+// own worker, but they share the run slots.
+func TestBridge_ConcurrentRunsAreCapped(t *testing.T) {
+	chitd := &fakeChitd{users: humanUsers()}
+	srv := chitd.server(t)
+
+	// Each run marks itself live in a directory for a moment; the most marks
+	// ever seen at once is the concurrency the bridge allowed.
+	dir := t.TempDir()
+	live := filepath.Join(dir, "live")
+	if err := os.Mkdir(live, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	peak := filepath.Join(dir, "peak")
+	bin := filepath.Join(dir, "claude")
+	script := fmt.Sprintf(`#!/bin/sh
+cat > /dev/null
+touch %[1]s/$$
+n=$(ls %[1]s | wc -l)
+if [ "$n" -gt "$(cat %[2]s 2>/dev/null || echo 0)" ]; then echo "$n" > %[2]s; fi
+sleep 0.3
+rm %[1]s/$$
+cat <<'FAKEEOF'
+%[3]s
+FAKEEOF
+`, live, peak, fakeResultJSON(fakeSessionID))
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := testConfig(t, srv.URL, bin)
+	cfg.MaxConcurrentRuns = 1
+	b := New(cfg)
+	b.agentUserID = testAgentID
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() { cancel(); b.wg.Wait() })
+	for i := range 3 {
+		b.handleEvent(ctx, postedEvent(&model.Post{ID: fmt.Sprintf("root-%d", i),
+			ChannelID: testChannelID, UserID: testOtherUser, Content: "go"}))
+	}
+	waitForPosts(t, chitd, 3)
+
+	got, _ := os.ReadFile(peak)
+	if strings.TrimSpace(string(got)) != "1" {
+		t.Errorf("peak concurrent runs = %s, want 1", got)
 	}
 }
 

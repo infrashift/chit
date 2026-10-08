@@ -43,10 +43,13 @@ type Bridge struct {
 	agentUsername string
 	channels      map[string]struct{}
 
+	// runSlots bounds concurrent claude processes across all threads.
+	runSlots chan struct{}
+
 	mu         sync.Mutex
 	sessions   map[string]string           // thread root ID → claude session ID
 	queues     map[string]chan *model.Post // thread root ID → pending posts
-	actorTypes map[string]string           // author user ID → actor_type ("" = lookup failed)
+	actorTypes map[string]string           // author user ID → resolved actor_type
 	offlist    map[string]struct{}         // channels already warned about
 	wg         sync.WaitGroup
 }
@@ -65,6 +68,7 @@ func New(cfg *Config) *Bridge {
 		cfg:        cfg,
 		client:     client,
 		runner:     NewClaudeRunner(cfg),
+		runSlots:   make(chan struct{}, cfg.MaxConcurrentRuns),
 		channels:   channels,
 		sessions:   make(map[string]string),
 		queues:     make(map[string]chan *model.Post),
@@ -96,7 +100,8 @@ func (b *Bridge) Run(ctx context.Context) error {
 		"agent", me.Username, "agent_user_id", me.ID,
 		"channels", b.cfg.Channels, "workdir", b.cfg.WorkDir,
 		"model", b.cfg.Model, "require_mention", b.cfg.RequireMention,
-		"reply_to_agents", b.cfg.ReplyToAgents, "max_agent_hops", b.cfg.MaxAgentHops)
+		"reply_to_agents", b.cfg.ReplyToAgents, "max_agent_hops", b.cfg.MaxAgentHops,
+		"max_concurrent_runs", b.cfg.MaxConcurrentRuns, "setting_sources", b.cfg.SettingSources)
 
 	b.client.Listen(ctx, func(event *model.WebSocketEvent) {
 		b.handleEvent(ctx, event)
@@ -190,11 +195,20 @@ func (b *Bridge) warnOffAllowlist(channelID string) {
 // shouldRun decides whether a queued post actually warrants a claude run, and
 // returns the author's actor_type alongside the verdict. It may call the REST
 // API, so it runs on the per-thread worker rather than the WebSocket read
-// loop. Posts by humans (and by authors whose type could not be resolved) are
-// always run; posts by other agents or bots are dropped unless ReplyToAgents
-// is on, this agent is named directly, and the thread is under the hop cap.
+// loop. Posts by humans are always run; posts by other agents or bots are
+// dropped unless ReplyToAgents is on, this agent is named directly, and the
+// thread is under the hop cap.
+//
+// An author whose type cannot be resolved is treated as human — silently
+// ignoring a person is worse than one extra agent turn — unless the post
+// carries a hop count. Only bridges write that prop, so a post with one came
+// from an agent, and treating it as human would reset the count to zero and
+// lift the hop cap for as long as the lookup kept failing.
 func (b *Bridge) shouldRun(ctx context.Context, post *model.Post) (run bool, authorActor string) {
 	actor := b.actorType(ctx, post.UserID)
+	if actor == "" && agentHops(post) > 0 {
+		actor = model.ActorTypeAgent
+	}
 	if actor != model.ActorTypeAgent && actor != model.ActorTypeBot {
 		return true, actor
 	}
@@ -215,11 +229,11 @@ func (b *Bridge) shouldRun(ctx context.Context, post *model.Post) (run bool, aut
 	return true, actor
 }
 
-// actorType returns the author's actor_type, caching every lookup for the
-// process lifetime. Failures are cached as "" so an unreachable or deleted
-// user is not re-fetched on every post; "" is treated as "not an agent",
-// failing open toward humans — silently ignoring a person is worse than one
-// extra agent turn, which the hop cap bounds anyway.
+// actorType returns the author's actor_type, or "" when it cannot be
+// resolved. Successful lookups are cached for the process lifetime; failures
+// are not, because a failure is usually transient, and caching one would
+// misclassify that author for good — an agent read as a human escapes the
+// loop guard.
 func (b *Bridge) actorType(ctx context.Context, userID string) string {
 	b.mu.Lock()
 	actor, ok := b.actorTypes[userID]
@@ -230,17 +244,15 @@ func (b *Bridge) actorType(ctx context.Context, userID string) string {
 
 	user, err := b.client.GetUser(ctx, userID)
 	if err != nil {
-		slog.Warn("failed to resolve author actor_type; treating as human",
+		slog.Warn("failed to resolve author actor_type",
 			"user_id", userID, "error", err)
-		actor = ""
-	} else {
-		actor = user.ActorType
+		return ""
 	}
 
 	b.mu.Lock()
-	b.actorTypes[userID] = actor
+	b.actorTypes[userID] = user.ActorType
 	b.mu.Unlock()
-	return actor
+	return user.ActorType
 }
 
 // mentionsUsernameDirectly reports whether content names username with an
@@ -312,10 +324,15 @@ func (b *Bridge) processPost(ctx context.Context, root string, post *model.Post)
 
 	sessionID := b.lookupSession(ctx, root)
 
+	select {
+	case b.runSlots <- struct{}{}:
+	case <-ctx.Done():
+		return
+	}
 	slog.Info("running claude", "root_id", root, "post_id", post.ID,
 		"resume", sessionID != "", "content_len", len(post.Content))
-
 	result, err := b.runner.Run(ctx, post.Content, sessionID)
+	<-b.runSlots
 	if err != nil {
 		slog.Error("claude run failed", "root_id", root, "error", err)
 		b.reply(ctx, post.ChannelID, root,
