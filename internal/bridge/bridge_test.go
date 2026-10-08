@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/infrashift/chit/internal/model"
 )
 
@@ -76,6 +78,15 @@ type fakeChitd struct {
 	lastAuth     string
 	getUserCalls int
 	threadCalls  int
+
+	// For Run: channels the agent can read (absent → 404, or channelStatus
+	// when set), the channel IDs it is a member of, and the events the
+	// WebSocket delivers.
+	channels      map[string]*model.Channel
+	channelStatus int
+	memberOf      []string
+	events        chan *model.WebSocketEvent
+	wsConnects    int
 }
 
 func (f *fakeChitd) server(t *testing.T) *httptest.Server {
@@ -122,6 +133,58 @@ func (f *fakeChitd) server(t *testing.T) *httptest.Server {
 		defer f.mu.Unlock()
 		f.threadCalls++
 		_ = json.NewEncoder(w).Encode(&model.PostList{Order: f.thread})
+	})
+	mux.HandleFunc("GET /api/v1/channels/{id}", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		channel, ok := f.channels[r.PathValue("id")]
+		status := f.channelStatus
+		f.mu.Unlock()
+		switch {
+		case status != 0:
+			http.Error(w, "unavailable", status)
+		case !ok:
+			http.Error(w, "not found", http.StatusNotFound)
+		default:
+			_ = json.NewEncoder(w).Encode(channel)
+		}
+	})
+	mux.HandleFunc("GET /api/v1/users/me/teams/{id}/channels/members", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		members := []*model.ChannelMember{}
+		for _, id := range f.memberOf {
+			members = append(members, &model.ChannelMember{ChannelID: id, UserID: testAgentID})
+		}
+		_ = json.NewEncoder(w).Encode(members)
+	})
+	mux.HandleFunc("GET /api/v1/websocket", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		f.mu.Lock()
+		f.wsConnects++
+		f.mu.Unlock()
+		closed := make(chan struct{})
+		go func() {
+			defer close(closed)
+			for {
+				if _, _, err := conn.ReadMessage(); err != nil {
+					return
+				}
+			}
+		}()
+		for {
+			select {
+			case ev := <-f.events:
+				if err := conn.WriteJSON(ev); err != nil {
+					return
+				}
+			case <-closed:
+				return
+			}
+		}
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)

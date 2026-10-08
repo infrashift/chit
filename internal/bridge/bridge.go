@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/infrashift/chit/internal/chitclient"
@@ -33,6 +34,22 @@ const perThreadQueueSize = 16
 // delivered twice (around a WebSocket reconnect) instead of running it twice.
 const seenPostsSize = 1024
 
+// idleWorkerTimeout is how long a thread's worker waits for another post
+// before it exits. Its session is forgotten too; it is recovered from the
+// thread's props if the thread wakes up.
+const idleWorkerTimeout = 10 * time.Minute
+
+// replyTimeout bounds posting one reply. Replies get their own deadline, not
+// the run's context, so a run stopped by shutdown can still say so.
+const replyTimeout = 15 * time.Second
+
+// errShuttingDown is returned for a post the bridge stopped before running.
+var errShuttingDown = errors.New("the bridge is shutting down")
+
+// shutdownNotice answers posts a shutting-down bridge did not get to.
+const shutdownNotice = "⚠️ The bridge is restarting and did not get to your latest message " +
+	"in this thread. Please send it again once I am back."
+
 // queueFullNotice answers a post dropped because its thread's queue is full.
 const queueFullNotice = "⚠️ I'm still working through earlier messages in this thread " +
 	"and could not queue this one. Please send it again once I have replied."
@@ -55,6 +72,9 @@ type Bridge struct {
 
 	// runSlots bounds concurrent claude processes across all threads.
 	runSlots chan struct{}
+	// stopping closes when shutdown begins: no new run starts after it.
+	stopping    chan struct{}
+	idleTimeout time.Duration
 
 	mu         sync.Mutex
 	sessions   map[string]string           // thread root ID → claude session ID
@@ -78,22 +98,26 @@ func New(cfg *Config) *Bridge {
 		client = chitclient.NewOAuth(cfg.ServerURL, cfg.OAuth())
 	}
 	return &Bridge{
-		cfg:        cfg,
-		client:     client,
-		runner:     NewClaudeRunner(cfg),
-		runSlots:   make(chan struct{}, cfg.MaxConcurrentRuns),
-		channels:   channels,
-		sessions:   make(map[string]string),
-		queues:     make(map[string]chan *model.Post),
-		actorTypes: make(map[string]string),
-		offlist:    make(map[string]struct{}),
-		busy:       make(map[string]struct{}),
-		seen:       make(map[string]struct{}),
+		cfg:         cfg,
+		client:      client,
+		runner:      NewClaudeRunner(cfg),
+		runSlots:    make(chan struct{}, cfg.MaxConcurrentRuns),
+		stopping:    make(chan struct{}),
+		idleTimeout: idleWorkerTimeout,
+		channels:    channels,
+		sessions:    make(map[string]string),
+		queues:      make(map[string]chan *model.Post),
+		actorTypes:  make(map[string]string),
+		offlist:     make(map[string]struct{}),
+		busy:        make(map[string]struct{}),
+		seen:        make(map[string]struct{}),
 	}
 }
 
-// Run resolves the agent identity, then listens for posts until ctx is
-// cancelled. It blocks.
+// Run resolves the agent identity, checks it can serve its channels, then
+// listens for posts until ctx is cancelled. It blocks until shutdown is done:
+// runs in progress get ShutdownGrace to finish, and threads with posts that
+// never started are told to send them again.
 func (b *Bridge) Run(ctx context.Context) error {
 	me, err := b.client.Me(ctx)
 	if err != nil {
@@ -111,6 +135,9 @@ func (b *Bridge) Run(ctx context.Context) error {
 		slog.Warn("agent user is not marked actor_type=agent; other agents will treat its posts as human",
 			"user_id", me.ID, "actor_type", me.ActorType)
 	}
+	if err := b.checkChannels(ctx); err != nil {
+		return err
+	}
 	slog.Info("bridge started",
 		"agent", me.Username, "agent_user_id", me.ID,
 		"channels", b.cfg.Channels, "workdir", b.cfg.WorkDir,
@@ -118,11 +145,76 @@ func (b *Bridge) Run(ctx context.Context) error {
 		"reply_to_agents", b.cfg.ReplyToAgents, "max_agent_hops", b.cfg.MaxAgentHops,
 		"max_concurrent_runs", b.cfg.MaxConcurrentRuns, "setting_sources", b.cfg.SettingSources)
 
+	// Runs outlive ctx, which only says to stop listening; workCtx is
+	// cancelled when the grace period is up.
+	workCtx, stopWork := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopWork()
 	b.client.Listen(ctx, func(event *model.WebSocketEvent) {
-		b.handleEvent(ctx, event)
+		b.handleEvent(workCtx, event)
 	})
-	b.wg.Wait()
+
+	close(b.stopping)
+	done := make(chan struct{})
+	go func() {
+		b.wg.Wait()
+		close(done)
+	}()
+	slog.Info("bridge stopping; waiting for runs in progress", "grace", b.cfg.ShutdownGrace)
+	select {
+	case <-done:
+	case <-time.After(b.cfg.ShutdownGrace):
+		slog.Warn("shutdown grace period over; stopping runs in progress")
+		stopWork()
+		<-done
+	}
+	slog.Info("bridge stopped")
 	return nil
+}
+
+// checkChannels confirms the agent is a member of every channel it serves.
+// The hub delivers events only to members, so a bridge serving a channel its
+// agent is not in would start cleanly and never hear a thing. A refusal from
+// chitd (the channel does not exist, or the agent may not see it) stops the
+// bridge; a failure to get an answer only warns, so a chitd restart does not
+// keep the bridge down.
+func (b *Bridge) checkChannels(ctx context.Context) error {
+	for _, id := range b.cfg.Channels {
+		member, err := b.isMember(ctx, id)
+		var status *chitclient.StatusError
+		switch {
+		case errors.As(err, &status) && status.Status < 500:
+			return fmt.Errorf("channel %s in CHIT_CLAUDE_CHANNELS: %w", id, err)
+		case err != nil:
+			slog.Warn("could not check channel membership", "channel_id", id, "error", err)
+		case !member:
+			return fmt.Errorf("channel %s in CHIT_CLAUDE_CHANNELS: agent %s is not a member, "+
+				"so it would never receive its posts; add it to the channel", id, b.agentUsername)
+		}
+	}
+	return nil
+}
+
+// isMember reports whether the agent belongs to a channel. A direct or group
+// channel can only be read by its members; an open channel can be read by
+// anyone on its team, so for a team channel the agent's memberships decide.
+func (b *Bridge) isMember(ctx context.Context, channelID string) (bool, error) {
+	channel, err := b.client.GetChannel(ctx, channelID)
+	if err != nil {
+		return false, err
+	}
+	if channel.TeamID == "" {
+		return true, nil
+	}
+	members, err := b.client.GetMyChannelMembers(ctx, channel.TeamID)
+	if err != nil {
+		return false, err
+	}
+	for _, m := range members {
+		if m.ChannelID == channelID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // handleEvent filters incoming events down to posts the bridge should answer
@@ -144,6 +236,8 @@ func (b *Bridge) handleEvent(ctx context.Context, event *model.WebSocketEvent) {
 		root = post.ID
 	}
 
+	// The send happens under mu, so a worker retiring for idleness (which
+	// also takes mu) can never leave a post in a queue nobody reads.
 	b.mu.Lock()
 	queue, ok := b.queues[root]
 	if !ok {
@@ -152,11 +246,15 @@ func (b *Bridge) handleEvent(ctx context.Context, event *model.WebSocketEvent) {
 		b.wg.Add(1)
 		go b.threadWorker(ctx, root, queue)
 	}
-	b.mu.Unlock()
-
+	sent := false
 	select {
 	case queue <- post:
+		sent = true
 	default:
+	}
+	b.mu.Unlock()
+
+	if !sent {
 		slog.Warn("thread queue full, dropping message", "root_id", root, "post_id", post.ID)
 		b.noticeQueueFull(ctx, root, post)
 	}
@@ -344,20 +442,74 @@ func agentHops(post *model.Post) int {
 }
 
 // threadWorker serializes claude runs for one thread: one process per session
-// at a time, messages queued in arrival order.
+// at a time, messages queued in arrival order. It exits when the thread has
+// been idle for idleTimeout, and on shutdown, after telling the thread about
+// any post it did not get to.
 func (b *Bridge) threadWorker(ctx context.Context, root string, queue chan *model.Post) {
 	defer b.wg.Done()
+	idle := time.NewTimer(b.idleTimeout)
+	defer idle.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-b.stopping:
+			b.abandon(ctx, root, queue, nil)
+			return
+		case <-idle.C:
+			if b.retire(root, queue) {
+				return
+			}
+			idle.Reset(b.idleTimeout)
 		case post := <-queue:
+			select {
+			case <-b.stopping:
+				b.abandon(ctx, root, queue, post)
+				return
+			default:
+			}
 			b.mu.Lock()
 			delete(b.busy, root)
 			b.mu.Unlock()
 			b.processPost(ctx, root, post)
+			idle.Reset(b.idleTimeout)
 		}
 	}
+}
+
+// retire removes an idle thread's worker state, unless a post arrived in the
+// meantime. Sends happen under mu, so once the queue is gone from the map
+// nothing more can arrive on it.
+func (b *Bridge) retire(root string, queue chan *model.Post) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(queue) > 0 {
+		return false
+	}
+	delete(b.queues, root)
+	delete(b.sessions, root)
+	delete(b.busy, root)
+	return true
+}
+
+// abandon tells a thread, once, that the posts left in its queue (and taken,
+// if non-nil) were never run.
+func (b *Bridge) abandon(ctx context.Context, root string, queue chan *model.Post, taken *model.Post) {
+	last := taken
+	for {
+		select {
+		case p := <-queue:
+			last = p
+			continue
+		default:
+		}
+		break
+	}
+	if last == nil {
+		return
+	}
+	slog.Info("shutting down with unrun posts in thread", "root_id", root, "last_post_id", last.ID)
+	b.reply(ctx, last.ChannelID, root, shutdownNotice, map[string]any{hopsProp: agentHops(last)})
 }
 
 func (b *Bridge) processPost(ctx context.Context, root string, post *model.Post) {
@@ -382,6 +534,10 @@ func (b *Bridge) processPost(ctx context.Context, root string, post *model.Post)
 	}
 
 	result, notice, err := b.runClaude(ctx, root, post, sessionID)
+	if errors.Is(err, errShuttingDown) {
+		b.reply(ctx, post.ChannelID, root, shutdownNotice, map[string]any{hopsProp: hops})
+		return
+	}
 	if result != nil && result.SessionID != "" {
 		b.mu.Lock()
 		b.sessions[root] = result.SessionID
@@ -435,10 +591,17 @@ const sessionLostNotice = "_The Claude session for this thread could not be foun
 func (b *Bridge) runClaude(ctx context.Context, root string, post *model.Post, sessionID string) (*ClaudeResult, string, error) {
 	select {
 	case b.runSlots <- struct{}{}:
+	case <-b.stopping:
+		return nil, "", errShuttingDown
 	case <-ctx.Done():
-		return nil, "", ctx.Err()
+		return nil, "", errShuttingDown
 	}
 	defer func() { <-b.runSlots }()
+	select {
+	case <-b.stopping:
+		return nil, "", errShuttingDown
+	default:
+	}
 
 	slog.Info("running claude", "root_id", root, "post_id", post.ID,
 		"resume", sessionID != "", "content_len", len(post.Content))
@@ -460,6 +623,8 @@ func (b *Bridge) runClaude(ctx context.Context, root string, post *model.Post, s
 // agent may answer any of them; the remaining props go on the last part, which
 // is where session recovery looks first.
 func (b *Bridge) reply(ctx context.Context, channelID, root, content string, props map[string]any) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), replyTimeout)
+	defer cancel()
 	parts := splitContent(content, model.PostMaxContentSize)
 	for i, part := range parts {
 		partProps := props

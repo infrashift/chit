@@ -148,7 +148,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 
 	if resp.StatusCode >= 300 {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return fmt.Errorf("%s %s: status %d: %s", method, path, resp.StatusCode, string(respBody))
+		return &StatusError{Method: method, Path: path, Status: resp.StatusCode, Body: string(respBody)}
 	}
 
 	if out != nil {
@@ -157,6 +157,19 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		}
 	}
 	return nil
+}
+
+// StatusError is chitd answering a request with a non-2xx status, so callers
+// can tell a refusal (403, 404) from a request that never got an answer.
+type StatusError struct {
+	Method string
+	Path   string
+	Status int
+	Body   string
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("%s %s: status %d: %s", e.Method, e.Path, e.Status, e.Body)
 }
 
 // pageQuery renders page/per_page query params understood by chitd's list
@@ -241,6 +254,16 @@ func (c *Client) GetChannel(ctx context.Context, id string) (*model.Channel, err
 func (c *Client) GetChannelMembers(ctx context.Context, channelID string, page, perPage int) ([]*model.ChannelMember, error) {
 	var members []*model.ChannelMember
 	if err := c.do(ctx, http.MethodGet, "/api/v1/channels/"+channelID+"/members"+pageQuery(page, perPage), nil, &members); err != nil {
+		return nil, err
+	}
+	return members, nil
+}
+
+// GetMyChannelMembers returns the agent's own membership in each channel of a
+// team it belongs to.
+func (c *Client) GetMyChannelMembers(ctx context.Context, teamID string) ([]*model.ChannelMember, error) {
+	var members []*model.ChannelMember
+	if err := c.do(ctx, http.MethodGet, "/api/v1/users/me/teams/"+teamID+"/channels/members", nil, &members); err != nil {
 		return nil, err
 	}
 	return members, nil

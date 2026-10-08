@@ -110,8 +110,11 @@ func (r *ClaudeRunner) Run(ctx context.Context, prompt, sessionID string) (*Clau
 	cmd.Stderr = &stderr
 
 	runErr := cmd.Run()
-	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+	switch {
+	case errors.Is(runCtx.Err(), context.DeadlineExceeded):
 		return nil, &RunError{Summary: fmt.Sprintf("claude run timed out after %s", r.cfg.RunTimeout)}
+	case errors.Is(runCtx.Err(), context.Canceled):
+		return nil, &RunError{Summary: "the run was stopped because the bridge is shutting down"}
 	}
 
 	// The CLI exits non-zero on an API error but still prints its result,

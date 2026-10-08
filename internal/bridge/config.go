@@ -67,6 +67,11 @@ type Config struct {
 	// already runs one at a time; this bounds how many threads run at once.
 	MaxConcurrentRuns int `koanf:"max_concurrent_runs"`
 
+	// ShutdownGrace is how long runs in progress may keep going after a
+	// shutdown signal before they are killed. Keep it under the supervisor's
+	// own stop timeout (systemd's TimeoutStopSec defaults to 90s).
+	ShutdownGrace time.Duration `koanf:"shutdown_grace"`
+
 	// ContextWindow is the assumed model context size (tokens) used for the
 	// "context ~N%" footer estimate.
 	ContextWindow int `koanf:"context_window"`
@@ -91,6 +96,7 @@ func Defaults() *Config {
 
 		SettingSources:    "project",
 		MaxConcurrentRuns: 2,
+		ShutdownGrace:     60 * time.Second,
 	}
 }
 
@@ -180,6 +186,8 @@ func (c *Config) validateLimits() error {
 		return fmt.Errorf("CHIT_CLAUDE_MAX_CONCURRENT_RUNS must be at least 1, got %d", c.MaxConcurrentRuns)
 	case c.MaxAgentHops < 0:
 		return fmt.Errorf("CHIT_CLAUDE_MAX_AGENT_HOPS must not be negative, got %d", c.MaxAgentHops)
+	case c.ShutdownGrace < 0:
+		return fmt.Errorf("CHIT_CLAUDE_SHUTDOWN_GRACE must not be negative, got %s", c.ShutdownGrace)
 	case c.ContextWindow < 0:
 		return fmt.Errorf("CHIT_CLAUDE_CONTEXT_WINDOW must not be negative, got %d", c.ContextWindow)
 	case strings.TrimSpace(c.SettingSources) == "":
