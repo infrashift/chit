@@ -7,8 +7,6 @@ import (
 	"strconv"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-
-	"github.com/infrashift/chit/internal/model"
 )
 
 func (s *ChitMCPServer) registerPrompts() {
@@ -23,7 +21,7 @@ func (s *ChitMCPServer) registerPrompts() {
 			},
 			{
 				Name:        "num_posts",
-				Description: "Number of recent posts to include (default: 50)",
+				Description: "Number of recent posts to include (default: 50, at most 200)",
 				Required:    false,
 			},
 		},
@@ -56,8 +54,8 @@ func (s *ChitMCPServer) handleSummarizeChannel(ctx context.Context, req *mcp.Get
 	perPage := 50
 	if n := req.Params.Arguments["num_posts"]; n != "" {
 		parsed, err := strconv.Atoi(n)
-		if err != nil || parsed < 1 {
-			return nil, fmt.Errorf("num_posts must be a positive integer, got %q", n)
+		if err != nil || parsed < 1 || parsed > maxPerPage {
+			return nil, fmt.Errorf("num_posts must be an integer from 1 to %d, got %q", maxPerPage, n)
 		}
 		perPage = parsed
 	}
@@ -72,7 +70,7 @@ func (s *ChitMCPServer) handleSummarizeChannel(ctx context.Context, req *mcp.Get
 		return nil, fmt.Errorf("get channel posts: %w", err)
 	}
 
-	postsJSON, _ := json.Marshal(posts)
+	postsJSON, _ := json.Marshal(viewPostList(posts))
 
 	return &mcp.GetPromptResult{
 		Description: fmt.Sprintf("Summarize recent activity in #%s", channel.DisplayName),
@@ -106,7 +104,7 @@ func (s *ChitMCPServer) handleDraftReply(ctx context.Context, req *mcp.GetPrompt
 		return nil, fmt.Errorf("get thread: %w", err)
 	}
 
-	threadJSON, _ := json.Marshal(&model.PostList{Order: posts})
+	threadJSON, _ := json.Marshal(viewPosts(posts))
 
 	promptText := fmt.Sprintf(
 		"Draft a reply to the following thread conversation.\n\nThread (JSON):\n%s",

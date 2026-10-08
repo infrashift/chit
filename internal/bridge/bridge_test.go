@@ -212,9 +212,12 @@ func humanUsers() map[string]*model.User {
 	}
 }
 
+// testConfig answers every post, so tests about running and replying need
+// not mention the agent; the mention gating has tests of its own.
 func testConfig(t *testing.T, serverURL, claudeBin string) *Config {
 	t.Helper()
 	cfg := Defaults()
+	cfg.RequireMention = false
 	cfg.ServerURL = serverURL
 	cfg.AgentKratosID = testKratosID
 	cfg.Channels = []string{testChannelID}
@@ -441,28 +444,111 @@ func TestShouldEnqueue(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := b.shouldEnqueue(tc.post); got != tc.want {
+			if _, got := b.shouldEnqueue(tc.post); got != tc.want {
 				t.Errorf("shouldEnqueue = %v, want %v", got, tc.want)
 			}
 		})
 	}
+}
 
-	t.Run("mention gating", func(t *testing.T) {
-		cfg := testConfig(t, "http://unused", "claude")
-		cfg.RequireMention = true
-		b := New(cfg)
-		b.agentUserID = testAgentID
+// With RequireMention (the default), a post must name the agent; a broadcast
+// counts only with AnswerBroadcasts; and with FollowThreads (the default) a
+// reply in a thread the agent has joined needs no mention, while a reply in a
+// thread it knows nothing about goes to the worker to check.
+func TestShouldEnqueue_MentionGating(t *testing.T) {
+	broadcast := map[string]any{"mentions": []any{testAgentID}} // as the server expands @channel
+	cases := []struct {
+		name             string
+		followThreads    bool
+		answerBroadcasts bool
+		post             *model.Post
+		wantOK           bool
+		wantAddressed    bool
+	}{
+		{name: "no mention", followThreads: true,
+			post: &model.Post{Content: "anyone around?"}},
+		{name: "direct mention", followThreads: true,
+			post: &model.Post{Content: "@chit-agent plan it"}, wantOK: true, wantAddressed: true},
+		{name: "@channel is not addressed to the agent", followThreads: true,
+			post: &model.Post{Content: "@channel standup", Props: broadcast}},
+		{name: "@channel with AnswerBroadcasts", followThreads: true, answerBroadcasts: true,
+			post: &model.Post{Content: "@channel standup", Props: broadcast}, wantOK: true, wantAddressed: true},
+		{name: "follow-up in a joined thread", followThreads: true,
+			post: &model.Post{RootID: "joined-root", Content: "and then?"}, wantOK: true, wantAddressed: true},
+		{name: "follow-up in a bystander thread", followThreads: true,
+			post: &model.Post{RootID: "other-root", Content: "lol"}},
+		{name: "follow-up in an unknown thread is checked later", followThreads: true,
+			post: &model.Post{RootID: "new-root", Content: "and then?"}, wantOK: true},
+		{name: "joined thread without FollowThreads",
+			post: &model.Post{RootID: "joined-root", Content: "and then?"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testConfig(t, "http://unused", "claude")
+			cfg.RequireMention = true
+			cfg.FollowThreads = tc.followThreads
+			cfg.AnswerBroadcasts = tc.answerBroadcasts
+			b := New(cfg)
+			b.agentUserID = testAgentID
+			b.agentUsername = testAgentUsername
+			b.joined.add("joined-root")
+			b.bystander.add("other-root")
 
-		without := &model.Post{ChannelID: testChannelID, UserID: testOtherUser}
-		if b.shouldEnqueue(without) {
-			t.Error("post without mention should be ignored when RequireMention")
-		}
-		with := &model.Post{ChannelID: testChannelID, UserID: testOtherUser,
-			Props: map[string]any{"mentions": []any{testAgentID}}}
-		if !b.shouldEnqueue(with) {
-			t.Error("post mentioning the agent should be handled")
-		}
+			tc.post.ChannelID = testChannelID
+			tc.post.UserID = testOtherUser
+			addressed, ok := b.shouldEnqueue(tc.post)
+			if ok != tc.wantOK || addressed != tc.wantAddressed {
+				t.Errorf("shouldEnqueue = (addressed %v, ok %v), want (%v, %v)",
+					addressed, ok, tc.wantAddressed, tc.wantOK)
+			}
+		})
+	}
+}
+
+// End to end with the default gating: an unmentioned reply in a thread the
+// agent has not joined is checked against the thread once and then ignored
+// without a lookup; once the agent is named there, later replies need no
+// mention.
+func TestBridge_FollowsThreadsItJoined(t *testing.T) {
+	chitd := &fakeChitd{users: humanUsers(), thread: []*model.Post{
+		{ID: "root-1", ChannelID: testChannelID, UserID: testOtherUser, Content: "humans talking"},
+	}}
+	srv := chitd.server(t)
+	cfg := testConfig(t, srv.URL, writeEchoClaude(t, t.TempDir()))
+	cfg.RequireMention = true
+	b, ctx := liveBridge(t, cfg)
+
+	say := func(id, content string) {
+		b.handleEvent(ctx, postedEvent(&model.Post{ID: id, ChannelID: testChannelID,
+			UserID: testOtherUser, RootID: "root-1", Content: content}))
+	}
+	threadCalls := func() int {
+		chitd.mu.Lock()
+		defer chitd.mu.Unlock()
+		return chitd.threadCalls
+	}
+
+	say("msg-1", "chatting")
+	waitFor(t, "the thread to be checked", func() bool {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return b.bystander.has("root-1")
 	})
+	say("msg-2", "still chatting")
+	say("msg-3", "@chit-agent summarise")
+	// Queued behind msg-3 in the same thread, so its answer lands second.
+	say("msg-4", "and the risks")
+
+	posts := waitForPosts(t, chitd, 2)
+	if !strings.HasPrefix(posts[0].Content, "re: @chit-agent summarise") ||
+		!strings.HasPrefix(posts[1].Content, "re: and the risks") {
+		t.Errorf("want answers to the mention and the follow-up, got %q, %q", posts[0].Content, posts[1].Content)
+	}
+	if n := threadCalls(); n != 2 {
+		// One check for msg-1; one session lookup for msg-3. msg-2 was
+		// dropped on the read loop, and msg-4 rode on the joined thread.
+		t.Errorf("thread fetched %d times, want 2", n)
+	}
 }
 
 // syncBuffer is a concurrency-safe io.Writer for capturing slog output.
@@ -499,14 +585,14 @@ func TestBridge_WarnsOncePerOffAllowlistChannel(t *testing.T) {
 	// Repeated posts from one unserved channel warn exactly once.
 	stray := &model.Post{ChannelID: "stray-chan", UserID: testOtherUser}
 	for range 3 {
-		if b.shouldEnqueue(stray) {
+		if _, ok := b.shouldEnqueue(stray); ok {
 			t.Fatal("post from an unserved channel must be dropped")
 		}
 	}
 	// A second unserved channel gets its own warning.
 	b.shouldEnqueue(&model.Post{ChannelID: "dm-chan", UserID: testOtherUser})
 	// The configured channel never warns.
-	if !b.shouldEnqueue(&model.Post{ChannelID: testChannelID, UserID: testOtherUser}) {
+	if _, ok := b.shouldEnqueue(&model.Post{ChannelID: testChannelID, UserID: testOtherUser}); !ok {
 		t.Fatal("post in the configured channel must be handled")
 	}
 
@@ -729,9 +815,9 @@ func TestBridge_SessionRecoveryFromThreadProps(t *testing.T) {
 	b.agentUserID = testAgentID
 
 	// Fresh bridge (empty in-memory map) must recover the session from props.
-	got := b.lookupSession(context.Background(), "root-1")
-	if got != fakeSessionID2 {
-		t.Fatalf("lookupSession: got %q, want %q", got, fakeSessionID2)
+	got, joined := b.threadState(context.Background(), "root-1")
+	if got != fakeSessionID2 || !joined {
+		t.Fatalf("threadState: got (%q, %v), want (%q, true)", got, joined, fakeSessionID2)
 	}
 }
 
@@ -853,10 +939,10 @@ func TestBridge_TwoAgentsIndependentSessions(t *testing.T) {
 	agentB.agentUserID = testAgentID2
 
 	ctx := context.Background()
-	if got := agentA.lookupSession(ctx, "root-1"); got != fakeSessionID {
+	if got, _ := agentA.threadState(ctx, "root-1"); got != fakeSessionID {
 		t.Errorf("agent A session: got %q, want %q", got, fakeSessionID)
 	}
-	if got := agentB.lookupSession(ctx, "root-1"); got != fakeSessionID2 {
+	if got, _ := agentB.threadState(ctx, "root-1"); got != fakeSessionID2 {
 		t.Errorf("agent B session: got %q, want %q", got, fakeSessionID2)
 	}
 }
@@ -1023,8 +1109,8 @@ func TestFirstSightingForgetsOldest(t *testing.T) {
 	if !b.firstSighting("p-0") {
 		t.Error("the oldest ID should have been forgotten")
 	}
-	if len(b.seen) != seenPostsSize || len(b.seenOrder) != seenPostsSize {
-		t.Errorf("seen holds %d/%d, want %d", len(b.seen), len(b.seenOrder), seenPostsSize)
+	if n := b.seen.len(); n != seenPostsSize {
+		t.Errorf("seen holds %d, want %d", n, seenPostsSize)
 	}
 }
 
@@ -1080,5 +1166,101 @@ echo '{"result":"done","session_id":"`+fakeSessionID+`"}'
 	}
 	if n != 1 {
 		t.Errorf("queue-full notice posted %d times, want 1", n)
+	}
+}
+
+// A session whose context reaches MaxSessionTokens is retired: the reply says
+// so and carries the reset marker, and the next reply, even after a restart,
+// starts a new session.
+func TestBridge_SessionRetiredAtTokenCeiling(t *testing.T) {
+	chitd := &fakeChitd{users: humanUsers()}
+	srv := chitd.server(t)
+	dir := t.TempDir()
+	argvFile := filepath.Join(dir, "argv")
+	bin := writeFakeClaude(t, dir, argvFile, fakeResultJSON(fakeSessionID), 0) // context 43.4k
+	cfg := testConfig(t, srv.URL, bin)
+	cfg.MaxSessionTokens = 40_000
+	b, ctx := liveBridge(t, cfg)
+
+	b.handleEvent(ctx, postedEvent(&model.Post{ID: "root-1", ChannelID: testChannelID,
+		UserID: testOtherUser, Content: "big task"}))
+	first := waitForPosts(t, chitd, 1)[0]
+	if !strings.Contains(first.Content, "starts a new session") || first.Props[sessionResetProp] != true {
+		t.Errorf("the reply should announce and mark the reset: %q %v", first.Content, first.Props)
+	}
+
+	b.handleEvent(ctx, postedEvent(&model.Post{ID: "msg-2", ChannelID: testChannelID,
+		UserID: testOtherUser, RootID: "root-1", Content: "next"}))
+	waitForPosts(t, chitd, 2)
+	if argv := readArgv(t, argvFile); slices.Contains(argv, "--resume") {
+		t.Errorf("the retired session must not be resumed: %q", argv)
+	}
+
+	// After a restart the marker, not the older session prop, decides.
+	chitd.mu.Lock()
+	chitd.thread = []*model.Post{
+		{ID: "root-1", UserID: testOtherUser},
+		{ID: "a-1", UserID: testAgentID, Props: map[string]any{sessionProp: "old"}},
+		{ID: "a-2", UserID: testAgentID, Props: map[string]any{sessionProp: "old", sessionResetProp: true}},
+	}
+	chitd.mu.Unlock()
+	fresh := New(cfg)
+	fresh.agentUserID = testAgentID
+	if got, joined := fresh.threadState(context.Background(), "root-1"); got != "" || !joined {
+		t.Errorf("threadState after a reset = (%q, %v), want (\"\", true)", got, joined)
+	}
+}
+
+func TestBridge_FooterCanBeOff(t *testing.T) {
+	chitd := &fakeChitd{users: humanUsers()}
+	srv := chitd.server(t)
+	dir := t.TempDir()
+	cfg := testConfig(t, srv.URL, writeFakeClaude(t, dir, filepath.Join(dir, "argv"), fakeResultJSON(fakeSessionID), 0))
+	cfg.Footer = false
+	b, ctx := liveBridge(t, cfg)
+
+	b.handleEvent(ctx, postedEvent(&model.Post{ID: "root-1", ChannelID: testChannelID,
+		UserID: testOtherUser, Content: "hi"}))
+	reply := waitForPosts(t, chitd, 1)[0]
+	if strings.Contains(reply.Content, "⚙") {
+		t.Errorf("footer should be off: %q", reply.Content)
+	}
+	if _, ok := reply.Props["claude_usage"]; !ok {
+		t.Error("usage still belongs in the props")
+	}
+}
+
+// Each run leaves one run_complete line with its token figures, the record
+// operators total usage from.
+func TestBridge_LogsRunComplete(t *testing.T) {
+	var logs syncBuffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	chitd := &fakeChitd{users: humanUsers()}
+	srv := chitd.server(t)
+	dir := t.TempDir()
+	b, ctx := liveBridge(t, testConfig(t, srv.URL,
+		writeFakeClaude(t, dir, filepath.Join(dir, "argv"), fakeResultJSON(fakeSessionID), 0)))
+	b.handleEvent(ctx, postedEvent(&model.Post{ID: "root-1", ChannelID: testChannelID,
+		UserID: testOtherUser, Content: "hi"}))
+	waitForPosts(t, chitd, 1)
+
+	var line map[string]any
+	for l := range strings.SplitSeq(logs.String(), "\n") {
+		if strings.Contains(l, `"msg":"run_complete"`) {
+			if err := json.Unmarshal([]byte(l), &line); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if line == nil {
+		t.Fatalf("no run_complete line in:\n%s", logs.String())
+	}
+	for k, want := range map[string]float64{"cache_write_tokens": 900, "context_tokens": 43400, "input_tokens": 4500} {
+		if line[k] != want {
+			t.Errorf("%s = %v, want %v", k, line[k], want)
+		}
 	}
 }

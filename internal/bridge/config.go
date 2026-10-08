@@ -34,9 +34,14 @@ type Config struct {
 	OAuthScopes       string `koanf:"oauth_scopes"`
 	OAuthAudience     string `koanf:"oauth_audience"`
 
-	// What to listen to
-	Channels       []string `koanf:"channels"`
-	RequireMention bool     `koanf:"require_mention"`
+	// What to listen to. With RequireMention, a post must name the agent
+	// (@all and @channel count only with AnswerBroadcasts), except that with
+	// FollowThreads a reply in a thread the agent has replied in needs no
+	// mention.
+	Channels         []string `koanf:"channels"`
+	RequireMention   bool     `koanf:"require_mention"`
+	FollowThreads    bool     `koanf:"follow_threads"`
+	AnswerBroadcasts bool     `koanf:"answer_broadcasts"`
 
 	// Multi-agent behaviour. Several bridges (one per persona) can serve the
 	// same channel; these knobs keep them from answering each other forever.
@@ -72,9 +77,18 @@ type Config struct {
 	// own stop timeout (systemd's TimeoutStopSec defaults to 90s).
 	ShutdownGrace time.Duration `koanf:"shutdown_grace"`
 
-	// ContextWindow is the assumed model context size (tokens) used for the
-	// "context ~N%" footer estimate.
+	// ContextWindow is the context size (tokens) the footer's "context ~N%"
+	// measures against when the CLI does not report the model's own.
 	ContextWindow int `koanf:"context_window"`
+
+	// Footer appends the usage line to each reply. The same figures are in
+	// the reply's claude_usage prop either way.
+	Footer bool `koanf:"footer"`
+
+	// MaxSessionTokens retires a thread's session once a run leaves its
+	// context at least this large; the next reply starts a new session.
+	// 0 never retires one.
+	MaxSessionTokens int64 `koanf:"max_session_tokens"`
 }
 
 // SettingSourcesAll is the CHIT_CLAUDE_SETTING_SOURCES value that passes no
@@ -90,6 +104,9 @@ func Defaults() *Config {
 		AllowedTools:   "Read,Grep,Glob",
 		RunTimeout:     30 * time.Minute,
 		ContextWindow:  200_000,
+		RequireMention: true,
+		FollowThreads:  true,
+		Footer:         true,
 		MaxAgentHops:   2,
 		OAuthScopes:    "chit:read chit:write",
 		OAuthAudience:  "chit",
@@ -188,6 +205,8 @@ func (c *Config) validateLimits() error {
 		return fmt.Errorf("CHIT_CLAUDE_MAX_AGENT_HOPS must not be negative, got %d", c.MaxAgentHops)
 	case c.ShutdownGrace < 0:
 		return fmt.Errorf("CHIT_CLAUDE_SHUTDOWN_GRACE must not be negative, got %s", c.ShutdownGrace)
+	case c.MaxSessionTokens < 0:
+		return fmt.Errorf("CHIT_CLAUDE_MAX_SESSION_TOKENS must not be negative, got %d", c.MaxSessionTokens)
 	case c.ContextWindow < 0:
 		return fmt.Errorf("CHIT_CLAUDE_CONTEXT_WINDOW must not be negative, got %d", c.ContextWindow)
 	case strings.TrimSpace(c.SettingSources) == "":

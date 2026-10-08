@@ -18,6 +18,11 @@ import (
 
 const sessionProp = "claude_session_id"
 
+// sessionResetProp marks an agent reply after which the thread's session is
+// not resumed (it outgrew CHIT_CLAUDE_MAX_SESSION_TOKENS). Session recovery
+// stops at it, so a restart does not resume the session it retired.
+const sessionResetProp = "claude_session_reset"
+
 // hopsProp counts consecutive agent→agent turns in a thread. A post by a human
 // carries no such prop (hops 0), so every human turn resets the chain; each
 // agent reply to an agent increments it. Capped by Config.MaxAgentHops, this
@@ -33,6 +38,18 @@ const perThreadQueueSize = 16
 // seenPostsSize is how many recent post IDs are remembered to drop a post
 // delivered twice (around a WebSocket reconnect) instead of running it twice.
 const seenPostsSize = 1024
+
+// threadMemorySize is how many threads' participation (has this agent replied
+// there or not) is remembered, to answer follow-ups without a lookup.
+const threadMemorySize = 4096
+
+// queued is a post waiting on its thread's worker. A post that did not name
+// the agent is queued only when it might be a follow-up in a thread the agent
+// has replied in; the worker checks that before running it.
+type queued struct {
+	post      *model.Post
+	addressed bool
+}
 
 // idleWorkerTimeout is how long a thread's worker waits for another post
 // before it exits. Its session is forgotten too; it is recovered from the
@@ -77,13 +94,14 @@ type Bridge struct {
 	idleTimeout time.Duration
 
 	mu         sync.Mutex
-	sessions   map[string]string           // thread root ID → claude session ID
-	queues     map[string]chan *model.Post // thread root ID → pending posts
-	actorTypes map[string]string           // author user ID → resolved actor_type
-	offlist    map[string]struct{}         // channels already warned about
-	busy       map[string]struct{}         // threads told their queue is full
-	seen       map[string]struct{}         // recently enqueued post IDs
-	seenOrder  []string                    // seen, oldest first
+	sessions   map[string]string      // thread root ID → claude session ID ("" = start fresh)
+	queues     map[string]chan queued // thread root ID → pending posts
+	actorTypes map[string]string      // author user ID → resolved actor_type
+	offlist    map[string]struct{}    // channels already warned about
+	busy       map[string]struct{}    // threads told their queue is full
+	seen       *recentSet             // recently enqueued post IDs
+	joined     *recentSet             // threads this agent has replied in
+	bystander  *recentSet             // threads checked and found without its replies
 	wg         sync.WaitGroup
 }
 
@@ -106,11 +124,13 @@ func New(cfg *Config) *Bridge {
 		idleTimeout: idleWorkerTimeout,
 		channels:    channels,
 		sessions:    make(map[string]string),
-		queues:      make(map[string]chan *model.Post),
+		queues:      make(map[string]chan queued),
 		actorTypes:  make(map[string]string),
 		offlist:     make(map[string]struct{}),
 		busy:        make(map[string]struct{}),
-		seen:        make(map[string]struct{}),
+		seen:        newRecentSet(seenPostsSize),
+		joined:      newRecentSet(threadMemorySize),
+		bystander:   newRecentSet(threadMemorySize),
 	}
 }
 
@@ -227,7 +247,8 @@ func (b *Bridge) handleEvent(ctx context.Context, event *model.WebSocketEvent) {
 	if post == nil {
 		return
 	}
-	if !b.shouldEnqueue(post) || !b.firstSighting(post.ID) {
+	addressed, ok := b.shouldEnqueue(post)
+	if !ok || !b.firstSighting(post.ID) {
 		return
 	}
 
@@ -241,22 +262,30 @@ func (b *Bridge) handleEvent(ctx context.Context, event *model.WebSocketEvent) {
 	b.mu.Lock()
 	queue, ok := b.queues[root]
 	if !ok {
-		queue = make(chan *model.Post, perThreadQueueSize)
+		queue = make(chan queued, perThreadQueueSize)
 		b.queues[root] = queue
 		b.wg.Add(1)
 		go b.threadWorker(ctx, root, queue)
 	}
 	sent := false
 	select {
-	case queue <- post:
+	case queue <- queued{post: post, addressed: addressed}:
 		sent = true
 	default:
+	}
+	// The agent is about to answer here, so the thread is joined now: a
+	// follow-up sent before that answer lands is for the agent too.
+	if sent && addressed {
+		b.joined.add(root)
+		b.bystander.remove(root)
 	}
 	b.mu.Unlock()
 
 	if !sent {
 		slog.Warn("thread queue full, dropping message", "root_id", root, "post_id", post.ID)
-		b.noticeQueueFull(ctx, root, post)
+		if addressed {
+			b.noticeQueueFull(ctx, root, post)
+		}
 	}
 }
 
@@ -265,16 +294,7 @@ func (b *Bridge) handleEvent(ctx context.Context, event *model.WebSocketEvent) {
 func (b *Bridge) firstSighting(postID string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if _, ok := b.seen[postID]; ok {
-		return false
-	}
-	b.seen[postID] = struct{}{}
-	b.seenOrder = append(b.seenOrder, postID)
-	if len(b.seenOrder) > seenPostsSize {
-		delete(b.seen, b.seenOrder[0])
-		b.seenOrder = b.seenOrder[1:]
-	}
-	return true
+	return b.seen.add(postID)
 }
 
 // noticeQueueFull tells the thread, once until its worker catches up, that a
@@ -296,25 +316,52 @@ func (b *Bridge) noticeQueueFull(ctx context.Context, root string, post *model.P
 }
 
 // shouldEnqueue applies the cheap event filters: configured channel, not
-// authored by the agent itself, not an ephemeral command response, and
-// (optionally) the agent must be mentioned. It runs inline on the WebSocket
-// read loop, so it must never make a network call — anything needing a lookup
-// belongs in shouldRun.
-func (b *Bridge) shouldEnqueue(post *model.Post) bool {
+// authored by the agent itself, not an ephemeral command response, and, with
+// RequireMention, addressed to the agent. It runs inline on the WebSocket read
+// loop, so it must never make a network call — anything needing a lookup
+// belongs on the worker.
+//
+// With RequireMention, a post is addressed when it names the agent, or (with
+// FollowThreads) when it replies in a thread the agent has replied in. A reply
+// in a thread the bridge knows nothing about yet is queued unaddressed, for
+// the worker to check.
+func (b *Bridge) shouldEnqueue(post *model.Post) (addressed, ok bool) {
 	if _, ok := b.channels[post.ChannelID]; !ok {
 		b.warnOffAllowlist(post.ChannelID)
-		return false
+		return false, false
 	}
 	if post.UserID == b.agentUserID {
-		return false
+		return false, false
 	}
 	if post.Type == "command_response" {
-		return false
+		return false, false
 	}
-	if b.cfg.RequireMention && !mentionsUser(post, b.agentUserID) {
-		return false
+	if !b.cfg.RequireMention || b.mentioned(post) {
+		return true, true
 	}
-	return true
+	if !b.cfg.FollowThreads || post.RootID == "" {
+		return false, false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	switch {
+	case b.joined.has(post.RootID):
+		return true, true
+	case b.bystander.has(post.RootID):
+		return false, false
+	}
+	return false, true
+}
+
+// mentioned reports whether a post names this agent. @all and @channel count
+// only with AnswerBroadcasts: the server folds them into props["mentions"],
+// and one @channel would otherwise start a run in every persona serving the
+// channel.
+func (b *Bridge) mentioned(post *model.Post) bool {
+	if b.cfg.AnswerBroadcasts {
+		return mentionsUser(post, b.agentUserID)
+	}
+	return mentionsUsernameDirectly(post.Content, b.agentUsername)
 }
 
 // warnOffAllowlist reports, once per channel, that the agent is receiving
@@ -445,7 +492,7 @@ func agentHops(post *model.Post) int {
 // at a time, messages queued in arrival order. It exits when the thread has
 // been idle for idleTimeout, and on shutdown, after telling the thread about
 // any post it did not get to.
-func (b *Bridge) threadWorker(ctx context.Context, root string, queue chan *model.Post) {
+func (b *Bridge) threadWorker(ctx context.Context, root string, queue chan queued) {
 	defer b.wg.Done()
 	idle := time.NewTimer(b.idleTimeout)
 	defer idle.Stop()
@@ -461,17 +508,19 @@ func (b *Bridge) threadWorker(ctx context.Context, root string, queue chan *mode
 				return
 			}
 			idle.Reset(b.idleTimeout)
-		case post := <-queue:
+		case q := <-queue:
 			select {
 			case <-b.stopping:
-				b.abandon(ctx, root, queue, post)
+				b.abandon(ctx, root, queue, &q)
 				return
 			default:
 			}
 			b.mu.Lock()
 			delete(b.busy, root)
 			b.mu.Unlock()
-			b.processPost(ctx, root, post)
+			if q.addressed || b.participates(ctx, root) {
+				b.processPost(ctx, root, q.post)
+			}
 			idle.Reset(b.idleTimeout)
 		}
 	}
@@ -480,7 +529,7 @@ func (b *Bridge) threadWorker(ctx context.Context, root string, queue chan *mode
 // retire removes an idle thread's worker state, unless a post arrived in the
 // meantime. Sends happen under mu, so once the queue is gone from the map
 // nothing more can arrive on it.
-func (b *Bridge) retire(root string, queue chan *model.Post) bool {
+func (b *Bridge) retire(root string, queue chan queued) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if len(queue) > 0 {
@@ -492,14 +541,19 @@ func (b *Bridge) retire(root string, queue chan *model.Post) bool {
 	return true
 }
 
-// abandon tells a thread, once, that the posts left in its queue (and taken,
-// if non-nil) were never run.
-func (b *Bridge) abandon(ctx context.Context, root string, queue chan *model.Post, taken *model.Post) {
-	last := taken
+// abandon tells a thread, once, that the addressed posts left in its queue
+// (and taken, if non-nil) were never run.
+func (b *Bridge) abandon(ctx context.Context, root string, queue chan queued, taken *queued) {
+	var last *model.Post
+	if taken != nil && taken.addressed {
+		last = taken.post
+	}
 	for {
 		select {
-		case p := <-queue:
-			last = p
+		case q := <-queue:
+			if q.addressed {
+				last = q.post
+			}
 			continue
 		default:
 		}
@@ -530,10 +584,14 @@ func (b *Bridge) processPost(ctx context.Context, root string, post *model.Post)
 
 	sessionID := ""
 	if root != post.ID {
-		sessionID = b.lookupSession(ctx, root)
+		sessionID, _ = b.threadState(ctx, root)
 	}
 
 	result, notice, err := b.runClaude(ctx, root, post, sessionID)
+	b.mu.Lock()
+	b.joined.add(root)
+	b.bystander.remove(root)
+	b.mu.Unlock()
 	if errors.Is(err, errShuttingDown) {
 		b.reply(ctx, post.ChannelID, root, shutdownNotice, map[string]any{hopsProp: hops})
 		return
@@ -564,6 +622,13 @@ func (b *Bridge) processPost(ctx context.Context, root string, post *model.Post)
 	if content == "" {
 		content = "_(empty response)_"
 	}
+	retired := b.cfg.MaxSessionTokens > 0 && result.Usage.ContextTokens() >= b.cfg.MaxSessionTokens
+	if retired {
+		content += fmt.Sprintf(sessionFullNotice, humanTokens(result.Usage.ContextTokens()))
+		b.mu.Lock()
+		b.sessions[root] = ""
+		b.mu.Unlock()
+	}
 	props := map[string]any{
 		sessionProp: result.SessionID,
 		hopsProp:    hops,
@@ -576,8 +641,19 @@ func (b *Bridge) processPost(ctx context.Context, root string, post *model.Post)
 			"num_turns":                   result.NumTurns,
 		},
 	}
-	b.reply(ctx, post.ChannelID, root, notice+content+b.runner.Footer(result), props)
+	if retired {
+		props[sessionResetProp] = true
+	}
+	if b.cfg.Footer {
+		content += b.runner.Footer(result)
+	}
+	b.reply(ctx, post.ChannelID, root, notice+content, props)
 }
+
+// sessionFullNotice ends a reply after which the thread starts a new session.
+const sessionFullNotice = "\n\n_This thread's Claude session has grown to %s tokens " +
+	"(CHIT_CLAUDE_MAX_SESSION_TOKENS), so my next reply here starts a new session " +
+	"without this context. Restate anything it should know when you write again._"
 
 // sessionLostNotice opens a reply whose thread's session could not be resumed.
 const sessionLostNotice = "_The Claude session for this thread could not be found " +
@@ -605,8 +681,10 @@ func (b *Bridge) runClaude(ctx context.Context, root string, post *model.Post, s
 
 	slog.Info("running claude", "root_id", root, "post_id", post.ID,
 		"resume", sessionID != "", "content_len", len(post.Content))
+	start := time.Now()
 	result, err := b.runner.Run(ctx, post.Content, sessionID)
 	if !errors.Is(err, ErrSessionNotFound) {
+		logRun(root, post.ID, sessionID != "", start, result, err)
 		return result, "", err
 	}
 	slog.Warn("thread's claude session not found; starting a new one",
@@ -614,8 +692,28 @@ func (b *Bridge) runClaude(ctx context.Context, root string, post *model.Post, s
 	b.mu.Lock()
 	delete(b.sessions, root)
 	b.mu.Unlock()
+	start = time.Now()
 	result, err = b.runner.Run(ctx, post.Content, "")
+	logRun(root, post.ID, false, start, result, err)
 	return result, sessionLostNotice, err
+}
+
+// logRun writes one run_complete line per run: the record to total token use
+// from, per thread or per bridge.
+func logRun(root, postID string, resumed bool, start time.Time, result *ClaudeResult, err error) {
+	attrs := []any{"root_id", root, "post_id", postID, "resumed", resumed,
+		"duration_ms", time.Since(start).Milliseconds(), "ok", err == nil}
+	if result != nil {
+		attrs = append(attrs,
+			"input_tokens", result.Usage.InputTokens,
+			"output_tokens", result.Usage.OutputTokens,
+			"cache_read_tokens", result.Usage.CacheReadInputTokens,
+			"cache_write_tokens", result.Usage.CacheCreationInputTokens,
+			"context_tokens", result.Usage.ContextTokens(),
+			"cost_usd", result.TotalCostUSD,
+			"num_turns", result.NumTurns)
+	}
+	slog.Info("run_complete", attrs...)
 }
 
 // reply posts content into the thread, split across several posts when it is
@@ -658,36 +756,62 @@ func splitContent(s string, limit int) []string {
 	return append(parts, s)
 }
 
-// lookupSession returns the claude session for a thread: the in-memory map
-// first, then (after a restart) the newest agent reply's props in the thread.
-func (b *Bridge) lookupSession(ctx context.Context, root string) string {
+// threadState returns the claude session to resume in a thread and whether
+// this agent has replied there. The session comes from memory first, then
+// (after a restart or an idle retirement) from the newest of the agent's
+// replies in the thread that names one; a reply marked with sessionResetProp
+// ends the search, since the session before it was retired.
+func (b *Bridge) threadState(ctx context.Context, root string) (sessionID string, joined bool) {
 	b.mu.Lock()
 	sessionID, ok := b.sessions[root]
 	b.mu.Unlock()
 	if ok {
-		return sessionID
+		return sessionID, true
 	}
 
 	posts, err := b.client.GetThread(ctx, root)
 	if err != nil {
 		slog.Warn("failed to fetch thread for session recovery; starting fresh session",
 			"root_id", root, "error", err)
-		return ""
+		return "", false
 	}
 	// Thread posts are oldest-first; scan newest-first for the latest session.
 	for i := len(posts) - 1; i >= 0; i-- {
 		p := posts[i]
-		if p.UserID != b.agentUserID || p.Props == nil {
+		if p.UserID != b.agentUserID {
 			continue
 		}
+		joined = true
+		if reset, _ := p.Props[sessionResetProp].(bool); reset {
+			break
+		}
 		if id, ok := p.Props[sessionProp].(string); ok && id != "" {
-			b.mu.Lock()
-			b.sessions[root] = id
-			b.mu.Unlock()
-			return id
+			sessionID = id
+			break
 		}
 	}
-	return ""
+	if joined {
+		b.mu.Lock()
+		b.sessions[root] = sessionID
+		b.mu.Unlock()
+	}
+	return sessionID, joined
+}
+
+// participates reports whether this agent has replied in a thread, so a
+// follow-up there needs no mention. The answer is remembered either way; the
+// agent's own replies keep it current.
+func (b *Bridge) participates(ctx context.Context, root string) bool {
+	_, joined := b.threadState(ctx, root)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if joined {
+		b.joined.add(root)
+		b.bystander.remove(root)
+	} else {
+		b.bystander.add(root)
+	}
+	return joined
 }
 
 // postFromEventData decodes the full post carried in a `posted` event's data.

@@ -6,8 +6,6 @@ import (
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-
-	"github.com/infrashift/chit/internal/model"
 )
 
 func (s *ChitMCPServer) registerTools() {
@@ -133,7 +131,7 @@ func (s *ChitMCPServer) registerTools() {
 	// Events
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "get_new_events",
-		Description: "Poll for new real-time events since the last check. Returns and clears buffered events. Events are delivered over chitd's WebSocket and carry full payloads (e.g. 'posted' events include the entire post).",
+		Description: "Poll for new real-time events since the last check. Returns and clears buffered events. By default only posted, post_edited and post_deleted are returned (posts as id, channel, author, content, time); name other event types in 'types' to receive them. Events not returned are discarded.",
 	}, s.handleGetNewEvents)
 }
 
@@ -240,10 +238,14 @@ type markChannelViewedArgs struct {
 }
 
 type getNewEventsArgs struct {
-	SinceSeq int64 `json:"since_seq,omitempty" jsonschema:"Return events after this sequence number (0 for all)"`
+	SinceSeq int64    `json:"since_seq,omitempty" jsonschema:"Return events after this sequence number (0 for all)"`
+	Types    []string `json:"types,omitempty" jsonschema:"Event types to return (default: posted, post_edited, post_deleted)"`
 }
 
 // ─── Tool handlers ───────────────────────────────────────────────
+
+// maxPerPage caps how many items one tool call or prompt may fetch.
+const maxPerPage = 200
 
 // clampPagination bounds tool-supplied pagination to sane values.
 func clampPagination(page, perPage, defaultPerPage int) (clampedPage, clampedPerPage int) {
@@ -253,8 +255,8 @@ func clampPagination(page, perPage, defaultPerPage int) (clampedPage, clampedPer
 	if perPage <= 0 {
 		perPage = defaultPerPage
 	}
-	if perPage > 200 {
-		perPage = 200
+	if perPage > maxPerPage {
+		perPage = maxPerPage
 	}
 	return page, perPage
 }
@@ -308,7 +310,7 @@ func (s *ChitMCPServer) handleGetChannelPosts(ctx context.Context, _ *mcp.CallTo
 	if err != nil {
 		return toolError(err)
 	}
-	return toolJSON(posts)
+	return toolJSON(viewPostList(posts))
 }
 
 func (s *ChitMCPServer) handleGetPost(ctx context.Context, _ *mcp.CallToolRequest, args getPostArgs) (*mcp.CallToolResult, any, error) {
@@ -316,7 +318,7 @@ func (s *ChitMCPServer) handleGetPost(ctx context.Context, _ *mcp.CallToolReques
 	if err != nil {
 		return toolError(err)
 	}
-	return toolJSON(post)
+	return toolJSON(viewPost(post))
 }
 
 func (s *ChitMCPServer) handleGetPinnedPosts(ctx context.Context, _ *mcp.CallToolRequest, args getPinnedPostsArgs) (*mcp.CallToolResult, any, error) {
@@ -324,7 +326,7 @@ func (s *ChitMCPServer) handleGetPinnedPosts(ctx context.Context, _ *mcp.CallToo
 	if err != nil {
 		return toolError(err)
 	}
-	return toolJSON(posts)
+	return toolJSON(viewPostList(posts))
 }
 
 func (s *ChitMCPServer) handleCreatePost(ctx context.Context, _ *mcp.CallToolRequest, args createPostArgs) (*mcp.CallToolResult, any, error) {
@@ -332,7 +334,7 @@ func (s *ChitMCPServer) handleCreatePost(ctx context.Context, _ *mcp.CallToolReq
 	if err != nil {
 		return toolError(err)
 	}
-	return toolJSON(saved)
+	return toolJSON(viewPost(saved))
 }
 
 func (s *ChitMCPServer) handleReplyToThread(ctx context.Context, _ *mcp.CallToolRequest, args replyToThreadArgs) (*mcp.CallToolResult, any, error) {
@@ -340,7 +342,7 @@ func (s *ChitMCPServer) handleReplyToThread(ctx context.Context, _ *mcp.CallTool
 	if err != nil {
 		return toolError(err)
 	}
-	return toolJSON(saved)
+	return toolJSON(viewPost(saved))
 }
 
 func (s *ChitMCPServer) handleGetThread(ctx context.Context, _ *mcp.CallToolRequest, args getThreadArgs) (*mcp.CallToolResult, any, error) {
@@ -348,7 +350,7 @@ func (s *ChitMCPServer) handleGetThread(ctx context.Context, _ *mcp.CallToolRequ
 	if err != nil {
 		return toolError(err)
 	}
-	return toolJSON(&model.PostList{Order: posts})
+	return toolJSON(viewPosts(posts))
 }
 
 func (s *ChitMCPServer) handleGetMyThreads(ctx context.Context, _ *mcp.CallToolRequest, args getMyThreadsArgs) (*mcp.CallToolResult, any, error) {
@@ -384,7 +386,7 @@ func (s *ChitMCPServer) handleSearchPosts(ctx context.Context, _ *mcp.CallToolRe
 	if err != nil {
 		return toolError(err)
 	}
-	return toolJSON(results)
+	return toolJSON(viewPostList(results))
 }
 
 func (s *ChitMCPServer) handleListTags(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
@@ -442,7 +444,7 @@ func (s *ChitMCPServer) handleMarkChannelViewed(ctx context.Context, _ *mcp.Call
 }
 
 func (s *ChitMCPServer) handleGetNewEvents(ctx context.Context, _ *mcp.CallToolRequest, args getNewEventsArgs) (*mcp.CallToolResult, any, error) {
-	events := s.eventBuffer.Drain(args.SinceSeq)
+	events := viewEvents(s.eventBuffer.Drain(args.SinceSeq), args.Types)
 	if len(events) == 0 {
 		return toolText("No new events")
 	}
