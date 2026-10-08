@@ -3,37 +3,10 @@ package app
 import (
 	"context"
 	"log/slog"
-	"regexp"
-	"strings"
 
 	"github.com/infrashift/chit/internal/model"
 	"github.com/infrashift/chit/internal/pubsub"
 )
-
-// mentionRe matches @username patterns at word boundaries.
-// Uses the same character set as model.validUsernameRe.
-var mentionRe = regexp.MustCompile(`(?i)(?:^|[^a-zA-Z0-9])@([a-z0-9][a-z0-9._-]{0,62}[a-z0-9])`)
-
-// parseMentions extracts deduplicated, lowercased usernames from content.
-// Also recognises @all and @channel as special keywords.
-func parseMentions(content string) []string {
-	matches := mentionRe.FindAllStringSubmatch(content, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-
-	seen := make(map[string]struct{}, len(matches))
-	var result []string
-	for _, m := range matches {
-		username := strings.ToLower(m[1])
-		if _, ok := seen[username]; ok {
-			continue
-		}
-		seen[username] = struct{}{}
-		result = append(result, username)
-	}
-	return result
-}
 
 // maxMentionNames caps how many distinct @names one post resolves. Each name
 // used to cost two queries inside the post request; a post of a few hundred
@@ -44,7 +17,7 @@ const maxMentionNames = 50
 // It handles @all/@channel by collecting all channel members.
 // Self-mentions and non-channel-members are filtered out.
 func (a *App) processMentions(ctx context.Context, post *model.Post) ([]string, error) {
-	usernames := parseMentions(post.Content)
+	usernames := model.ParseMentions(post.Content)
 	if len(usernames) == 0 {
 		return nil, nil
 	}

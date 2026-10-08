@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -74,12 +74,6 @@ const shutdownNotice = "⚠️ The bridge is restarting and did not get to your 
 // queueFullNotice answers a post dropped because its thread's queue is full.
 const queueFullNotice = "⚠️ I'm still working through earlier messages in this thread " +
 	"and could not queue this one. Please send it again once I have replied."
-
-// mentionRe matches @username patterns at word boundaries. Copied verbatim
-// from internal/app/mention.go, which is the source of truth — the bridge
-// cannot import internal/app without pulling the store (and pgx) in and
-// failing `make check-deps`.
-var mentionRe = regexp.MustCompile(`(?i)(?:^|[^a-zA-Z0-9])@([a-z0-9][a-z0-9._-]{0,62}[a-z0-9])`)
 
 // Bridge wires Chit posts to headless Claude Code runs.
 type Bridge struct {
@@ -497,12 +491,7 @@ func mentionsUsernameDirectly(content, username string) bool {
 	if want == "all" || want == "channel" {
 		return false
 	}
-	for _, m := range mentionRe.FindAllStringSubmatch(content, -1) {
-		if strings.EqualFold(m[1], want) {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(model.ParseMentions(content), want)
 }
 
 // agentHops reads the agent→agent hop count carried in a post's props. Props
