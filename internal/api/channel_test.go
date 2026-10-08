@@ -421,7 +421,7 @@ func TestGetMyChannelMembers(t *testing.T) {
 	ms.Channels.SeedMember(&model.ChannelMember{ChannelID: testChannelID, UserID: testUserID, MentionCount: 2})
 
 	handler := getMyChannelMembers(a)
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 	r = withChiParam(r, "id", testTeamID)
 	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()

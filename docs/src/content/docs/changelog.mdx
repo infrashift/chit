@@ -22,6 +22,24 @@ Behaviour changes an operator must act on or know about:
 - **`chit-mcp` and `chit-claude` take exactly one auth mode.** Setting both
   `*_OAUTH_CLIENT_ID` and `*_AGENT_KRATOS_ID` now stops them at startup;
   OAuth2 used to win silently. Unset the one you do not use.
+- **`chit-claude` answers only when addressed.** `CHIT_CLAUDE_REQUIRE_MENTION`
+  now defaults to `true`: a post must name the agent, after which replies in
+  that thread need no mention (`CHIT_CLAUDE_FOLLOW_THREADS`, default `true`).
+  `@all` and `@channel` no longer count unless
+  `CHIT_CLAUDE_ANSWER_BROADCASTS=true`. Set `REQUIRE_MENTION=false` to keep a
+  channel where every post is answered.
+- **`chit-claude` runs no longer inherit the host's Claude Code setup.** Runs
+  pass `--strict-mcp-config` and `--setting-sources project`: MCP servers,
+  permissions, hooks and plugins from the host user's `~/.claude` stop
+  applying. Name MCP servers in `CHIT_CLAUDE_MCP_CONFIG`; set
+  `CHIT_CLAUDE_SETTING_SOURCES=all` to load every source again.
+- **`chit-claude` checks its channels at startup**, and refuses to start when
+  chitd says its agent is not a member of one listed in
+  `CHIT_CLAUDE_CHANNELS`.
+- **`chit-mcp` returns posts without their props** (and without hashtags or
+  update/delete times), and `get_new_events` returns only `posted`,
+  `post_edited` and `post_deleted` unless `types` names others. An agent that
+  read props from tool results must fetch the post over the REST API instead.
 - **`actor_type` is required for machine actors.** Every entry in
   `CHIT_MACHINE_ACTORS` must set `actor_type` to `agent` or `bot`; an entry
   without it now fails boot, naming the client. Add it before upgrading.
@@ -56,6 +74,18 @@ Behaviour changes an operator must act on or know about:
 
 ### Added
 
+- `chit-claude`: control words in a thread (`!new [message]`, `!stop`,
+  `!status`); a `⏳ Working on it…` note for runs past 10 seconds, deleted when
+  the reply lands; author tags on prompts (`[@alice] …`); a new session
+  started partway through a thread is given the thread so far
+  (`CHIT_CLAUDE_SEED_MAX_CHARS`, default 8000);
+  `CHIT_CLAUDE_MAX_CONCURRENT_RUNS` (default 2);
+  `CHIT_CLAUDE_SHUTDOWN_GRACE` (default 60s); `CHIT_CLAUDE_MAX_SESSION_TOKENS`
+  to retire a session past a size; `CHIT_CLAUDE_FOOTER` to drop the usage
+  line; a `run_complete` log line per run with its token figures.
+- `scripts/bridge-token-baseline.sh` compares the tokens a conversation costs
+  through the bridge with plain `claude -p`. Measured with `claude` 2.1.292 on
+  haiku, the two are within 1% on input.
 - `GET /users/me/threads/direct`: the thread inbox for direct and group
   channels, whose threads never appeared in any team's inbox because they
   have no team. `PUT /users/me/threads/{id}/read` and `/following` work
@@ -160,6 +190,15 @@ Behaviour changes an operator must act on or know about:
 
 ### Changed
 
+- `chit-claude` stops gracefully: runs in progress get
+  `CHIT_CLAUDE_SHUTDOWN_GRACE` to finish and post their answers, the rest are
+  stopped with a reply saying why, and threads with unstarted messages are
+  told to resend them. It used to kill every run at once and drop the queue
+  without a word.
+- `chit-claude`'s footer shows cache reads and writes apart, and measures
+  `context ~N%` from the run's last API call against the window the CLI
+  reports for the model.
+- chitd and `chit-claude` share one mention parser, `model.ParseMentions`.
 - `chit-mcp` and `chit-claude` refuse to start when both an OAuth2 client
   (`*_OAUTH_CLIENT_ID`) and a Kratos identity (`*_AGENT_KRATOS_ID`) are set.
   OAuth2 used to win silently. Remove the one you do not mean.
@@ -246,6 +285,21 @@ Behaviour changes an operator must act on or know about:
 
 ### Fixed
 
+- `chit-claude` no longer answers another agent as a human after one failed
+  author lookup. Failures were cached for the life of the process, which
+  lifted `REPLY_TO_AGENTS` and the hop cap for that agent.
+- `chit-claude` passes the prompt on stdin. In argv, a post reading
+  `--version` was parsed as that option.
+- `chit-claude` replaces a thread's session that can no longer be resumed
+  (a changed `WORKDIR` or `~/.claude`) with a new one, rather than failing
+  every later reply in the thread.
+- `chit-claude` posts the CLI's own error message when a run fails with an
+  API error, instead of a log tag from stderr; treats `is_error` results as
+  failures rather than "_(empty response)_"; splits replies over 64 KiB
+  rather than losing them; says so in the thread when its queue is full;
+  answers a post delivered twice once; and frees idle threads' workers.
+- A cancelled `claude` run whose child processes still held its output could
+  outlive its timeout.
 - `chit-reconcile` revokes what the CUE no longer grants. It only ever wrote
   tuples, so a command taken from a role, or a role taken from an actor,
   stayed in force in Keto.

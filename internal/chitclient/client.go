@@ -148,7 +148,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 
 	if resp.StatusCode >= 300 {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return fmt.Errorf("%s %s: status %d: %s", method, path, resp.StatusCode, string(respBody))
+		return &StatusError{Method: method, Path: path, Status: resp.StatusCode, Body: string(respBody)}
 	}
 
 	if out != nil {
@@ -157,6 +157,19 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		}
 	}
 	return nil
+}
+
+// StatusError is chitd answering a request with a non-2xx status, so callers
+// can tell a refusal (403, 404) from a request that never got an answer.
+type StatusError struct {
+	Method string
+	Path   string
+	Status int
+	Body   string
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("%s %s: status %d: %s", e.Method, e.Path, e.Status, e.Body)
 }
 
 // pageQuery renders page/per_page query params understood by chitd's list
@@ -246,6 +259,16 @@ func (c *Client) GetChannelMembers(ctx context.Context, channelID string, page, 
 	return members, nil
 }
 
+// GetMyChannelMembers returns the agent's own membership in each channel of a
+// team it belongs to.
+func (c *Client) GetMyChannelMembers(ctx context.Context, teamID string) ([]*model.ChannelMember, error) {
+	var members []*model.ChannelMember
+	if err := c.do(ctx, http.MethodGet, "/api/v1/users/me/teams/"+teamID+"/channels/members", nil, &members); err != nil {
+		return nil, err
+	}
+	return members, nil
+}
+
 // ViewChannel marks a channel as viewed for the agent, clearing unreads.
 func (c *Client) ViewChannel(ctx context.Context, channelID string) error {
 	return c.do(ctx, http.MethodPost, "/api/v1/channels/"+channelID+"/members/me/view", nil, nil)
@@ -298,6 +321,11 @@ func (c *Client) CreatePost(ctx context.Context, channelID, rootID, content stri
 		return nil, err
 	}
 	return &saved, nil
+}
+
+// DeletePost deletes one of the agent's own posts.
+func (c *Client) DeletePost(ctx context.Context, id string) error {
+	return c.do(ctx, http.MethodDelete, "/api/v1/posts/"+id, nil, nil)
 }
 
 // SearchPosts searches posts across all channels the agent is a member of.

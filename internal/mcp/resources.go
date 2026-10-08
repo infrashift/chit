@@ -7,8 +7,6 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-
-	"github.com/infrashift/chit/internal/model"
 )
 
 func (s *ChitMCPServer) registerResources() {
@@ -93,7 +91,7 @@ func (s *ChitMCPServer) handleChannelRecentResource(ctx context.Context, req *mc
 	if err != nil {
 		return nil, fmt.Errorf("get channel posts: %w", err)
 	}
-	data, _ := json.Marshal(posts)
+	data, _ := json.Marshal(viewPostList(posts))
 	return &mcp.ReadResourceResult{
 		Contents: []*mcp.ResourceContents{
 			{URI: req.Params.URI, MIMEType: "application/json", Text: string(data)},
@@ -110,7 +108,7 @@ func (s *ChitMCPServer) handleThreadResource(ctx context.Context, req *mcp.ReadR
 	if err != nil {
 		return nil, fmt.Errorf("get thread: %w", err)
 	}
-	data, _ := json.Marshal(&model.PostList{Order: posts})
+	data, _ := json.Marshal(viewPosts(posts))
 	return &mcp.ReadResourceResult{
 		Contents: []*mcp.ResourceContents{
 			{URI: req.Params.URI, MIMEType: "application/json", Text: string(data)},

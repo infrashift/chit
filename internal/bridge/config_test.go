@@ -52,3 +52,36 @@ func TestConfig_AuthMode(t *testing.T) {
 		})
 	}
 }
+
+// Limits that parse but would break the bridge quietly are refused at start.
+func TestConfig_Limits(t *testing.T) {
+	cases := []struct {
+		name string
+		env  map[string]string
+		ok   bool
+	}{
+		{"defaults", map[string]string{}, true},
+		{"zero run timeout", map[string]string{"CHIT_CLAUDE_RUN_TIMEOUT": "0s"}, false},
+		{"zero concurrency", map[string]string{"CHIT_CLAUDE_MAX_CONCURRENT_RUNS": "0"}, false},
+		{"negative hops", map[string]string{"CHIT_CLAUDE_MAX_AGENT_HOPS": "-1"}, false},
+		{"zero hops is allowed", map[string]string{"CHIT_CLAUDE_MAX_AGENT_HOPS": "0"}, true},
+		{"negative context window", map[string]string{"CHIT_CLAUDE_CONTEXT_WINDOW": "-5"}, false},
+		{"blank setting sources", map[string]string{"CHIT_CLAUDE_SETTING_SOURCES": " "}, false},
+		{"all setting sources", map[string]string{"CHIT_CLAUDE_SETTING_SOURCES": SettingSourcesAll}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CHIT_CLAUDE_AGENT_KRATOS_ID", "019421a0-0000-7000-8000-000000000001")
+			t.Setenv("CHIT_CLAUDE_OAUTH_CLIENT_ID", "")
+			t.Setenv("CHIT_CLAUDE_CHANNELS", "019421a0-0000-7000-8000-000000000020")
+			t.Setenv("CHIT_CLAUDE_WORKDIR", t.TempDir())
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			_, err := Load()
+			if (err == nil) != tc.ok {
+				t.Fatalf("err = %v, want ok=%v", err, tc.ok)
+			}
+		})
+	}
+}

@@ -4,7 +4,7 @@ description: Drive headless Claude Code sessions from Chit channels with the chi
 ---
 
 The `chit-claude` bridge turns Chit into an asynchronous, markdown-native
-front-end for [Claude Code](https://code.claude.com/docs). Post a message in a
+front-end for [Claude Code](https://code.claude.com/docs). Name the agent in a
 configured channel and the bridge runs `claude -p` headlessly in a working
 directory of your choice; Claude's response lands back in the thread as the
 agent user, with a token/cost footer. Replying in the thread resumes the same
@@ -15,11 +15,13 @@ no terminal open anywhere.
 
 ```
 you (any Chit client)
-   │  post "plan the migration of service X"
+   │  post "@claude-architect plan the migration of service X"
    ▼
 chitd ──WebSocket (posted event)──▶ chit-claude bridge
-                                        │ claude -p "<message>" --output-format json
-                                        │ (adds --resume <session_id> on thread replies)
+                                        │ claude -p --output-format json
+                                        │   --strict-mcp-config --setting-sources project
+                                        │   (adds --resume <session_id> on thread replies)
+                                        │ stdin: "[@you] @claude-architect plan the…"
                                         ▼
                                     claude CLI ──▶ Anthropic (subscription OAuth)
                                         │ result JSON: text + session_id + usage
@@ -32,15 +34,23 @@ chitd ◀──REST POST /posts (threaded reply + footer + session prop)──�
   (`claude_session_id`), so state lives in the conversation itself and
   survives bridge restarts. Replies in the thread run
   `claude -p --resume <session_id>`.
-- **One run at a time per thread.** Messages arriving while Claude is working
-  queue up in order (resuming the same session from two processes at once
-  would interleave its transcript).
-- **The runner posts the reply.** Claude runs with no MCP servers attached in
-  this setup; the bridge captures the `--output-format json` result and posts
-  it. Attaching `chit-mcp` via `--mcp-config` so Claude can post mid-run
-  updates itself is possible but optional.
-- **Failures are visible.** A failed or timed-out run posts an error reply
-  (with the stderr tail) to the thread instead of going silent.
+- **The prompt goes in on stdin, tagged with its author.** Claude reads
+  `[@alice] …`, so it can tell the people in a thread apart. Nothing else is
+  added to a turn; see [token cost](#token-cost).
+- **One run at a time per thread, a few at a time overall.** Messages
+  arriving while Claude is working queue up in order (resuming the same
+  session from two processes at once would interleave its transcript), and
+  `CHIT_CLAUDE_MAX_CONCURRENT_RUNS` (default 2) caps runs across threads.
+- **Runs are isolated from the host's Claude Code setup.** Every run passes
+  `--strict-mcp-config`, so no MCP server loads unless
+  `CHIT_CLAUDE_MCP_CONFIG` names it, and `--setting-sources project`, so the
+  host user's own settings (and the permissions, hooks and plugins they
+  enable) stay out. The bridge posts the `--output-format json` result
+  itself. To let Claude read Chit or post mid-run updates, give it
+  `chit-mcp` through `CHIT_CLAUDE_MCP_CONFIG`.
+- **Failures are visible.** A failed or timed-out run posts an error reply to
+  the thread instead of going silent. It shows the CLI's own message (or the
+  first line of stderr); the full stderr goes to the bridge's log.
 
 :::caution[Session resumption gotcha]
 `claude -p --session-id <id>` does **not** resume a session on later runs —
@@ -188,10 +198,10 @@ export CHIT_CLAUDE_OAUTH_AUDIENCE=chit
 export CHIT_CLAUDE_CHANNELS=<channel-id>[,<channel-id>...]
 export CHIT_CLAUDE_WORKDIR=/path/to/project    # where claude runs
 # optional hardening / behavior:
-export CHIT_CLAUDE_MODEL=claude-fable-5        # empty → the claude CLI default
+export CHIT_CLAUDE_MODEL=claude-fable-5-1      # empty → the claude CLI default
 export CHIT_CLAUDE_PERMISSION_MODE=dontAsk     # blocks tools not allowlisted
 export CHIT_CLAUDE_ALLOWED_TOOLS="Read,Grep,Glob,Bash(go test *)"
-export CHIT_CLAUDE_REQUIRE_MENTION=false       # true → only @chit-agent posts trigger runs
+export CHIT_CLAUDE_REQUIRE_MENTION=true        # the default; false → every post triggers a run
 export CHIT_CLAUDE_RUN_TIMEOUT=30m
 
 make build-claude
@@ -204,7 +214,12 @@ exactly one of `CHIT_CLAUDE_OAUTH_CLIENT_ID` (OAuth2 mode, which then also
 requires the client secret and token URL) and `CHIT_CLAUDE_AGENT_KRATOS_ID`.
 The bridge refuses to start with both, with neither, or with an incomplete
 OAuth2 block, rather than picking a mode for you.
-`CHIT_CLAUDE_CHANNELS` and `CHIT_CLAUDE_WORKDIR` are always required.
+`CHIT_CLAUDE_CHANNELS` and `CHIT_CLAUDE_WORKDIR` are always required, and the
+bridge checks at startup that its agent is a member of every channel listed:
+chitd only delivers posts to members, so a bridge serving a channel its agent
+is not in would otherwise run without ever hearing from it. A refusal from
+chitd (unknown channel, not a member) stops the bridge; a chitd that does not
+answer only logs a warning.
 
 Tokens are cached and renewed automatically — the bridge fetches a new one only
 when the current token expires (Hydra issues 1-hour tokens by default). If the
@@ -221,12 +236,61 @@ for every agent, so it cannot express per-agent or per-application privilege.
 Keep it for local development; use OAuth2 anywhere else.
 :::
 
+## Talking to the agent
+
+### When it answers
+
+With the default `CHIT_CLAUDE_REQUIRE_MENTION=true`, the agent answers a post
+that names it (`@claude-architect …`). Once a post has named it in a thread,
+`CHIT_CLAUDE_FOLLOW_THREADS=true` (the default) means later replies in that
+thread need no mention, so a conversation reads naturally. Replies in threads
+it has not joined, and every other post in the channel, cost nothing.
+
+`@all` and `@channel` do not count as naming the agent unless
+`CHIT_CLAUDE_ANSWER_BROADCASTS=true`. One `@channel` would otherwise start a
+run in every persona serving the channel.
+
+`CHIT_CLAUDE_REQUIRE_MENTION=false` answers every post in the channel,
+side conversations between people included. That suits a channel that is
+only for talking to one agent, and few others.
+
+### What it sees
+
+Each message reaches Claude tagged with its author: `[@alice] can you check
+the migration?`. When a session starts partway through a thread (the agent
+named in an existing conversation, or a lost session being replaced), the
+thread so far comes first, each post tagged the same way, newest kept, up to
+`CHIT_CLAUDE_SEED_MAX_CHARS` (default 8000; `0` turns it off). The agent's
+earlier replies are included without their footers.
+
+### While it works
+
+A run still going after 10 seconds shows `⏳ Working on it…` in the thread.
+The note is deleted when the reply lands. The reply is always a new post, so
+an `@mention` in it reaches other agents and notifies people as usual. If the
+bridge is killed mid-run (rather than stopped), the note is left behind.
+
+### Control words
+
+A message to the agent (named, or in a thread it has joined) that starts
+with one of these acts on the thread instead of going to Claude:
+
+| Word | Effect |
+|---|---|
+| `!new` | The next message in this thread starts a new Claude session, with no earlier context. |
+| `!new <message>` | Runs `<message>` in a new session. |
+| `!stop` | Stops the run in progress and drops the thread's queued messages. |
+| `!status` | Says whether a run is in progress (and for how long), how many messages are queued, and whether the next reply resumes a session. |
+
+`!new` waits its turn in the thread's queue, so a run already under way
+cannot undo it when it finishes. `!stop` and `!status` act at once.
+
 ## Multiple personas in one channel
 
 **One bridge process serves exactly one agent user**: the one bound to its
 OAuth2 client (or its `CHIT_CLAUDE_AGENT_KRATOS_ID`), resolved once at
 startup. To run several personas — say a `claude-architect` on Fable 5 and a
-`claude-docs-writer` on Sonnet — run one `chit-claude` process per persona,
+`claude-docs-writer` on Sonnet 5.5 — run one `chit-claude` process per persona,
 each with its own Hydra client, agent user, model, and working directory. They
 can all serve the same channel.
 
@@ -290,9 +354,10 @@ cooperation mechanism between trusted bridge processes, not a security
 boundary.
 :::
 
-Note that `CHIT_CLAUDE_REQUIRE_MENTION` is a separate, coarser gate that
-applies to *all* authors including humans. The agent rules above are always
-enforced on top of it.
+`CHIT_CLAUDE_REQUIRE_MENTION` (see [talking to the
+agent](#talking-to-the-agent)) is a separate gate that applies to *all*
+authors including humans. The agent rules above are always enforced on top of
+it.
 
 ### Per-persona configuration
 
@@ -307,7 +372,7 @@ CHIT_CLAUDE_OAUTH_SCOPES=chit:read chit:write
 CHIT_CLAUDE_OAUTH_AUDIENCE=chit
 CHIT_CLAUDE_CHANNELS=<shared channel id>
 CHIT_CLAUDE_WORKDIR=/srv/worktrees/architect
-CHIT_CLAUDE_MODEL=claude-fable-5
+CHIT_CLAUDE_MODEL=claude-fable-5-1
 CHIT_CLAUDE_REQUIRE_MENTION=true
 CHIT_CLAUDE_REPLY_TO_AGENTS=true
 CHIT_CLAUDE_MAX_AGENT_HOPS=2
@@ -315,7 +380,7 @@ CLAUDE_CODE_OAUTH_TOKEN=...
 ```
 
 `docs-writer.env` is the same with its **own** Hydra client, its own workdir,
-and `CHIT_CLAUDE_MODEL=claude-sonnet-5`. One client per persona means tokens
+and `CHIT_CLAUDE_MODEL=claude-sonnet-5-5`. One client per persona means tokens
 are per-agent: revoking one agent's client stops that agent alone, and the
 audit trail distinguishes them.
 
@@ -344,6 +409,10 @@ EnvironmentFile=%h/.config/chit-claude/%i.env
 ExecStart=%h/bin/chit-claude
 Restart=on-failure
 RestartSec=5s
+
+# Stop waits up to CHIT_CLAUDE_SHUTDOWN_GRACE (60s) for runs in progress;
+# keep TimeoutStopSec above it.
+TimeoutStopSec=90s
 
 [Install]
 WantedBy=default.target
@@ -382,9 +451,18 @@ systemctl --user enable --now chit-claude@architect chit-claude@docs-writer
   anyone on the team, while removing somebody else requires `system_admin`.
   The member list is easier to grow than to shrink, and it is your real trust
   boundary.
-- **Prompts are argv, never shell.** Message content is passed to the claude
-  binary as a process argument; there is no shell interpolation to inject
-  into.
+- **Prompts go in on stdin.** Message content reaches the claude binary on
+  its standard input, never through a shell and never in its arguments.
+  (Passed as an argument, a post reading `--version` was parsed as that
+  option, since `-p` is a flag and the prompt is the CLI's positional
+  argument.)
+- **The host's Claude Code setup stays out.** Runs pass
+  `--strict-mcp-config` and `--setting-sources project`, so MCP servers,
+  permissions, hooks and plugins configured for the host user do not reach
+  the agent. Set `CHIT_CLAUDE_SETTING_SOURCES=all` only if you want them to.
+- **Anyone who can address the agent can steer the thread.** That includes
+  the [control words](#control-words): `!stop` and `!new` from any channel
+  member who names the agent, or replies in a thread it has joined.
 - **The gateway now enforces, and it is no longer optional.** The API access
   rules previously listed `noop` as a fallback authenticator, so an
   unauthenticated request passed Oathkeeper and was rejected only by chitd.
@@ -402,18 +480,104 @@ systemctl --user enable --now chit-claude@architect chit-claude@docs-writer
   each other mid-run. A `git worktree` per persona is the cheap fix and gives
   each one its own branch.
 
+## Operations
+
+### Limits
+
+| What | Limit | What happens past it |
+|---|---|---|
+| Runs at once, across threads | `CHIT_CLAUDE_MAX_CONCURRENT_RUNS` (2) | Further runs wait for a slot. |
+| Messages queued per thread | 16 | The thread is told once that a message was dropped and should be resent. |
+| One run | `CHIT_CLAUDE_RUN_TIMEOUT` (30m) | The run is killed and the thread told. |
+| One reply | 64 KiB, chitd's post limit | The reply is split across several posts. |
+
+### Sessions live in `~/.claude`, under the working directory
+
+Claude Code keeps each session's transcript under `~/.claude/projects/`, keyed
+by the directory it ran in. The thread only stores the session's ID. If
+`CHIT_CLAUDE_WORKDIR` changes, or the bridge's home is not persistent (a
+container without a volume for it), a thread's session cannot be resumed. The
+bridge then starts a new session for that thread, seeded with the thread so
+far, and says so in the reply. Persist `~/.claude` to avoid it.
+
+### Restarts and shutdown
+
+On `SIGTERM` or `SIGINT` the bridge stops listening, lets runs in progress
+finish for up to `CHIT_CLAUDE_SHUTDOWN_GRACE` (60s), then stops the rest and
+says so in their threads. A thread whose queued messages were never started
+is told once to resend them. Keep the supervisor's stop timeout above the
+grace period (systemd's `TimeoutStopSec` defaults to 90s).
+
+A thread idle for 10 minutes frees its worker. Its session is recovered from
+the thread's posts when it is next used, as after a restart.
+
+### Logs
+
+The bridge logs JSON to stderr. Each run writes one `run_complete` line:
+
+```json
+{"level":"INFO","msg":"run_complete","root_id":"…","post_id":"…","resumed":true,
+ "duration_ms":48210,"ok":true,"input_tokens":12,"output_tokens":1840,
+ "cache_read_tokens":61204,"cache_write_tokens":3310,"context_tokens":64526,
+ "cost_usd":0.21,"num_turns":4}
+```
+
+Sum these for usage per thread, per persona or per day. `context_tokens` is
+the size of the conversation after the run.
+
+## Token cost
+
+**The bridge adds almost nothing to a turn.** Claude receives the message
+text with an author tag of a few tokens, and `--resume` reloads the same
+transcript an interactive session would. A fresh session starts with Claude
+Code's own system prompt and tool definitions, about 21k tokens with the
+default tools (measured with `claude` 2.1.292); that is the same with or
+without the bridge.
+
+What decides the cost is **how many runs happen and how long each session
+gets**:
+
+- **Which posts start a run.** With the default gating, only posts that name
+  the agent, and replies in threads it has joined, do. With
+  `REQUIRE_MENTION=false`, every post in the channel does, once per persona
+  serving it.
+- **Cold caches.** Each resumed turn re-reads the whole conversation. Within
+  the prompt cache's lifetime that is cheap (a cache read). After it lapses,
+  the next turn writes the whole conversation into the cache again, at more
+  than the price of plain input. The footer shows cache **reads** and
+  **writes** separately; a long thread with many writes is the expensive
+  case. The `claude` 2.1.292 CLI wrote its cache entries with a 1-hour
+  lifetime.
+- **Session size.** A thread's session grows with every turn, and each turn
+  re-reads all of it. `CHIT_CLAUDE_MAX_SESSION_TOKENS`
+  retires a session once its context reaches that many tokens: the reply says
+  so, and the next message starts a new session, without the old context
+  (restate what matters). `!new` does the same on demand.
+- **What runs load.** Runs load no MCP servers and none of the host user's
+  settings unless configured to. Attaching `chit-mcp` adds its tool
+  definitions to every turn, and whatever its tools return to the
+  conversation. Its tools return posts as id, author, content and time only,
+  without props.
+
+To compare the bridge against plain `claude -p --resume` on your own setup,
+run `scripts/bridge-token-baseline.sh`.
+
 ## The footer
 
 Each reply ends with a usage line built from the run's JSON result — no
 OpenTelemetry collector required:
 
 ```
-⚙ tokens in 4.5k · out 1.2k · cache 38.0k · $0.42 · context ~21%
+⚙ in 12 · out 1.8k · cache read 61.2k · write 3.3k · $0.21 · context ~32%
 ```
 
-`context ~N%` estimates window fill as
-`(cache_read_input_tokens + input_tokens) / CHIT_CLAUDE_CONTEXT_WINDOW`
-(default 200000). For subscription (OAuth) runs the `$` figure is what the
-run *would have cost* on the API, not an actual charge. If you later want
-time-series dashboards, Claude Code's OpenTelemetry support
-(`CLAUDE_CODE_ENABLE_TELEMETRY=1`) can run alongside this unchanged.
+`in`, `out`, `cache read` and `write` are the run's totals over every API call
+it made. `context ~N%` is the conversation's size after the run (everything
+the last API call read: input, cache reads and cache writes) over the model's
+context window as the CLI reports it, falling back to
+`CHIT_CLAUDE_CONTEXT_WINDOW` (default 200000). For subscription (OAuth) runs
+the `$` figure is what the run *would have cost* on the API, not an actual
+charge. `CHIT_CLAUDE_FOOTER=false` drops the line; the same figures stay in
+the reply's `claude_usage` prop. If you later want time-series dashboards,
+Claude Code's OpenTelemetry support (`CLAUDE_CODE_ENABLE_TELEMETRY=1`) can run
+alongside this unchanged.

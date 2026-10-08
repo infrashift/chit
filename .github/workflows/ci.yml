@@ -80,9 +80,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: clients/chit-tui/go.mod
-      - uses: golangci/golangci-lint-action@v6
+      # v8 and a pinned version, as for the server: the TUI's .golangci.yml
+      # is v2 config, which v6 of the action cannot run, and "latest" let a
+      # new release change the result without a commit.
+      - uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          version: v2.13.2
           working-directory: clients/chit-tui
           only-new-issues: true
 

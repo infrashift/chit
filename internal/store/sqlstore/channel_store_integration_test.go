@@ -374,11 +374,11 @@ func TestChannelStoreIntegration_GetMembersForUser(t *testing.T) {
 		{ChannelID: gone.ID, UserID: user.ID},
 		{ChannelID: elsewhere.ID, UserID: user.ID},
 	} {
-		if _, err := ss.Channel().SaveMember(t.Context(), m); err != nil {
+		if _, err = ss.Channel().SaveMember(t.Context(), m); err != nil {
 			t.Fatalf("SaveMember: %v", err)
 		}
 	}
-	if err := ss.Channel().Delete(t.Context(), gone.ID, 1); err != nil {
+	if err = ss.Channel().Delete(t.Context(), gone.ID, 1); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 

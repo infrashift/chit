@@ -34,9 +34,14 @@ type Config struct {
 	OAuthScopes       string `koanf:"oauth_scopes"`
 	OAuthAudience     string `koanf:"oauth_audience"`
 
-	// What to listen to
-	Channels       []string `koanf:"channels"`
-	RequireMention bool     `koanf:"require_mention"`
+	// What to listen to. With RequireMention, a post must name the agent
+	// (@all and @channel count only with AnswerBroadcasts), except that with
+	// FollowThreads a reply in a thread the agent has replied in needs no
+	// mention.
+	Channels         []string `koanf:"channels"`
+	RequireMention   bool     `koanf:"require_mention"`
+	FollowThreads    bool     `koanf:"follow_threads"`
+	AnswerBroadcasts bool     `koanf:"answer_broadcasts"`
 
 	// Multi-agent behaviour. Several bridges (one per persona) can serve the
 	// same channel; these knobs keep them from answering each other forever.
@@ -55,10 +60,46 @@ type Config struct {
 	AppendSystemPrompt string        `koanf:"append_system_prompt"`
 	RunTimeout         time.Duration `koanf:"run_timeout"`
 
-	// ContextWindow is the assumed model context size (tokens) used for the
-	// "context ~N%" footer estimate.
+	// What the run inherits from the host. Runs always pass
+	// --strict-mcp-config, so MCPConfig (a path or JSON string handed to
+	// --mcp-config) is the only way to give Claude MCP servers.
+	// SettingSources is passed to --setting-sources; SettingSourcesAll omits
+	// the flag and lets the CLI load every source, the host user's included.
+	MCPConfig      string `koanf:"mcp_config"`
+	SettingSources string `koanf:"setting_sources"`
+
+	// MaxConcurrentRuns caps claude processes across all threads. Each thread
+	// already runs one at a time; this bounds how many threads run at once.
+	MaxConcurrentRuns int `koanf:"max_concurrent_runs"`
+
+	// ShutdownGrace is how long runs in progress may keep going after a
+	// shutdown signal before they are killed. Keep it under the supervisor's
+	// own stop timeout (systemd's TimeoutStopSec defaults to 90s).
+	ShutdownGrace time.Duration `koanf:"shutdown_grace"`
+
+	// ContextWindow is the context size (tokens) the footer's "context ~N%"
+	// measures against when the CLI does not report the model's own.
 	ContextWindow int `koanf:"context_window"`
+
+	// Footer appends the usage line to each reply. The same figures are in
+	// the reply's claude_usage prop either way.
+	Footer bool `koanf:"footer"`
+
+	// SeedMaxChars caps how much of a thread is given to a session that
+	// starts mid-thread: one opened by a mention partway through a
+	// conversation, or one replacing a session that was lost. (A session
+	// started by !new or MaxSessionTokens starts clean.) 0 gives none.
+	SeedMaxChars int `koanf:"seed_max_chars"`
+
+	// MaxSessionTokens retires a thread's session once a run leaves its
+	// context at least this large; the next reply starts a new session.
+	// 0 never retires one.
+	MaxSessionTokens int64 `koanf:"max_session_tokens"`
 }
+
+// SettingSourcesAll is the CHIT_CLAUDE_SETTING_SOURCES value that passes no
+// --setting-sources flag at all.
+const SettingSourcesAll = "all"
 
 // Defaults returns a Config populated with default values.
 func Defaults() *Config {
@@ -69,9 +110,17 @@ func Defaults() *Config {
 		AllowedTools:   "Read,Grep,Glob",
 		RunTimeout:     30 * time.Minute,
 		ContextWindow:  200_000,
+		RequireMention: true,
+		FollowThreads:  true,
+		Footer:         true,
+		SeedMaxChars:   8000,
 		MaxAgentHops:   2,
 		OAuthScopes:    "chit:read chit:write",
 		OAuthAudience:  "chit",
+
+		SettingSources:    "project",
+		MaxConcurrentRuns: 2,
+		ShutdownGrace:     60 * time.Second,
 	}
 }
 
@@ -143,6 +192,34 @@ func Load() (*Config, error) {
 	if cfg.WorkDir == "" {
 		return nil, fmt.Errorf("CHIT_CLAUDE_WORKDIR is required")
 	}
+	if err := cfg.validateLimits(); err != nil {
+		return nil, err
+	}
 
 	return cfg, nil
+}
+
+// validateLimits rejects numeric settings that would parse but break the
+// bridge quietly: a zero timeout fails every run the moment it starts, and a
+// zero concurrency cap never starts one.
+func (c *Config) validateLimits() error {
+	switch {
+	case c.RunTimeout <= 0:
+		return fmt.Errorf("CHIT_CLAUDE_RUN_TIMEOUT must be positive, got %s", c.RunTimeout)
+	case c.MaxConcurrentRuns < 1:
+		return fmt.Errorf("CHIT_CLAUDE_MAX_CONCURRENT_RUNS must be at least 1, got %d", c.MaxConcurrentRuns)
+	case c.MaxAgentHops < 0:
+		return fmt.Errorf("CHIT_CLAUDE_MAX_AGENT_HOPS must not be negative, got %d", c.MaxAgentHops)
+	case c.ShutdownGrace < 0:
+		return fmt.Errorf("CHIT_CLAUDE_SHUTDOWN_GRACE must not be negative, got %s", c.ShutdownGrace)
+	case c.SeedMaxChars < 0:
+		return fmt.Errorf("CHIT_CLAUDE_SEED_MAX_CHARS must not be negative, got %d", c.SeedMaxChars)
+	case c.MaxSessionTokens < 0:
+		return fmt.Errorf("CHIT_CLAUDE_MAX_SESSION_TOKENS must not be negative, got %d", c.MaxSessionTokens)
+	case c.ContextWindow < 0:
+		return fmt.Errorf("CHIT_CLAUDE_CONTEXT_WINDOW must not be negative, got %d", c.ContextWindow)
+	case strings.TrimSpace(c.SettingSources) == "":
+		return fmt.Errorf("CHIT_CLAUDE_SETTING_SOURCES must name sources (e.g. project) or be %q", SettingSourcesAll)
+	}
+	return nil
 }
