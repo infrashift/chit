@@ -33,7 +33,10 @@ type PostCreatedMsg struct {
 	Post *model.Post
 	// Tags are the names to apply to the new post once its ID is known.
 	Tags []string
-	Err  error
+	// Draft is the text as written, tags included, for putting back in the
+	// input when the server refuses the post.
+	Draft string
+	Err   error
 }
 
 // ThreadLoadedMsg is sent when a thread is fetched.

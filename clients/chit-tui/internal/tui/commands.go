@@ -54,7 +54,14 @@ func FetchOlderPosts(ctx context.Context, client api.ChitClient, channelID strin
 func CreatePost(ctx context.Context, client api.ChitClient, post *model.Post, tags ...string) tea.Cmd {
 	return func() tea.Msg {
 		created, err := client.CreatePost(ctx, post)
-		return PostCreatedMsg{Post: created, Tags: tags, Err: err}
+		msg := PostCreatedMsg{Post: created, Tags: tags, Err: err}
+		if err != nil {
+			msg.Draft = post.Content
+			for _, t := range tags {
+				msg.Draft += " #" + t
+			}
+		}
+		return msg
 	}
 }
 

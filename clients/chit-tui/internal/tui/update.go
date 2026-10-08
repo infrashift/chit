@@ -138,9 +138,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case viewport.PostSelectedMsg:
 		m.cancelEdit()
-		cmds = append(cmds, FetchThread(m.reqCtx(), m.client, msg.Post.ID))
+		// Replies are listed in the channel too. Opening one opens its
+		// root's thread: a thread rooted at a reply is not one the server
+		// recognizes, and it refuses replies to a reply.
+		root := msg.Post.ID
+		if msg.Post.RootID != "" {
+			root = msg.Post.RootID
+		}
+		cmds = append(cmds, FetchThread(m.reqCtx(), m.client, root))
 		m.mainPane = paneThread
-		m.threadRootID = msg.Post.ID
+		m.threadRootID = root
 		cmds = append(cmds, m.setFocus(FocusInput))
 		m.resizeComponents()
 		return m, tea.Batch(cmds...)

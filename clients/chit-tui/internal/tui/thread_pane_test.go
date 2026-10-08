@@ -8,7 +8,9 @@ import (
 
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/input"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/palette"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/viewport"
 )
 
 func wsPosted(p map[string]any) tui.WebSocketEventMsg {
@@ -137,5 +139,38 @@ func TestModel_TagChangesShowInTheOpenThread(t *testing.T) {
 
 	if !strings.Contains(viewOf(m), "#followup") {
 		t.Errorf("tag not shown on the reply in the open thread:\n%s", viewOf(m))
+	}
+}
+
+// Replies show in the channel history too, and Enter on one opened a thread
+// rooted at the reply. The server refuses a reply to a reply, so whatever was
+// typed there was rejected. Found running against the merged server.
+func TestModel_EnterOnAReplyOpensItsRootsThread(t *testing.T) {
+	client := &mockClient{}
+	m := modelWithClient(t, client)
+	m, _ = step(t, m, tui.TeamsLoadedMsg{Teams: []*model.Team{{ID: "t1"}}})
+	m, _ = step(t, m, tui.ChannelsLoadedMsg{TeamID: "t1", Channels: []*model.Channel{{ID: "c1", TeamID: "t1"}}})
+
+	m, cmd := step(t, m, viewport.PostSelectedMsg{Post: &model.Post{ID: "r9", RootID: "p1", ChannelID: "c1", UserID: "u2"}})
+	if got := wantMsg[tui.ThreadLoadedMsg](t, cmd); got.PostID != "p1" {
+		t.Errorf("loaded the thread of %q, want the root p1", got.PostID)
+	}
+
+	_, cmd = step(t, m, input.SendMsg{Content: "a reply"})
+	drain(cmd)
+	if p := client.lastCreatedPost; p == nil || p.RootID != "p1" {
+		t.Errorf("reply sent as %+v, want RootID p1", p)
+	}
+}
+
+// The input clears as a message is sent. When the server refused it, the
+// text was gone; it now comes back so it can be fixed and sent again.
+func TestModel_RefusedSendKeepsTheText(t *testing.T) {
+	m := setupModel(t)
+
+	m, _ = step(t, m, tui.PostCreatedMsg{Draft: "my carefully written message", Err: &model.AppError{Message: "refused"}})
+
+	if !strings.Contains(viewOf(m), "my carefully written message") {
+		t.Errorf("the refused message's text was lost:\n%s", viewOf(m))
 	}
 }

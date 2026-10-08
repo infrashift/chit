@@ -248,6 +248,12 @@ func (m Model) handleOlderPosts(msg OlderPostsLoadedMsg) (tea.Model, tea.Cmd) {
 func (m Model) handlePostCreated(msg PostCreatedMsg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	if msg.Err != nil {
+		// The input cleared on Enter. Put the text back, unless something
+		// new has been typed since, so a refused message can be fixed and
+		// sent again rather than written out from scratch.
+		if msg.Draft != "" && m.input.Value() == "" {
+			m.input.SetValue(msg.Draft)
+		}
 		return m, m.setError(msg.Err)
 	}
 	// Show the message immediately rather than waiting for the WebSocket
