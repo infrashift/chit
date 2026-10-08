@@ -113,6 +113,8 @@ func (r *ClaudeRunner) Run(ctx context.Context, prompt, sessionID string) (*Clau
 	switch {
 	case errors.Is(runCtx.Err(), context.DeadlineExceeded):
 		return nil, &RunError{Summary: fmt.Sprintf("claude run timed out after %s", r.cfg.RunTimeout)}
+	case errors.Is(context.Cause(ctx), errStopped):
+		return nil, &RunError{Summary: "the run was " + errStopped.Error()}
 	case errors.Is(runCtx.Err(), context.Canceled):
 		return nil, &RunError{Summary: "the run was stopped because the bridge is shutting down"}
 	}
@@ -195,6 +197,9 @@ func (r *ClaudeRunner) args(sessionID string) []string {
 	return args
 }
 
+// footerSeparator opens the usage footer, so it can be cut from a reply.
+const footerSeparator = "\n\n---\n`⚙"
+
 // Footer renders the usage summary appended to every agent reply. Cache
 // writes are shown apart from reads: a turn that finds the prompt cache cold
 // rewrites the whole conversation into it, and that is where a long thread's
@@ -204,7 +209,7 @@ func (r *ClaudeRunner) Footer(res *ClaudeResult) string {
 	if window := r.contextWindow(res); window > 0 {
 		pct = res.Usage.ContextTokens() * 100 / window
 	}
-	return fmt.Sprintf("\n\n---\n`⚙ in %s · out %s · cache read %s · write %s · $%.2f · context ~%d%%`",
+	return fmt.Sprintf(footerSeparator+" in %s · out %s · cache read %s · write %s · $%.2f · context ~%d%%`",
 		humanTokens(res.Usage.InputTokens),
 		humanTokens(res.Usage.OutputTokens),
 		humanTokens(res.Usage.CacheReadInputTokens),

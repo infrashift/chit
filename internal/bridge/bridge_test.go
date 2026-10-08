@@ -87,6 +87,7 @@ type fakeChitd struct {
 	memberOf      []string
 	events        chan *model.WebSocketEvent
 	wsConnects    int
+	deleted       []string
 }
 
 func (f *fakeChitd) server(t *testing.T) *httptest.Server {
@@ -127,6 +128,12 @@ func (f *fakeChitd) server(t *testing.T) *httptest.Server {
 		f.mu.Unlock()
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(&post)
+	})
+	mux.HandleFunc("DELETE /api/v1/posts/{id}", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		f.deleted = append(f.deleted, r.PathValue("id"))
+		f.mu.Unlock()
+		_, _ = w.Write([]byte(`{"status":"OK"}`))
 	})
 	mux.HandleFunc("GET /api/v1/posts/{id}/thread", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -540,14 +547,15 @@ func TestBridge_FollowsThreadsItJoined(t *testing.T) {
 	say("msg-4", "and the risks")
 
 	posts := waitForPosts(t, chitd, 2)
-	if !strings.HasPrefix(posts[0].Content, "re: @chit-agent summarise") ||
-		!strings.HasPrefix(posts[1].Content, "re: and the risks") {
+	if !strings.HasPrefix(posts[0].Content, "re: [@alice] @chit-agent summarise") ||
+		!strings.HasPrefix(posts[1].Content, "re: [@alice] and the risks") {
 		t.Errorf("want answers to the mention and the follow-up, got %q, %q", posts[0].Content, posts[1].Content)
 	}
-	if n := threadCalls(); n != 2 {
-		// One check for msg-1; one session lookup for msg-3. msg-2 was
-		// dropped on the read loop, and msg-4 rode on the joined thread.
-		t.Errorf("thread fetched %d times, want 2", n)
+	if n := threadCalls(); n != 3 {
+		// One check for msg-1; for msg-3, one session lookup and one fetch to
+		// seed its new session with the thread so far. msg-2 was dropped on
+		// the read loop, and msg-4 resumed the session msg-3 started.
+		t.Errorf("thread fetched %d times, want 3", n)
 	}
 }
 
@@ -815,7 +823,7 @@ func TestBridge_SessionRecoveryFromThreadProps(t *testing.T) {
 	b.agentUserID = testAgentID
 
 	// Fresh bridge (empty in-memory map) must recover the session from props.
-	got, joined := b.threadState(context.Background(), "root-1")
+	got, joined, _ := b.threadState(context.Background(), "root-1")
 	if got != fakeSessionID2 || !joined {
 		t.Fatalf("threadState: got (%q, %v), want (%q, true)", got, joined, fakeSessionID2)
 	}
@@ -939,10 +947,10 @@ func TestBridge_TwoAgentsIndependentSessions(t *testing.T) {
 	agentB.agentUserID = testAgentID2
 
 	ctx := context.Background()
-	if got, _ := agentA.threadState(ctx, "root-1"); got != fakeSessionID {
+	if got, _, _ := agentA.threadState(ctx, "root-1"); got != fakeSessionID {
 		t.Errorf("agent A session: got %q, want %q", got, fakeSessionID)
 	}
-	if got, _ := agentB.threadState(ctx, "root-1"); got != fakeSessionID2 {
+	if got, _, _ := agentB.threadState(ctx, "root-1"); got != fakeSessionID2 {
 		t.Errorf("agent B session: got %q, want %q", got, fakeSessionID2)
 	}
 }
@@ -970,12 +978,13 @@ func TestBridge_RunFailurePostsErrorReply(t *testing.T) {
 	}
 }
 
-// writeEchoClaude writes a fake claude whose result is the prompt it read on
-// stdin, so each reply names the post it answers. Prompts must not contain
-// characters that need escaping in JSON.
+// writeEchoClaude writes a fake claude whose result echoes the last line of
+// its prompt (the message being answered, tagged with its author), so each
+// reply names the post it answers. Messages must not contain characters that
+// need escaping in JSON.
 func writeEchoClaude(t *testing.T, dir string) string {
 	t.Helper()
-	return writeScript(t, dir, `p=$(cat)
+	return writeScript(t, dir, `p=$(tail -n 1)
 printf '{"result":"re: %s","session_id":"`+fakeSessionID+`"}\n' "$p"
 `)
 }
@@ -1093,7 +1102,7 @@ func TestBridge_DuplicateDeliveryRunsOnce(t *testing.T) {
 
 	// The thread's queue is FIFO, so a duplicate run would land before beta.
 	posts := waitForPosts(t, chitd, 2)
-	if !strings.HasPrefix(posts[0].Content, "re: alpha") || !strings.HasPrefix(posts[1].Content, "re: beta") {
+	if !strings.HasPrefix(posts[0].Content, "re: [@alice] alpha") || !strings.HasPrefix(posts[1].Content, "re: [@alice] beta") {
 		t.Errorf("want replies to alpha then beta, got %q, %q", posts[0].Content, posts[1].Content)
 	}
 }
@@ -1206,8 +1215,8 @@ func TestBridge_SessionRetiredAtTokenCeiling(t *testing.T) {
 	chitd.mu.Unlock()
 	fresh := New(cfg)
 	fresh.agentUserID = testAgentID
-	if got, joined := fresh.threadState(context.Background(), "root-1"); got != "" || !joined {
-		t.Errorf("threadState after a reset = (%q, %v), want (\"\", true)", got, joined)
+	if got, joined, clean := fresh.threadState(context.Background(), "root-1"); got != "" || !joined || !clean {
+		t.Errorf("threadState after a reset = (%q, %v, %v), want (\"\", true, true)", got, joined, clean)
 	}
 }
 

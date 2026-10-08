@@ -90,7 +90,7 @@ func TestBridge_RunServesOverWebSocket(t *testing.T) {
 	chitd.events <- postedEvent(&model.Post{ID: "root-1", ChannelID: testChannelID,
 		UserID: testOtherUser, Content: "hello"})
 	reply := waitForPosts(t, chitd, 1)[0]
-	if reply.RootID != "root-1" || !strings.HasPrefix(reply.Content, "re: hello") {
+	if reply.RootID != "root-1" || !strings.HasPrefix(reply.Content, "re: [@alice] hello") {
 		t.Errorf("unexpected reply %+v", reply)
 	}
 	if err := stop(); err != nil {
@@ -258,7 +258,7 @@ func TestBridge_IdleWorkerRetires(t *testing.T) {
 
 	b.handleEvent(ctx, postedEvent(&model.Post{ID: "msg-2", ChannelID: testChannelID,
 		UserID: testOtherUser, RootID: "root-1", Content: "second"}))
-	if reply := waitForPosts(t, chitd, 2)[1]; !strings.HasPrefix(reply.Content, "re: second") {
+	if reply := waitForPosts(t, chitd, 2)[1]; !strings.HasPrefix(reply.Content, "re: [@alice] second") {
 		t.Errorf("a woken thread should be answered, got %q", reply.Content)
 	}
 }

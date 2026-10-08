@@ -85,6 +85,12 @@ type Config struct {
 	// the reply's claude_usage prop either way.
 	Footer bool `koanf:"footer"`
 
+	// SeedMaxChars caps how much of a thread is given to a session that
+	// starts mid-thread: one opened by a mention partway through a
+	// conversation, or one replacing a session that was lost. (A session
+	// started by !new or MaxSessionTokens starts clean.) 0 gives none.
+	SeedMaxChars int `koanf:"seed_max_chars"`
+
 	// MaxSessionTokens retires a thread's session once a run leaves its
 	// context at least this large; the next reply starts a new session.
 	// 0 never retires one.
@@ -107,6 +113,7 @@ func Defaults() *Config {
 		RequireMention: true,
 		FollowThreads:  true,
 		Footer:         true,
+		SeedMaxChars:   8000,
 		MaxAgentHops:   2,
 		OAuthScopes:    "chit:read chit:write",
 		OAuthAudience:  "chit",
@@ -205,6 +212,8 @@ func (c *Config) validateLimits() error {
 		return fmt.Errorf("CHIT_CLAUDE_MAX_AGENT_HOPS must not be negative, got %d", c.MaxAgentHops)
 	case c.ShutdownGrace < 0:
 		return fmt.Errorf("CHIT_CLAUDE_SHUTDOWN_GRACE must not be negative, got %s", c.ShutdownGrace)
+	case c.SeedMaxChars < 0:
+		return fmt.Errorf("CHIT_CLAUDE_SEED_MAX_CHARS must not be negative, got %d", c.SeedMaxChars)
 	case c.MaxSessionTokens < 0:
 		return fmt.Errorf("CHIT_CLAUDE_MAX_SESSION_TOKENS must not be negative, got %d", c.MaxSessionTokens)
 	case c.ContextWindow < 0:

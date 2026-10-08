@@ -323,6 +323,11 @@ func (c *Client) CreatePost(ctx context.Context, channelID, rootID, content stri
 	return &saved, nil
 }
 
+// DeletePost deletes one of the agent's own posts.
+func (c *Client) DeletePost(ctx context.Context, id string) error {
+	return c.do(ctx, http.MethodDelete, "/api/v1/posts/"+id, nil, nil)
+}
+
 // SearchPosts searches posts across all channels the agent is a member of.
 // Provide terms, tagIDs, or both.
 func (c *Client) SearchPosts(ctx context.Context, terms string, tagIDs []string, page, perPage int) (*model.PostList, error) {
