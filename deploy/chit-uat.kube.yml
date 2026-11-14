@@ -204,10 +204,13 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: chit-keto-config
+# Copies of deploy/keto/keto.yml and deploy/keto/namespaces.cue.
+# TestKetoSchemaInSync fails when they differ.
 data:
   keto.yml: |
-    version: v0.12.0
-
+    # keto-cue configuration. keto-cue is the Ory Keto fork that reads the
+    # permission schema in CUE (namespaces.cue, next to this file). The kube files
+    # mount both at /etc/keto. DSN comes from the environment.
     serve:
       read:
         host: 0.0.0.0
@@ -217,14 +220,42 @@ data:
         port: 4467
 
     namespaces:
-      - id: 0
-        name: chit/channel
-      - id: 1
-        name: chit/command
+      location: file:///etc/keto/namespaces.cue
 
     log:
       level: info
       format: json
+  namespaces.cue: |
+    // Chit's keto-cue permission schema. keto-cue reads it from
+    // namespaces.location in keto.yml; `make keto-validate` compiles it the way
+    // the server does. The chit-keto-config ConfigMap in deploy/chit.kube.yml and
+    // deploy/chit-uat.kube.yml carries a copy, and TestKetoSchemaInSync keeps the
+    // three the same.
+    //
+    // The schema declares only what Chit writes and checks. Keto runs in its
+    // default, non-strict mode, so a check follows every subject set, exactly as
+    // the namespace list of Keto v0.12 did.
+    package chit
+
+    namespaces: {
+    	// The subject type of the subject IDs that Chit writes: a user ID in
+    	// chit/channel, and "Actor:<user ID>" in chit/command. Keto does not
+    	// type-check a subject ID; this namespace only names it. No tuple lives
+    	// here.
+    	"chit/actor": {}
+
+    	// A mirror of channel_members, written best-effort. Chit never checks it
+    	// to grant access: <channel ID>#member@<user ID>.
+    	"chit/channel": relations: member: ["chit/actor"]
+
+    	// Slash-command authorization. chit-reconcile owns this namespace.
+    	//   Role:<name>#member@Actor:<user ID>
+    	//   Command:<slug>#execute@chit/command:Role:<name>#member
+    	"chit/command": relations: {
+    		member: ["chit/actor"]
+    		execute: ["chit/command#member"]
+    	}
+    }
 ---
 # Pod 1: Database — starts PostgreSQL immediately
 apiVersion: v1
@@ -297,18 +328,23 @@ spec:
         - --yes
 
     - name: migrate-keto
-      image: docker.io/oryd/keto:v0.12
+      # PENDING trusted-service-containers P-TSC-2: keto-cue has no trusted
+      # image yet. `make keto-cue-image` builds this local one; replace it
+      # with the TSC image pinned by digest when P-TSC-2 publishes it.
+      image: localhost/keto-cue:2a6c583e
       command:
         - keto
         - migrate
         - up
         - --yes
+        - -c
+        - /etc/keto/keto.yml
       env:
         - name: DSN
           value: postgres://chit:chit@localhost:5432/keto?sslmode=disable
       volumeMounts:
         - name: keto-config
-          mountPath: /home/ory
+          mountPath: /etc/keto
 
     - name: migrate-chit
       image: docker.io/migrate/migrate:v4.15.0
@@ -347,7 +383,10 @@ spec:
           mountPath: /etc/kratos
 
     - name: keto
-      image: docker.io/oryd/keto:v0.12
+      # PENDING trusted-service-containers P-TSC-2: keto-cue has no trusted
+      # image yet. `make keto-cue-image` builds this local one; replace it
+      # with the TSC image pinned by digest when P-TSC-2 publishes it.
+      image: localhost/keto-cue:2a6c583e
       args:
         - serve
         - -c

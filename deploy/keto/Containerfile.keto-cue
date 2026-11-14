@@ -1,0 +1,40 @@
+# INTERIM local keto-cue image, PENDING trusted-service-containers P-TSC-2.
+#
+# keto-cue (https://github.com/infrashift/keto-cue) has no trusted image yet.
+# Until P-TSC-2 publishes one, `make keto-cue-image` compiles keto-cue from
+# KETO_CUE_SRC on the host and copies the binary into this image. The layout
+# copies the trusted Ory images: trusted ubi9-micro, the CA bundle from
+# trusted ubi9-minimal, user 1001 ("ory") in group 0, HOME=/home/ory, and keto
+# on /usr/bin. Delete this file and the make target when the deploy files pin
+# the trusted image.
+#
+# The context is a directory that holds only the `keto` binary.
+
+FROM ghcr.io/infrashift/trusted-base-images/trusted/ubi9-minimal@sha256:00f323f097e88a3c144e49c127d8b1806dae1ffcaffad4ec3aeffc1edfbce21e AS certs
+
+FROM ghcr.io/infrashift/trusted-base-images/trusted/ubi9-micro@sha256:7e508a2e662514790147d89553ef62ad744e191680df061aa3efcfab48cb25af
+
+ARG KETO_CUE_REVISION=unknown
+LABEL org.opencontainers.image.title="keto-cue (local, pending P-TSC-2)" \
+      org.opencontainers.image.source="https://github.com/infrashift/keto-cue" \
+      org.opencontainers.image.revision="${KETO_CUE_REVISION}"
+
+USER root
+COPY --from=certs /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem \
+                  /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
+COPY keto /usr/bin/keto
+RUN set -euo pipefail; \
+    printf 'ory:x:1001:0:keto-cue service account:/home/ory:/sbin/nologin\n' >> /etc/passwd; \
+    mkdir -p /home/ory; \
+    chown -R 1001:0 /home/ory; \
+    chmod -R g=u /home/ory; \
+    /usr/bin/keto version
+
+ENV HOME=/home/ory \
+    SSL_CERT_FILE=/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem \
+    TZ=UTC
+WORKDIR /home/ory
+EXPOSE 4466 4467
+ENTRYPOINT ["keto"]
+CMD ["serve"]
+USER 1001

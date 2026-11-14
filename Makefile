@@ -1,4 +1,4 @@
-.PHONY: build build-mcp build-reconcile build-claude build-tui build-all run test test-integration test-tui test-all test-container test-e2e test-e2e-tui test-e2e-clean lint vuln lint-tui check-deps validate-spec cue-validate reconcile migrate-up migrate-down kube-migrate kube-build kube-up kube-down kube-restart kube-logs kube-clean uat-up uat-seed-kratos uat-down uat-clean docs-dev clean
+.PHONY: keto-cue-image keto-cue-image-present keto-validate test-keto build build-mcp build-reconcile build-claude build-tui build-all run test test-integration test-tui test-all test-container test-e2e test-e2e-tui test-e2e-clean lint vuln lint-tui check-deps validate-spec cue-validate reconcile migrate-up migrate-down kube-migrate kube-build kube-up kube-down kube-restart kube-logs kube-clean uat-up uat-seed-kratos uat-down uat-clean docs-dev clean
 
 BINARY=bin/chitd
 MCP_BINARY=bin/chit-mcp
@@ -11,7 +11,17 @@ CHIT_IMAGE?=localhost/chit:latest
 
 E2E_POD=chit-e2e
 E2E_IMAGE=chit-e2e:latest
+
 PG_IMAGE=docker.io/library/postgres:17-alpine
+
+# keto-cue, the Keto fork that reads CUE permission schemas. PENDING
+# trusted-service-containers P-TSC-2: until it publishes a trusted image,
+# keto-cue-image builds this local one from a keto-cue checkout at
+# KETO_CUE_REV. The deploy/*.kube.yml files name the same tag.
+KETO_CUE_SRC?=../keto-cue
+KETO_CUE_REV=2a6c583e
+KETO_CUE_IMAGE=localhost/keto-cue:$(KETO_CUE_REV)
+KETO_SCHEMA=deploy/keto/namespaces.cue
 
 
 # Server-module Go invocations run with GOWORK=off so each module in the
@@ -160,9 +170,56 @@ kube-migrate:
 		docker.io/migrate/migrate:v4.15.0 \
 		-database "$(MIGRATE_URL)" -path /migrations up
 
+## --- Keto (keto-cue) ---
+
+# Builds the interim keto-cue image (see deploy/keto/Containerfile.keto-cue)
+# from KETO_CUE_SRC, which must be checked out at KETO_CUE_REV. The binary is
+# compiled the way trusted-service-containers compiles Keto: static, json1.
+KETO_CUE_CTX=bin/keto-cue-image
+keto-cue-image:
+	@test "$$(git -C $(KETO_CUE_SRC) rev-parse --short=8 HEAD)" = "$(KETO_CUE_REV)" \
+		|| (echo "FAIL: $(KETO_CUE_SRC) is not at keto-cue $(KETO_CUE_REV)" && exit 1)
+	mkdir -p $(KETO_CUE_CTX)
+	cd $(KETO_CUE_SRC) && CGO_ENABLED=0 go build -tags json1 -ldflags "-s -w \
+		-X github.com/ory/keto/internal/driver/config.Version=keto-cue-$(KETO_CUE_REV) \
+		-X github.com/ory/keto/internal/driver/config.Commit=$$(git rev-parse HEAD) \
+		-X github.com/ory/keto/internal/driver/config.Date=$$(git log -1 --format=%cI)" \
+		-o $(CURDIR)/$(KETO_CUE_CTX)/keto .
+	podman build -t $(KETO_CUE_IMAGE) --build-arg KETO_CUE_REVISION=$(KETO_CUE_REV) \
+		-f deploy/keto/Containerfile.keto-cue $(KETO_CUE_CTX)
+
+# Builds the image only when it is missing.
+keto-cue-image-present:
+	@podman image exists $(KETO_CUE_IMAGE) || $(MAKE) keto-cue-image
+
+# Compiles Chit's permission schema as the keto-cue server does.
+keto-validate: keto-cue-image-present
+	podman run --rm -v $(CURDIR)/$(KETO_SCHEMA):/schema.cue:ro,Z $(KETO_CUE_IMAGE) \
+		namespace validate /schema.cue
+
+# Runs the Keto client and reconciler tests (internal/keto, integration tag)
+# against a throwaway keto-cue with Chit's schema and an in-memory store.
+# Set KETO_TEST_IMAGE to run the same assertions against another Keto build.
+KETO_TEST_IMAGE?=$(KETO_CUE_IMAGE)
+KETO_TEST_READ_PORT?=54466
+KETO_TEST_WRITE_PORT?=54467
+test-keto: keto-cue-image-present
+	-podman rm -f chit-ktest 2>/dev/null
+	podman run -d --rm --name chit-ktest \
+		-p $(KETO_TEST_READ_PORT):4466 -p $(KETO_TEST_WRITE_PORT):4467 \
+		-v $(CURDIR)/deploy/keto:/etc/keto:ro,Z -e DSN=memory \
+		$(KETO_TEST_IMAGE) serve -c /etc/keto/keto.yml
+	@until curl -sf http://localhost:$(KETO_TEST_READ_PORT)/health/ready >/dev/null; do sleep 1; done
+	CHIT_KETO_READ_URL=http://localhost:$(KETO_TEST_READ_PORT) \
+	CHIT_KETO_WRITE_URL=http://localhost:$(KETO_TEST_WRITE_PORT) \
+		GOWORK=off go test -race -count=1 -tags integration ./internal/keto/... ; \
+	EXIT_CODE=$$? ; \
+	podman rm -f chit-ktest >/dev/null ; \
+	exit $$EXIT_CODE
+
 ## --- Podman Kube ---
 
-kube-build:
+kube-build: keto-cue-image-present
 	podman build -t $(CHIT_IMAGE) -f deploy/Containerfile .
 
 kube-up: kube-build
