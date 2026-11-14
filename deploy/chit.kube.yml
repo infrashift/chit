@@ -286,13 +286,15 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: chit-keto-config
-# Copies of deploy/keto/keto.yml and deploy/keto/namespaces.cue.
-# TestKetoSchemaInSync fails when they differ.
+# A copy of deploy/keto/keto.yml. TestKetoSchemaInSync fails when they differ.
 data:
   keto.yml: |
     # keto-cue configuration. keto-cue is the Ory Keto fork that reads the
-    # permission schema in CUE (namespaces.cue, next to this file). The kube files
-    # mount both at /etc/keto. DSN comes from the environment.
+    # permission schema in CUE. namespaces.location is a directory: keto-cue
+    # compiles every *.cue file in it as one package, so services that share
+    # this keto-cue each add one file (see schema/chit.cue). The kube files
+    # mount this file at /etc/keto and schema/ at /etc/keto/schema. DSN comes
+    # from the environment.
     serve:
       read:
         host: 0.0.0.0
@@ -302,22 +304,46 @@ data:
         port: 4467
 
     namespaces:
-      location: file:///etc/keto/namespaces.cue
+      location: file:///etc/keto/schema
 
     log:
       level: info
       format: json
-  namespaces.cue: |
-    // Chit's keto-cue permission schema. keto-cue reads it from
-    // namespaces.location in keto.yml; `make keto-validate` compiles it the way
-    // the server does. The chit-keto-config ConfigMap in deploy/chit.kube.yml and
-    // deploy/chit-uat.kube.yml carries a copy, and TestKetoSchemaInSync keeps the
-    // three the same.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chit-keto-schema
+# Chit's file of the shared keto-cue schema directory, a copy of
+# deploy/keto/schema/chit.cue. A service that shares this keto-cue adds its
+# own file to the directory. TestKetoSchemaInSync fails when they differ.
+data:
+  chit.cue: |
+    // Chit's part of the keto-cue permission schema.
+    //
+    // One keto-cue instance serves Chit and HALO. keto-cue compiles every *.cue
+    // file of its schema directory (namespaces.location) as ONE CUE package, so
+    // each service ships one file and every file follows these rules:
+    //
+    //   - The package clause is `package keto`, the name of keto-cue's base
+    //     schema. Two different package names in one directory are an error.
+    //   - A service declares namespaces only under its own prefix: Chit uses
+    //     "chit/...". CUE unifies a namespace that two files declare instead of
+    //     refusing it, so a shared name would silently merge two services' rules.
+    //   - Definitions (#name) and hidden fields (_name) are package-wide too:
+    //     prefix them with the service name (#chit_...).
+    //   - A file may refer to another service's namespace as a subject type,
+    //     for example ["chit/actor"].
+    //
+    // `make keto-validate` compiles this file alone and next to a sample HALO
+    // file (internal/keto/testdata/halo.cue). The chit-keto-schema ConfigMap in
+    // deploy/chit.kube.yml and deploy/chit-uat.kube.yml carries a copy, and
+    // TestKetoSchemaInSync keeps them the same.
     //
     // The schema declares only what Chit writes and checks. Keto runs in its
     // default, non-strict mode, so a check follows every subject set, exactly as
     // the namespace list of Keto v0.12 did.
-    package chit
+    package keto
 
     namespaces: {
     	// The subject type of the subject IDs that Chit writes: a user ID in
@@ -452,6 +478,8 @@ spec:
       volumeMounts:
         - name: keto-config
           mountPath: /etc/keto
+        - name: keto-schema
+          mountPath: /etc/keto/schema
 
     - name: migrate-hydra
       image: ghcr.io/infrashift/trusted-service-containers/trusted/hydra:v26.2.0-382cdac@sha256:9fec07541f34f4f4ea83b7f3c834647e9b3c21f5b4403a547bf98454f4b1b2e7
@@ -510,6 +538,8 @@ spec:
       volumeMounts:
         - name: keto-config
           mountPath: /etc/keto
+        - name: keto-schema
+          mountPath: /etc/keto/schema
 
     - name: hydra
       image: ghcr.io/infrashift/trusted-service-containers/trusted/hydra:v26.2.0-382cdac@sha256:9fec07541f34f4f4ea83b7f3c834647e9b3c21f5b4403a547bf98454f4b1b2e7
@@ -579,6 +609,9 @@ spec:
     - name: keto-config
       configMap:
         name: chit-keto-config
+    - name: keto-schema
+      configMap:
+        name: chit-keto-schema
     - name: hydra-config
       configMap:
         name: chit-hydra-config

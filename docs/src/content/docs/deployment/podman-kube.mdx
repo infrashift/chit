@@ -62,7 +62,8 @@ keto-cue waits for a TSC image (P-TSC-2) and is built locally by
 | `chit-kratos-config` | Kratos server config + identity schema |
 | `chit-hydra-config` | Hydra server config (issuer, opaque 1-hour access tokens, placeholder system secret) |
 | `chit-oathkeeper-config` | Oathkeeper access rules and server config |
-| `chit-keto-config` | keto-cue server config (`keto.yml`) and permission schema (`namespaces.cue`), copies of `deploy/keto/` |
+| `chit-keto-config` | keto-cue server config, a copy of `deploy/keto/keto.yml` |
+| `chit-keto-schema` | Chit's file of the keto-cue schema directory, a copy of `deploy/keto/schema/chit.cue`, mounted at `/etc/keto/schema` |
 
 ## Persistent Volumes
 
@@ -122,7 +123,7 @@ See [Manual Acceptance Testing](/chit/getting-started/manual-acceptance-testing/
 | `make validate-spec` | Validate `api/openapi.yaml` |
 | `make cue-validate` | Evaluate the CUE definitions in `auth/` |
 | `make keto-cue-image` | Build the interim `localhost/keto-cue` image from `../keto-cue` (`KETO_CUE_SRC`), pending trusted-service-containers P-TSC-2 |
-| `make keto-validate` | Compile `deploy/keto/namespaces.cue` with keto-cue, as the server does |
+| `make keto-validate` | Compile `deploy/keto/schema/` with keto-cue, as the server does, and again next to a sample HALO file |
 | `make test-keto` | Run the Keto client and reconciler tests against a throwaway keto-cue (`KETO_TEST_IMAGE` runs them against another Keto) |
 
 ## Containerfile

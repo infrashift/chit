@@ -28,7 +28,8 @@ MIGRATE_IMAGE=docker.io/migrate/migrate:v4.15.0@sha256:f613168b682b4c17033a1d5b3
 KETO_CUE_SRC?=../keto-cue
 KETO_CUE_REV=2a6c583e
 KETO_CUE_IMAGE=localhost/keto-cue:$(KETO_CUE_REV)
-KETO_SCHEMA=deploy/keto/namespaces.cue
+# The schema directory keto-cue loads: one CUE package, one file per service.
+KETO_SCHEMA=deploy/keto/schema
 
 
 # Server-module Go invocations run with GOWORK=off so each module in the
@@ -199,10 +200,15 @@ keto-cue-image:
 keto-cue-image-present:
 	@podman image exists $(KETO_CUE_IMAGE) || $(MAKE) keto-cue-image
 
-# Compiles Chit's permission schema as the keto-cue server does.
+# Compiles Chit's schema directory as the keto-cue server does, then the
+# same file next to a sample HALO file, as one package in one directory: the
+# shared keto-cue that HALO and Chit will use.
 keto-validate: keto-cue-image-present
-	podman run --rm -v $(CURDIR)/$(KETO_SCHEMA):/schema.cue:ro,Z $(KETO_CUE_IMAGE) \
-		namespace validate /schema.cue
+	podman run --rm -v $(CURDIR)/$(KETO_SCHEMA):/schema:ro,Z $(KETO_CUE_IMAGE) \
+		namespace validate /schema
+	podman run --rm -v $(CURDIR)/$(KETO_SCHEMA)/chit.cue:/shared/chit.cue:ro,Z \
+		-v $(CURDIR)/internal/keto/testdata/halo.cue:/shared/halo.cue:ro,Z $(KETO_CUE_IMAGE) \
+		namespace validate /shared
 
 # Runs the Keto client and reconciler tests (internal/keto, integration tag)
 # against a throwaway keto-cue with Chit's schema and an in-memory store.

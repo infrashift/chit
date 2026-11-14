@@ -6,17 +6,19 @@ import (
 	"io"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/cuecontext"
+	"cuelang.org/go/cue/parser"
 	"gopkg.in/yaml.v3"
 
 	"github.com/infrashift/chit/internal/model"
 )
 
 const (
-	schemaFile = "../../deploy/keto/namespaces.cue"
+	schemaFile = "../../deploy/keto/schema/chit.cue"
 	configFile = "../../deploy/keto/keto.yml"
 )
 
@@ -31,9 +33,8 @@ func readFile(t *testing.T, path string) string {
 	return string(b)
 }
 
-// ketoConfigMap returns the data of the chit-keto-config ConfigMap in a kube
-// file.
-func ketoConfigMap(t *testing.T, path string) map[string]string {
+// configMap returns the data of the named ConfigMap in a kube file.
+func configMap(t *testing.T, path, name string) map[string]string {
 	t.Helper()
 	dec := yaml.NewDecoder(bytes.NewReader([]byte(readFile(t, path))))
 	for {
@@ -46,31 +47,57 @@ func ketoConfigMap(t *testing.T, path string) map[string]string {
 		}
 		err := dec.Decode(&doc)
 		if errors.Is(err, io.EOF) {
-			t.Fatalf("%s: no chit-keto-config ConfigMap", path)
+			t.Fatalf("%s: no %s ConfigMap", path, name)
 		}
 		if err != nil {
 			t.Fatalf("%s: %v", path, err)
 		}
-		if doc.Kind == "ConfigMap" && doc.Metadata.Name == "chit-keto-config" {
+		if doc.Kind == "ConfigMap" && doc.Metadata.Name == name {
 			return doc.Data
 		}
 	}
 }
 
-// TestKetoSchemaInSync keeps the ConfigMap copies of the keto-cue schema and
-// config the same as deploy/keto, which `make keto-validate` and
+// TestKetoSchemaInSync keeps the ConfigMap copies of the keto-cue config and
+// schema the same as deploy/keto, which `make keto-validate` and
 // `make test-keto` use.
 func TestKetoSchemaInSync(t *testing.T) {
-	want := map[string]string{
-		"namespaces.cue": readFile(t, schemaFile),
-		"keto.yml":       readFile(t, configFile),
+	want := []struct{ configMap, key, file string }{
+		{"chit-keto-config", "keto.yml", configFile},
+		{"chit-keto-schema", "chit.cue", schemaFile},
 	}
 	for _, kube := range kubeFiles {
-		data := ketoConfigMap(t, kube)
-		for key, content := range want {
-			if data[key] != content {
-				t.Errorf("%s: chit-keto-config %q differs from deploy/keto/%s", kube, key, key)
+		for _, w := range want {
+			data := configMap(t, kube, w.configMap)
+			if len(data) != 1 || data[w.key] != readFile(t, w.file) {
+				t.Errorf("%s: %s must hold only %q, a copy of %s", kube, w.configMap, w.key, w.file)
 			}
+		}
+	}
+}
+
+// TestKetoSchemaSharesThePackage checks the rules that let Chit's file share
+// a keto-cue schema directory with other services' files: keto-cue compiles
+// them as one package, so the package must be the shared name, and every
+// namespace must carry Chit's prefix, or CUE would merge it with another
+// service's namespace of the same name. `make keto-validate` compiles the
+// file next to a sample HALO file.
+func TestKetoSchemaSharesThePackage(t *testing.T) {
+	f, err := parser.ParseFile(schemaFile, readFile(t, schemaFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.PackageName(); got != "keto" {
+		t.Errorf("package %q, want keto: keto-cue refuses two package names in one directory", got)
+	}
+	v := cuecontext.New().BuildFile(f)
+	iter, err := v.LookupPath(cue.ParsePath("namespaces")).Fields()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for iter.Next() {
+		if name := iter.Selector().Unquoted(); !strings.HasPrefix(name, "chit/") {
+			t.Errorf("namespace %q lacks the chit/ prefix", name)
 		}
 	}
 }
