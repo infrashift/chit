@@ -26,7 +26,9 @@ Behaviour changes an operator must act on or know about:
   rename or delete these), and drops tags applied nowhere. The down
   migration is lossy: it drops private tags and channel tags and merges
   same-named tags. `POST /tags` without a `scope` now creates a **private**
-  tag: chit-tui's "create and apply" makes tags only their creator sees.
+  tag; chit-tui asks for a channel tag of the current channel, as its
+  tags always behaved, and makes a private one only on request (Ctrl+T in
+  the tag picker).
   `GET /tags`, post and batch tag reads, search and `post_tags_updated` show
   each user only the tags they can see.
 - **Keto is now keto-cue, with a CUE permission schema.**
