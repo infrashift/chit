@@ -1479,7 +1479,7 @@ paths:
 
         A name has 1 to 50 characters: letters, digits, space, `-`, `_` and
         `.`. It is unique per owner (private) or per channel (channel) after
-        NFKC normalization and case folding; creating a name that exists in
+        NFKC normalization and simple lowercasing; creating a name that exists in
         its scope returns the existing tag. An owner has at most 1024 tags.
 
         The prefix `profile/` is reserved for HALO's Profile tags: a person

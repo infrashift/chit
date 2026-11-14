@@ -207,7 +207,7 @@ Per-user thread follow and read state.
 |---|---|---|---|
 | `id` | UUID | PK | UUIDv7 primary key |
 | `name` | VARCHAR(50) | NOT NULL | Tag name, NFKC-normalized, case kept |
-| `name_key` | VARCHAR(200) | NOT NULL | The name after NFKC and case folding |
+| `name_key` | VARCHAR(200) | NOT NULL | The name after NFKC and simple lowercasing (`lower(normalize(name, NFKC))`) |
 | `owner_id` | UUID | NOT NULL, FK → users (CASCADE) | Owner |
 | `scope` | VARCHAR(10) | NOT NULL, `private` or `channel` | Who sees it |
 | `channel_id` | UUID | FK → channels (CASCADE); set exactly for `channel` | The channel of a channel tag |

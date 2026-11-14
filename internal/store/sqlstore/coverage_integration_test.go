@@ -173,7 +173,7 @@ func TestTagStoreIntegration_GetTagsForPosts(t *testing.T) {
 		t.Fatalf("GetTagsForPosts = %v; want only p1 tagged", got)
 	}
 
-	// A name is unique in its channel by its folded key: a second save is
+	// A name is unique in its channel by its lowercased key: a second save is
 	// a 409, and the app answers it with the existing tag.
 	_, err = ss.Tag().Save(t.Context(), &model.Tag{Name: "BulkBug", Scope: model.TagScopeChannel, ChannelID: channel.ID, OwnerID: user.ID})
 	var appErr *model.AppError

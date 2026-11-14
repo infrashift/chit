@@ -197,7 +197,8 @@ and naming its ID answers 404 as for an unknown tag. A `channel` tag belongs
 to one channel: every member sees it and may apply or remove it there, and
 only there. Only the owner renames or deletes a tag. A name has 1 to 50
 characters (letters, digits, space, `-`, `_`, `.`) and is unique per owner
-(private) or per channel (channel) after NFKC normalization and case folding.
+(private) or per channel (channel) after NFKC normalization and simple
+lowercasing (so `ß` and `ss` are different names).
 An item has at most 32 channel tags and 32 private tags of each owner; an
 owner owns at most 1024 tags. Each application records `applied_by`.
 

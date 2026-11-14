@@ -13,7 +13,9 @@ Behaviour changes an operator must act on or know about:
 - **Tags have an owner and a scope (migration `000008`).** A tag is now
   `private` (its owner's alone, on anything they can read) or `channel`
   (shared by one channel's members, usable only there), and names are unique
-  per owner or per channel after NFKC and case folding, no longer server-wide.
+  per owner or per channel after NFKC and lowercasing (ß and ss stay
+  distinct), no longer server-wide. Old names that now share a key in one
+  channel ("Bug", "bug") merge into one tag.
   The migration turns each existing tag into a channel tag in every channel
   where a post carries it, owned by the new system actor `chit-system`
   (Chit never recorded who created or applied a tag; a system_admin may

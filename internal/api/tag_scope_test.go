@@ -403,7 +403,7 @@ func TestDeleteUserTags(t *testing.T) {
 
 // ─── Scope rules ─────────────────────────────────────────────────
 
-func TestTags_NamesAreUniquePerScopeAfterNFKCAndCaseFolding(t *testing.T) {
+func TestTags_NamesAreUniquePerScopeAfterNFKCAndLowercasing(t *testing.T) {
 	e := newTagEnv(t)
 	a1 := e.mustCreateTag(t, "user:"+aliceKratos, "Bug Fix", model.TagScopePrivate, "", nil)
 	a2 := e.mustCreateTag(t, "user:"+aliceKratos, "ＢＵＧ fix", model.TagScopePrivate, "", nil)
