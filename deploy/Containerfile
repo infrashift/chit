@@ -17,27 +17,49 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /bin/chitd ./cmd/chitd
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /bin/chit-reconcile ./cmd/chit-reconcile
 
-# Runtime stage
-# trusted-base-images ubi9-minimal (latest), pinned by digest: the base the
-# trusted-service-containers images take their CA bundle from.
-FROM ghcr.io/infrashift/trusted-base-images/trusted/ubi9-minimal@sha256:00f323f097e88a3c144e49c127d8b1806dae1ffcaffad4ec3aeffc1edfbce21e
+# CA trust donor. ubi9-micro ships no /etc/pki/ca-trust, so the bundle comes
+# from trusted-base-images ubi9-minimal, as in trusted-service-containers.
+FROM ghcr.io/infrashift/trusted-base-images/trusted/ubi9-minimal@sha256:00f323f097e88a3c144e49c127d8b1806dae1ffcaffad4ec3aeffc1edfbce21e AS certs
 
-# The trusted base runs as UID 1001; installing packages needs root, and
-# USER chit below drops it again.
+# Runtime stage
+# trusted-base-images ubi9-micro (latest), pinned by its multi-arch index. The
+# index holds the same per-arch digests that trusted-service-containers pins for
+# its Chit image, so this image runs on the same base. ubi9-micro has no package
+# manager and none of the krb5-libs that failed the High gate on ubi9-minimal.
+FROM ghcr.io/infrashift/trusted-base-images/trusted/ubi9-micro@sha256:7e508a2e662514790147d89553ef62ad744e191680df061aa3efcfab48cb25af
+
 USER root
-RUN microdnf install -y shadow-utils && microdnf clean all
-RUN groupadd -r chit && useradd -r -g chit -s /sbin/nologin chit
+
+COPY --from=certs /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem \
+                  /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
 
 COPY --from=builder /bin/chitd /usr/local/bin/chitd
 # The one-shot reconciler that pushes auth/*.cue into Keto. It ships in the same
 # image so the Nomad job can run it as a batch task against the same CUE the
 # server loads, rather than a second image that could drift from it.
 COPY --from=builder /bin/chit-reconcile /usr/local/bin/chit-reconcile
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /src/auth /etc/chit/auth
-ENV CHIT_COMMANDS_CUE_DIR=/etc/chit/auth
 
-USER chit
+# ubi9-micro has no shadow-utils, so the passwd entry is appended by hand, as
+# trusted-service-containers does. UID 1001 in GID 0, with `chmod g=u`, keeps
+# the image usable under an arbitrary UID. /var/log/chit is the default audit
+# log directory (CHIT_AUDIT_LOG_PATH); without it chitd logs audit to stderr.
+RUN set -euo pipefail; \
+    test "$(stat -c %s /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem)" -gt 100000; \
+    test -n "$(ls /etc/chit/auth)"; \
+    printf 'chit:x:1001:0:Chit service account:/home/chit:/sbin/nologin\n' >> /etc/passwd; \
+    mkdir -p /etc/pki/tls/certs /etc/ssl /home/chit /var/log/chit; \
+    ln -sf /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem /etc/pki/tls/certs/ca-bundle.crt; \
+    ln -sf /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem /etc/ssl/cert.pem; \
+    chown -R 1001:0 /home/chit /var/log/chit; \
+    chmod -R g=u /home/chit /var/log/chit
+
+ENV HOME=/home/chit \
+    SSL_CERT_FILE=/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem \
+    CHIT_COMMANDS_CUE_DIR=/etc/chit/auth
+
+WORKDIR /home/chit
+USER 1001
 EXPOSE 8065
 
 ENTRYPOINT ["chitd"]
