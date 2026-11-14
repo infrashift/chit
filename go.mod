@@ -2,6 +2,8 @@ module github.com/infrashift/chit
 
 go 1.26.10
 
+toolchain go1.26.11
+
 require (
 	cuelang.org/go v0.16.0
 	github.com/getkin/kin-openapi v0.149.0
