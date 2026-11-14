@@ -23,6 +23,10 @@ ZINC_URL="http://localhost:4080"        # ZincSearch
 ZINC_USER="admin"
 ZINC_PASS="admin"
 CHITD="http://localhost:8065"           # chitd direct (for health check)
+# Runs one SQL statement in chit's database. Only the setup uses it, to grant
+# system_admin, which no API grants to a person. Point it at the UAT pod with
+# E2E_PSQL="podman exec -i chit-uat-db-postgres psql -U chit -d chit -tAc".
+E2E_PSQL="${E2E_PSQL:-podman exec -i chit-db-postgres psql -U chit -d chit -tAc}"
 
 # ---------------------------------------------------------------------------
 # Counters
@@ -301,6 +305,11 @@ kratos_create_identity "charlie@test.local" "charlie" "Charlie Clark" "TestPass1
 CHARLIE_KRATOS_ID="$IDENTITY_ID"
 echo "  Charlie Kratos ID: ${CHARLIE_KRATOS_ID}"
 
+# Dave is the system_admin: removing another member of a channel needs it.
+kratos_create_identity "dave@test.local" "dave" "Dave Admin" "TestPass1234"
+DAVE_KRATOS_ID="$IDENTITY_ID"
+echo "  Dave  Kratos ID: ${DAVE_KRATOS_ID}"
+
 # ---------------------------------------------------------------------------
 # Login each user to get session tokens
 # ---------------------------------------------------------------------------
@@ -317,6 +326,27 @@ echo "  Bob   token: ${BOB_TOKEN:0:20}..."
 kratos_login "charlie@test.local" "TestPass1234"
 CHARLIE_TOKEN="$SESSION_TOKEN"
 echo "  Charlie token: ${CHARLIE_TOKEN:0:20}..."
+
+kratos_login "dave@test.local" "TestPass1234"
+DAVE_TOKEN="$SESSION_TOKEN"
+echo "  Dave  token: ${DAVE_TOKEN:0:20}..."
+
+# ---------------------------------------------------------------------------
+# Provision Dave and make him system_admin
+# ---------------------------------------------------------------------------
+section "SETUP: Grant system_admin to Dave"
+
+DAVE_ID=$(curl -s -H "X-Session-Token: ${DAVE_TOKEN}" "${API}/users/me" | jq -r '.id')
+if [[ -z "$DAVE_ID" || "$DAVE_ID" == "null" ]]; then
+  echo -e "${RED}FATAL: could not provision Dave.${NC}"
+  exit 1
+fi
+DAVE_ROLES=$($E2E_PSQL "UPDATE users SET roles = 'system_user system_admin' WHERE id = '${DAVE_ID}' RETURNING roles" | head -1)
+if [[ "$DAVE_ROLES" != *system_admin* ]]; then
+  echo -e "${RED}FATAL: could not grant system_admin to Dave with: ${E2E_PSQL}${NC}"
+  exit 1
+fi
+echo "  Dave ${DAVE_ID}: ${DAVE_ROLES}"
 
 # ---------------------------------------------------------------------------
 echo ""
@@ -538,8 +568,20 @@ assert_json "2.11 Keto: Bob is member" ".allowed" "true" "$KETO_CHECK"
 # 2.12 Add Bob to private channel then remove him
 curl_api_full POST "/channels/${PRIVATE_CHANNEL_ID}/members" "{\"user_id\":\"${BOB_ID}\"}"
 assert_status "2.12a add Bob to private channel" 201 "$LAST_STATUS"
+# 2.12b Removing another member needs system_admin (e85f76d); Alice, the
+# channel's creator, is not one.
 curl_api_full DELETE "/channels/${PRIVATE_CHANNEL_ID}/members/${BOB_ID}"
-assert_status "2.12b remove Bob from private channel" 200 "$LAST_STATUS"
+assert_status "2.12b non-admin cannot remove Bob" 403 "$LAST_STATUS"
+# 2.12c-e Dave, the system_admin, joins the team and the channel (removal
+# also needs channel membership), then removes Bob.
+curl_api_full POST "/teams/${TEAM_ID}/members" "{\"user_id\":\"${DAVE_ID}\"}"
+assert_status "2.12c add Dave to team" 201 "$LAST_STATUS"
+curl_api_full POST "/channels/${PRIVATE_CHANNEL_ID}/members" "{\"user_id\":\"${DAVE_ID}\"}"
+assert_status "2.12d add Dave to private channel" 201 "$LAST_STATUS"
+CURRENT_TOKEN="$DAVE_TOKEN"
+curl_api_full DELETE "/channels/${PRIVATE_CHANNEL_ID}/members/${BOB_ID}"
+assert_status "2.12e system_admin removes Bob" 200 "$LAST_STATUS"
+CURRENT_TOKEN="$ALICE_TOKEN"
 
 # 2.13 Verify Keto relation removed for Bob on private channel
 KETO_CHECK=$(curl -s "${KETO_READ}/relation-tuples/check?namespace=chit/channel&object=${PRIVATE_CHANNEL_ID}&relation=member&subject_id=${BOB_ID}")
