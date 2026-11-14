@@ -146,7 +146,7 @@ make lint               # golangci-lint
 make vuln               # govulncheck
 ```
 
-Requires Go 1.25.14 or later and Podman.
+Requires Go 1.26.10 or later and Podman.
 
 ## API Documentation
 

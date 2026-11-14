@@ -240,6 +240,14 @@ Behaviour changes an operator must act on or know about:
 
 ### Security
 
+- Vulnerable modules updated, clearing the 9 Critical and 24 fixable High
+  grype findings in a chitd image: `golang.org/x/crypto` v0.58.0,
+  `golang.org/x/net` v0.62.0, `github.com/getkin/kin-openapi` v0.149.0 and
+  `github.com/klauspost/compress` v1.20.2 (with `x/sys`, `x/sync` and
+  `x/text` as they require). chit-tui takes the same `x/net` and
+  `github.com/yuin/goldmark` v1.7.17. The fixed `x/` modules need Go 1.26, so
+  both modules and the workspace now require **Go 1.26.10**, and the
+  builder images move to it.
 - Channel and post authorization enforced server-side: channel membership
   required to read/post/pin, author-or-admin required to edit/delete, team
   membership required to create/join channels, invite-by-member for
