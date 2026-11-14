@@ -51,12 +51,16 @@ func TestTag_PreSave(t *testing.T) {
 	}
 }
 
-func TestTagNameKey_NFKCAndCaseFold(t *testing.T) {
-	// Fullwidth letters (NFKC), upper case, and a letter that folds to two
-	// (ß -> ss) all share a key.
-	for _, name := range []string{"Strasse", "STRASSE", "Straße", "Ｓｔｒａｓｓｅ"} {
-		if got := TagNameKey(name); got != "strasse" {
-			t.Errorf("TagNameKey(%q) = %q, want strasse", name, got)
+func TestTagNameKey_NFKCAndLowercase(t *testing.T) {
+	for name, want := range map[string]string{
+		"Strasse": "strasse", "STRASSE": "strasse", "Ｓｔｒａｓｓｅ": "strasse",
+		// Simple lowercasing, not folding: ß stays ß, so "Straße" and
+		// "Strasse" are two names.
+		"Straße": "straße", "STRASSE ": "strasse",
+		"Résumé": "résumé", "RE\u0301SUME\u0301": "résumé",
+	} {
+		if got := TagNameKey(name); got != want {
+			t.Errorf("TagNameKey(%q) = %q, want %q", name, got, want)
 		}
 	}
 }

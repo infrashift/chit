@@ -6,7 +6,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"golang.org/x/text/cases"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -52,8 +51,9 @@ type Tag struct {
 	ChannelID string `json:"channel_id,omitempty"`
 	CreateAt  int64  `json:"create_at"`
 	UpdateAt  int64  `json:"update_at"`
-	// NameKey is the name after NFKC normalization and case folding; a name
-	// is unique per owner (private) or per channel (channel) by its key.
+	// NameKey is the name after NFKC normalization and simple lowercasing
+	// (TagNameKey); a name is unique per owner (private) or per channel
+	// (channel) by its key.
 	NameKey string `json:"-"`
 }
 
@@ -118,10 +118,15 @@ func NormalizeTagName(name string) string {
 	return strings.TrimSpace(norm.NFKC.String(name))
 }
 
-// TagNameKey is the key a name is unique by: NFKC, then case folding.
-// "Résumé", "RÉSUMÉ" and "ｒésumé" share one key.
+// TagNameKey is the key a name is unique by: NFKC, then simple Unicode
+// lowercasing, rune by rune. "Résumé", "RÉSUMÉ" and "ｒésumé" share one key;
+// "ß" and "ss" do not, as full case folding would make them.
+//
+// It must equal PostgreSQL's lower(normalize(name, NFKC)), which migration
+// 000008 used for the existing tags: TestTagNameKey_AgreesWithPostgres
+// (integration) holds the two to one rule.
 func TagNameKey(name string) string {
-	return cases.Fold().String(NormalizeTagName(name))
+	return strings.ToLower(NormalizeTagName(name))
 }
 
 // IsReservedTagName reports whether name starts with the reserved prefix,
@@ -142,8 +147,8 @@ func ValidateTagName(raw string) *AppError {
 	}
 	rest := name
 	if IsReservedTagName(name) {
-		// The prefix is ASCII in the folded key; in the name it may differ
-		// in case only, so it has the same byte length.
+		// The prefix is ASCII in the key; in the NFKC name it may differ in
+		// case only, so it has the same byte length.
 		rest = name[len(ReservedTagPrefix):]
 		if rest == "" {
 			return NewBadRequestError("Tag.IsValid", "a profile/ tag needs a name after the prefix")

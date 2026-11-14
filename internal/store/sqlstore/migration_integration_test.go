@@ -97,9 +97,12 @@ func TestMigration000008_ScopedTags(t *testing.T) {
 	}
 	exec(`INSERT INTO posts (id, channel_id, user_id, content, create_at, update_at) VALUES
 	      ($1, $4, $6, 'a', 1, 1), ($2, $4, $6, 'b', 1, 1), ($3, $5, $6, 'c', 1, 1)`, p1, p2, p3, ch1, ch2, user)
-	exec(`INSERT INTO tags (id, name) VALUES ($1, 'Bug'), ($2, 'unused'), ($3, 'Straße')`, bug, unused, solo)
+	twin := "00000000-0000-7000-8000-0000000000a2"
+	exec(`INSERT INTO tags (id, name) VALUES ($1, 'Bug'), ($2, 'unused'), ($3, 'Straße'), ($4, 'BUG')`, bug, unused, solo, twin)
 	// bug: on two posts in ch1 and one in ch2. solo: on one post in ch2.
-	exec(`INSERT INTO message_tags (message_id, tag_id) VALUES ($1, $4), ($2, $4), ($3, $4), ($3, $5)`, p1, p2, p3, bug, solo)
+	// BUG, the same name in another case, on p1 and p2 in ch1: it merges
+	// into ch1's Bug (the lower id), and p1 keeps one application.
+	exec(`INSERT INTO message_tags (message_id, tag_id) VALUES ($1, $4), ($2, $4), ($3, $4), ($3, $5), ($1, $6), ($2, $6)`, p1, p2, p3, bug, solo, twin)
 
 	applyMigration(t, db, 8, "up")
 
@@ -124,8 +127,8 @@ func TestMigration000008_ScopedTags(t *testing.T) {
 		if r.owner != model.SystemActorID || r.scope != model.TagScopeChannel {
 			t.Errorf("tag %+v: want a channel tag of the system actor", r)
 		}
-		if r.id == unused {
-			t.Error("the unused tag survived")
+		if r.id == unused || r.id == "00000000-0000-7000-8000-0000000000a2" {
+			t.Errorf("tag %s survived: unused tags are dropped and BUG merges into Bug", r.id)
 		}
 	}
 	if got[0].name != "Bug" || got[0].channel != ch1 || got[0].id != bug || got[0].key != "bug" {
@@ -178,5 +181,69 @@ func TestMigration000008_ScopedTags(t *testing.T) {
 	}
 	if err := db.QueryRow(ctx, `SELECT COUNT(*) FROM message_tags`).Scan(&n); err != nil || n != 4 {
 		t.Errorf("applications after down: %d, %v; want all 4", n, err)
+	}
+}
+
+// tagKeyCases are names on which a Go key and a SQL key could part: letters
+// with special case rules, compatibility forms that NFKC rewrites, and the
+// reserved prefix in disguise.
+var tagKeyCases = []string{
+	"Straße", "STRASSE", // ß: lowercasing keeps it, folding would make ss
+	"Ｆｕｌｌｗｉｄｔｈ", "ﬁle", "Ⅻ", "K", // full width, ligature, Roman numeral, Kelvin sign
+	"İstanbul", "ISTANBUL", "ıi", // Turkish dotted capital I and dotless i
+	"ΣΊΣΥΦΟΣ", "σίσυφος", "ς", // Greek capital sigma, and the final sigma
+	"é", "É", "É", // combining acute accent and the precomposed form
+	"Ǆ", "ǅ", // a digraph with a titlecase form
+	"PROFILE/Coder", "ＰＲＯＦＩＬＥ/x", "Profile/x", // the reserved prefix
+}
+
+// TestTagNameKey_AgreesWithPostgres holds the Go key (model.TagNameKey) and
+// the SQL key of migration 000008 to one rule: NFKC, then simple
+// lowercasing. The SQL side is the migration itself, run on these names, so
+// a change to either side fails here.
+func TestTagNameKey_AgreesWithPostgres(t *testing.T) {
+	ctx := context.Background()
+	db := migrationDB(t, 8)
+	user, team := model.NewID(), model.NewID()
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := db.Exec(ctx, q, args...); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	exec(`INSERT INTO users (id, kratos_id, username, display_name, email, create_at, update_at) VALUES ($1, $2, 'u', 'U', 'u@x', 1, 1)`, user, model.NewID())
+	exec(`INSERT INTO teams (id, name, display_name, creator_id, create_at, update_at) VALUES ($1, 't', 'T', $2, 1, 1)`, team, user)
+	// Each name in a channel of its own: names that share a key in one
+	// channel merge, which TestMigration000008_ScopedTags covers.
+	for i, name := range tagKeyCases {
+		channel, post, id := model.NewID(), model.NewID(), model.NewID()
+		exec(`INSERT INTO channels (id, team_id, creator_id, name, display_name, type, create_at, update_at) VALUES ($1, $2, $3, $4, 'C', 'O', 1, 1)`,
+			channel, team, user, fmt.Sprintf("c%d", i))
+		exec(`INSERT INTO posts (id, channel_id, user_id, content, create_at, update_at) VALUES ($1, $2, $3, 'p', 1, 1)`, post, channel, user)
+		exec(`INSERT INTO tags (id, name) VALUES ($1, $2)`, id, name)
+		exec(`INSERT INTO message_tags (message_id, tag_id) VALUES ($1, $2)`, post, id)
+	}
+
+	applyMigration(t, db, 8, "up")
+
+	for _, name := range tagKeyCases {
+		var sqlKey string
+		if err := db.QueryRow(ctx, `SELECT name_key FROM tags WHERE name = $1`, name).Scan(&sqlKey); err != nil {
+			t.Fatalf("%q: %v", name, err)
+		}
+		if goKey := model.TagNameKey(name); goKey != sqlKey {
+			t.Errorf("%q: Go key %q, SQL key %q", name, goKey, sqlKey)
+		}
+		if strings.HasPrefix(sqlKey, model.ReservedTagPrefix) != model.IsReservedTagName(name) {
+			t.Errorf("%q: the SQL key and IsReservedTagName disagree about profile/", name)
+		}
+	}
+	for _, name := range []string{"PROFILE/Coder", "ＰＲＯＦＩＬＥ/x", "Profile/x"} {
+		if !model.IsReservedTagName(name) {
+			t.Errorf("%q is not refused as profile/", name)
+		}
+	}
+	if model.TagNameKey("Straße") == model.TagNameKey("Strasse") {
+		t.Error("ß and ss share a key")
 	}
 }
