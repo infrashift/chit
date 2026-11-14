@@ -56,12 +56,16 @@ func TestTagNameKey_NFKCAndLowercase(t *testing.T) {
 		"Strasse": "strasse", "STRASSE": "strasse", "Ｓｔｒａｓｓｅ": "strasse",
 		// Simple lowercasing, not folding: ß stays ß, so "Straße" and
 		// "Strasse" are two names.
-		"Straße": "straße", "STRASSE ": "strasse",
+		"Straße": "straße",
 		"Résumé": "résumé", "RE\u0301SUME\u0301": "résumé",
 	} {
 		if got := TagNameKey(name); got != want {
 			t.Errorf("TagNameKey(%q) = %q, want %q", name, got, want)
 		}
+	}
+	// Spaces around a name are trimmed before the key is made.
+	if got := TagNameKey("\tSTRASSE "); got != "strasse" {
+		t.Errorf("TagNameKey with spaces = %q, want strasse", got)
 	}
 }
 
