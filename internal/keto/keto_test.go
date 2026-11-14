@@ -12,13 +12,20 @@ type recorded struct {
 	body                map[string]any
 }
 
-func fakeKeto(t *testing.T, status int, reply string) (*Client, *[]recorded) {
+// fakeKeto answers every request with status and reply, except a list
+// (GET /relation-tuples), which it answers with the tuples in stored: the
+// lookup that WriteRelation makes before it writes.
+func fakeKeto(t *testing.T, status int, reply string, stored ...Tuple) (*Client, *[]recorded) {
 	t.Helper()
 	var got []recorded
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec := recorded{method: r.Method, path: r.URL.Path, query: r.URL.RawQuery}
 		_ = json.NewDecoder(r.Body).Decode(&rec.body)
 		got = append(got, rec)
+		if r.Method == http.MethodGet && r.URL.Path == "/relation-tuples" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"relation_tuples": stored, "next_page_token": ""})
+			return
+		}
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(reply))
 	}))
@@ -61,15 +68,52 @@ func TestWriteAndDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if (*got)[0].method != http.MethodPut || (*got)[0].body["subject_id"] != "sub" {
-		t.Errorf("write = %+v", (*got)[0])
+	// Each write is a lookup of the exact tuple, then the PUT.
+	if l := (*got)[0]; l.method != http.MethodGet || l.query != "namespace=ns&object=obj&page_size=1&relation=rel&subject_id=sub" {
+		t.Errorf("lookup = %+v", l)
 	}
-	if set, _ := (*got)[1].body["subject_set"].(map[string]any); set["relation"] != "srel" {
-		t.Errorf("subject-set write = %+v", (*got)[1])
+	if (*got)[1].method != http.MethodPut || (*got)[1].body["subject_id"] != "sub" {
+		t.Errorf("write = %+v", (*got)[1])
 	}
-	del := (*got)[2]
+	if l := (*got)[2]; l.method != http.MethodGet ||
+		l.query != "namespace=ns&object=obj&page_size=1&relation=rel&subject_set.namespace=sns&subject_set.object=sobj&subject_set.relation=srel" {
+		t.Errorf("subject-set lookup = %+v", l)
+	}
+	if set, _ := (*got)[3].body["subject_set"].(map[string]any); set["relation"] != "srel" {
+		t.Errorf("subject-set write = %+v", (*got)[3])
+	}
+	del := (*got)[4]
 	if del.method != http.MethodDelete || del.query != "namespace=ns&object=obj&relation=rel&subject_id=Role%3Aadmin%23member%26x%3D1" {
 		t.Errorf("delete = %+v", del)
+	}
+}
+
+// A tuple Keto already stores is not written again: Keto would store a
+// second row.
+func TestWrite_SkipsAStoredTuple(t *testing.T) {
+	stored := Tuple{Namespace: "ns", Object: "obj", Relation: "rel", SubjectID: "sub"}
+	c, got := fakeKeto(t, http.StatusOK, ``, stored)
+	if err := c.WriteRelation(t.Context(), "ns", "obj", "rel", "sub"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.WriteSubjectSetRelation(t.Context(), "ns", "obj", "rel", "sns", "sobj", "srel"); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range *got {
+		if r.method != http.MethodGet {
+			t.Errorf("wrote a stored tuple: %+v", r)
+		}
+	}
+}
+
+// A failed lookup fails the write rather than writing blind.
+func TestWrite_LookupErrorIsAnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	if err := New(srv.URL, srv.URL, srv.Client()).WriteRelation(t.Context(), "ns", "obj", "rel", "sub"); err == nil {
+		t.Fatal("a failed lookup was not an error")
 	}
 }
 

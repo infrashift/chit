@@ -3,6 +3,7 @@
 package keto_test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -68,9 +69,13 @@ func TestKetoIntegration_ChannelMembership(t *testing.T) {
 	if err := c.WriteRelation(t.Context(), ns, channel, model.KetoRelationMember, alice); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	// Writing the same tuple twice is not an error: chitd re-mirrors members.
+	// Writing the same tuple twice is not an error, and stores it once:
+	// chitd re-mirrors members.
 	if err := c.WriteRelation(t.Context(), ns, channel, model.KetoRelationMember, alice); err != nil {
 		t.Fatalf("second write: %v", err)
+	}
+	if n := countRows(t, c, ns, channel); n != 1 {
+		t.Fatalf("%d rows for %s after two writes, want 1", n, channel)
 	}
 	assertCheck(t, c, ns, channel, model.KetoRelationMember, alice, true)
 	assertCheck(t, c, ns, channel, model.KetoRelationMember, bob, false)
@@ -192,20 +197,71 @@ func assertTuples(t *testing.T, c *keto.Client, ns string, want []string) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	// A set: Keto stores a tuple once per write, so a tuple the reconciler
-	// writes on every run is listed once per run. Checks are unaffected, and
-	// a delete removes every copy.
-	seen := map[string]bool{}
+	// Rows, not a set: a duplicate row fails this.
 	got := []string{}
 	for i := range tuples {
-		if s := tuples[i].String(); !seen[s] {
-			seen[s] = true
-			got = append(got, s)
-		}
+		got = append(got, tuples[i].String())
 	}
 	sort.Strings(got)
 	sort.Strings(want)
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("tuples in %s:\n%s\nwant:\n%s", ns, strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// countRows counts the stored rows whose object is object, duplicates
+// included.
+func countRows(t *testing.T, c *keto.Client, ns, object string) int {
+	t.Helper()
+	tuples, err := c.ListRelations(t.Context(), ns)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	n := 0
+	for _, tu := range tuples {
+		if tu.Object == object {
+			n++
+		}
+	}
+	return n
+}
+
+// TestKetoIntegration_ReconcileTwiceDoesNotGrow runs the same reconcile
+// twice. Keto stores a row per PUT, so before the client looked a tuple up
+// before writing it, every chit-reconcile run added a copy of every grant.
+func TestKetoIntegration_ReconcileTwiceDoesNotGrow(t *testing.T) {
+	c := testClient(t)
+	ns := model.KetoNamespaceCommand
+	rec := command.NewReconciler(c)
+	cfg := &command.CUEConfig{
+		Roles:  []command.CUERole{{Name: "admin", AllowedCommands: []string{"help", "kick"}}},
+		Actors: []command.CUEActor{{ID: uniq("admin"), Roles: []string{"admin"}}},
+	}
+	// Start from an empty namespace, whatever an earlier test left.
+	if err := rec.Reconcile(t.Context(), &command.CUEConfig{}); err != nil {
+		t.Fatalf("empty reconcile: %v", err)
+	}
+	t.Cleanup(func() { _ = rec.Reconcile(context.Background(), &command.CUEConfig{}) })
+	rows := func() int {
+		t.Helper()
+		tuples, err := c.ListRelations(t.Context(), ns)
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		return len(tuples)
+	}
+
+	if err := rec.Reconcile(t.Context(), cfg); err != nil {
+		t.Fatalf("first reconcile: %v", err)
+	}
+	first := rows()
+	if first != 3 {
+		t.Fatalf("%d rows after the first reconcile, want 3", first)
+	}
+	if err := rec.Reconcile(t.Context(), cfg); err != nil {
+		t.Fatalf("second reconcile: %v", err)
+	}
+	if second := rows(); second != first {
+		t.Fatalf("%d rows after the second reconcile, want %d: the reconcile wrote duplicates", second, first)
 	}
 }
