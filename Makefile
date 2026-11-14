@@ -12,7 +12,14 @@ CHIT_IMAGE?=localhost/chit:latest
 E2E_POD=chit-e2e
 E2E_IMAGE=chit-e2e:latest
 
-PG_IMAGE=docker.io/library/postgres:17-alpine
+# Third-party images, pinned by digest. docs/.../upgrade-keto-cue.mdx lists
+# where each one comes from; keep the deploy/*.kube.yml copies the same.
+# PostgreSQL 17 is the trusted-service-containers mirror of the Docker
+# Hardened Image. It is in quarantine, so only its immutable -<shortsha> tag
+# exists.
+PG_IMAGE=ghcr.io/infrashift/trusted-service-containers/quarantine/postgres:17-debian-382cdac@sha256:66dcbc496311685361b6a56e261e6694454daea3e297604dfd79590275f03910
+# Not in trusted-service-containers: upstream, pinned by digest.
+MIGRATE_IMAGE=docker.io/migrate/migrate:v4.15.0@sha256:f613168b682b4c17033a1d5b381e0cb474c05715b843f4b160fb7bab9cead0c5
 
 # keto-cue, the Keto fork that reads CUE permission schemas. PENDING
 # trusted-service-containers P-TSC-2: until it publishes a trusted image,
@@ -167,7 +174,7 @@ migrate-down:
 # migration files without restarting the pod. Requires no local migrate binary.
 kube-migrate:
 	podman run --rm --network host -v $(CURDIR)/migrations:/migrations:ro,Z \
-		docker.io/migrate/migrate:v4.15.0 \
+		$(MIGRATE_IMAGE) \
 		-database "$(MIGRATE_URL)" -path /migrations up
 
 ## --- Keto (keto-cue) ---

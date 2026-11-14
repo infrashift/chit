@@ -2,19 +2,10 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: chit-postgres-init
-data:
-  init-databases.sql: |
-    CREATE DATABASE kratos;
-    CREATE DATABASE keto;
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
   name: chit-kratos-config
 data:
   kratos.yml: |
-    version: v1.3.0
+    version: v26.2.0
 
     serve:
       public:
@@ -270,7 +261,7 @@ spec:
   restartPolicy: Always
   containers:
     - name: postgres
-      image: docker.io/library/postgres:17-alpine
+      image: ghcr.io/infrashift/trusted-service-containers/quarantine/postgres:17-debian-382cdac@sha256:66dcbc496311685361b6a56e261e6694454daea3e297604dfd79590275f03910
       env:
         - name: POSTGRES_USER
           value: chit
@@ -278,19 +269,20 @@ spec:
           value: chit
         - name: POSTGRES_DB
           value: chit
+      # The TSC image is the Debian-based Docker Hardened Image: PGDATA is
+      # /var/lib/postgresql/17/data, and it runs as UID 70 like the Alpine
+      # image did, so a volume from 17-alpine mounts here unchanged. Its
+      # entrypoint does not run /docker-entrypoint-initdb.d; the app pod's
+      # ensure-databases init container creates the Ory databases. Text
+      # indexes built under Alpine's musl need a REINDEX: see the upgrade notes.
       volumeMounts:
         - name: pgdata
-          mountPath: /var/lib/postgresql/data
-        - name: pg-init
-          mountPath: /docker-entrypoint-initdb.d
+          mountPath: /var/lib/postgresql/17/data
 
   volumes:
     - name: pgdata
       persistentVolumeClaim:
         claimName: chit-uat-pgdata
-    - name: pg-init
-      configMap:
-        name: chit-postgres-init
 ---
 # Pod 2: App — init containers wait for postgres, run migrations, seed UAT data, then start services
 apiVersion: v1
@@ -306,7 +298,7 @@ spec:
 
   initContainers:
     - name: wait-postgres
-      image: docker.io/library/postgres:17-alpine
+      image: ghcr.io/infrashift/trusted-service-containers/quarantine/postgres:17-debian-382cdac@sha256:66dcbc496311685361b6a56e261e6694454daea3e297604dfd79590275f03910
       command:
         - sh
         - -c
@@ -318,8 +310,31 @@ spec:
           done
           echo "PostgreSQL is ready."
 
+    # The postgres entrypoint does not run init scripts, so create the Ory
+    # databases here, idempotently, before their migrations.
+    - name: ensure-databases
+      image: ghcr.io/infrashift/trusted-service-containers/quarantine/postgres:17-debian-382cdac@sha256:66dcbc496311685361b6a56e261e6694454daea3e297604dfd79590275f03910
+      env:
+        - name: PGPASSWORD
+          value: chit
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          for db in kratos keto; do
+            # No grep: the hardened postgres image does not ship it.
+            if [ "$(psql -h localhost -U chit -d postgres -tAc \
+                 "SELECT 1 FROM pg_database WHERE datname='$db'")" = 1 ]; then
+              echo "database $db already exists"
+            else
+              echo "creating database $db"
+              createdb -h localhost -U chit "$db"
+            fi
+          done
+
     - name: migrate-kratos
-      image: docker.io/oryd/kratos:v1.3
+      image: ghcr.io/infrashift/trusted-service-containers/trusted/kratos:v26.2.0-382cdac@sha256:3162b223e4190e51ecf5e66159b324de3d50c6ca720f935118919717b83eb817
       command:
         - kratos
         - migrate
@@ -347,7 +362,8 @@ spec:
           mountPath: /etc/keto
 
     - name: migrate-chit
-      image: docker.io/migrate/migrate:v4.15.0
+      # Not in trusted-service-containers (gap): upstream, pinned by digest.
+      image: docker.io/migrate/migrate:v4.15.0@sha256:f613168b682b4c17033a1d5b381e0cb474c05715b843f4b160fb7bab9cead0c5
       args:
         - -database
         - postgres://chit:chit@localhost:5432/chit?sslmode=disable
@@ -368,7 +384,7 @@ spec:
 
   containers:
     - name: kratos
-      image: docker.io/oryd/kratos:v1.3
+      image: ghcr.io/infrashift/trusted-service-containers/trusted/kratos:v26.2.0-382cdac@sha256:3162b223e4190e51ecf5e66159b324de3d50c6ca720f935118919717b83eb817
       args:
         - serve
         - --config
@@ -399,7 +415,7 @@ spec:
           mountPath: /etc/keto
 
     - name: oathkeeper
-      image: docker.io/oryd/oathkeeper:v0.40
+      image: ghcr.io/infrashift/trusted-service-containers/trusted/oathkeeper:v26.2.0-382cdac@sha256:dfa66c5314c05c864f8e8bcbf946ce9e6c9c8d2840c7c52ebe0b4048142c7288
       args:
         - serve
         - --config
@@ -409,7 +425,8 @@ spec:
           mountPath: /etc/oathkeeper
 
     - name: zincsearch
-      image: public.ecr.aws/zinclabs/zincsearch:latest
+      # Not in trusted-service-containers (gap): upstream, pinned by digest.
+      image: public.ecr.aws/zinclabs/zincsearch:0.4.10@sha256:fd865f7d0393428479726117c9f3b827e26eaee7f2fb21a22d8bc894e8f8f40e
       env:
         - name: ZINC_FIRST_ADMIN_USER
           value: admin

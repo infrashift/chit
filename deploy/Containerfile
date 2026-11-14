@@ -1,5 +1,7 @@
 # Build stage
-FROM docker.io/library/golang:1.25-alpine AS builder
+# Not in trusted-service-containers (gap): TSC has no Go builder image. The
+# upstream image, pinned by digest.
+FROM docker.io/library/golang:1.25-alpine@sha256:1ae0735f00daffa3aaf1363a5184c0d2dc55c78e3db4ec70241cdac97bf84b59 AS builder
 
 # No apk install needed: the base image already ships ca-certificates, and
 # module fetching goes through the Go module proxy rather than git.
@@ -16,8 +18,13 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /bin/chitd ./cmd/chitd
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /bin/chit-reconcile ./cmd/chit-reconcile
 
 # Runtime stage
-FROM registry.access.redhat.com/ubi9-minimal:latest
+# trusted-base-images ubi9-minimal (latest), pinned by digest: the base the
+# trusted-service-containers images take their CA bundle from.
+FROM ghcr.io/infrashift/trusted-base-images/trusted/ubi9-minimal@sha256:00f323f097e88a3c144e49c127d8b1806dae1ffcaffad4ec3aeffc1edfbce21e
 
+# The trusted base runs as UID 1001; installing packages needs root, and
+# USER chit below drops it again.
+USER root
 RUN microdnf install -y shadow-utils && microdnf clean all
 RUN groupadd -r chit && useradd -r -g chit -s /sbin/nologin chit
 

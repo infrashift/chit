@@ -1,4 +1,4 @@
-version: v2.2.0
+version: v26.2.0
 
 # Ory Hydra issues the OAuth2 access tokens that machine actors (AI agents,
 # bots) present to Oathkeeper. Humans continue to authenticate with Kratos
