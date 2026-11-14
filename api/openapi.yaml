@@ -936,6 +936,46 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /channels/{id}/stream_status:
+    post:
+      operationId: send_stream_status
+      summary: Send a stream status event
+      description: |
+        Tells the channel's members that the caller is producing a reply:
+        `started`, `progress` while it streams, and `finished`. chitd relays
+        a `stream_status` WebSocket event to the channel and stores nothing:
+        no post, no counter, no pubsub envelope.
+
+        The caller must be a member of the channel. An allowlisted OAuth2
+        client may send it on behalf of a member with `X-On-Behalf-Of`; the
+        event then also carries `actor_id`. Each caller may send two events a
+        second per channel, in bursts of five; more is a 429.
+      tags: [Channels]
+      parameters:
+        - $ref: "#/components/parameters/ChannelIdParam"
+        - $ref: "#/components/parameters/OnBehalfOfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StreamStatusRequest"
+      responses:
+        "200":
+          description: Event relayed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
   # ──────────────────────────── Posts ─────────────────────────────
   /posts:
     post:
@@ -959,7 +999,23 @@ paths:
 
         A `posted` WebSocket event is broadcast to the channel, and each user
         mentioned gets a `mentioned` event.
+
+        **On behalf of a person.** A machine actor whose OAuth2 client is in
+        `CHIT_ON_BEHALF_OF_CLIENTS` may post as a person by naming their user
+        ID in `X-On-Behalf-Of`. The post is authorized as that person, with
+        the same membership checks, and its author (`user_id`) is the person.
+        The server sets `props.on_behalf_of.actor_id` to the client's user ID
+        and writes a `post_on_behalf_of` audit record with both. A client not
+        on the list gets 403; an empty, malformed or unknown user ID, or one
+        that is not a person, gets 400; a Kratos session that sends the header
+        gets 403.
+
+        **Provenance.** `props.provenance` (see `Provenance`) may be set only
+        by an agent or bot, or on a post made on behalf of a person; anyone
+        else gets 403, and a malformed value gets 400.
       tags: [Posts]
+      parameters:
+        - $ref: "#/components/parameters/OnBehalfOfHeader"
       requestBody:
         required: true
         content:
@@ -1010,6 +1066,10 @@ paths:
         existing props, and a null value removes its key. Sets `edit_at`,
         re-parses mentions, and returns the whole post. Broadcasts a
         `post_edited` WebSocket event carrying the whole post.
+
+        Setting or removing `props.provenance` needs an agent or bot editor
+        (403 otherwise), and a new value must match `Provenance` (400).
+        `props.on_behalf_of` cannot be changed.
       tags: [Posts]
       parameters:
         - $ref: "#/components/parameters/PostIdParam"
@@ -1696,8 +1756,11 @@ paths:
         posted, post_edited, post_deleted, post_pinned, post_unpinned,
         typing, channel_created, channel_updated, channel_deleted,
         user_added, user_removed, thread_updated, post_tags_updated,
-        mentioned, command_response. Channel and team events reach only
-        members.
+        mentioned, command_response, stream_status. Channel and team events
+        reach only members. `stream_status` (from
+        `POST /channels/{id}/stream_status`) carries `channel_id`, `user_id`,
+        `status`, and `stream_id` and `actor_id` when set; it is never
+        stored.
 
         Clients may send one action, `typing`, for a channel they belong to;
         inbound messages are limited to 4096 bytes. The server sends ping
@@ -1769,6 +1832,18 @@ components:
       schema:
         type: string
         format: uuid
+    OnBehalfOfHeader:
+      name: X-On-Behalf-Of
+      in: header
+      required: false
+      description: |
+        The user ID of the person an allowlisted OAuth2 client
+        (`CHIT_ON_BEHALF_OF_CLIENTS`) acts for. Accepted only from a
+        client_credentials machine actor, and only on `POST /posts` and
+        `POST /channels/{id}/stream_status`; elsewhere it is a 400.
+      schema:
+        type: string
+        format: uuid
     PostIdParam:
       name: id
       in: path
@@ -1806,6 +1881,12 @@ components:
             $ref: "#/components/schemas/AppError"
     Conflict:
       description: Resource already exists
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AppError"
+    TooManyRequests:
+      description: Rate limit exceeded
       content:
         application/json:
           schema:
@@ -2229,6 +2310,55 @@ components:
         props:
           type: object
           additionalProperties: true
+          properties:
+            provenance:
+              $ref: "#/components/schemas/Provenance"
+
+    Provenance:
+      type: object
+      additionalProperties: false
+      description: |
+        What produced an agent's message, in `props.provenance`. HALO's
+        channel membership check reads it. Every field is optional; any other
+        field is refused.
+      properties:
+        tool_ids:
+          type: array
+          maxItems: 100
+          items:
+            type: string
+            format: uuid
+        okf_namespace_ids:
+          type: array
+          maxItems: 100
+          items:
+            type: string
+            format: uuid
+        okf_blob_sha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        model:
+          type: string
+          minLength: 1
+          maxLength: 200
+        attachment_ids:
+          type: array
+          maxItems: 100
+          items:
+            type: string
+            format: uuid
+
+    StreamStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [started, progress, finished]
+        stream_id:
+          type: string
+          pattern: "^[A-Za-z0-9._:-]{1,64}$"
+          description: Optional, to match the events of one reply
 
     PostList:
       type: object
@@ -2407,6 +2537,7 @@ components:
             - post_tags_updated
             - mentioned
             - command_response
+            - stream_status
         data:
           type: object
           additionalProperties: true

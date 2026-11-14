@@ -106,6 +106,8 @@ func New(a *app.App) http.Handler {
 			r.Delete("/channels/{id}/members/{user_id}", removeChannelMember(a))
 			r.Get("/channels/{id}/members", getChannelMembers(a))
 			r.Post("/channels/{id}/members/me/view", viewChannel(a))
+			// Not persisted: relayed to the channel's WebSocket clients.
+			r.Post("/channels/{id}/stream_status", sendStreamStatus(a))
 
 			// Posts
 			r.Post("/posts", createPost(a))

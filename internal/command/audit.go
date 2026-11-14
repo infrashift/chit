@@ -44,6 +44,20 @@ func (a *AuditLogger) LogCommandAttempt(eventID, actorID, actorType, commandSlug
 	)
 }
 
+// LogPostOnBehalfOf records a post that an allowlisted OAuth2 client made on
+// behalf of a person: the actor (the client's user and client ID) and the
+// principal (the person, who is the post's author).
+func (a *AuditLogger) LogPostOnBehalfOf(eventID, actorID, clientID, principalID, postID, channelID string) {
+	a.logger.Info("post_on_behalf_of",
+		"event_id", eventID,
+		"actor_id", actorID,
+		"client_id", clientID,
+		"principal_id", principalID,
+		"post_id", postID,
+		"channel_id", channelID,
+	)
+}
+
 // Close flushes and closes the underlying file, if any.
 func (a *AuditLogger) Close() error {
 	if a.file != nil {

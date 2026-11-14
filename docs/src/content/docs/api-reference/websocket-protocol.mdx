@@ -90,6 +90,7 @@ chitd sends 15 event types.
 | `post_tags_updated` | `post_id`, `channel_id`, `tags` (the post's whole tag list) | `channel_id` | A tag is added to or removed from a post |
 | `mentioned` | `post_id`, `channel_id`, `user_id` (the post's **author**) | `user_id` (the mentioned user) | A post mentions the user, by `@username` or `@all` |
 | `command_response` | `text`, `command_slug`, `channel_id` | `user_id` (the invoker) | A slash command handler ran. See [MCP and Slash Commands](/chit/reference/mcp-and-commands/). |
+| `stream_status` | `channel_id`, `user_id`, `status` (`started`, `progress`, `finished`), and `stream_id` and `actor_id` when set | `channel_id` | A member, or an allowlisted client on behalf of one, calls `POST /channels/{id}/stream_status` while producing a reply. Never stored; two a second per sender and channel, in bursts of five. |
 
 Notes:
 
@@ -106,6 +107,9 @@ Notes:
   handler, or a handler error answers only through the `POST /posts`
   response.
 - There is no presence or `status_change` event.
+- `stream_status`, like `typing`, is relayed and never stored: no post, no
+  counter, no pubsub envelope. HALO's halod sends it while it streams a reply
+  to the requester, so the channel's other members see activity.
 
 ## Client → Server Actions
 

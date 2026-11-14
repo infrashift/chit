@@ -126,3 +126,22 @@ func TestLoad_Durations(t *testing.T) {
 		t.Fatalf("ping=%v ttl=%v", cfg.WSPingInterval, cfg.CacheTTL)
 	}
 }
+
+// CHIT_ON_BEHALF_OF_CLIENTS is a comma-separated list, like the origins, and
+// empty by default: no client acts on behalf of anyone unless named.
+func TestLoad_OnBehalfOfClients(t *testing.T) {
+	cfg, err := LoadWithoutDatabase()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.OnBehalfOfClients) != 0 {
+		t.Fatalf("default %q, want none", cfg.OnBehalfOfClients)
+	}
+	t.Setenv("CHIT_ON_BEHALF_OF_CLIENTS", " halod , ,other")
+	if cfg, err = LoadWithoutDatabase(); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"halod", "other"}; !slices.Equal(cfg.OnBehalfOfClients, want) {
+		t.Fatalf("got %q, want %q", cfg.OnBehalfOfClients, want)
+	}
+}

@@ -11,11 +11,33 @@ import (
 
 // CreatePost creates a new post and handles threading, channel stats, mentions, and WebSocket broadcast.
 func (a *App) CreatePost(ctx context.Context, post *model.Post) (*model.Post, error) {
+	return a.CreatePostAs(ctx, post, nil)
+}
+
+// CreatePostAs creates post as CreatePost does. A non-nil actor is the
+// allowlisted machine actor posting on behalf of post.UserID (see
+// ResolvePrincipal): the post is authorized as post.UserID, and the actor is
+// recorded in props.on_behalf_of and in the audit log.
+func (a *App) CreatePostAs(ctx context.Context, post *model.Post, actor *model.User) (*model.Post, error) {
 	// Membership comes first, before slash commands are intercepted: a command
 	// runs in the context of the channel it was typed in, and `/topic` with no
 	// argument reads the channel header back to whoever asked.
 	if err := a.requireChannelMember(ctx, post.ChannelID, post.UserID); err != nil {
 		return nil, err
+	}
+
+	// Server-owned: only the server records who acted for whom.
+	delete(post.Props, model.PropOnBehalfOf)
+	if actor != nil && !a.OnBehalfOfAllowed(actor) {
+		return nil, model.NewForbiddenError("App.CreatePost", "this client may not act on behalf of a user")
+	}
+	if prov, ok := post.Props[model.PropProvenance]; ok {
+		if err := a.requireProvenanceWriter(ctx, post.UserID, actor); err != nil {
+			return nil, err
+		}
+		if err := model.ValidateProvenance(prov); err != nil {
+			return nil, err
+		}
 	}
 
 	// Intercept slash commands — they are NOT persisted.
@@ -54,9 +76,19 @@ func (a *App) CreatePost(ctx context.Context, post *model.Post) (*model.Post, er
 		post.Props["mentions"] = mentionedUserIDs
 	}
 
+	if actor != nil {
+		if post.Props == nil {
+			post.Props = make(map[string]any)
+		}
+		post.Props[model.PropOnBehalfOf] = map[string]any{"actor_id": actor.ID}
+	}
+
 	saved, err := a.Store.Post().Save(ctx, post)
 	if err != nil {
 		return nil, err
+	}
+	if actor != nil && a.AuditLogger != nil {
+		a.AuditLogger.LogPostOnBehalfOf(model.NewID(), actor.ID, actor.OAuthClientID, saved.UserID, saved.ID, saved.ChannelID)
 	}
 
 	// Update channel stats (atomic SQL)
@@ -140,6 +172,20 @@ func (a *App) UpdatePost(ctx context.Context, id string, patch PostPatch, actorI
 	}
 	if authErr := a.requirePostOwner(ctx, post, actorID); authErr != nil {
 		return nil, authErr
+	}
+
+	// on_behalf_of is the server's record of who posted: no edit changes it.
+	delete(patch.Props, model.PropOnBehalfOf)
+	if prov, ok := patch.Props[model.PropProvenance]; ok {
+		// Setting or removing provenance both need the right to write it.
+		if provErr := a.requireProvenanceWriter(ctx, actorID, nil); provErr != nil {
+			return nil, provErr
+		}
+		if prov != nil {
+			if provErr := model.ValidateProvenance(prov); provErr != nil {
+				return nil, provErr
+			}
+		}
 	}
 
 	if patch.Content != nil {
@@ -351,4 +397,22 @@ func (a *App) broadcastPostEvent(ctx context.Context, event string, post *model.
 			ChannelID: post.ChannelID,
 		},
 	}, &pubsub.EventEnvelope{Event: event, PostID: post.ID, ChannelID: post.ChannelID})
+}
+
+// requireProvenanceWriter returns a 403 unless authorID may set
+// props.provenance: an agent or a bot, or a person's post made by an
+// allowlisted client on their behalf (actor non-nil). A person posting for
+// themselves may not claim what tools or models produced their words.
+func (a *App) requireProvenanceWriter(ctx context.Context, authorID string, actor *model.User) error {
+	if actor != nil && a.OnBehalfOfAllowed(actor) {
+		return nil
+	}
+	user, err := a.Store.User().Get(ctx, authorID)
+	if err != nil {
+		return err
+	}
+	if user.ActorType == model.ActorTypeAgent || user.ActorType == model.ActorTypeBot {
+		return nil
+	}
+	return model.NewForbiddenError("App.Provenance", "only an agent or bot, or an allowlisted client posting on behalf of a user, may set props.provenance")
 }

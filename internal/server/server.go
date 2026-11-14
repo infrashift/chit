@@ -263,6 +263,9 @@ func (s *Server) ensureMachineActors() error {
 	if err != nil {
 		return err
 	}
+	if err := app.CheckOnBehalfOfClients(s.config.OnBehalfOfClients, actors); err != nil {
+		return err
+	}
 	if len(actors) == 0 {
 		return nil
 	}
