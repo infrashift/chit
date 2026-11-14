@@ -101,16 +101,16 @@ func TestPostStoreIntegration_Search(t *testing.T) {
 	savePost(t, ss, elsewhere.ID, user.ID, "", "needle out of scope", 4000)
 	pct := savePost(t, ss, channel.ID, user.ID, "", "100% done", 5000)
 
-	bug, err := ss.Tag().Save(t.Context(), &model.Tag{Name: "bug"})
+	bug, err := ss.Tag().Save(t.Context(), &model.Tag{Name: "bug", Scope: model.TagScopeChannel, ChannelID: channel.ID, OwnerID: user.ID})
 	if err != nil {
 		t.Fatalf("save tag: %v", err)
 	}
-	urgent, err := ss.Tag().Save(t.Context(), &model.Tag{Name: "urgent"})
+	urgent, err := ss.Tag().Save(t.Context(), &model.Tag{Name: "urgent", Scope: model.TagScopeChannel, ChannelID: channel.ID, OwnerID: user.ID})
 	if err != nil {
 		t.Fatalf("save tag: %v", err)
 	}
 	for _, pt := range [][2]string{{a.ID, bug.ID}, {a.ID, urgent.ID}, {c.ID, bug.ID}} {
-		if err = ss.Tag().AddTagToPost(t.Context(), pt[0], pt[1]); err != nil {
+		if err = ss.Tag().AddTagToPost(t.Context(), pt[0], pt[1], user.ID); err != nil {
 			t.Fatalf("AddTagToPost: %v", err)
 		}
 	}

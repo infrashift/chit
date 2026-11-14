@@ -377,7 +377,8 @@ func (c *Client) UpdateThreadFollowing(ctx context.Context, teamID, postID strin
 
 // ─── Tags ────────────────────────────────────────────────────────
 
-// GetAllTags lists all tags.
+// GetAllTags lists the tags the caller can see: their private tags and the
+// channel tags of their channels.
 func (c *Client) GetAllTags(ctx context.Context) ([]*model.Tag, error) {
 	var tags []*model.Tag
 	if err := c.do(ctx, http.MethodGet, "/api/v1/tags", nil, &tags); err != nil {

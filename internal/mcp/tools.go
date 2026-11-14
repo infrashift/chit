@@ -93,17 +93,17 @@ func (s *ChitMCPServer) registerTools() {
 	// Tags
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "list_tags",
-		Description: "List all available tags",
+		Description: "List the tags you can see: your private tags and the channel tags of your channels",
 	}, s.handleListTags)
 
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "add_tag_to_post",
-		Description: "Add a tag to a post (message)",
+		Description: "Add a tag to a post (message): a channel tag of the post's channel, or your own private tag",
 	}, s.handleAddTagToPost)
 
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "get_tags_for_post",
-		Description: "Get all tags associated with a post",
+		Description: "Get the tags on a post that you can see",
 	}, s.handleGetTagsForPost)
 
 	// Users

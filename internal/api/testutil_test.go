@@ -165,7 +165,7 @@ func setupTestApp(t *testing.T) (a *app.App, ms *mockStore, cleanup func()) {
 		Following: true,
 	})
 
-	ms.Tags.Seed(&model.Tag{ID: testTagID, Name: "important"})
+	ms.Tags.Seed(&model.Tag{ID: testTagID, Name: "important", Scope: model.TagScopeChannel, ChannelID: testChannelID, OwnerID: testUserID})
 	ms.Tags.SeedPostTag(testRootPost, testTagID)
 
 	cfg := config.Defaults()

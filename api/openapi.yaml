@@ -1470,9 +1470,84 @@ paths:
       operationId: create_tag
       summary: Create a tag
       description: |
-        Creates a tag that can be applied to posts. Idempotent by name:
-        creating a name that exists returns the existing tag.
+        Creates a tag owned by the caller. `scope` is `private` (the default:
+        only the owner sees the tag, its name and the items it is on, and
+        only the owner applies it, to any channel or post they can read) or
+        `channel` (it belongs to `channel_id`, which the caller must be a
+        member of; every member sees it and may apply it there, and only
+        there).
+
+        A name has 1 to 50 characters: letters, digits, space, `-`, `_` and
+        `.`. It is unique per owner (private) or per channel (channel) after
+        NFKC normalization and case folding; creating a name that exists in
+        its scope returns the existing tag. An owner has at most 1024 tags.
+
+        The prefix `profile/` is reserved for HALO's Profile tags: a person
+        gets 403 for it. An allowlisted client sending `X-On-Behalf-Of` may
+        create one, as the person's private tag.
       tags: [Tags]
+      parameters:
+        - $ref: "#/components/parameters/OnBehalfOfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTagRequest"
+      responses:
+        "201":
+          description: Tag created, or the existing tag with that name in its scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tag"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    get:
+      operationId: get_all_tags
+      summary: List the tags the caller can see
+      description: |
+        The caller's private tags and the channel tags of the channels they
+        belong to; never another user's private tag. With `channel_id`, the
+        caller's private tags and that channel's tags (members only).
+      tags: [Tags]
+      parameters:
+        - name: channel_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Visible tags
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Tag"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /tags/{id}:
+    put:
+      operationId: rename_tag
+      summary: Rename a tag
+      description: |
+        The owner only (a system_admin may also manage the tags of the system
+        actor, which owns the tags migrated from the old global list). A tag
+        the caller cannot see is a 404. A `profile/` tag cannot be renamed,
+        and no tag can be renamed to one (403).
+      tags: [Tags]
+      parameters:
+        - $ref: "#/components/parameters/TagIdParam"
       requestBody:
         required: true
         content:
@@ -1483,12 +1558,11 @@ paths:
               properties:
                 name:
                   type: string
+                  minLength: 1
                   maxLength: 50
-                  description: Unique tag name
-                  example: "bug"
       responses:
-        "201":
-          description: Tag created
+        "200":
+          description: Renamed tag
           content:
             application/json:
               schema:
@@ -1497,13 +1571,129 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
-    get:
-      operationId: get_all_tags
-      summary: List all tags
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    delete:
+      operationId: delete_tag
+      summary: Delete a tag and every application of it
+      description: The owner only, as for rename. A tag the caller cannot see is a 404.
       tags: [Tags]
+      parameters:
+        - $ref: "#/components/parameters/TagIdParam"
       responses:
         "200":
-          description: All tags
+          description: Tag deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # Under /tags, like /tags/posts, to stay clear of the /channels/{id} routes.
+  /tags/channels:
+    post:
+      operationId: filter_channels_by_tags
+      summary: List the caller's channels that have all of up to 8 tags
+      description: |
+        A channel matches a tag when the channel itself or one of its live
+        posts has it; it must match every tag. Only the caller's channels
+        (in `team_id`, when set) are considered, and only tags the caller
+        can see may filter: an unknown tag or another user's private tag
+        matches nothing. Each result carries the channel-level tags the
+        caller can see.
+      tags: [Tags]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tag_ids]
+              properties:
+                tag_ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 8
+                  items:
+                    type: string
+                    format: uuid
+                team_id:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Matching channels
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TaggedChannel"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /channels/{id}/tags:
+    post:
+      operationId: add_tag_to_channel
+      summary: Add a tag to a channel
+      description: |
+        Members of the channel only. A channel tag applies only in its own
+        channel; a private tag only by its owner. A `profile/` tag only by an
+        allowlisted client on its owner's behalf. At most 32 channel tags,
+        and 32 private tags of each owner, per channel. Records who applied
+        it. Sends `channel_tags_updated`.
+      tags: [Tags]
+      parameters:
+        - $ref: "#/components/parameters/ChannelIdParam"
+        - $ref: "#/components/parameters/OnBehalfOfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tag_id]
+              properties:
+                tag_id:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Tag added to the channel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    get:
+      operationId: get_tags_for_channel
+      summary: Get the tags on a channel that the caller can see
+      tags: [Tags]
+      parameters:
+        - $ref: "#/components/parameters/ChannelIdParam"
+      responses:
+        "200":
+          description: Tags on the channel itself
           content:
             application/json:
               schema:
@@ -1512,6 +1702,62 @@ paths:
                   $ref: "#/components/schemas/Tag"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /channels/{id}/tags/{tag_id}:
+    delete:
+      operationId: remove_tag_from_channel
+      summary: Remove a tag from a channel
+      description: Any member for a channel tag; the owner for a private tag.
+      tags: [Tags]
+      parameters:
+        - $ref: "#/components/parameters/ChannelIdParam"
+        - name: tag_id
+          in: path
+          required: true
+          description: Tag ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Tag removed from the channel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /users/{id}/tags:
+    delete:
+      operationId: delete_user_tags
+      summary: Delete every tag a user owns
+      description: |
+        Deletes the user's tags with every application of them, and forgets
+        the user as the applier of other owners' tags. Run it when a person
+        is deleted or anonymized. The user themselves or a system_admin.
+      tags: [Tags]
+      parameters:
+        - $ref: "#/components/parameters/UserIdParam"
+      responses:
+        "200":
+          description: Tags deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   # Deliberately under /tags rather than /posts/tags: the latter collides with
   # the /posts/{id} routes, where the router binds id="tags" and answers 405.
@@ -1559,10 +1805,19 @@ paths:
     post:
       operationId: add_tag_to_post
       summary: Add a tag to a post
-      description: Associates an existing tag with a post; members of its channel only.
+      description: |
+        Applies a tag to a post; members of its channel only. A channel tag
+        applies only in its own channel; a private tag only by its owner,
+        on any post they can read. A `profile/` tag only by an allowlisted
+        client on its owner's behalf. At most 32 channel tags, and 32
+        private tags of each owner, per post. Records who applied it. Sends
+        `post_tags_updated` to each user who may see the change, with their
+        own view of the post's tags: a private tag's change reaches only its
+        owner. A tag the caller cannot see is a 404.
       tags: [Tags]
       parameters:
         - $ref: "#/components/parameters/PostIdParam"
+        - $ref: "#/components/parameters/OnBehalfOfHeader"
       requestBody:
         required: true
         content:
@@ -1589,7 +1844,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
     get:
       operationId: get_tags_for_post
-      summary: Get tags for a post
+      summary: Get the tags on a post that the caller can see
+      description: Channel tags and the caller's own private tags; never another user's private tag.
       tags: [Tags]
       parameters:
         - $ref: "#/components/parameters/PostIdParam"
@@ -1611,6 +1867,7 @@ paths:
     delete:
       operationId: remove_tag_from_post
       summary: Remove a tag from a post
+      description: Any member for a channel tag; the owner for a private tag. A tag the caller cannot see is a 404.
       tags: [Tags]
       parameters:
         - $ref: "#/components/parameters/PostIdParam"
@@ -1756,7 +2013,9 @@ paths:
         posted, post_edited, post_deleted, post_pinned, post_unpinned,
         typing, channel_created, channel_updated, channel_deleted,
         user_added, user_removed, thread_updated, post_tags_updated,
-        mentioned, command_response, stream_status. Channel and team events
+        channel_tags_updated, tag_updated, tag_deleted, mentioned,
+        command_response, stream_status. Tag events carry only what their
+        recipient may see: a private tag's events reach its owner alone. Channel and team events
         reach only members. `stream_status` (from
         `POST /channels/{id}/stream_status`) carries `channel_id`, `user_id`,
         `status`, and `stream_id` and `actor_id` when set; it is never
@@ -1839,8 +2098,18 @@ components:
       description: |
         The user ID of the person an allowlisted OAuth2 client
         (`CHIT_ON_BEHALF_OF_CLIENTS`) acts for. Accepted only from a
-        client_credentials machine actor, and only on `POST /posts` and
-        `POST /channels/{id}/stream_status`; elsewhere it is a 400.
+        client_credentials machine actor, and only on `POST /posts`,
+        `POST /channels/{id}/stream_status`, `POST /tags`,
+        `POST /posts/{id}/tags` and `POST /channels/{id}/tags`; elsewhere
+        it is a 400.
+      schema:
+        type: string
+        format: uuid
+    TagIdParam:
+      name: id
+      in: path
+      required: true
+      description: Tag ID
       schema:
         type: string
         format: uuid
@@ -2454,9 +2723,58 @@ components:
         name:
           type: string
           maxLength: 50
+        scope:
+          type: string
+          enum: [private, channel]
+        owner_id:
+          type: string
+          format: uuid
+        channel_id:
+          type: string
+          format: uuid
+          description: Set for a channel tag
+        create_at:
+          type: integer
+          format: int64
+        update_at:
+          type: integer
+          format: int64
       example:
         id: "0192d4c1-7e2a-7000-8000-000000000040"
         name: "bug"
+        scope: "channel"
+        owner_id: "0192d4c1-7e2a-7000-8000-000000000001"
+        channel_id: "0192d4c1-7e2a-7000-8000-000000000020"
+        create_at: 1700000060000
+        update_at: 1700000060000
+
+    CreateTagRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 50
+          example: "bug"
+        scope:
+          type: string
+          enum: [private, channel]
+          default: private
+        channel_id:
+          type: string
+          format: uuid
+          description: Required for a channel tag
+
+    TaggedChannel:
+      type: object
+      properties:
+        channel:
+          $ref: "#/components/schemas/Channel"
+        tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tag"
 
     MessageTag:
       type: object
@@ -2538,6 +2856,9 @@ components:
             - mentioned
             - command_response
             - stream_status
+            - channel_tags_updated
+            - tag_updated
+            - tag_deleted
         data:
           type: object
           additionalProperties: true

@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"log/slog"
-	"slices"
 	"strings"
 
 	"github.com/infrashift/chit/internal/model"
@@ -42,11 +41,15 @@ type SearchRequest struct {
 func (a *App) SearchPosts(ctx context.Context, req *SearchRequest) (*model.PostList, error) {
 	empty := &model.PostList{Order: []*model.Post{}}
 
-	tagIDs := slices.Compact(slices.Sorted(slices.Values(req.TagIDs)))
-	for _, id := range tagIDs {
-		if !model.IsValidID(id) {
-			return nil, model.NewBadRequestError("App.SearchPosts", "invalid tag id")
-		}
+	// Only Tags the searcher can see may filter: a private Tag of somebody
+	// else, like an unknown Tag, matches nothing, so the result never tells
+	// whether it exists or what it is on.
+	tagIDs, visible, err := a.visibleTagIDs(ctx, req.TagIDs, req.UserID, "App.SearchPosts")
+	if err != nil {
+		return nil, err
+	}
+	if !visible {
+		return empty, nil
 	}
 	if req.Terms == "" && len(tagIDs) == 0 {
 		return empty, nil

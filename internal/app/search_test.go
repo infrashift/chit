@@ -64,7 +64,7 @@ func TestSearchPosts_NoQueryNoTags_ReturnsEmpty(t *testing.T) {
 
 func TestSearchPosts_Tags(t *testing.T) {
 	f, _ := newSearchFixture(t)
-	tag := &model.Tag{ID: model.NewID(), Name: "bug"}
+	tag := &model.Tag{ID: model.NewID(), Name: "bug", Scope: model.TagScopeChannel, ChannelID: f.channel.ID, OwnerID: model.NewID()}
 	f.store.Tags.Seed(tag)
 	tagged := f.post(f.channel, "searcher", "tagged search", 1)
 	f.post(f.channel, "searcher", "untagged search", 2)

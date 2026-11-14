@@ -157,11 +157,11 @@ func TestTagStoreIntegration_GetTagsForPosts(t *testing.T) {
 	user, channel := newTestChannelFixture(t, ss)
 	p1 := savePost(t, ss, channel.ID, user.ID, "", "one", 1000)
 	p2 := savePost(t, ss, channel.ID, user.ID, "", "two", 2000)
-	bug, err := ss.Tag().Save(t.Context(), &model.Tag{Name: "bulkbug"})
+	bug, err := ss.Tag().Save(t.Context(), &model.Tag{Name: "bulkbug", Scope: model.TagScopeChannel, ChannelID: channel.ID, OwnerID: user.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = ss.Tag().AddTagToPost(t.Context(), p1.ID, bug.ID); err != nil {
+	if err = ss.Tag().AddTagToPost(t.Context(), p1.ID, bug.ID, user.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -173,9 +173,12 @@ func TestTagStoreIntegration_GetTagsForPosts(t *testing.T) {
 		t.Fatalf("GetTagsForPosts = %v; want only p1 tagged", got)
 	}
 
-	again, err := ss.Tag().Save(t.Context(), &model.Tag{Name: "bulkbug"})
-	if err != nil || again.ID != bug.ID {
-		t.Fatalf("re-saving a tag name gave %v, %v; want the existing tag", again, err)
+	// A name is unique in its channel by its folded key: a second save is
+	// a 409, and the app answers it with the existing tag.
+	_, err = ss.Tag().Save(t.Context(), &model.Tag{Name: "BulkBug", Scope: model.TagScopeChannel, ChannelID: channel.ID, OwnerID: user.ID})
+	var appErr *model.AppError
+	if !errors.As(err, &appErr) || appErr.StatusCode != http.StatusConflict {
+		t.Fatalf("re-saving a tag name gave %v; want a 409", err)
 	}
 }
 

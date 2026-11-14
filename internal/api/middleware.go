@@ -48,7 +48,7 @@ func AuthExtract(a *app.App) func(http.Handler) http.Handler {
 				if principalID, ok := onBehalfOf(r); ok {
 					if !onBehalfOfRoute(r) {
 						WriteError(w, model.NewBadRequestError("AuthExtract",
-							OnBehalfOfHeader+" is accepted only on POST /posts and POST /channels/{id}/stream_status"))
+							OnBehalfOfHeader+" is accepted only on POST /posts, /channels/{id}/stream_status, /tags, /posts/{id}/tags and /channels/{id}/tags"))
 						return
 					}
 					principal, err := a.ResolvePrincipal(r.Context(), user, principalID)
@@ -121,6 +121,10 @@ var onBehalfOfRoutes = []struct {
 }{
 	{http.MethodPost, regexp.MustCompile(`^/api/v1/posts$`)},
 	{http.MethodPost, regexp.MustCompile(`^/api/v1/channels/[^/]+/stream_status$`)},
+	// Tags: halod creates and applies a person's profile/ Tags for them.
+	{http.MethodPost, regexp.MustCompile(`^/api/v1/tags$`)},
+	{http.MethodPost, regexp.MustCompile(`^/api/v1/posts/[^/]+/tags$`)},
+	{http.MethodPost, regexp.MustCompile(`^/api/v1/channels/[^/]+/tags$`)},
 }
 
 func onBehalfOfRoute(r *http.Request) bool {

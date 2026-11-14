@@ -124,12 +124,12 @@ func tagNames(t *testing.T, evt model.WebSocketEvent) []string {
 
 // Tags are added after a post is created, by a separate request. Nothing
 // announced them, so other clients showed a post's tags only after
-// reloading the channel. Each change now goes to the post's channel with
-// the post's whole tag list.
+// reloading the channel. Each change to a channel tag now goes to each
+// member of the post's channel, with the post's tag list as they see it.
 func TestTaggingAPostBroadcastsItsTags(t *testing.T) {
 	a, ms, cleanup := setupTestApp(t)
 	defer cleanup()
-	ms.Tags.Seed(&model.Tag{ID: "019421a0-0000-7000-8000-000000000071", Name: "deploy"})
+	ms.Tags.Seed(&model.Tag{ID: "019421a0-0000-7000-8000-000000000071", Name: "deploy", Scope: model.TagScopeChannel, ChannelID: testChannelID, OwnerID: testUserID})
 	srv := httptest.NewServer(New(a))
 	defer srv.Close()
 	conn := dialAs(t, srv)
