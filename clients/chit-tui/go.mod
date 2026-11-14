@@ -2,6 +2,8 @@ module github.com/infrashift/chit/clients/chit-tui
 
 go 1.26.10
 
+toolchain go1.26.11
+
 require (
 	cuelang.org/go v0.16.0
 	github.com/BurntSushi/toml v1.6.0
