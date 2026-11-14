@@ -135,7 +135,7 @@ make kube-build
 ```
 
 The Containerfile uses a multi-stage build: Go compilation of `chitd` and
-`chit-reconcile` in a `golang:1.25-alpine` builder stage, then a
+`chit-reconcile` in a `golang:1.26-alpine` builder stage, then a
 `ubi9-minimal` runtime image that runs as a non-root `chit` user, carries the
 CUE definitions at `/etc/chit/auth` (`CHIT_COMMANDS_CUE_DIR`), and starts
 `chitd`.

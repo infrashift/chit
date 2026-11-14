@@ -1,7 +1,7 @@
 # Build stage
 # Not in trusted-service-containers (gap): TSC has no Go builder image. The
 # upstream image, pinned by digest.
-FROM docker.io/library/golang:1.25-alpine@sha256:1ae0735f00daffa3aaf1363a5184c0d2dc55c78e3db4ec70241cdac97bf84b59 AS builder
+FROM docker.io/library/golang:1.26-alpine@sha256:30b1e546a9c7fa3b747c2bdba3a0c7bdf3a02ebb4c5b8405d2f948d7e8aac4ec AS builder
 
 # No apk install needed: the base image already ships ca-certificates, and
 # module fetching goes through the Go module proxy rather than git.

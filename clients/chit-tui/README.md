@@ -17,7 +17,7 @@ Fuller documentation lives on the docs site, under [`docs/src/content/docs/tui/`
 
 ## Requirements
 
-- Go 1.25+
+- Go 1.26.10+
 - A running [Chit server](https://github.com/infrashift/chit)
 
 ## Installation

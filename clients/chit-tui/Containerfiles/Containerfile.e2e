@@ -1,7 +1,7 @@
 # trusted-base-images ubi9-standard (latest), pinned by digest.
 FROM ghcr.io/infrashift/trusted-base-images/trusted/ubi9-standard@sha256:492304c8ff2237112a353e59eee9454ddbb7b0ea84e2ae45f7824e49e1bbc913
 
-ARG GO_VERSION=1.24.4
+ARG GO_VERSION=1.26.10
 
 ENV GOPATH=/go \
     GOCACHE=/go/cache \
