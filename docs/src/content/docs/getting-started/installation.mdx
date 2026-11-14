@@ -62,7 +62,7 @@ make vuln               # govulncheck
 make check-deps         # dependency boundaries between the binaries
 ```
 
-`make test-integration` starts a disposable `postgres:17-alpine` container in
+`make test-integration` starts a disposable PostgreSQL 17 container (`PG_IMAGE`) in
 Podman on port `55432` (override with `ITEST_PORT`), runs every migration up,
 all the way down and up again, runs the `integration`-tagged tests in
 `internal/store/sqlstore` and `internal/pubsub`, and removes the container. The
