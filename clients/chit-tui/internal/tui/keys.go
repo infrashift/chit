@@ -145,7 +145,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if sel != nil {
 			cmd := m.setFocus(FocusTagPicker)
-			m.tagPicker.Open(sel.ID, m.allTags, m.postTags[sel.ID])
+			m.tagPicker.Open(sel.ID, m.tagsUsableIn(sel.ChannelID), m.postTags[sel.ID])
 			return m, cmd
 		}
 	}

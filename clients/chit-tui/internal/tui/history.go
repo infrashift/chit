@@ -314,7 +314,7 @@ func (m Model) handleSearchSubmit(msg palette.SearchSubmitMsg) (tea.Model, tea.C
 	term, tagNames := tagpicker.StripHashtags(msg.Term)
 	var tagIDs []string
 	for _, name := range tagNames {
-		if t := m.tagByName(name); t != nil {
+		if t := m.searchTagByName(name, m.activeChannelID()); t != nil {
 			tagIDs = append(tagIDs, t.ID)
 		}
 	}

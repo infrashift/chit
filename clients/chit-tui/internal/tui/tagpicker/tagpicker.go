@@ -20,10 +20,12 @@ type TagToggledMsg struct {
 	Applied bool
 }
 
-// TagCreateRequestMsg is sent when the user wants to create a new tag.
+// TagCreateRequestMsg is sent when the user wants to create a new tag. It
+// is a channel tag of the post's channel unless Private is set.
 type TagCreateRequestMsg struct {
-	Name   string
-	PostID string
+	Name    string
+	PostID  string
+	Private bool
 }
 
 // Model is the tag picker overlay component.
@@ -36,15 +38,18 @@ type Model struct {
 	visible  bool
 	focused  bool
 	postID   string
-	styles   styles.Styles
-	width    int
-	height   int
+	// private makes Ctrl+N create a private tag rather than a channel tag;
+	// Ctrl+T toggles it, and it resets each time the picker opens.
+	private bool
+	styles  styles.Styles
+	width   int
+	height  int
 }
 
 // New creates a new tag picker model.
 func New(s styles.Styles) Model {
 	ti := textinput.New()
-	ti.Placeholder = "Filter tags... (ctrl+n to create)"
+	ti.Placeholder = "Filter tags... (ctrl+n create, ctrl+t private)"
 	ti.CharLimit = 50
 	return Model{
 		postTags: make(map[string]bool),
@@ -63,11 +68,15 @@ func (m *Model) Open(postID string, allTags []*model.Tag, appliedTags []*model.T
 	for _, t := range appliedTags {
 		m.postTags[t.ID] = true
 	}
+	m.private = false
 	m.input.Reset()
 	m.input.Focus()
 	m.cursor = 0
 	m.filter()
 }
+
+// Private reports whether Ctrl+N will create a private tag.
+func (m Model) Private() bool { return m.private }
 
 // AddApplied lists a tag just created and applied to postID. The picker
 // otherwise goes on listing the tags it opened with, and the new one, made
@@ -159,14 +168,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 			}
 			return m, nil
+		case tea.KeyCtrlT:
+			m.private = !m.private
+			return m, nil
 		case tea.KeyCtrlN:
 			name := strings.TrimSpace(m.input.Value())
 			if name != "" {
-				postID := m.postID
+				postID, private := m.postID, m.private
 				m.input.Reset()
 				m.filter()
 				return m, func() tea.Msg {
-					return TagCreateRequestMsg{Name: name, PostID: postID}
+					return TagCreateRequestMsg{Name: name, PostID: postID, Private: private}
 				}
 			}
 			return m, nil
@@ -187,7 +199,11 @@ func (m Model) View() string {
 
 	var items []string
 	items = append(items, m.input.View())
-	items = append(items, "")
+	mode := "new tags: channel (shared with members) · ctrl+t for private"
+	if m.private {
+		mode = "new tags: private (only you see them) · ctrl+t for channel"
+	}
+	items = append(items, m.styles.Timestamp.Render("  "+mode), "")
 
 	start, end := listwin.Window(m.cursor, len(m.filtered), listwin.Rows(m.height))
 	for i := start; i < end; i++ {
@@ -197,6 +213,9 @@ func (m Model) View() string {
 			check = "[x]"
 		}
 		line := check + " #" + tag.Name
+		if tag.Private() {
+			line += " (private)"
+		}
 		if i == m.cursor {
 			line = m.styles.AutocompleteActive.Render(line)
 		} else {
@@ -206,7 +225,11 @@ func (m Model) View() string {
 	}
 
 	if len(m.filtered) == 0 && m.input.Value() != "" {
-		items = append(items, m.styles.Timestamp.Render("  Press Ctrl+N to create tag"))
+		kind := "channel"
+		if m.private {
+			kind = "private"
+		}
+		items = append(items, m.styles.Timestamp.Render("  Press Ctrl+N to create a "+kind+" tag"))
 	}
 
 	body := lipgloss.JoinVertical(lipgloss.Left, items...)

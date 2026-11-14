@@ -405,15 +405,19 @@ func TestCreateTag(t *testing.T) {
 			writeError(w, 400, "bad body")
 			return
 		}
-		writeJSON(w, model.Tag{ID: "t1", Name: body["name"]})
+		if body["scope"] != "channel" || body["channel_id"] != "c1" {
+			writeError(w, 400, "want a channel tag of c1")
+			return
+		}
+		writeJSON(w, model.Tag{ID: "t1", Name: body["name"], Scope: body["scope"], ChannelID: body["channel_id"]})
 	})
 	client, _ := setupTestClient(t, mux)
 
-	tag, err := client.CreateTag(context.Background(), "urgent")
+	tag, err := client.CreateTag(context.Background(), "urgent", "channel", "c1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tag.ID != "t1" || tag.Name != "urgent" {
+	if tag.ID != "t1" || tag.Name != "urgent" || tag.Scope != "channel" || tag.ChannelID != "c1" {
 		t.Errorf("unexpected tag: %+v", tag)
 	}
 }

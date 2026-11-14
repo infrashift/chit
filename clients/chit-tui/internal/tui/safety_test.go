@@ -227,7 +227,7 @@ func createdPost(t *testing.T, cmd tea.Cmd) tui.PostCreatedMsg {
 // two quick sends gave the first post the second one's tags.
 func TestModel_TagsGoToThePostThatCarriedThem(t *testing.T) {
 	m, client := withOwnPost(t)
-	m, _ = step(t, m, tui.AllTagsLoadedMsg{Tags: []*model.Tag{{ID: "ta", Name: "alpha"}, {ID: "tb", Name: "beta"}}})
+	m, _ = step(t, m, tui.AllTagsLoadedMsg{Tags: []*model.Tag{{ID: "ta", Name: "alpha", Scope: model.TagScopeChannel, ChannelID: "c1"}, {ID: "tb", Name: "beta", Scope: model.TagScopeChannel, ChannelID: "c1"}}})
 
 	client.post = &model.Post{ID: "one", ChannelID: "c1", UserID: "u1"}
 	m, cmd := step(t, m, input.SendMsg{Content: "first #alpha"})
@@ -252,7 +252,7 @@ func TestModel_TagsGoToThePostThatCarriedThem(t *testing.T) {
 // word vanished and nothing was tagged.
 func TestModel_EditAppliesItsTags(t *testing.T) {
 	m, client := withOwnPost(t)
-	m, _ = step(t, m, tui.AllTagsLoadedMsg{Tags: []*model.Tag{{ID: "tp", Name: "prod"}}})
+	m, _ = step(t, m, tui.AllTagsLoadedMsg{Tags: []*model.Tag{{ID: "tp", Name: "prod", Scope: model.TagScopeChannel, ChannelID: "c1"}}})
 	m, _ = step(t, m, key('e'))
 
 	_ = send(t, m, "deployed #prod")
@@ -262,5 +262,25 @@ func TestModel_EditAppliesItsTags(t *testing.T) {
 	}
 	if !slices.Equal(client.taggedPosts, []string{"mine#tp"}) {
 		t.Errorf("tagged = %v, want [mine#tp]", client.taggedPosts)
+	}
+}
+
+// A #tag in a message is the channel's tag. A private tag of the same name,
+// or another channel's, is not borrowed: the channel gets its own.
+func TestModel_HashtagMakesAChannelTag(t *testing.T) {
+	m, client := withOwnPost(t)
+	m, _ = step(t, m, tui.AllTagsLoadedMsg{Tags: []*model.Tag{
+		{ID: "mine", Name: "alpha", Scope: model.TagScopePrivate},
+		{ID: "elsewhere", Name: "alpha", Scope: model.TagScopeChannel, ChannelID: "c9"},
+	}})
+	client.post = &model.Post{ID: "one", ChannelID: "c1", UserID: "u1"}
+	m, cmd := step(t, m, input.SendMsg{Content: "first #alpha"})
+	_, cmd = step(t, m, createdPost(t, cmd))
+	drain(cmd)
+	if want := []string{"alpha/channel/c1"}; !slices.Equal(client.tagsCreated, want) {
+		t.Errorf("created %v, want %v", client.tagsCreated, want)
+	}
+	if want := []string{"one#new-tag"}; !slices.Equal(client.taggedPosts, want) {
+		t.Errorf("tagged %v, want %v", client.taggedPosts, want)
 	}
 }

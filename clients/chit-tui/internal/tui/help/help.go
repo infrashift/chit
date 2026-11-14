@@ -66,7 +66,7 @@ var keyBindings = []binding{
 	{"tab", "switch between panes"},
 	{"enter", "history: reply in thread · input: send"},
 	{"j / k", "history: move between posts"},
-	{"t", "tag a post (history pane, or a thread's root)"},
+	{"t", "tag a post (history pane, or a thread's root); new tags are the channel's, ctrl+t in the picker for private"},
 	{"y", "copy the selection, or the selected post"},
 	{"e", "edit your own post (history pane)"},
 	{"d d", "delete your own post, pressing d twice (history pane)"},

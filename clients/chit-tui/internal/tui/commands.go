@@ -346,10 +346,17 @@ func AddChannelMembersCmd(ctx context.Context, client api.ChitClient, channelID 
 	}
 }
 
-// CreateTagAndApplyCmd creates a tag then applies it to a post.
-func CreateTagAndApplyCmd(ctx context.Context, client api.ChitClient, name, postID string) tea.Cmd {
+// CreateTagAndApplyCmd creates a tag then applies it to a post. The tag is a
+// channel tag of channelID, shared with the channel's members, as tags in
+// chit-tui always were; private makes it the user's private tag instead.
+// With no channel it can only be private.
+func CreateTagAndApplyCmd(ctx context.Context, client api.ChitClient, name, postID, channelID string, private bool) tea.Cmd {
 	return func() tea.Msg {
-		tag, err := client.CreateTag(ctx, name)
+		scope := model.TagScopeChannel
+		if private || channelID == "" {
+			scope, channelID = model.TagScopePrivate, ""
+		}
+		tag, err := client.CreateTag(ctx, name, scope, channelID)
 		if err != nil {
 			return TagCreatedMsg{Tag: nil, Err: err}
 		}
