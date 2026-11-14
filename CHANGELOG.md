@@ -10,6 +10,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Behaviour changes an operator must act on or know about:
 
+- **Tags have an owner and a scope (migration `000008`).** A tag is now
+  `private` (its owner's alone, on anything they can read) or `channel`
+  (shared by one channel's members, usable only there), and names are unique
+  per owner or per channel after NFKC and case folding, no longer server-wide.
+  The migration turns each existing tag into a channel tag in every channel
+  where a post carries it, owned by the new system actor `chit-system`
+  (Chit never recorded who created or applied a tag; a system_admin may
+  rename or delete these), and drops tags applied nowhere. The down
+  migration is lossy: it drops private tags and channel tags and merges
+  same-named tags. `POST /tags` without a `scope` now creates a **private**
+  tag: chit-tui's "create and apply" makes tags only their creator sees.
+  `GET /tags`, post and batch tag reads, search and `post_tags_updated` show
+  each user only the tags they can see.
 - **Keto is now keto-cue, with a CUE permission schema.**
   [keto-cue](https://github.com/infrashift/keto-cue) is the Ory Keto fork that
   reads CUE instead of OPL; its server, storage and REST API are upstream
@@ -127,6 +140,17 @@ Behaviour changes an operator must act on or know about:
 
 ### Added
 
+- Scoped tags (P-CHIT-7 for HALO): `scope` and `channel_id` on `POST /tags`;
+  `PUT`/`DELETE /tags/{id}` (owner only); tags on channels
+  (`POST`/`GET /channels/{id}/tags`, `DELETE /channels/{id}/tags/{tag_id}`,
+  `channel_tags` table) with `applied_by` recorded on channel and post
+  applications; `POST /tags/channels`, a channel filter by up to 8 tags that
+  must all match on the channel or one of its posts; `DELETE /users/{id}/tags`
+  for deleting or anonymizing a person; `channel_tags_updated`,
+  `tag_updated` and `tag_deleted` events. Limits: 50 characters, 32 tags per
+  item, 1024 per owner, 8 per filter. The `profile/` prefix is reserved for
+  HALO acting on a person's behalf (`X-On-Behalf-Of` is now also accepted on
+  `POST /tags`, `/posts/{id}/tags` and `/channels/{id}/tags`).
 - On-behalf-of posting (P-CHIT-1 for HALO): a machine actor listed in
   `CHIT_ON_BEHALF_OF_CLIENTS` may post as a person, and send
   `stream_status` for them, by naming the person's user ID in

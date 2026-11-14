@@ -177,12 +177,34 @@ reply, unless they already have a membership (for example, they unfollowed).
 
 | Method | Path | Summary | Who may call |
 |---|---|---|---|
-| POST | `/tags` | Create a tag (`{"name": ...}`, 1–50 characters). Idempotent: an existing name returns the existing tag. | Any user |
-| GET | `/tags` | List all tags | Any user |
-| POST | `/posts/{id}/tags` | Tag a post (`{"tag_id": ...}`) | Members of the post's channel |
-| GET | `/posts/{id}/tags` | Tags on a post | Members of the post's channel |
-| DELETE | `/posts/{id}/tags/{tag_id}` | Remove a tag from a post | Members of the post's channel |
-| POST | `/tags/posts` | Tags for many posts (`{"post_ids": [...]}`, at most 200), as an object keyed by post ID. Posts the caller cannot read are omitted. | Any user |
+| POST | `/tags` | Create a tag owned by the caller: `{"name", "scope": "private" (default) or "channel", "channel_id"}`. Idempotent per scope. | Any user; a member of `channel_id` for a channel tag |
+| GET | `/tags` | The tags the caller can see (`?channel_id=` narrows to one channel) | Any user |
+| PUT | `/tags/{id}` | Rename (`{"name"}`) | The owner |
+| DELETE | `/tags/{id}` | Delete, with every application | The owner |
+| POST | `/posts/{id}/tags` | Tag a post (`{"tag_id": ...}`) | Members of the post's channel; a private tag by its owner only |
+| GET | `/posts/{id}/tags` | The tags on a post the caller can see | Members of the post's channel |
+| DELETE | `/posts/{id}/tags/{tag_id}` | Remove a tag from a post | Members for a channel tag; the owner for a private tag |
+| POST | `/tags/posts` | Visible tags for many posts (`{"post_ids": [...]}`, at most 200), keyed by post ID. Posts the caller cannot read are omitted. | Any user |
+| POST | `/channels/{id}/tags` | Tag a channel (`{"tag_id": ...}`) | Members; a private tag by its owner only |
+| GET | `/channels/{id}/tags` | The tags on a channel the caller can see | Members |
+| DELETE | `/channels/{id}/tags/{tag_id}` | Remove a tag from a channel | Members for a channel tag; the owner for a private tag |
+| POST | `/tags/channels` | The caller's channels that have **all** of up to 8 tags (`{"tag_ids", "team_id"}`), on the channel or one of its posts, each with its visible channel tags | Any user |
+| DELETE | `/users/{id}/tags` | Delete every tag the user owns (for deleting or anonymizing a person) | The user or a system_admin |
+
+**Scopes.** A `private` tag is its owner's alone: nobody else sees it, its
+name, or what it is on, in any list, read, search, filter or WebSocket event,
+and naming its ID answers 404 as for an unknown tag. A `channel` tag belongs
+to one channel: every member sees it and may apply or remove it there, and
+only there. Only the owner renames or deletes a tag. A name has 1 to 50
+characters (letters, digits, space, `-`, `_`, `.`) and is unique per owner
+(private) or per channel (channel) after NFKC normalization and case folding.
+An item has at most 32 channel tags and 32 private tags of each owner; an
+owner owns at most 1024 tags. Each application records `applied_by`.
+
+**`profile/` is reserved** for HALO's Profile tags. A person cannot create,
+rename or apply such a tag (403). An OAuth2 client in
+`CHIT_ON_BEHALF_OF_CLIENTS` may create one and apply it with
+`X-On-Behalf-Of`, only as the person's private tag.
 
 ### Search
 
@@ -197,7 +219,7 @@ Request body:
 | Field | Type | Description |
 |---|---|---|
 | `terms` | string | Text to find. Optional if `tag_ids` is given. |
-| `tag_ids` | string[] | Tag UUIDs; a post must carry **all** of them. Optional if `terms` is given. |
+| `tag_ids` | string[] | Up to 8 tag UUIDs; a post must carry **all** of them. Only tags the caller can see filter: another user's private tag, like an unknown tag, matches nothing. Optional if `terms` is given. |
 | `from` | string | Author username; a leading `@` is accepted. An unknown author matches nothing. |
 | `page` | int | Page number, default `0` |
 | `per_page` | int | Page size, default `60` |
