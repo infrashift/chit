@@ -1,6 +1,6 @@
 FROM ghcr.io/infrashift/trusted-base-images/trusted/ubi9-standard
 
-ARG GO_VERSION=1.24.4
+ARG GO_VERSION=1.26.10
 
 ENV GOPATH=/go \
     GOCACHE=/go/cache \

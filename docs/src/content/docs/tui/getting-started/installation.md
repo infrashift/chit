@@ -5,7 +5,7 @@ description: How to install Chit TUI from source.
 
 ## Prerequisites
 
-- **Go 1.25+** — [Install Go](https://go.dev/doc/install)
+- **Go 1.26.10+** — [Install Go](https://go.dev/doc/install)
 - **A Chit server** — A running instance of [Chit](https://github.com/infrashift/chit)
 - **An account on that server** — You sign in from the TUI's login screen
   (or supply a token with `CHIT_SESSION_TOKEN`)
