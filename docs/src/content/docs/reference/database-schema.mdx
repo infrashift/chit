@@ -244,6 +244,38 @@ Junction table linking channels to tags, like `message_tags`.
 
 **Indexes:** `tag_id`
 
+### files
+
+Image attachments. The bytes are in the object store under `s3_key`.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | UUID | PK | UUIDv7 |
+| `channel_id` | UUID | NOT NULL, FK → channels (CASCADE) | The channel it was uploaded to |
+| `uploader_actor_id` | UUID | NOT NULL, FK → users | The person it is authorized as (with `X-On-Behalf-Of`, the person named) |
+| `via_actor_id` | UUID | FK → users | The allowlisted client that uploaded it for them, or NULL |
+| `name` | VARCHAR(255) | NOT NULL | The cleaned file name, with the stored type's extension |
+| `sha256` | CHAR(64) | NOT NULL | SHA-256 of the stored bytes |
+| `content_type` | VARCHAR(64) | NOT NULL, `image/png` or `image/jpeg` | The stored type |
+| `size_bytes` | BIGINT | NOT NULL, > 0 | Stored size |
+| `width`, `height` | INTEGER | NOT NULL, > 0 | Pixels |
+| `alt_text` | VARCHAR(1000) | NOT NULL, default `''` | The person's description |
+| `s3_key` | VARCHAR(80) | NOT NULL | `<channel_id>/<file_id>` of the upload that stored the bytes; a deduplicated file shares another file's key, in the same channel only |
+| `create_at` | BIGINT | NOT NULL | |
+| `delete_at` | BIGINT | NOT NULL, default 0 | Soft delete |
+
+**Indexes:** `(channel_id, sha256)` and `uploader_actor_id` where live; `s3_key`; `delete_at` where deleted
+
+### post_files
+
+Links files to the post they are attached to.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `post_id` | UUID | PK, FK → posts (CASCADE) | |
+| `file_id` | UUID | PK, FK → files (CASCADE), UNIQUE | A file is attached to one post |
+| `position` | SMALLINT | NOT NULL | Order in the post's `file_ids` |
+
 ## Migrations
 
 Migrations are stored in `migrations/` and applied with golang-migrate:
@@ -265,6 +297,8 @@ make migrate-down  # Roll back all migrations
 | `000005_oauth_client_id` | Adds `users.oauth_client_id` (UNIQUE, nullable), mapping a Hydra OAuth2 client to a machine actor |
 | `000006_nullable_person_columns` | Drops NOT NULL from `users.kratos_id` and `users.email` so a machine actor can exist; UNIQUE stays |
 | `000007_query_indexes_and_dm_uniqueness` | Adds `posts (update_at, id)` and `threads (last_reply_at DESC)`; merges duplicate live DMs and groups into the oldest copy (posts, threads and members move, the rest are soft-deleted) and adds a partial unique index on `channels (name)` for team-less channels; drops `idx_users_kratos_id`, `idx_users_username`, `idx_users_email` and `idx_teams_name`, which duplicated UNIQUE constraints |
+| `000008_scoped_tags` | Gives each tag an owner and a scope (`private` or `channel`) and adds `channel_tags`; see the changelog's upgrade notes |
+| `000009_files` | Adds `files` and `post_files` for image attachments. The down migration drops them; the objects stay in the bucket |
 
 ### Rolling back
 

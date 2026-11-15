@@ -25,13 +25,22 @@ exists.
 | `CHIT_TRUSTED_CLIENT_HEADER` | string | `X-Client-Id` | Header carrying a machine actor's OAuth2 `client_id`, set by Oathkeeper after introspecting a Hydra token. Checked before `CHIT_TRUSTED_PROXY_HEADER`. The client must be bound to a user (see `CHIT_MACHINE_ACTORS`); an unknown client gets 401 and is never auto-created. |
 | `CHIT_TRUSTED_PROXY_SECRET` | string | _(empty)_ | When set, every authenticated request must carry a matching `X-Proxy-Secret` header before either identity header is trusted; recommended in production |
 | `CHIT_MACHINE_ACTORS` | JSON | _(empty)_ | Machine actors (agents and bots) to create or update at boot. See [Machine actors](#machine-actors). |
-| `CHIT_ON_BEHALF_OF_CLIENTS` | list | _(empty)_ | Comma-separated OAuth2 client IDs of machine actors that may act as a person by naming the person's user ID, or `kratos:` and their Kratos identity ID, in `X-On-Behalf-Of`: post, send `stream_status`, create and apply tags, create a channel, add a channel member, and read the person with `GET /users/me`. A `kratos:` person who has no user yet is provisioned as on their first browser request. The request is authorized as that person, and `props.on_behalf_of.actor_id` and the audit log record the client. Each must be in `CHIT_MACHINE_ACTORS`, or chitd does not start. A person's session can never use the header. |
+| `CHIT_ON_BEHALF_OF_CLIENTS` | list | _(empty)_ | Comma-separated OAuth2 client IDs of machine actors that may act as a person by naming the person's user ID, or `kratos:` and their Kratos identity ID, in `X-On-Behalf-Of`: post, send `stream_status`, create, read, apply and remove tags, create a channel, add a channel member, upload and download attachments, and read the person with `GET /users/me`. A `kratos:` person who has no user yet is provisioned as on their first browser request. The request is authorized as that person, and `props.on_behalf_of.actor_id` and the audit log record the client. Each must be in `CHIT_MACHINE_ACTORS`, or chitd does not start. A person's session can never use the header. |
 | `CHIT_KRATOS_ADMIN_URL` | string | `http://localhost:4434` | Ory Kratos admin API base URL |
 | `CHIT_KETO_READ_URL` | string | `http://localhost:4466` | Ory Keto read API base URL |
 | `CHIT_KETO_WRITE_URL` | string | `http://localhost:4467` | Ory Keto write API base URL |
 | `CHIT_ZINCSEARCH_URL` | string | _(empty)_ | ZincSearch server URL. Empty disables ZincSearch: search runs as SQL and no indexer runs. When set, a background indexer syncs posts every 5 seconds and term searches go to ZincSearch, falling back to SQL if it errors. |
 | `CHIT_ZINCSEARCH_USER` | string | `admin` | ZincSearch username |
 | `CHIT_ZINCSEARCH_PASSWORD` | string | _(empty)_ | ZincSearch password |
+| `CHIT_S3_ENDPOINT` | string | _(empty)_ | S3-compatible endpoint for attachments (SeaweedFS in the deploy files), addressed path-style, such as `http://127.0.0.1:8333`. Empty turns attachments off: the file routes and `file_ids` answer 503. When set, chitd creates the bucket at start if it is missing, retrying for 60 seconds while the store starts. |
+| `CHIT_S3_BUCKET` | string | `chit-files` | The attachment bucket |
+| `CHIT_S3_REGION` | string | `us-east-1` | Region in the request signatures (SeaweedFS ignores it) |
+| `CHIT_S3_ACCESS_KEY_ID` | string | _(empty)_ | S3 access key; required with `CHIT_S3_ENDPOINT` |
+| `CHIT_S3_SECRET_ACCESS_KEY` | string | _(empty)_ | S3 secret key; required with `CHIT_S3_ENDPOINT` |
+| `CHIT_FILE_QUOTA_BYTES` | int | `1073741824` | Most bytes of live attachments one person may have; an upload past it is a 413 |
+| `CHIT_FILE_ORPHAN_GRACE` | duration | `24h` | How long an upload may wait for its post, and how long a deleted file's object is kept |
+| `CHIT_FILE_SWEEP_INTERVAL` | duration | `10m` | How often the attachment sweep runs |
+| `CHIT_FILE_SWEEP_BATCH` | int | `100` | Most files the sweep expires, and most it purges, per run |
 | `CHIT_WS_PING_INTERVAL` | duration | `30s` | Interval between WebSocket ping frames |
 | `CHIT_WS_WRITE_TIMEOUT` | duration | `10s` | Write deadline for WebSocket messages |
 | `CHIT_CACHE_SIZE` | int | `20000` | Maximum entries in the user LRU cache |
