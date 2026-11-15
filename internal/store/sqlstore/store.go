@@ -19,6 +19,7 @@ type SqlStore struct {
 	post    store.PostStore
 	thread  store.ThreadStore
 	tag     store.TagStore
+	file    store.FileStore
 }
 
 // New creates a new SqlStore and connects to the database.
@@ -50,6 +51,7 @@ func New(ctx context.Context, databaseURL string, maxOpen, maxIdle int) (*SqlSto
 	ss.post = &SqlPostStore{sqlStore: ss}
 	ss.thread = &SqlThreadStore{sqlStore: ss}
 	ss.tag = &SqlTagStore{sqlStore: ss}
+	ss.file = &SqlFileStore{sqlStore: ss}
 
 	return ss, nil
 }
@@ -60,6 +62,7 @@ func (ss *SqlStore) Channel() store.ChannelStore { return ss.channel }
 func (ss *SqlStore) Post() store.PostStore       { return ss.post }
 func (ss *SqlStore) Thread() store.ThreadStore   { return ss.thread }
 func (ss *SqlStore) Tag() store.TagStore         { return ss.tag }
+func (ss *SqlStore) File() store.FileStore       { return ss.file }
 
 func (ss *SqlStore) Close() {
 	ss.pool.Close()

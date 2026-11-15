@@ -10,6 +10,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Behaviour changes an operator must act on or know about:
 
+- **Attachments (migration `000009`) and a SeaweedFS container.** The
+  migration adds `files` and `post_files`; its down migration drops them
+  and leaves the objects in the bucket. Attachments are off until
+  `CHIT_S3_ENDPOINT` is set, with `CHIT_S3_ACCESS_KEY_ID` and
+  `CHIT_S3_SECRET_ACCESS_KEY` (chitd will not start with the endpoint and
+  no keys). The deploy files add a `seaweedfs` container
+  (trusted-service-containers `trusted/seaweedfs:4.51-382cdac`, by digest)
+  on 127.0.0.1 ports 8333 (S3), 9333, 8380 and 8888 and gRPC 19333, 18380,
+  18888 and 18334, a `chit-seaweedfs-config` ConfigMap with the dev S3 key,
+  and a `chit-seaweeddata` volume (`chit-uat-seaweeddata` for UAT), which
+  `make kube-clean` and `make uat-clean` now remove. chitd creates the
+  `chit-files` bucket at start, waiting up to 60 seconds for the store.
+  `CreatePostRequest.content` is no longer required: a post of attachments
+  alone has none.
 - **Tags have an owner and a scope (migration `000008`).** A tag is now
   `private` (its owner's alone, on anything they can read) or `channel`
   (shared by one channel's members, usable only there), and names are unique
@@ -145,6 +159,36 @@ Behaviour changes an operator must act on or know about:
 
 ### Added
 
+- Attachments (P-CHIT-5 for HALO): `POST /channels/{id}/files` uploads an
+  image (multipart `file` and `alt_text`), `GET /files/{id}` serves its
+  bytes, `GET /files/{id}/info` its metadata, and `POST /files/search`
+  finds files by name and alt text only, in the caller's channels.
+  `file_ids` on `POST /posts` attaches up to 4 of the author's uploads in
+  that channel; posts read back with `file_ids`, and deleting a post
+  deletes its files. Uploads are checked by the new package
+  `pkg/imagecheck` (no Chit dependencies, for HALO to reuse): PNG, JPEG,
+  WebP and GIF (first frame) only, SVG refused, declared and sniffed types
+  must agree, polyglots (trailing bytes, markup in metadata) refused,
+  `image.DecodeConfig` refuses more than 40 MP before decoding, then a pure
+  Go re-encode (JPEG to JPEG, the rest to PNG) drops EXIF and anything
+  else; 10 MiB in and out, and `CHIT_FILE_QUOTA_BYTES` (1 GiB) per person.
+  Refusals carry an `id` (`file.svg`, `file.polyglot`, ...). Bytes go to
+  the S3 bucket `chit-files` under `<channel_id>/<file_id>` through a small
+  SigV4 client; identical bytes share one object within a channel, never
+  across channels. Before it is attached only the uploader reads a file,
+  then every member; a non-member gets 403. Every file response carries
+  `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox`
+  and `Content-Disposition`. A sweep, at most `CHIT_FILE_SWEEP_BATCH` files
+  each `CHIT_FILE_SWEEP_INTERVAL`, deletes uploads never attached and the
+  objects of deleted files after `CHIT_FILE_ORPHAN_GRACE` (24 h).
+- `X-On-Behalf-Of` on more routes, so halod can manage a person's tags and
+  attachments as the person: `GET /tags`, `GET /channels/{id}/tags`,
+  `POST /tags/posts`, `POST /tags/channels`,
+  `DELETE /posts/{id}/tags/{tag_id}`, `DELETE /channels/{id}/tags/{tag_id}`,
+  `POST /channels/{id}/files` (a `file_uploaded` audit record names the
+  client) and `GET /files/{id}`. The person sees only their own private
+  tags. A test now holds the route list and the spec's header declarations
+  to the same set.
 - On-behalf-of provisioning and Conversations (P-CHIT-8 for HALO):
   `X-On-Behalf-Of` also takes `kratos:<Kratos identity ID>` (a canonical
   UUID). A person who has never opened Chit gets the user their first

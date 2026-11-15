@@ -12,6 +12,7 @@ import (
 
 	"github.com/infrashift/chit/internal/api"
 	"github.com/infrashift/chit/internal/app"
+	"github.com/infrashift/chit/internal/blob"
 	"github.com/infrashift/chit/internal/command"
 	"github.com/infrashift/chit/internal/config"
 	"github.com/infrashift/chit/internal/jobs"
@@ -52,6 +53,10 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 
 	s.initApp()
+
+	if err := s.initBlobs(); err != nil {
+		return nil, fmt.Errorf("init attachments: %w", err)
+	}
 
 	// After initApp, because it needs the App and its store; before initHTTP,
 	// because a request that arrives first would be refused as an unknown
@@ -159,6 +164,47 @@ func (s *Server) initApp() {
 	s.app = app.New(s.store, s.hub, s.pubsub, s.config)
 }
 
+// initBlobs connects the attachment object store when CHIT_S3_ENDPOINT is
+// set, and creates the bucket if it is missing. The store may still be
+// starting beside chitd (the deploy manifests run SeaweedFS in the same
+// pod), so it is retried for blobStartTimeout before chitd gives up.
+func (s *Server) initBlobs() error {
+	if s.config.S3Endpoint == "" {
+		slog.Info("attachments are off: CHIT_S3_ENDPOINT is not set")
+		return nil
+	}
+	store, err := blob.NewS3(&blob.S3Config{
+		Endpoint:        s.config.S3Endpoint,
+		Bucket:          s.config.S3Bucket,
+		Region:          s.config.S3Region,
+		AccessKeyID:     s.config.S3AccessKeyID,
+		SecretAccessKey: s.config.S3SecretAccessKey,
+	})
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), blobStartTimeout)
+	defer cancel()
+	for {
+		err = store.EnsureBucket(ctx)
+		if err == nil {
+			break
+		}
+		slog.Warn("attachments: object store not ready; retrying", "endpoint", s.config.S3Endpoint, "error", err)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("bucket %s at %s: %w", s.config.S3Bucket, s.config.S3Endpoint, err)
+		case <-time.After(2 * time.Second):
+		}
+	}
+	s.app.Blobs = store
+	slog.Info("attachments are on", "endpoint", s.config.S3Endpoint, "bucket", s.config.S3Bucket)
+	return nil
+}
+
+// blobStartTimeout bounds the wait for the object store at start.
+const blobStartTimeout = 60 * time.Second
+
 func (s *Server) initCommands() {
 	cueCfg, err := command.LoadCUE(s.config.CommandsCUEDir)
 	if err != nil {
@@ -227,6 +273,10 @@ func (s *Server) initJobs() {
 			s.config.ZincSearchPassword,
 		).WithPostStore(s.store.Post())
 		s.scheduler.AddWorker(indexer)
+	}
+
+	if s.app.Blobs != nil {
+		s.scheduler.AddWorker(workers.NewFileSweeper(s.app.SweepFiles, s.config.FileSweepInterval))
 	}
 
 	if s.webhookCh != nil {

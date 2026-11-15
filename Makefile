@@ -226,7 +226,7 @@ kube-log-%:
 	podman logs -f chit-app-$*
 
 kube-clean: kube-down
-	-podman volume rm chit-pgdata chit-zincdata 2>/dev/null
+	-podman volume rm chit-pgdata chit-zincdata chit-seaweeddata 2>/dev/null
 
 ## --- UAT (Manual Acceptance Testing) ---
 
@@ -251,7 +251,7 @@ uat-down:
 	sed "s|__PROJECT_ROOT__|$(CURDIR)|g" $(UAT_KUBE_FILE) | podman kube down -
 
 uat-clean: uat-down
-	-podman volume rm chit-uat-pgdata chit-uat-zincdata 2>/dev/null
+	-podman volume rm chit-uat-pgdata chit-uat-zincdata chit-uat-seaweeddata 2>/dev/null
 
 ## --- Docs ---
 

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/infrashift/chit/internal/blob"
 	"github.com/infrashift/chit/internal/jobs/workers"
 	"github.com/infrashift/chit/internal/keto"
 
@@ -31,6 +32,8 @@ type App struct {
 	Hub    *websocket.Hub
 	PubSub pubsub.PubSub
 	Config *config.Config
+	// Blobs holds attachment bytes; nil when attachments are off.
+	Blobs blob.Store
 
 	// Slash commands (nil when commands are disabled).
 	CommandRegistry *command.Registry

@@ -43,7 +43,7 @@ Created/Modified Files
   1. tests/e2e/test_e2e.sh
 
   Executable bash script with:
-  - Setup: Health checks for all 6 services (PG, Kratos, Oathkeeper, Keto, ZincSearch, chitd), creates 3 test users via Kratos Admin API, logs in each via API flow to get session tokens
+  - Setup: Health checks for all 6 services (PG, Kratos, Oathkeeper, Keto, ZincSearch, chitd; SeaweedFS is checked in scenario 11), creates 3 test users via Kratos Admin API, logs in each via API flow to get session tokens
   - Scenario 1: User provisioning — system ping/config at chitd and 401 through the gateway, auto-provision on first /users/me, user lookup by ID/username, user search, unauthenticated 401, idempotent provisioning
   - Scenario 2: Team & channel lifecycle — team creation with auto team_admin role, adding members, public/private channels, Keto relation tuple verification (write & delete), "my channels" filtering, updates
   - Scenario 3: Channel messaging — posting, pagination, get/edit/pin/unpin/delete posts, mark channel viewed
@@ -62,6 +62,17 @@ Created/Modified Files
     checks that her own first login finds the same user; then provisions an
     identity of the `email-only` Kratos schema (like HALO's) and checks its
     derived username
+  - Scenario 11: Attachments (HALO P-CHIT-5) — checks that SeaweedFS's S3
+    gateway refuses an anonymous request; as halod on behalf of Erin, uploads
+    a PNG to her Conversation (uploader and `via_actor_id`, nosniff and
+    sandbox headers), fetches it as her before it is attached and is refused
+    as itself, posts it as her and reads it as a member, and checks that Bob,
+    not a member, gets 403; finds it by alt text; refuses SVG, a PNG/HTML
+    polyglot and a declared/sniffed mismatch; refuses on-behalf-of upload and
+    download from a person's session and from `chit-e2e-bot`, a machine actor
+    not on `CHIT_ON_BEHALF_OF_CLIENTS`; checks in PostgreSQL that the same
+    bytes share one object within a channel and get their own in another;
+    and that deleting the post deletes the file
 
   The Keto checks in scenarios 2 and 4 read `chit/channel` tuples, which chitd
   writes best-effort; members added when a channel is created are written in

@@ -29,7 +29,13 @@ func (s *SqlPostStore) Save(ctx context.Context, post *model.Post) (*model.Post,
 		rootID = post.RootID
 	}
 
-	_, err := s.sqlStore.pool.Exec(ctx, query,
+	tx, err := s.sqlStore.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("save post: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	_, err = tx.Exec(ctx, query,
 		post.ID, post.ChannelID, post.UserID, rootID, post.Content,
 		post.Type, post.Props, post.Hashtags, post.IsPinned, post.EditAt,
 		post.CreateAt, post.UpdateAt, post.DeleteAt,
@@ -37,21 +43,64 @@ func (s *SqlPostStore) Save(ctx context.Context, post *model.Post) (*model.Post,
 	if err != nil {
 		return nil, fmt.Errorf("save post: %w", err)
 	}
+	if err := attachFiles(ctx, tx, post); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("save post: commit: %w", err)
+	}
 
 	return post, nil
+}
+
+// attachFiles links post.FileIDs to the post, in order. The conditions are
+// in the INSERT itself, so a file deleted, attached elsewhere or swept
+// between the app's checks and this statement is not attached: the count
+// then falls short and the post is not saved either (409).
+func attachFiles(ctx context.Context, tx pgx.Tx, post *model.Post) error {
+	if len(post.FileIDs) == 0 {
+		return nil
+	}
+	tag, err := tx.Exec(ctx,
+		`INSERT INTO post_files (post_id, file_id, position)
+		 SELECT $1, f.id, ids.ord - 1
+		 FROM unnest($2::uuid[]) WITH ORDINALITY AS ids(id, ord)
+		 JOIN files f ON f.id = ids.id
+		 WHERE f.channel_id = $3 AND f.uploader_actor_id = $4 AND f.delete_at = 0
+		   AND NOT EXISTS (SELECT 1 FROM post_files pf WHERE pf.file_id = f.id)
+		 ON CONFLICT DO NOTHING`,
+		post.ID, post.FileIDs, post.ChannelID, post.UserID)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return model.NewConflictError("SqlPostStore.Save", "a file is already attached to another post")
+		}
+		return fmt.Errorf("attach files: %w", err)
+	}
+	if int(tag.RowsAffected()) != len(post.FileIDs) {
+		return model.NewConflictError("SqlPostStore.Save",
+			"a file is gone, attached to another post, or not yours to attach in this channel")
+	}
+	return nil
 }
 
 // postColumns is the one SELECT list for posts, and scanPost its one reader.
 // root_id is nullable and comes back as ”. Prefix it with postsAlias when the
 // query joins posts under an alias.
-const postColumns = `id, channel_id, user_id, COALESCE(root_id::text, ''), content, type, props,
-	hashtags, is_pinned, edit_at, create_at, update_at, delete_at`
+var postColumns = `id, channel_id, user_id, COALESCE(root_id::text, ''), content, type, props,
+	hashtags, is_pinned, edit_at, create_at, update_at, delete_at, ` + postFileIDs("posts")
+
+// postFileIDs reads the IDs of the files attached to the post alias, in
+// order.
+func postFileIDs(alias string) string {
+	return `COALESCE((SELECT array_agg(pf.file_id::text ORDER BY pf.position) FROM post_files pf WHERE pf.post_id = ` +
+		alias + `.id), '{}')`
+}
 
 // postColumnsAs is postColumns with every column qualified by alias.
 func postColumnsAs(alias string) string {
 	return alias + `.id, ` + alias + `.channel_id, ` + alias + `.user_id, COALESCE(` + alias + `.root_id::text, ''), ` +
 		alias + `.content, ` + alias + `.type, ` + alias + `.props, ` + alias + `.hashtags, ` + alias + `.is_pinned, ` +
-		alias + `.edit_at, ` + alias + `.create_at, ` + alias + `.update_at, ` + alias + `.delete_at`
+		alias + `.edit_at, ` + alias + `.create_at, ` + alias + `.update_at, ` + alias + `.delete_at, ` + postFileIDs(alias)
 }
 
 func scanPost(row pgx.Row) (*model.Post, error) {
@@ -59,8 +108,11 @@ func scanPost(row pgx.Row) (*model.Post, error) {
 	err := row.Scan(
 		&p.ID, &p.ChannelID, &p.UserID, &p.RootID, &p.Content,
 		&p.Type, &p.Props, &p.Hashtags, &p.IsPinned, &p.EditAt,
-		&p.CreateAt, &p.UpdateAt, &p.DeleteAt,
+		&p.CreateAt, &p.UpdateAt, &p.DeleteAt, &p.FileIDs,
 	)
+	if len(p.FileIDs) == 0 {
+		p.FileIDs = nil
+	}
 	return p, err
 }
 
@@ -118,14 +170,35 @@ func (s *SqlPostStore) Update(ctx context.Context, post *model.Post) (*model.Pos
 	return post, nil
 }
 
+// Delete soft-deletes a post and, in the same transaction, unlinks its
+// files and soft-deletes them: a deleted message's images stop being served
+// at once, and the sweep removes their objects later.
 func (s *SqlPostStore) Delete(ctx context.Context, id string, deleteAt int64) error {
+	if !model.IsValidID(id) {
+		return model.NewNotFoundError("SqlPostStore.Delete", id)
+	}
+	tx, err := s.sqlStore.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("delete post: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	query := `UPDATE posts SET delete_at = $1, update_at = $1 WHERE id = $2 AND delete_at = 0`
-	tag, err := s.sqlStore.pool.Exec(ctx, query, deleteAt, id)
+	tag, err := tx.Exec(ctx, query, deleteAt, id)
 	if err != nil {
 		return fmt.Errorf("delete post: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return model.NewNotFoundError("SqlPostStore.Delete", id)
+	}
+	if _, err := tx.Exec(ctx,
+		`WITH unlinked AS (DELETE FROM post_files WHERE post_id = $1 RETURNING file_id)
+		 UPDATE files SET delete_at = $2 WHERE id IN (SELECT file_id FROM unlinked) AND delete_at = 0`,
+		id, deleteAt); err != nil {
+		return fmt.Errorf("delete post: unlink files: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("delete post: commit: %w", err)
 	}
 	return nil
 }

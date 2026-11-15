@@ -38,10 +38,12 @@ Then the services:
 | **hydra** | TSC `hydra:v26.2.0` | 4444, 4445 | OAuth2 tokens for machine actors (`--dev`: plain HTTP) |
 | **oathkeeper** | TSC `oathkeeper:v26.2.0` | 4455, 4456 | Authentication proxy |
 | **zincsearch** | `zinclabs/zincsearch:0.4.10` | 4080 | Full-text search index |
+| **seaweedfs** | TSC `seaweedfs:4.51-382cdac` | 8333 (S3), 9333, 8380, 8888; gRPC 19333, 18380, 18888, 18334; all on 127.0.0.1 | Attachment store: one `weed server` with master, volume server, filer and S3 gateway. The gateway accepts only the identity in `chit-seaweedfs-config`. chitd creates the `chit-files` bucket. |
 | **chitd** | `localhost/chit:latest` | 8065 | The Chit server |
 
 The chitd container is configured in the manifest with the database URL, the
-Kratos and Keto URLs, and the ZincSearch URL and credentials; everything else
+Kratos and Keto URLs, the ZincSearch URL and credentials, and the SeaweedFS
+endpoint and its dev S3 key (`CHIT_S3_*`); everything else
 takes chitd's defaults. To set more (for example `CHIT_MACHINE_ACTORS` or
 `CHIT_TRUSTED_PROXY_SECRET`), add it to the `chitd` container's `env` and run
 `make kube-restart`, or run chitd locally with `.env` (see
@@ -50,7 +52,8 @@ takes chitd's defaults. To set more (for example `CHIT_MACHINE_ACTORS` or
 Podman names each container `<pod>-<container>`, e.g. `chit-app-chitd`.
 
 Every image is pinned by digest in the manifest. "TSC" is
-`ghcr.io/infrashift/trusted-service-containers`. ZincSearch and
+`ghcr.io/infrashift/trusted-service-containers`; SeaweedFS is its
+`trusted/seaweedfs`, built from source on UBI9 Micro. ZincSearch and
 `migrate/migrate` are not in TSC and come from their upstream registries.
 TSC builds keto-cue from source (commit `809351b3`) on trusted UBI9 Micro,
 the same way it builds the Ory images.
@@ -63,6 +66,7 @@ the same way it builds the Ory images.
 | `chit-hydra-config` | Hydra server config (issuer, opaque 1-hour access tokens, placeholder system secret) |
 | `chit-oathkeeper-config` | Oathkeeper access rules and server config |
 | `chit-keto-config` | keto-cue server config, a copy of `deploy/keto/keto.yml` |
+| `chit-seaweedfs-config` | `s3.json`: the S3 identity (dev access and secret key) the gateway accepts, mounted at `/etc/seaweedfs` |
 | `chit-keto-schema` | Chit's file of the keto-cue schema directory, a copy of `deploy/keto/schema/chit.cue`, mounted at `/etc/keto/schema` |
 
 ## Persistent Volumes
@@ -71,6 +75,7 @@ the same way it builds the Ory images.
 |---|---|---|
 | `chit-pgdata` | `/var/lib/postgresql/17/data` | PostgreSQL data directory |
 | `chit-zincdata` | `/data` | ZincSearch index data |
+| `chit-seaweeddata` | `/data` | SeaweedFS volumes and filer metadata (attachments) |
 
 ## Networking
 

@@ -123,10 +123,22 @@ var onBehalfOfRoutes = []struct {
 	// Posting, and saying that a reply is being produced.
 	{http.MethodPost, "POST /posts", regexp.MustCompile(`^/api/v1/posts$`)},
 	{http.MethodPost, "POST /channels/{id}/stream_status", regexp.MustCompile(`^/api/v1/channels/[^/]+/stream_status$`)},
-	// Tags: halod creates and applies a person's profile/ Tags for them.
+	// Tags: halod reads, creates, applies and removes a person's Tags for
+	// them, profile/ Tags included, and sees only what the person sees:
+	// their own private Tags and the channel Tags of their channels.
 	{http.MethodPost, "POST /tags", regexp.MustCompile(`^/api/v1/tags$`)},
+	{http.MethodGet, "GET /tags", regexp.MustCompile(`^/api/v1/tags$`)},
 	{http.MethodPost, "POST /posts/{id}/tags", regexp.MustCompile(`^/api/v1/posts/[^/]+/tags$`)},
+	{http.MethodDelete, "DELETE /posts/{id}/tags/{tag_id}", regexp.MustCompile(`^/api/v1/posts/[^/]+/tags/[^/]+$`)},
 	{http.MethodPost, "POST /channels/{id}/tags", regexp.MustCompile(`^/api/v1/channels/[^/]+/tags$`)},
+	{http.MethodGet, "GET /channels/{id}/tags", regexp.MustCompile(`^/api/v1/channels/[^/]+/tags$`)},
+	{http.MethodDelete, "DELETE /channels/{id}/tags/{tag_id}", regexp.MustCompile(`^/api/v1/channels/[^/]+/tags/[^/]+$`)},
+	{http.MethodPost, "POST /tags/posts", regexp.MustCompile(`^/api/v1/tags/posts$`)},
+	{http.MethodPost, "POST /tags/channels", regexp.MustCompile(`^/api/v1/tags/channels$`)},
+	// Attachments: halod uploads a person's image, and fetches an image
+	// for the person it shows it to (halod proxies downloads).
+	{http.MethodPost, "POST /channels/{id}/files", regexp.MustCompile(`^/api/v1/channels/[^/]+/files$`)},
+	{http.MethodGet, "GET /files/{id}", regexp.MustCompile(`^/api/v1/files/[^/]+$`)},
 	// Conversations: halod creates a person's private channel and adds
 	// itself to it, as the person. GET /users/me returns the person, which
 	// is how halod learns the user ID of a kratos: principal.

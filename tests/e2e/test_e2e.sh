@@ -1452,6 +1452,158 @@ assert_status "10.12 create a channel on behalf of Frank" 201 "$LAST_STATUS" "$L
 assert_json "10.12 Frank is the creator" ".creator_id" "$FRANK_ID" "$LAST_BODY"
 
 # ============================================================================
+# SCENARIO 11: Attachments (HALO P-CHIT-5)
+# ============================================================================
+# halod uploads an image for Erin into her Conversation, fetches it for her,
+# and posts it as her. chitd stores the bytes in SeaweedFS (the seaweedfs
+# container of deploy/chit.kube.yml) through its S3 gateway, which refuses
+# anonymous requests. chit-e2e-bot is a machine actor that is not on
+# CHIT_ON_BEHALF_OF_CLIENTS.
+section "Scenario 11: Attachments"
+
+E2E_TMP=$(mktemp -d)
+# A 1×1 PNG.
+echo 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==' \
+  | base64 -d > "${E2E_TMP}/dot.png"
+# The same PNG with an HTML page after IEND: a polyglot.
+cat "${E2E_TMP}/dot.png" > "${E2E_TMP}/polyglot.png"
+printf '<html><script>alert(1)</script></html>' >> "${E2E_TMP}/polyglot.png"
+printf '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>' > "${E2E_TMP}/x.svg"
+
+# upload_file TOKEN CHANNEL FILE CONTENT_TYPE ALT [ON_BEHALF_OF] — a
+# multipart upload with a bearer token; sets LAST_STATUS, LAST_BODY and
+# LAST_HEADERS (lowercased names).
+upload_file() {
+  local token="$1" channel="$2" file="$3" ctype="$4" alt="$5" obo="${6:-}"
+  local body hdr
+  body=$(mktemp); hdr=$(mktemp)
+  local args=(-s -w '%{http_code}' -o "$body" -D "$hdr" -X POST -H "Authorization: Bearer ${token}"
+    -F "file=@${file};type=${ctype}" -F "alt_text=${alt}")
+  [[ -n "$obo" ]] && args+=(-H "X-On-Behalf-Of: ${obo}")
+  LAST_STATUS=$(curl "${args[@]}" "${API}/channels/${channel}/files")
+  LAST_BODY=$(cat "$body")
+  LAST_HEADERS=$(tr 'A-Z' 'a-z' < "$hdr" | tr -d '\r')
+  rm -f "$body" "$hdr"
+}
+
+# get_file TOKEN FILE_ID OUT [ON_BEHALF_OF] — downloads to OUT; sets
+# LAST_STATUS and LAST_HEADERS.
+get_file() {
+  local token="$1" id="$2" out="$3" obo="${4:-}"
+  local hdr
+  hdr=$(mktemp)
+  local args=(-s -w '%{http_code}' -o "$out" -D "$hdr" -H "Authorization: Bearer ${token}")
+  [[ -n "$obo" ]] && args+=(-H "X-On-Behalf-Of: ${obo}")
+  LAST_STATUS=$(curl "${args[@]}" "${API}/files/${id}")
+  LAST_HEADERS=$(tr 'A-Z' 'a-z' < "$hdr" | tr -d '\r')
+  rm -f "$hdr"
+}
+
+# assert_header LABEL "name: value" — LAST_HEADERS has that line.
+assert_header() {
+  if grep -qxF "$2" <<< "$LAST_HEADERS"; then
+    echo -e "  ${GREEN}PASS${NC} $1 ($2)"
+    PASS_COUNT=$((PASS_COUNT + 1))
+  else
+    echo -e "  ${RED}FAIL${NC} $1 — no \"$2\" in the response headers"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+  fi
+}
+
+# 11.1 SeaweedFS refuses anonymous S3 requests: only chitd's identity works.
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8333/chit-files/")
+assert_status "11.1 the S3 gateway refuses an anonymous request" 403 "$STATUS"
+
+# 11.2 halod uploads for Erin, into her Conversation.
+upload_file "$HALOD_TOKEN" "$CONV_ID" "${E2E_TMP}/dot.png" image/png "A single dot" "kratos:${ERIN_KRATOS_ID}"
+assert_status "11.2 upload on behalf of Erin" 201 "$LAST_STATUS" "$LAST_BODY"
+assert_json "11.2 Erin is the uploader" ".uploader_id" "$ERIN_ID" "$LAST_BODY"
+assert_json "11.2 halod is recorded" ".via_actor_id" "$HALOD_USER_ID" "$LAST_BODY"
+assert_json "11.2 stored as PNG" ".content_type" "image/png" "$LAST_BODY"
+assert_json "11.2 1×1" '"\(.width)x\(.height)"' "1x1" "$LAST_BODY"
+assert_header "11.2 nosniff" "x-content-type-options: nosniff"
+assert_header "11.2 sandbox CSP" "content-security-policy: sandbox"
+FILE_ID=$(echo "$LAST_BODY" | jq -r '.id')
+FILE_SHA=$(echo "$LAST_BODY" | jq -r '.sha256')
+
+# 11.3 Before it is attached, halod reads it only as Erin.
+get_file "$HALOD_TOKEN" "$FILE_ID" "${E2E_TMP}/got.png"
+assert_status "11.3 halod as itself, before the post" 403 "$LAST_STATUS"
+get_file "$HALOD_TOKEN" "$FILE_ID" "${E2E_TMP}/got.png" "kratos:${ERIN_KRATOS_ID}"
+assert_status "11.3 halod fetches it for Erin" 200 "$LAST_STATUS"
+assert_header "11.3 image/png" "content-type: image/png"
+assert_header "11.3 nosniff" "x-content-type-options: nosniff"
+assert_header "11.3 sandbox CSP" "content-security-policy: sandbox"
+assert_header "11.3 attachment" "content-disposition: attachment; filename=dot.png"
+assert_json "11.3 the bytes are what was stored" "." "$FILE_SHA" "\"$(sha256sum "${E2E_TMP}/got.png" | cut -d' ' -f1)\""
+
+# 11.4 halod posts it as Erin; then any member reads it, and Bob may not.
+halod_api POST "/posts" "{\"channel_id\":\"${CONV_ID}\",\"content\":\"\",\"file_ids\":[\"${FILE_ID}\"]}" "kratos:${ERIN_KRATOS_ID}"
+assert_status "11.4 a post of the image alone" 201 "$LAST_STATUS" "$LAST_BODY"
+assert_json "11.4 the post carries the file" ".file_ids[0]" "$FILE_ID" "$LAST_BODY"
+FILE_POST_ID=$(echo "$LAST_BODY" | jq -r '.id')
+get_file "$HALOD_TOKEN" "$FILE_ID" "${E2E_TMP}/got.png"
+assert_status "11.4 halod, a member, reads the attached file" 200 "$LAST_STATUS"
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Session-Token: ${BOB_TOKEN}" "${API}/files/${FILE_ID}")
+assert_status "11.4 Bob, not a member, may not" 403 "$STATUS"
+
+# 11.5 Search finds it by alt text, for a member only.
+halod_api POST "/files/search" '{"terms":"single DOT"}'
+assert_json "11.5 found by alt text" ".[0].id" "$FILE_ID" "$LAST_BODY"
+CURRENT_TOKEN="$BOB_TOKEN"
+curl_api_full POST "/files/search" '{"terms":"single dot"}'
+assert_json "11.5 not for a non-member" "length" "0" "$LAST_BODY"
+
+# 11.6 The validation pipeline refuses SVG, a polyglot and a mismatch.
+upload_file "$HALOD_TOKEN" "$CONV_ID" "${E2E_TMP}/x.svg" image/svg+xml "" "kratos:${ERIN_KRATOS_ID}"
+assert_status "11.6 SVG" 415 "$LAST_STATUS" "$LAST_BODY"
+assert_json "11.6 SVG reason" ".id" "file.svg" "$LAST_BODY"
+upload_file "$HALOD_TOKEN" "$CONV_ID" "${E2E_TMP}/polyglot.png" image/png "" "kratos:${ERIN_KRATOS_ID}"
+assert_status "11.6 PNG/HTML polyglot" 422 "$LAST_STATUS" "$LAST_BODY"
+assert_json "11.6 polyglot reason" ".id" "file.polyglot" "$LAST_BODY"
+upload_file "$HALOD_TOKEN" "$CONV_ID" "${E2E_TMP}/dot.png" image/jpeg "" "kratos:${ERIN_KRATOS_ID}"
+assert_status "11.6 declared JPEG, sniffed PNG" 415 "$LAST_STATUS" "$LAST_BODY"
+assert_header "11.6 refusals carry nosniff" "x-content-type-options: nosniff"
+
+# 11.7 On behalf of: a person's session, and a machine actor that is not on
+# the allowlist, are refused.
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "X-Session-Token: ${ALICE_TOKEN}" \
+  -H "X-On-Behalf-Of: ${ERIN_ID}" -F "file=@${E2E_TMP}/dot.png;type=image/png" "${API}/channels/${CONV_ID}/files")
+assert_status "11.7 a person's session with X-On-Behalf-Of" 403 "$STATUS"
+BOT_CLIENT_ID="chit-e2e-bot"
+BOT_CLIENT_SECRET="chit-e2e-bot-secret"
+curl -s -o /dev/null -X POST "${HYDRA_ADMIN}/admin/clients" -H "Content-Type: application/json" \
+  -d "$(jq -n --arg id "$BOT_CLIENT_ID" --arg secret "$BOT_CLIENT_SECRET" '{
+    client_id: $id, client_secret: $secret, grant_types: ["client_credentials"],
+    scope: "chit:read chit:write", audience: ["chit"],
+    token_endpoint_auth_method: "client_secret_basic" }')"
+BOT_TOKEN=$(curl -s -u "${BOT_CLIENT_ID}:${BOT_CLIENT_SECRET}" -X POST "${HYDRA_PUBLIC}/oauth2/token" \
+  -d grant_type=client_credentials -d "scope=chit:read chit:write" -d audience=chit | jq -r '.access_token')
+upload_file "$BOT_TOKEN" "$CONV_ID" "${E2E_TMP}/dot.png" image/png "" "kratos:${ERIN_KRATOS_ID}"
+assert_status "11.7 a machine actor not on the allowlist" 403 "$LAST_STATUS" "$LAST_BODY"
+get_file "$BOT_TOKEN" "$FILE_ID" "${E2E_TMP}/got.png" "kratos:${ERIN_KRATOS_ID}"
+assert_status "11.7 nor may it download on behalf" 403 "$LAST_STATUS"
+
+# 11.8 The same bytes in another channel get their own object; in the same
+# channel they share one.
+upload_file "$HALOD_TOKEN" "$CONV_ID" "${E2E_TMP}/dot.png" image/png "again" "kratos:${ERIN_KRATOS_ID}"
+assert_status "11.8 the same image again, same channel" 201 "$LAST_STATUS" "$LAST_BODY"
+FRANK_CONV_ID=$($E2E_PSQL "SELECT id FROM channels WHERE name = 'conversation-frank'" | tr -d '[:space:]')
+upload_file "$HALOD_TOKEN" "$FRANK_CONV_ID" "${E2E_TMP}/dot.png" image/png "" "kratos:${FRANK_KRATOS_ID}"
+assert_status "11.8 the same image in Frank's channel" 201 "$LAST_STATUS" "$LAST_BODY"
+OBJECTS=$($E2E_PSQL "SELECT channel_id || ':' || count(DISTINCT s3_key) || ':' || bool_and(s3_key LIKE channel_id || '/%') FROM files WHERE sha256 = '${FILE_SHA}' GROUP BY channel_id ORDER BY channel_id = '${CONV_ID}' DESC" | tr -d ' ' | tr '\n' ' ')
+assert_json "11.8 one object per channel, each under its own channel" "." "${CONV_ID}:1:true ${FRANK_CONV_ID}:1:true " "\"${OBJECTS}\""
+
+# 11.9 Deleting the post deletes its file.
+kratos_login "erin@test.local" "TestPass1234"
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "X-Session-Token: ${SESSION_TOKEN}" "${API}/posts/${FILE_POST_ID}")
+assert_status "11.9 Erin deletes her post" 200 "$STATUS"
+get_file "$HALOD_TOKEN" "$FILE_ID" "${E2E_TMP}/got.png" "kratos:${ERIN_KRATOS_ID}"
+assert_status "11.9 its file is gone" 404 "$LAST_STATUS"
+
+rm -rf "$E2E_TMP"
+
+# ============================================================================
 # SUMMARY
 # ============================================================================
 section "Test Summary"
