@@ -14,10 +14,10 @@ E2E_IMAGE=chit-e2e:latest
 
 # Third-party images, pinned by digest. docs/.../deployment/podman-kube.mdx
 # lists where each one comes from; keep the deploy/*.kube.yml copies the same.
-# PostgreSQL 17 is the trusted-service-containers mirror of the Docker
-# Hardened Image. It is in quarantine, so only its immutable -<shortsha> tag
-# exists.
-PG_IMAGE=ghcr.io/infrashift/trusted-service-containers/quarantine/postgres:17-debian-382cdac@sha256:66dcbc496311685361b6a56e261e6694454daea3e297604dfd79590275f03910
+# PostgreSQL 17 is the trusted-service-containers postgresql17 image: the
+# signed PGDG RPMs on trusted UBI9 Minimal, UID 26, PGDATA
+# /var/lib/pgsql/data/userdata.
+PG_IMAGE=ghcr.io/infrashift/trusted-service-containers/trusted/postgresql17:17.12-9410cd4@sha256:6375c284b5aaa6d83096d74ae6b1b7a3340bcd81739e4309465b18a3e781d6e3
 # Not in trusted-service-containers: upstream, pinned by digest.
 MIGRATE_IMAGE=docker.io/migrate/migrate:v4.15.0@sha256:f613168b682b4c17033a1d5b381e0cb474c05715b843f4b160fb7bab9cead0c5
 
