@@ -43,7 +43,7 @@ Created/Modified Files
   1. tests/e2e/test_e2e.sh
 
   Executable bash script with:
-  - Setup: Health checks for all 6 services (PG, Kratos, Oathkeeper, Keto, ZincSearch, chitd; SeaweedFS is checked in scenario 11), creates 3 test users via Kratos Admin API, logs in each via API flow to get session tokens
+  - Setup: Health checks for all 6 services (PG, Kratos, Oathkeeper, Keto, ZincSearch, chitd; SeaweedFS is checked in scenario 11) and the membership hook stub (waited for up to 3 minutes while it compiles), creates 3 test users via Kratos Admin API, logs in each via API flow to get session tokens
   - Scenario 1: User provisioning — system ping/config at chitd and 401 through the gateway, auto-provision on first /users/me, user lookup by ID/username, user search, unauthenticated 401, idempotent provisioning
   - Scenario 2: Team & channel lifecycle — team creation with auto team_admin role, adding members, public/private channels, Keto relation tuple verification (write & delete), "my channels" filtering, updates
   - Scenario 3: Channel messaging — posting, pagination, get/edit/pin/unpin/delete posts, mark channel viewed
@@ -73,6 +73,21 @@ Created/Modified Files
     not on `CHIT_ON_BEHALF_OF_CLIENTS`; checks in PostgreSQL that the same
     bytes share one object within a channel and get their own in another;
     and that deleting the post deletes the file
+  - Scenario 12: Membership policy hook (HALO P-CHIT-2) — chitd asks the
+    `memberhook-stub` container of `deploy/chit.kube.yml`
+    (`tests/e2e/hookstub`, a stand-in for halod on 127.0.0.1:4490) before
+    every channel add, with the Hydra client `chit-e2e-memberhook` that the
+    stub registers and checks by introspection. Checks that the stub refuses
+    a token Hydra did not issue to chitd; that scenario 10's on-behalf-of add
+    of halod asked about halod (an agent, added by Erin, via halod) and not
+    about Erin, the creator; the request body of an allowed add; that a
+    refused user (Charlie) gets 403 `channel.membership_refused` with the
+    hook's `reason` and `detail` on `POST /channels/{id}/members`, `/invite`
+    (with a temporary Keto grant), an Open channel's creation (no channel is
+    created), joining `general`, a DM and a group; that a failing hook
+    refuses with `hook_unavailable`; and that the audit log records the
+    answers. `HOOK_STUB` and `E2E_AUDIT` point the scenario at another stub
+    or pod.
 
   The Keto checks in scenarios 2 and 4 read `chit/channel` tuples, which chitd
   writes best-effort; members added when a channel is created are written in

@@ -661,6 +661,35 @@ spec:
         - name: seaweeddata
           mountPath: /data
 
+    # The membership policy hook for tests/e2e/test_e2e.sh scenario 12: a
+    # stub of HALO's halod (tests/e2e/hookstub), built from this checkout on
+    # 127.0.0.1:4490. At start it registers chitd's Hydra client
+    # chit-e2e-memberhook. It allows every member until the e2e names one
+    # to refuse. Never copy it, or chitd's CHIT_MEMBERSHIP_HOOK_* below, into
+    # a real deployment. The Go builder image is the one deploy/Containerfile
+    # pins.
+    - name: memberhook-stub
+      image: docker.io/library/golang:1.26-alpine@sha256:30b1e546a9c7fa3b747c2bdba3a0c7bdf3a02ebb4c5b8405d2f948d7e8aac4ec
+      workingDir: /src
+      command: ["go", "run", "./tests/e2e/hookstub"]
+      env:
+        - name: GOWORK
+          value: "off"
+        - name: GOFLAGS
+          value: -buildvcs=false
+        - name: HOOKSTUB_LISTEN
+          value: 127.0.0.1:4490
+        - name: HOOKSTUB_HYDRA_ADMIN_URL
+          value: http://127.0.0.1:4445
+        - name: HOOKSTUB_CLIENT_ID
+          value: chit-e2e-memberhook
+        - name: HOOKSTUB_CLIENT_SECRET
+          value: chit-e2e-memberhook-secret
+      volumeMounts:
+        - name: chit-src
+          mountPath: /src
+          readOnly: true
+
     - name: chitd
       image: localhost/chit:latest
       env:
@@ -692,6 +721,16 @@ spec:
           value: '[{"client_id":"chit-e2e-halod","username":"halod-e2e","display_name":"halod (e2e)","roles":"system_user","actor_type":"agent"},{"client_id":"chit-e2e-bot","username":"bot-e2e","display_name":"bot (e2e)","roles":"system_user","actor_type":"bot"}]'
         - name: CHIT_ON_BEHALF_OF_CLIENTS
           value: chit-e2e-halod
+        # The membership hook: the memberhook-stub container above, with the
+        # Hydra client it registers. Every channel add asks it first.
+        - name: CHIT_MEMBERSHIP_HOOK_URL
+          value: http://127.0.0.1:4490/membership-check
+        - name: CHIT_MEMBERSHIP_HOOK_TOKEN_URL
+          value: http://127.0.0.1:4444/oauth2/token
+        - name: CHIT_MEMBERSHIP_HOOK_CLIENT_ID
+          value: chit-e2e-memberhook
+        - name: CHIT_MEMBERSHIP_HOOK_CLIENT_SECRET
+          value: chit-e2e-memberhook-secret
 
   volumes:
     - name: kratos-config
@@ -721,4 +760,8 @@ spec:
     - name: chit-migrations
       hostPath:
         path: __PROJECT_ROOT__/migrations
+        type: Directory
+    - name: chit-src
+      hostPath:
+        path: __PROJECT_ROOT__
         type: Directory
