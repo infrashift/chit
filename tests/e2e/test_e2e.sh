@@ -930,6 +930,43 @@ fi
 curl_api_full POST "/posts/${THREAD_ROOT_ID}/tags" "{\"tag_id\":\"${TAG_FEATURE_ID}\"}"
 assert_status "6.7 tag thread root" 200 "$LAST_STATUS"
 
+# --- Scoped tags (P-CHIT-7). Tags without a scope, as above, are private. ---
+
+# 6.11 A private tag stays Alice's: Bob, in the same channel, never sees it.
+CURRENT_TOKEN="$ALICE_TOKEN"
+curl_api_full POST "/tags" '{"name":"alice only","scope":"private"}'
+assert_status "6.11a create private tag" 201 "$LAST_STATUS"
+TAG_PRIVATE_ID=$(echo "$LAST_BODY" | jq -r '.id')
+curl_api_full POST "/posts/${ALICE_POST_ID}/tags" "{\"tag_id\":\"${TAG_PRIVATE_ID}\"}"
+assert_status "6.11b apply private tag" 200 "$LAST_STATUS"
+CURRENT_TOKEN="$BOB_TOKEN"
+curl_api_full GET "/posts/${ALICE_POST_ID}/tags"
+assert_json "6.11c Bob does not see it on the post" "[.[] | select(.id == \"${TAG_PRIVATE_ID}\")] | length" "0" "$LAST_BODY"
+curl_api_full GET "/tags"
+assert_json "6.11d Bob does not see it listed" "[.[] | select(.id == \"${TAG_PRIVATE_ID}\")] | length" "0" "$LAST_BODY"
+curl_api_full POST "/posts/${ALICE_POST_ID}/tags" "{\"tag_id\":\"${TAG_PRIVATE_ID}\"}"
+assert_status "6.11e Bob cannot apply it" 404 "$LAST_STATUS"
+
+# 6.12 A channel tag is shared by the channel's members.
+CURRENT_TOKEN="$ALICE_TOKEN"
+curl_api_full POST "/tags" "{\"name\":\"Release\",\"scope\":\"channel\",\"channel_id\":\"${PUBLIC_CHANNEL_ID}\"}"
+assert_status "6.12a create channel tag" 201 "$LAST_STATUS"
+TAG_CHANNEL_ID=$(echo "$LAST_BODY" | jq -r '.id')
+CURRENT_TOKEN="$BOB_TOKEN"
+curl_api_full POST "/channels/${PUBLIC_CHANNEL_ID}/tags" "{\"tag_id\":\"${TAG_CHANNEL_ID}\"}"
+assert_status "6.12b Bob applies it to the channel" 200 "$LAST_STATUS"
+curl_api_full GET "/channels/${PUBLIC_CHANNEL_ID}/tags"
+assert_json "6.12c Bob sees it on the channel" "[.[] | select(.id == \"${TAG_CHANNEL_ID}\")] | length" "1" "$LAST_BODY"
+curl_api_full POST "/tags/channels" "{\"tag_ids\":[\"${TAG_CHANNEL_ID}\"]}"
+assert_json "6.12d the filter finds the channel" "[.[] | select(.channel.id == \"${PUBLIC_CHANNEL_ID}\")] | length" "1" "$LAST_BODY"
+curl_api_full PUT "/tags/${TAG_CHANNEL_ID}" '{"name":"mine now"}'
+assert_status "6.12e only the owner renames it" 403 "$LAST_STATUS"
+
+# 6.13 profile/ is reserved for HALO, acting on a person's behalf.
+CURRENT_TOKEN="$ALICE_TOKEN"
+curl_api_full POST "/tags" '{"name":"profile/coder"}'
+assert_status "6.13 a person cannot create a profile/ tag" 403 "$LAST_STATUS"
+
 # --- Search (ZincSearch) ---
 # The search indexer is a skeleton (TODO), so we manually index posts
 

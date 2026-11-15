@@ -51,7 +51,9 @@ type ChitClient interface {
 	CreateGroupChannel(ctx context.Context, userIDs []string) (*model.Channel, error)
 	CreateChannel(ctx context.Context, channel *model.Channel) (*model.Channel, error)
 	GetAllTags(ctx context.Context) ([]*model.Tag, error)
-	CreateTag(ctx context.Context, name string) (*model.Tag, error)
+	// CreateTag creates a tag: scope "channel" in channelID (shared with its
+	// members), or "private" (seen by the caller only, channelID empty).
+	CreateTag(ctx context.Context, name, scope, channelID string) (*model.Tag, error)
 	GetTagsForPost(ctx context.Context, postID string) ([]*model.Tag, error)
 	// GetTagsForPosts fetches tags for many posts in one request, so opening
 	// a channel does not cost one round trip per message.
@@ -376,9 +378,13 @@ func (c *httpClient) GetAllTags(ctx context.Context) ([]*model.Tag, error) {
 	return tags, err
 }
 
-func (c *httpClient) CreateTag(ctx context.Context, name string) (*model.Tag, error) {
+func (c *httpClient) CreateTag(ctx context.Context, name, scope, channelID string) (*model.Tag, error) {
 	var tag model.Tag
-	err := c.post(ctx, "/tags", map[string]string{"name": name}, &tag)
+	body := map[string]string{"name": name, "scope": scope}
+	if channelID != "" {
+		body["channel_id"] = channelID
+	}
+	err := c.post(ctx, "/tags", body, &tag)
 	return &tag, err
 }
 

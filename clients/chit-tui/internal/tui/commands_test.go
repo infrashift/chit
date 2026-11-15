@@ -29,6 +29,7 @@ type mockClient struct {
 	createdChannel  *model.Channel
 	allTags         []*model.Tag
 	createdTag      *model.Tag
+	tagsCreated     []string // "name/scope/channelID" passed to CreateTag
 	postTags        []*model.Tag
 	lastCreatedPost *model.Post
 	channelsFetched []string // team IDs passed to GetMyChannels
@@ -180,11 +181,12 @@ func (m *mockClient) GetAllTags(_ context.Context) ([]*model.Tag, error) {
 	m.allTagsFetches++
 	return m.allTags, m.err
 }
-func (m *mockClient) CreateTag(_ context.Context, name string) (*model.Tag, error) {
+func (m *mockClient) CreateTag(_ context.Context, name, scope, channelID string) (*model.Tag, error) {
+	m.tagsCreated = append(m.tagsCreated, name+"/"+scope+"/"+channelID)
 	if m.createdTag != nil {
 		return m.createdTag, m.err
 	}
-	return &model.Tag{ID: "new-tag", Name: name}, m.err
+	return &model.Tag{ID: "new-tag", Name: name, Scope: scope, ChannelID: channelID}, m.err
 }
 func (m *mockClient) GetTagsForPost(_ context.Context, _ string) ([]*model.Tag, error) {
 	return m.postTags, m.err
@@ -558,5 +560,35 @@ func TestFetchMyThreads_ReportsAFailure(t *testing.T) {
 		if msg := tui.FetchMyThreads(context.Background(), client, teamID)().(tui.ThreadsLoadedMsg); msg.Err == nil {
 			t.Errorf("team %q: the failure was not reported", teamID)
 		}
+	}
+}
+
+// A tag created in a channel is a channel tag of that channel, shared with
+// its members, as chit-tui tags always were; private is the explicit option.
+func TestCreateTagAndApplyCmd_ChannelTagByDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		channelID string
+		private   bool
+		want      string
+	}{
+		{"in a channel", "c1", false, "deploy/channel/c1"},
+		{"private on request", "c1", true, "deploy/private/"},
+		{"no channel open", "", false, "deploy/private/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &mockClient{}
+			msg := tui.CreateTagAndApplyCmd(context.Background(), client, "deploy", "p1", tc.channelID, tc.private)()
+			added, ok := msg.(tui.TagAddedToPostMsg)
+			if !ok || added.Err != nil {
+				t.Fatalf("got %#v", msg)
+			}
+			if len(client.tagsCreated) != 1 || client.tagsCreated[0] != tc.want {
+				t.Fatalf("CreateTag got %v, want [%s]", client.tagsCreated, tc.want)
+			}
+			if len(client.taggedPosts) != 1 || client.taggedPosts[0] != "p1#new-tag" {
+				t.Errorf("applied %v", client.taggedPosts)
+			}
+		})
 	}
 }

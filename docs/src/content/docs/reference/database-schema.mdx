@@ -206,7 +206,17 @@ Per-user thread follow and read state.
 | Column | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | UUID | PK | UUIDv7 primary key |
-| `name` | VARCHAR(50) | UNIQUE, NOT NULL | Tag name |
+| `name` | VARCHAR(50) | NOT NULL | Tag name, NFKC-normalized, case kept |
+| `name_key` | VARCHAR(200) | NOT NULL | The name after NFKC and simple lowercasing (`lower(normalize(name, NFKC))`) |
+| `owner_id` | UUID | NOT NULL, FK → users (CASCADE) | Owner |
+| `scope` | VARCHAR(10) | NOT NULL, `private` or `channel` | Who sees it |
+| `channel_id` | UUID | FK → channels (CASCADE); set exactly for `channel` | The channel of a channel tag |
+| `create_at`, `update_at` | BIGINT | | Times |
+
+**Indexes:** UNIQUE `(owner_id, name_key)` where private; UNIQUE
+`(channel_id, name_key)` where channel; `owner_id`. Migration 000008 made the
+old global tags channel tags of each channel that used them, owned by the
+system actor `chit-system` (`00000000-0000-7000-8000-000000000001`).
 
 ### message_tags
 
@@ -216,6 +226,21 @@ Junction table linking posts to tags.
 |---|---|---|---|
 | `message_id` | UUID | PK, FK → posts (CASCADE) | Post reference |
 | `tag_id` | UUID | PK, FK → tags (CASCADE) | Tag reference |
+| `applied_by` | UUID | FK → users (SET NULL) | Who applied it (NULL for migrated rows) |
+| `create_at` | BIGINT | | When |
+
+**Indexes:** `tag_id`
+
+### channel_tags
+
+Junction table linking channels to tags, like `message_tags`.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `channel_id` | UUID | PK, FK → channels (CASCADE) | Channel reference |
+| `tag_id` | UUID | PK, FK → tags (CASCADE) | Tag reference |
+| `applied_by` | UUID | FK → users (SET NULL) | Who applied it |
+| `create_at` | BIGINT | | When |
 
 **Indexes:** `tag_id`
 

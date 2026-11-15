@@ -18,6 +18,14 @@ const (
 	// WebSocketEventPostTagsUpdated carries a post's whole tag list after a
 	// tag is added or removed.
 	WebSocketEventPostTagsUpdated = "post_tags_updated"
+	// WebSocketEventChannelTagsUpdated carries a channel's own Tag list, as
+	// its reader sees it, after a Tag is applied to or removed from it.
+	WebSocketEventChannelTagsUpdated = "channel_tags_updated"
+	// WebSocketEventTagUpdated and WebSocketEventTagDeleted announce a
+	// rename or a delete: to the owner for a private Tag, to the channel for
+	// a channel Tag.
+	WebSocketEventTagUpdated = "tag_updated"
+	WebSocketEventTagDeleted = "tag_deleted"
 	// WebSocketEventStreamStatus tells a channel that a member, or an agent
 	// working for one, is producing a reply. chitd relays it and never
 	// stores it.

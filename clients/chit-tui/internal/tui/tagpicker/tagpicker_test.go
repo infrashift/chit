@@ -257,3 +257,51 @@ func TestTagPicker_ToggleOffAppliedTag(t *testing.T) {
 		t.Errorf("expected t1, got %q", toggled.TagID)
 	}
 }
+
+// Ctrl+N creates a channel tag; Ctrl+T switches to a private one, and the
+// choice resets when the picker opens again.
+func TestTagPicker_CtrlTMakesTheNewTagPrivate(t *testing.T) {
+	m := tagpicker.New(testutil.Styles())
+	m.SetSize(80, 24)
+	create := func(m tagpicker.Model, name string) (tagpicker.Model, tagpicker.TagCreateRequestMsg) {
+		t.Helper()
+		for _, r := range name {
+			m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		}
+		m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+		return m, cmd().(tagpicker.TagCreateRequestMsg)
+	}
+
+	m.Open("p1", testTags(), nil)
+	m, msg := create(m, "shared")
+	if msg.Private {
+		t.Error("ctrl+n made a private tag by default")
+	}
+	if !strings.Contains(m.View(), "new tags: channel") {
+		t.Error("the picker does not say new tags are channel tags")
+	}
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	if !m.Private() || !strings.Contains(m.View(), "new tags: private") {
+		t.Fatal("ctrl+t did not switch to private")
+	}
+	_, msg = create(m, "mine")
+	if !msg.Private || msg.Name != "mine" {
+		t.Errorf("got %+v, want a private tag", msg)
+	}
+
+	m.Open("p2", testTags(), nil)
+	if m.Private() {
+		t.Error("private carried over to the next post")
+	}
+}
+
+func TestTagPicker_MarksPrivateTags(t *testing.T) {
+	m := tagpicker.New(testutil.Styles())
+	m.SetSize(80, 24)
+	m.Open("p1", []*model.Tag{{ID: "t1", Name: "mine", Scope: model.TagScopePrivate}, {ID: "t2", Name: "ours", Scope: model.TagScopeChannel, ChannelID: "c1"}}, nil)
+	view := m.View()
+	if !strings.Contains(view, "#mine (private)") || strings.Contains(view, "#ours (private)") {
+		t.Errorf("view does not mark only the private tag:\n%s", view)
+	}
+}

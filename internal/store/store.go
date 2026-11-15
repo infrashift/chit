@@ -126,14 +126,42 @@ type ThreadStore interface {
 	IncrementMentionCounts(ctx context.Context, postID string, userIDs []string) error
 }
 
-// TagStore handles persistence for tags and message-tag associations.
+// TagStore handles persistence for Tags and their applications to posts
+// and channels. Reads return Tags of every owner and scope: the app filters
+// them for the reader (model.Tag.VisibleTo), except GetVisible, which lists
+// one reader's view.
 type TagStore interface {
+	// Save inserts a Tag; a name key taken in its scope is a 409.
 	Save(ctx context.Context, tag *model.Tag) (*model.Tag, error)
-	GetAll(ctx context.Context) ([]*model.Tag, error)
-	AddTagToPost(ctx context.Context, messageID, tagID string) error
+	Get(ctx context.Context, id string) (*model.Tag, error)
+	GetByIDs(ctx context.Context, ids []string) ([]*model.Tag, error)
+	// GetByKey finds a Tag by name key: per owner when scope is private, per
+	// channel when it is channel.
+	GetByKey(ctx context.Context, scope, ownerID, channelID, nameKey string) (*model.Tag, error)
+	// Update renames a Tag; a name key taken in its scope is a 409.
+	Update(ctx context.Context, tag *model.Tag) (*model.Tag, error)
+	// Delete removes a Tag and every application of it.
+	Delete(ctx context.Context, id string) error
+	// DeleteByOwner removes the owner's Tags and their applications, and
+	// clears the owner as applied_by of other owners' Tags.
+	DeleteByOwner(ctx context.Context, ownerID string) error
+	CountByOwner(ctx context.Context, ownerID string) (int, error)
+	// GetVisible lists userID's private Tags and the channel Tags of
+	// channelIDs.
+	GetVisible(ctx context.Context, userID string, channelIDs []string) ([]*model.Tag, error)
+
+	AddTagToPost(ctx context.Context, messageID, tagID, appliedBy string) error
 	RemoveTagFromPost(ctx context.Context, messageID, tagID string) error
 	GetTagsForPost(ctx context.Context, messageID string) ([]*model.Tag, error)
 	// GetTagsForPosts is the bulk form, keyed by post ID.
 	GetTagsForPosts(ctx context.Context, messageIDs []string) (map[string][]*model.Tag, error)
+
+	AddTagToChannel(ctx context.Context, channelID, tagID, appliedBy string) error
+	RemoveTagFromChannel(ctx context.Context, channelID, tagID string) error
+	GetTagsForChannel(ctx context.Context, channelID string) ([]*model.Tag, error)
+
 	FilterPostIDsByTags(ctx context.Context, postIDs, tagIDs []string) ([]string, error)
+	// FilterChannelIDsByTags keeps the channels that have every tag, on the
+	// channel or on one of its live posts.
+	FilterChannelIDsByTags(ctx context.Context, channelIDs, tagIDs []string) ([]string, error)
 }

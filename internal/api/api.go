@@ -134,6 +134,13 @@ func New(a *app.App) http.Handler {
 			// Tags
 			r.Post("/tags", createTag(a))
 			r.Get("/tags", getAllTags(a))
+			r.Put("/tags/{id}", renameTag(a))
+			r.Delete("/tags/{id}", deleteTag(a))
+			r.Post("/channels/{id}/tags", addTagToChannel(a))
+			r.Delete("/channels/{id}/tags/{tag_id}", removeTagFromChannel(a))
+			r.Get("/channels/{id}/tags", getTagsForChannel(a))
+			r.Post("/tags/channels", filterChannelsByTags(a))
+			r.Delete("/users/{id}/tags", deleteUserTags(a))
 			r.Post("/posts/{id}/tags", addTagToPost(a))
 			r.Delete("/posts/{id}/tags/{tag_id}", removeTagFromPost(a))
 			r.Get("/posts/{id}/tags", getTagsForPost(a))

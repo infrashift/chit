@@ -326,7 +326,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case tagpicker.TagCreateRequestMsg:
-		cmds = append(cmds, CreateTagAndApplyCmd(m.reqCtx(), m.client, msg.Name, msg.PostID))
+		cmds = append(cmds, CreateTagAndApplyCmd(m.reqCtx(), m.client, msg.Name, msg.PostID, m.activeChannelID(), msg.Private))
 		return m, tea.Batch(cmds...)
 
 	case TagCreatedMsg:
@@ -342,7 +342,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			return m, m.setError(msg.Err)
 		}
-		if msg.NewTag != nil && m.tagByName(msg.NewTag.Name) == nil {
+		if msg.NewTag != nil && !m.knownTag(msg.NewTag.ID) {
 			m.allTags = append(m.allTags, msg.NewTag)
 		}
 		m.tagPicker.AddApplied(msg.PostID, msg.NewTag)

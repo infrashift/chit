@@ -43,7 +43,17 @@ func New() *Store {
 		Channels: &ChannelStore{byID: map[string]*model.Channel{}, members: map[string][]*model.ChannelMember{}},
 		Posts:    &PostStore{byID: map[string]*model.Post{}},
 		Threads:  &ThreadStore{threads: map[string]*model.Thread{}, memberships: map[string]*model.ThreadMembership{}},
-		Tags:     &TagStore{tags: map[string]*model.Tag{}, postTags: map[string]map[string]bool{}},
+		Tags: &TagStore{tags: map[string]*model.Tag{}, postTags: map[string]map[string]string{},
+			channelTags: map[string]map[string]string{}},
+	}
+	s.Tags.postChannel = func(postID string) (string, bool) {
+		s.Posts.mu.RLock()
+		defer s.Posts.mu.RUnlock()
+		p, ok := s.Posts.live(postID)
+		if !ok {
+			return "", false
+		}
+		return p.ChannelID, true
 	}
 	s.Posts.channels = s.Channels
 	s.Posts.tags = s.Tags
@@ -1001,29 +1011,77 @@ func (s *ThreadStore) IncrementMentionCounts(_ context.Context, postID string, u
 // ─── Tags ────────────────────────────────────────────────────────
 
 type TagStore struct {
-	mu       sync.RWMutex
-	tags     map[string]*model.Tag
-	postTags map[string]map[string]bool
+	mu          sync.RWMutex
+	tags        map[string]*model.Tag
+	postTags    map[string]map[string]string // post -> tag -> applied_by
+	channelTags map[string]map[string]string // channel -> tag -> applied_by
+	// postChannel resolves a live post to its channel, for
+	// FilterChannelIDsByTags. Set by New; called without the tag lock.
+	postChannel func(postID string) (string, bool)
 }
 
 func (s *TagStore) Seed(t *model.Tag) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.tags[t.ID] = cp(t)
+	c := cp(t)
+	if c.Scope == "" {
+		c.Scope = model.TagScopePrivate
+	}
+	if c.NameKey == "" {
+		c.NameKey = model.TagNameKey(c.Name)
+	}
+	s.tags[t.ID] = c
 }
 
 // SeedPostTag tags a post.
 func (s *TagStore) SeedPostTag(postID, tagID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.tagLocked(postID, tagID)
+	s.tagLocked(postID, tagID, "")
 }
 
-func (s *TagStore) tagLocked(postID, tagID string) {
-	if s.postTags[postID] == nil {
-		s.postTags[postID] = map[string]bool{}
+// SeedChannelTag tags a channel.
+func (s *TagStore) SeedChannelTag(channelID, tagID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.channelTags[channelID] == nil {
+		s.channelTags[channelID] = map[string]string{}
 	}
-	s.postTags[postID][tagID] = true
+	s.channelTags[channelID][tagID] = ""
+}
+
+// AppliedBy returns who applied tagID to the post or channel itemID, and
+// whether it is applied there at all.
+func (s *TagStore) AppliedBy(itemID, tagID string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if by, ok := s.postTags[itemID][tagID]; ok {
+		return by, true
+	}
+	by, ok := s.channelTags[itemID][tagID]
+	return by, ok
+}
+
+func (s *TagStore) tagLocked(postID, tagID, appliedBy string) {
+	if s.postTags[postID] == nil {
+		s.postTags[postID] = map[string]string{}
+	}
+	if _, ok := s.postTags[postID][tagID]; !ok {
+		s.postTags[postID][tagID] = appliedBy
+	}
+}
+
+func (s *TagStore) keyTakenLocked(t *model.Tag) bool {
+	for _, e := range s.tags {
+		if e.ID == t.ID || e.Scope != t.Scope || e.NameKey != t.NameKey {
+			continue
+		}
+		if (t.Scope == model.TagScopePrivate && e.OwnerID == t.OwnerID) ||
+			(t.Scope == model.TagScopeChannel && e.ChannelID == t.ChannelID) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *TagStore) Save(_ context.Context, t *model.Tag) (*model.Tag, error) {
@@ -1033,32 +1091,147 @@ func (s *TagStore) Save(_ context.Context, t *model.Tag) (*model.Tag, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Upsert by name, as the SQL store does: an existing tag is returned.
-	for _, existing := range s.tags {
-		if existing.Name == t.Name {
-			*t = *existing
-			return t, nil
-		}
+	if s.keyTakenLocked(t) {
+		return nil, model.NewConflictError("TagStore.Save", "a tag with this name already exists")
 	}
 	s.tags[t.ID] = cp(t)
 	return t, nil
 }
 
-func (s *TagStore) GetAll(_ context.Context) ([]*model.Tag, error) {
+func (s *TagStore) Get(_ context.Context, id string) (*model.Tag, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]*model.Tag, 0, len(s.tags))
-	for _, t := range s.tags {
-		out = append(out, cp(t))
+	t, ok := s.tags[id]
+	if !ok {
+		return nil, model.NewNotFoundError("TagStore.Get", id)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return cp(t), nil
+}
+
+func (s *TagStore) GetByIDs(_ context.Context, ids []string) ([]*model.Tag, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []*model.Tag
+	for _, id := range ids {
+		if t, ok := s.tags[id]; ok {
+			out = append(out, cp(t))
+		}
+	}
 	return out, nil
 }
 
-func (s *TagStore) AddTagToPost(_ context.Context, postID, tagID string) error {
+func (s *TagStore) GetByKey(_ context.Context, scope, ownerID, channelID, nameKey string) (*model.Tag, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, e := range s.tags {
+		if e.Scope == scope && e.NameKey == nameKey &&
+			((scope == model.TagScopePrivate && e.OwnerID == ownerID) ||
+				(scope == model.TagScopeChannel && e.ChannelID == channelID)) {
+			return cp(e), nil
+		}
+	}
+	return nil, model.NewNotFoundError("TagStore.GetByKey", nameKey)
+}
+
+func (s *TagStore) Update(_ context.Context, t *model.Tag) (*model.Tag, error) {
+	t.Name = model.NormalizeTagName(t.Name)
+	t.NameKey = model.TagNameKey(t.Name)
+	t.UpdateAt = model.GetMillis()
+	if err := t.IsValid(); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.tagLocked(postID, tagID)
+	if _, ok := s.tags[t.ID]; !ok {
+		return nil, model.NewNotFoundError("TagStore.Update", t.ID)
+	}
+	if s.keyTakenLocked(t) {
+		return nil, model.NewConflictError("TagStore.Update", "a tag with this name already exists")
+	}
+	s.tags[t.ID] = cp(t)
+	return t, nil
+}
+
+func (s *TagStore) deleteLocked(id string) {
+	delete(s.tags, id)
+	for _, m := range s.postTags {
+		delete(m, id)
+	}
+	for _, m := range s.channelTags {
+		delete(m, id)
+	}
+}
+
+func (s *TagStore) Delete(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deleteLocked(id)
+	return nil
+}
+
+func (s *TagStore) DeleteByOwner(_ context.Context, ownerID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, t := range s.tags {
+		if t.OwnerID == ownerID {
+			s.deleteLocked(id)
+		}
+	}
+	for _, apps := range []map[string]map[string]string{s.postTags, s.channelTags} {
+		for _, m := range apps {
+			for tagID, by := range m {
+				if by == ownerID {
+					m[tagID] = ""
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (s *TagStore) CountByOwner(_ context.Context, ownerID string) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	n := 0
+	for _, t := range s.tags {
+		if t.OwnerID == ownerID {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func sortTags(out []*model.Tag) {
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].NameKey != out[j].NameKey {
+			return out[i].NameKey < out[j].NameKey
+		}
+		return out[i].ID < out[j].ID
+	})
+}
+
+func (s *TagStore) GetVisible(_ context.Context, userID string, channelIDs []string) ([]*model.Tag, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	in := map[string]bool{}
+	for _, id := range channelIDs {
+		in[id] = true
+	}
+	var out []*model.Tag
+	for _, t := range s.tags {
+		if (t.Scope == model.TagScopePrivate && t.OwnerID == userID) ||
+			(t.Scope == model.TagScopeChannel && in[t.ChannelID]) {
+			out = append(out, cp(t))
+		}
+	}
+	sortTags(out)
+	return out, nil
+}
+
+func (s *TagStore) AddTagToPost(_ context.Context, postID, tagID, appliedBy string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tagLocked(postID, tagID, appliedBy)
 	return nil
 }
 
@@ -1072,17 +1245,17 @@ func (s *TagStore) RemoveTagFromPost(_ context.Context, postID, tagID string) er
 func (s *TagStore) GetTagsForPost(_ context.Context, postID string) ([]*model.Tag, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.tagsForLocked(postID), nil
+	return s.tagsForLocked(s.postTags[postID]), nil
 }
 
-func (s *TagStore) tagsForLocked(postID string) []*model.Tag {
+func (s *TagStore) tagsForLocked(applied map[string]string) []*model.Tag {
 	var out []*model.Tag
-	for tagID := range s.postTags[postID] {
+	for tagID := range applied {
 		if t, ok := s.tags[tagID]; ok {
 			out = append(out, cp(t))
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	sortTags(out)
 	return out
 }
 
@@ -1091,17 +1264,42 @@ func (s *TagStore) GetTagsForPosts(_ context.Context, postIDs []string) (map[str
 	defer s.mu.RUnlock()
 	out := map[string][]*model.Tag{}
 	for _, id := range postIDs {
-		if tags := s.tagsForLocked(id); len(tags) > 0 {
+		if tags := s.tagsForLocked(s.postTags[id]); len(tags) > 0 {
 			out[id] = tags
 		}
 	}
 	return out, nil
 }
 
+func (s *TagStore) AddTagToChannel(_ context.Context, channelID, tagID, appliedBy string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.channelTags[channelID] == nil {
+		s.channelTags[channelID] = map[string]string{}
+	}
+	if _, ok := s.channelTags[channelID][tagID]; !ok {
+		s.channelTags[channelID][tagID] = appliedBy
+	}
+	return nil
+}
+
+func (s *TagStore) RemoveTagFromChannel(_ context.Context, channelID, tagID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.channelTags[channelID], tagID)
+	return nil
+}
+
+func (s *TagStore) GetTagsForChannel(_ context.Context, channelID string) ([]*model.Tag, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.tagsForLocked(s.channelTags[channelID]), nil
+}
+
 // hasAll reports whether postID carries every tag in tagIDs.
 func (s *TagStore) hasAll(postID string, tagIDs []string) bool {
 	for _, tagID := range tagIDs {
-		if !s.postTags[postID][tagID] {
+		if _, ok := s.postTags[postID][tagID]; !ok {
 			return false
 		}
 	}
@@ -1115,6 +1313,53 @@ func (s *TagStore) FilterPostIDsByTags(_ context.Context, postIDs, tagIDs []stri
 	for _, postID := range postIDs {
 		if s.hasAll(postID, tagIDs) {
 			ids = append(ids, postID)
+		}
+	}
+	return ids, nil
+}
+
+func (s *TagStore) FilterChannelIDsByTags(_ context.Context, channelIDs, tagIDs []string) ([]string, error) {
+	want := map[string]bool{}
+	for _, id := range tagIDs {
+		want[id] = true
+	}
+	// Copy under the tag lock, then resolve posts without it: PostStore.Search
+	// takes the post lock before the tag lock.
+	s.mu.RLock()
+	has := map[string]map[string]bool{}
+	note := func(channelID, tagID string) {
+		if has[channelID] == nil {
+			has[channelID] = map[string]bool{}
+		}
+		has[channelID][tagID] = true
+	}
+	for channelID, m := range s.channelTags {
+		for tagID := range m {
+			if want[tagID] {
+				note(channelID, tagID)
+			}
+		}
+	}
+	postHits := map[string][]string{}
+	for postID, m := range s.postTags {
+		for tagID := range m {
+			if want[tagID] {
+				postHits[postID] = append(postHits[postID], tagID)
+			}
+		}
+	}
+	s.mu.RUnlock()
+	for postID, tags := range postHits {
+		if channelID, live := s.postChannel(postID); live {
+			for _, tagID := range tags {
+				note(channelID, tagID)
+			}
+		}
+	}
+	var ids []string
+	for _, channelID := range channelIDs {
+		if len(has[channelID]) == len(want) {
+			ids = append(ids, channelID)
 		}
 	}
 	return ids, nil

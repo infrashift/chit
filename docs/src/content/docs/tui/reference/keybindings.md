@@ -214,8 +214,13 @@ When the tag picker overlay is open (`t` from the history or thread pane):
 | (any text) | Filter tags by name |
 | `↑` / `↓` | Navigate tag list |
 | `Enter` | Toggle tag on/off for the selected post |
-| `Ctrl+N` | Create a new tag from the filter text |
+| `Ctrl+N` | Create a new tag from the filter text, and apply it |
+| `Ctrl+T` | Switch what `Ctrl+N` creates: a **channel** tag (the default), shared with the channel's members, or a **private** tag that only you see |
 | `Esc` | Close tag picker |
+
+The picker lists the channel's tags and your private tags, which it marks
+`(private)`. A `#tag` written in a message is always the channel's tag of
+that name, created in the channel if it does not exist.
 
 ## Theme Picker
 

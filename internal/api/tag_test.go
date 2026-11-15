@@ -18,6 +18,7 @@ func TestCreateTag(t *testing.T) {
 	body := `{"id":"` + model.NewID() + `","name":"urgent"}`
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tags", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
+	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, r)
@@ -48,6 +49,7 @@ func TestGetAllTags(t *testing.T) {
 
 	handler := getAllTags(a)
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/tags", http.NoBody)
+	r = authedRequest(r, testUser())
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, r)
