@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 
 	"github.com/infrashift/chit/internal/model"
@@ -57,28 +58,36 @@ func (a *App) provisionUser(ctx context.Context, kratosID string) (*model.User, 
 		return nil, false, err
 	}
 
-	user = &model.User{
-		KratosID:    kratosID,
-		Username:    username,
-		DisplayName: displayName,
-		Email:       email,
+	// An identity without a username trait gets a derived one (username.go).
+	// A taken derived name is not an error: the next candidate is longer.
+	candidates := usernameCandidates(username, email, kratosID)
+	if displayName == "" {
+		displayName = candidates[0]
 	}
-	user.PreSave()
-
-	saved, err := a.Store.User().Save(ctx, user)
-	if err != nil {
+	for i, candidate := range candidates {
+		user := &model.User{
+			KratosID:    kratosID,
+			Username:    candidate,
+			DisplayName: displayName,
+			Email:       email,
+		}
+		saved, err := a.Store.User().Save(ctx, user)
+		if err == nil {
+			a.cacheUser(saved)
+			return saved, true, nil
+		}
 		// Race condition: another request may have created this user.
 		// Try fetching again.
-		existing, err2 := a.Store.User().GetByKratosID(ctx, kratosID)
-		if err2 == nil {
+		if existing, err2 := a.Store.User().GetByKratosID(ctx, kratosID); err2 == nil {
 			a.cacheUser(existing)
 			return existing, false, nil
 		}
-		return nil, false, err
+		var appErr *model.AppError
+		if i == len(candidates)-1 || !errors.As(err, &appErr) || appErr.StatusCode != http.StatusConflict {
+			return nil, false, err
+		}
 	}
-
-	a.cacheUser(saved)
-	return saved, true, nil
+	return nil, false, errors.New("no username candidate") // unreachable: candidates is never empty
 }
 
 // CreateUser provisions a user on an administrator's behalf.

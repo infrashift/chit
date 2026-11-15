@@ -157,6 +157,14 @@ Behaviour changes an operator must act on or know about:
   client. Refused: a malformed `kratos:` value, an identity Kratos does not
   know, an inactive identity and a deactivated user (400); a client not on
   the list or a person's session (403).
+- A Kratos identity without a `username` trait (HALO's schema has only
+  `email`) can be provisioned, from a browser or on behalf of. Its username
+  is the email's local part, lowercased, with each run of other characters
+  than `a-z 0-9 . _ -` made one `-`, cut to fit, then `-` and the first 8
+  hex digits of the Kratos ID (`sam.smith-6f1f2a64`); `user-` and 12 digits
+  without a usable email. A taken name takes a longer suffix (12, 16, then
+  32 digits). The display name falls back to it. An explicit
+  `traits.username` is used as before.
 - Scoped tags (P-CHIT-7 for HALO): `scope` and `channel_id` on `POST /tags`;
   `PUT`/`DELETE /tags/{id}` (owner only); tags on channels
   (`POST`/`GET /channels/{id}/tags`, `DELETE /channels/{id}/tags/{tag_id}`,

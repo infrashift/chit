@@ -23,29 +23,32 @@ const (
 	missingKratosID       = "6f1f2a64-2b8e-4a53-9c1e-0d6b2a1f4c33" // Kratos answers 404
 	goneKratosID          = "6f1f2a64-2b8e-4a53-9c1e-0d6b2a1f4c44" // a deactivated Chit user
 	goneUserID            = "019421a0-0000-7000-8000-0000000000ee"
+	emailOnlyKratosID     = "9a8b7c6d-2b8e-4a53-9c1e-0d6b2a1f4c55" // traits: email only, as HALO's schema
 	conversationChannelID = "019421a0-0000-7000-8000-000000000021"
 )
 
 // fakeKratos serves the Kratos admin identity API for newKratosID (active)
-// and inactiveKratosID, and 404 for anything else. It counts the lookups.
+// and inactiveKratosID, emailOnlyKratosID (no username or name trait), and
+// 404 for anything else. It counts the lookups.
 func (e *bridgeEnv) fakeKratos(t *testing.T) *atomic.Int32 {
 	t.Helper()
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		state := ""
+		state := "active"
+		traits := map[string]string{"username": "Subject", "name": "Sam Subject", "email": "sam@example.com"}
 		switch r.URL.Path {
 		case "/admin/identities/" + newKratosID:
-			state = "active"
 		case "/admin/identities/" + inactiveKratosID:
 			state = "inactive"
+		case "/admin/identities/" + emailOnlyKratosID:
+			traits = map[string]string{"email": "Erin.Only+halo@example.com"}
 		default:
 			http.Error(w, `{"error":{"code":404}}`, http.StatusNotFound)
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id": strings.TrimPrefix(r.URL.Path, "/admin/identities/"), "state": state,
-			"traits": map[string]string{"username": "Subject", "name": "Sam Subject", "email": "sam@example.com"},
+			"id": strings.TrimPrefix(r.URL.Path, "/admin/identities/"), "state": state, "traits": traits,
 		})
 	}))
 	t.Cleanup(srv.Close)
@@ -132,6 +135,32 @@ func TestOnBehalfOfKratos_ProvisionsTheUserABrowserWould(t *testing.T) {
 	}
 	if calls.Load() != 1 || len(e.auditRecords(t, "user_provisioned")) != 1 {
 		t.Fatalf("Kratos called %d times, %d records; want 1 and 1", calls.Load(), len(e.auditRecords(t, "user_provisioned")))
+	}
+}
+
+// An identity with only an email (HALO's schema) gets a derived username on
+// both paths: on behalf of, and the person's own browser request.
+func TestKratosEmailOnlyIdentity_BothPaths(t *testing.T) {
+	const want = "erin.only-halo-9a8b7c6d"
+	for name, req := range map[string]struct{ who, obo string }{
+		"on behalf of": {halod, "kratos:" + emailOnlyKratosID},
+		"browser":      {"user:" + emailOnlyKratosID, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newBridgeEnv(t)
+			e.fakeKratos(t)
+			var headers map[string]string
+			if req.obo != "" {
+				headers = obo(req.obo)
+			}
+			w := e.do(t, http.MethodGet, "/api/v1/users/me", req.who, "", headers)
+			var u model.User
+			decodeJSON(t, w.Body, &u)
+			if w.Code != http.StatusOK || u.KratosID != emailOnlyKratosID || u.Username != want ||
+				u.DisplayName != want || u.Email != "erin.only+halo@example.com" {
+				t.Fatalf("got %d, %+v; want username and display name %q", w.Code, u, want)
+			}
+		})
 	}
 }
 

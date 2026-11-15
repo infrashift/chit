@@ -23,7 +23,7 @@ set:
 | Header | Caller | Resolution |
 |---|---|---|
 | `X-Client-Id` | A machine actor holding a Hydra `client_credentials` token | Matched against `users.oauth_client_id`. An unknown client is a `401`; there is no automatic provisioning. Takes precedence over `X-User-Id`. |
-| `X-User-Id` | A person with a Kratos session | The Kratos identity ID. On first sight chitd provisions a local user from the identity's Kratos traits. |
+| `X-User-Id` | A person with a Kratos session | The Kratos identity ID. On first sight chitd provisions a local user from the identity's Kratos traits. Without a `username` trait the username is derived: the email's local part reduced to `a-z 0-9 . _ -`, then `-` and the first 8 hex digits of the Kratos ID (`user-` and 12 digits without an email); a taken name gets a longer suffix. |
 
 chitd validates no session or token itself; it trusts these headers. When
 `CHIT_TRUSTED_PROXY_SECRET` is set, every authenticated request must also carry
