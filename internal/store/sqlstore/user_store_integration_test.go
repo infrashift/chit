@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/infrashift/chit/internal/model"
 )
@@ -92,6 +93,9 @@ func TestUserStoreIntegration_Update(t *testing.T) {
 
 	saved.DisplayName = "Carol Updated"
 	saved.Email = "carol.updated@test.local"
+	// Timestamps have millisecond resolution. Without a pause, Update can land
+	// in the same millisecond as Save, and UpdateAt then equals CreateAt.
+	time.Sleep(2 * time.Millisecond)
 	updated, err := store.Update(t.Context(), saved)
 	if err != nil {
 		t.Fatalf("Update: %v", err)
