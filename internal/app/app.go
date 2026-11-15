@@ -3,10 +3,12 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	neturl "net/url"
 	"slices"
 	"sync"
 	"time"
@@ -130,9 +132,18 @@ func New(s store.Store, hub *websocket.Hub, ps pubsub.PubSub, cfg *config.Config
 	}
 }
 
+// ErrKratosIdentityNotFound is FetchKratosIdentity's error when Kratos has
+// no identity with the ID (Kratos answers 404).
+var ErrKratosIdentityNotFound = errors.New("kratos identity not found")
+
+// ErrKratosIdentityInactive is FetchKratosIdentity's error when the identity
+// is not active. Kratos gives such an identity no session, so it cannot reach
+// chitd from a browser; it must not be provisioned another way either.
+var ErrKratosIdentityInactive = errors.New("kratos identity is not active")
+
 // FetchKratosIdentity retrieves identity traits from Kratos Admin API.
 func (a *App) FetchKratosIdentity(ctx context.Context, kratosID string) (username, displayName, email string, err error) {
-	url := fmt.Sprintf("%s/admin/identities/%s", a.Config.KratosAdminURL, kratosID)
+	url := fmt.Sprintf("%s/admin/identities/%s", a.Config.KratosAdminURL, neturl.PathEscape(kratosID))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
@@ -145,6 +156,9 @@ func (a *App) FetchKratosIdentity(ctx context.Context, kratosID string) (usernam
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	if resp.StatusCode == http.StatusNotFound {
+		return "", "", "", fmt.Errorf("%w: %s", ErrKratosIdentityNotFound, kratosID)
+	}
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return "", "", "", fmt.Errorf("kratos identity fetch failed: status %d, body: %s", resp.StatusCode, string(bodyBytes))
@@ -161,6 +175,9 @@ func (a *App) FetchKratosIdentity(ctx context.Context, kratosID string) (usernam
 	// authenticates perfectly would be provisioned with an EMPTY display name,
 	// and the first thing anyone would notice is a blank author on a post.
 	var identity struct {
+		// active or inactive. Older Kratos versions leave it out, which
+		// is read as active.
+		State  string `json:"state"`
 		Traits struct {
 			Username    string `json:"username"`
 			DisplayName string `json:"display_name"`
@@ -171,6 +188,9 @@ func (a *App) FetchKratosIdentity(ctx context.Context, kratosID string) (usernam
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&identity); err != nil {
 		return "", "", "", fmt.Errorf("decode kratos identity: %w", err)
+	}
+	if identity.State != "" && identity.State != "active" {
+		return "", "", "", fmt.Errorf("%w: %s is %s", ErrKratosIdentityInactive, kratosID, identity.State)
 	}
 
 	displayName = identity.Traits.DisplayName

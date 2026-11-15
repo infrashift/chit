@@ -23,6 +23,8 @@ ZINC_URL="http://localhost:4080"        # ZincSearch
 ZINC_USER="admin"
 ZINC_PASS="admin"
 CHITD="http://localhost:8065"           # chitd direct (for health check)
+HYDRA_PUBLIC="http://localhost:4444"    # Hydra public API (token endpoint)
+HYDRA_ADMIN="http://localhost:4445"     # Hydra admin API (clients)
 # Runs one SQL statement in chit's database. Only the setup uses it, to grant
 # system_admin, which no API grants to a person. Point it at the UAT pod with
 # E2E_PSQL="podman exec -i chit-uat-db-postgres psql -U chit -d chit -tAc".
@@ -341,7 +343,7 @@ if [[ -z "$DAVE_ID" || "$DAVE_ID" == "null" ]]; then
   echo -e "${RED}FATAL: could not provision Dave.${NC}"
   exit 1
 fi
-DAVE_ROLES=$($E2E_PSQL "UPDATE users SET roles = 'system_user system_admin' WHERE id = '${DAVE_ID}' RETURNING roles" | head -1)
+DAVE_ROLES=$($E2E_PSQL "UPDATE users SET roles = 'system_user system_admin' WHERE id = '${DAVE_ID}' RETURNING roles" | sed -n 1p)
 if [[ "$DAVE_ROLES" != *system_admin* ]]; then
   echo -e "${RED}FATAL: could not grant system_admin to Dave with: ${E2E_PSQL}${NC}"
   exit 1
@@ -1310,6 +1312,144 @@ CURRENT_TOKEN="$ALICE_TOKEN"
 curl_api_full GET "/posts/${NORMAL_POST_ID}"
 assert_status "9.7 post still readable by owner" 200 "$LAST_STATUS"
 assert_json "9.7 post content unchanged" ".content" "This is a normal message, not a command" "$LAST_BODY"
+
+# ============================================================================
+# SCENARIO 10: On behalf of a Kratos identity (HALO P-CHIT-8)
+# ============================================================================
+# halod, a machine actor with a Hydra client_credentials token, makes a
+# Conversation for a person who has never opened Chit: it names them as
+# kratos:<Kratos identity ID>, creates their private channel as them, adds
+# itself as them, posts as them, and reads the channel as itself.
+# deploy/chit.kube.yml declares the client in CHIT_MACHINE_ACTORS and
+# CHIT_ON_BEHALF_OF_CLIENTS; this creates it in Hydra.
+section "Scenario 10: On Behalf Of a Kratos Identity"
+
+HALOD_CLIENT_ID="chit-e2e-halod"
+HALOD_CLIENT_SECRET="chit-e2e-halod-secret"
+HYDRA_CLIENT_STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "${HYDRA_ADMIN}/admin/clients" \
+  -H "Content-Type: application/json" \
+  -d "$(jq -n --arg id "$HALOD_CLIENT_ID" --arg secret "$HALOD_CLIENT_SECRET" '{
+    client_id: $id, client_secret: $secret, grant_types: ["client_credentials"],
+    scope: "chit:read chit:write", audience: ["chit"],
+    token_endpoint_auth_method: "client_secret_basic" }')")
+if [[ "$HYDRA_CLIENT_STATUS" != "201" && "$HYDRA_CLIENT_STATUS" != "409" ]]; then
+  echo -e "  ${RED}FAIL${NC} 10.0 create Hydra client ${HALOD_CLIENT_ID} — HTTP ${HYDRA_CLIENT_STATUS}"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+fi
+HALOD_TOKEN=$(curl -s -u "${HALOD_CLIENT_ID}:${HALOD_CLIENT_SECRET}" -X POST "${HYDRA_PUBLIC}/oauth2/token" \
+  -d grant_type=client_credentials -d "scope=chit:read chit:write" -d audience=chit | jq -r '.access_token')
+assert_json_not_empty "10.0 halod has a client_credentials token" "." "\"${HALOD_TOKEN}\""
+
+# halod_api METHOD PATH [DATA] [ON_BEHALF_OF] — as curl_api_full, with
+# halod's bearer token and, when given, X-On-Behalf-Of.
+halod_api() {
+  local method="$1" path="$2" data="${3:-}" obo="${4:-}"
+  local tmpfile
+  tmpfile=$(mktemp)
+  local args=(-s -w '%{http_code}' -X "$method" -o "$tmpfile"
+    -H "Content-Type: application/json" -H "Authorization: Bearer ${HALOD_TOKEN}")
+  [[ -n "$obo" ]] && args+=(-H "X-On-Behalf-Of: ${obo}")
+  [[ -n "$data" ]] && args+=(-d "$data")
+  LAST_STATUS=$(curl "${args[@]}" "${API}${path}")
+  LAST_BODY=$(cat "$tmpfile")
+  rm -f "$tmpfile"
+}
+
+# 10.1 halod learns its own user ID: GET /users/me without X-On-Behalf-Of.
+halod_api GET "/users/me"
+assert_status "10.1 halod reads itself" 200 "$LAST_STATUS" "$LAST_BODY"
+assert_json "10.1 halod is an agent" ".actor_type" "agent" "$LAST_BODY"
+HALOD_USER_ID=$(echo "$LAST_BODY" | jq -r '.id')
+
+# 10.2 A person Kratos knows and Chit has never seen.
+kratos_create_identity "erin@test.local" "erin" "Erin Example" "TestPass1234"
+ERIN_KRATOS_ID="$IDENTITY_ID"
+halod_api GET "/users/username/erin"
+assert_status "10.2 Chit has no user for Erin yet" 404 "$LAST_STATUS" "$LAST_BODY"
+
+# 10.3 Refusals: malformed, unknown to Kratos, a person's session.
+halod_api GET "/users/me" "" "kratos:not-a-uuid"
+assert_status "10.3a malformed kratos: value" 400 "$LAST_STATUS" "$LAST_BODY"
+halod_api GET "/users/me" "" "kratos:$(cat /proc/sys/kernel/random/uuid)"
+assert_status "10.3b identity unknown to Kratos" 400 "$LAST_STATUS" "$LAST_BODY"
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Session-Token: ${ALICE_TOKEN}" \
+  -H "X-On-Behalf-Of: kratos:${ERIN_KRATOS_ID}" "${API}/users/me")
+assert_status "10.3c a person's session may not act on behalf" 403 "$STATUS"
+halod_api GET "/users/username/erin"
+assert_status "10.3d the refusals provisioned nobody" 404 "$LAST_STATUS" "$LAST_BODY"
+
+# 10.4 kratos:<id> provisions Erin, as her first browser visit would.
+halod_api GET "/users/me" "" "kratos:${ERIN_KRATOS_ID}"
+assert_status "10.4 halod provisions Erin" 200 "$LAST_STATUS" "$LAST_BODY"
+assert_json "10.4 Erin's kratos_id" ".kratos_id" "$ERIN_KRATOS_ID" "$LAST_BODY"
+assert_json "10.4 Erin's username from Kratos" ".username" "erin" "$LAST_BODY"
+assert_json "10.4 Erin is a person" ".actor_type" "user" "$LAST_BODY"
+ERIN_ID=$(echo "$LAST_BODY" | jq -r '.id')
+
+# 10.5 halod's team: halod creates it as itself and adds Erin.
+halod_api POST "/teams" '{"name":"halo-e2e","display_name":"HALO e2e","type":"I"}'
+assert_status "10.5 halod creates its team" 201 "$LAST_STATUS" "$LAST_BODY"
+HALO_TEAM_ID=$(echo "$LAST_BODY" | jq -r '.id')
+halod_api POST "/teams/${HALO_TEAM_ID}/members" "{\"user_id\":\"${ERIN_ID}\"}"
+assert_status "10.5 halod adds Erin to its team" 201 "$LAST_STATUS" "$LAST_BODY"
+
+# 10.6 A private channel, created as Erin.
+halod_api POST "/channels" "{\"team_id\":\"${HALO_TEAM_ID}\",\"name\":\"conversation-e2e\",\"display_name\":\"Conversation\",\"type\":\"P\"}" "kratos:${ERIN_KRATOS_ID}"
+assert_status "10.6 create a channel on behalf of Erin" 201 "$LAST_STATUS" "$LAST_BODY"
+assert_json "10.6 Erin is the creator" ".creator_id" "$ERIN_ID" "$LAST_BODY"
+assert_json "10.6 the channel is private" ".type" "P" "$LAST_BODY"
+CONV_ID=$(echo "$LAST_BODY" | jq -r '.id')
+
+# 10.7 halod reads nothing before it is a member.
+halod_api GET "/channels/${CONV_ID}/posts"
+assert_status "10.7 halod is not yet a member" 403 "$LAST_STATUS" "$LAST_BODY"
+
+# 10.8 halod adds itself, as Erin.
+halod_api POST "/channels/${CONV_ID}/members" "{\"user_id\":\"${HALOD_USER_ID}\"}" "kratos:${ERIN_KRATOS_ID}"
+assert_status "10.8 add halod on behalf of Erin" 201 "$LAST_STATUS" "$LAST_BODY"
+assert_json "10.8 Keto: halod is a member" "." "true" "$(keto_allowed "$CONV_ID" "$HALOD_USER_ID")"
+
+# 10.9 halod posts as Erin.
+halod_api POST "/posts" "{\"channel_id\":\"${CONV_ID}\",\"content\":\"Hello from Erin, via halod\"}" "kratos:${ERIN_KRATOS_ID}"
+assert_status "10.9 post on behalf of Erin" 201 "$LAST_STATUS" "$LAST_BODY"
+assert_json "10.9 Erin is the author" ".user_id" "$ERIN_ID" "$LAST_BODY"
+assert_json "10.9 halod is recorded" ".props.on_behalf_of.actor_id" "$HALOD_USER_ID" "$LAST_BODY"
+CONV_POST_ID=$(echo "$LAST_BODY" | jq -r '.id')
+
+# 10.10 halod reads the channel as itself; Bob, not a member, may not.
+halod_api GET "/channels/${CONV_ID}/posts"
+assert_status "10.10 halod reads as a member" 200 "$LAST_STATUS" "$LAST_BODY"
+assert_json "10.10 halod sees Erin's post" ".order[] | select(.id == \"${CONV_POST_ID}\") | .user_id" "$ERIN_ID" "$LAST_BODY"
+CURRENT_TOKEN="$BOB_TOKEN"
+curl_api_full GET "/channels/${CONV_ID}/posts"
+assert_status "10.10 a non-member cannot read it" 403 "$LAST_STATUS" "$LAST_BODY"
+
+# 10.11 Erin's own first login finds the same user.
+kratos_login "erin@test.local" "TestPass1234"
+CURRENT_TOKEN="$SESSION_TOKEN"
+curl_api_full GET "/users/me"
+assert_json "10.11 Erin's session is the provisioned user" ".id" "$ERIN_ID" "$LAST_BODY"
+curl_api_full GET "/channels/${CONV_ID}/posts"
+assert_status "10.11 Erin reads her conversation" 200 "$LAST_STATUS" "$LAST_BODY"
+
+# 10.12 An identity with only an email (HALO's schema has no username or
+# name trait): Chit derives the username from the email and the Kratos ID.
+FRANK_KRATOS_ID=$(curl -s -X POST "${KRATOS_ADMIN}/admin/identities" -H "Content-Type: application/json" \
+  -d '{"schema_id":"email-only","traits":{"email":"Frank.Only+halo@test.local"}}' | jq -r '.id')
+if [[ -z "$FRANK_KRATOS_ID" || "$FRANK_KRATOS_ID" == "null" ]]; then
+  FRANK_KRATOS_ID=$(curl -s "${KRATOS_ADMIN}/admin/identities?credentials_identifier=frank.only%2Bhalo@test.local" | jq -r '.[0].id')
+fi
+FRANK_USERNAME="frank.only-halo-$(echo "$FRANK_KRATOS_ID" | tr -d '-' | cut -c1-8)"
+halod_api GET "/users/me" "" "kratos:${FRANK_KRATOS_ID}"
+assert_status "10.12 provision an email-only identity" 200 "$LAST_STATUS" "$LAST_BODY"
+assert_json "10.12 derived username" ".username" "$FRANK_USERNAME" "$LAST_BODY"
+assert_json "10.12 display name falls back to it" ".display_name" "$FRANK_USERNAME" "$LAST_BODY"
+FRANK_ID=$(echo "$LAST_BODY" | jq -r '.id')
+halod_api POST "/teams/${HALO_TEAM_ID}/members" "{\"user_id\":\"${FRANK_ID}\"}"
+assert_status "10.12 halod adds Frank to its team" 201 "$LAST_STATUS" "$LAST_BODY"
+halod_api POST "/channels" "{\"team_id\":\"${HALO_TEAM_ID}\",\"name\":\"conversation-frank\",\"display_name\":\"Conversation\",\"type\":\"P\"}" "kratos:${FRANK_KRATOS_ID}"
+assert_status "10.12 create a channel on behalf of Frank" 201 "$LAST_STATUS" "$LAST_BODY"
+assert_json "10.12 Frank is the creator" ".creator_id" "$FRANK_ID" "$LAST_BODY"
 
 # ============================================================================
 # SUMMARY

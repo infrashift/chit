@@ -49,6 +49,19 @@ func (s *SqlUserStore) GetByKratosID(ctx context.Context, kratosID string) (*mod
 	return s.getBy(ctx, "kratos_id", kratosID)
 }
 
+func (s *SqlUserStore) KratosIDDeactivated(ctx context.Context, kratosID string) (bool, error) {
+	if !model.IsValidID(kratosID) {
+		return false, nil
+	}
+	var deactivated bool
+	err := s.sqlStore.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM users WHERE kratos_id = $1 AND delete_at <> 0)`, kratosID).Scan(&deactivated)
+	if err != nil {
+		return false, fmt.Errorf("check deactivated kratos_id: %w", err)
+	}
+	return deactivated, nil
+}
+
 func (s *SqlUserStore) GetByUsername(ctx context.Context, username string) (*model.User, error) {
 	return s.getBy(ctx, "username", username)
 }

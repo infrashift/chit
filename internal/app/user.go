@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"strings"
 
 	"github.com/infrashift/chit/internal/model"
@@ -10,46 +12,82 @@ import (
 // ProvisionUser creates or retrieves a local user for the given Kratos
 // identity. Results are cached (TTL-bounded) so the per-request auth path does
 // not hit the database every time.
+//
+// A deactivated user is refused (403), not provisioned again: their row
+// still holds the Kratos ID, so a second row could not be saved anyway.
 func (a *App) ProvisionUser(ctx context.Context, kratosID string) (*model.User, error) {
+	user, _, err := a.provisionUser(ctx, kratosID)
+	if errors.Is(err, errUserDeactivated) {
+		return nil, model.NewForbiddenError("App.ProvisionUser", "this user is deactivated")
+	}
+	return user, err
+}
+
+// errUserDeactivated is provisionUser's error for a Kratos identity whose
+// user is deactivated.
+var errUserDeactivated = errors.New("user is deactivated")
+
+// provisionUser is ProvisionUser, and also reports whether it created the
+// user. A browser request and an on-behalf-of request (X-On-Behalf-Of:
+// kratos:<id>) both come here, so both make the same user.
+func (a *App) provisionUser(ctx context.Context, kratosID string) (*model.User, bool, error) {
 	if a.userCache != nil {
 		if user, ok := a.userCache.Get(kratosID); ok {
-			return user, nil
+			return user, false, nil
 		}
 	}
 
 	user, err := a.Store.User().GetByKratosID(ctx, kratosID)
 	if err == nil {
 		a.cacheUser(user)
-		return user, nil
+		return user, false, nil
+	}
+	if !isNotFound(err) {
+		return nil, false, err
+	}
+	deactivated, err := a.Store.User().KratosIDDeactivated(ctx, kratosID)
+	if err != nil {
+		return nil, false, err
+	}
+	if deactivated {
+		return nil, false, errUserDeactivated
 	}
 
 	username, displayName, email, err := a.FetchKratosIdentity(ctx, kratosID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	user = &model.User{
-		KratosID:    kratosID,
-		Username:    username,
-		DisplayName: displayName,
-		Email:       email,
+	// An identity without a username trait gets a derived one (username.go).
+	// A taken derived name is not an error: the next candidate is longer.
+	candidates := usernameCandidates(username, email, kratosID)
+	if displayName == "" {
+		displayName = candidates[0]
 	}
-	user.PreSave()
-
-	saved, err := a.Store.User().Save(ctx, user)
-	if err != nil {
+	for i, candidate := range candidates {
+		user := &model.User{
+			KratosID:    kratosID,
+			Username:    candidate,
+			DisplayName: displayName,
+			Email:       email,
+		}
+		saved, err := a.Store.User().Save(ctx, user)
+		if err == nil {
+			a.cacheUser(saved)
+			return saved, true, nil
+		}
 		// Race condition: another request may have created this user.
 		// Try fetching again.
-		existing, err2 := a.Store.User().GetByKratosID(ctx, kratosID)
-		if err2 == nil {
+		if existing, err2 := a.Store.User().GetByKratosID(ctx, kratosID); err2 == nil {
 			a.cacheUser(existing)
-			return existing, nil
+			return existing, false, nil
 		}
-		return nil, err
+		var appErr *model.AppError
+		if i == len(candidates)-1 || !errors.As(err, &appErr) || appErr.StatusCode != http.StatusConflict {
+			return nil, false, err
+		}
 	}
-
-	a.cacheUser(saved)
-	return saved, nil
+	return nil, false, errors.New("no username candidate") // unreachable: candidates is never empty
 }
 
 // CreateUser provisions a user on an administrator's behalf.

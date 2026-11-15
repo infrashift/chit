@@ -149,6 +149,27 @@ Behaviour changes an operator must act on or know about:
 
 ### Added
 
+- On-behalf-of provisioning and Conversations (P-CHIT-8 for HALO):
+  `X-On-Behalf-Of` also takes `kratos:<Kratos identity ID>` (a canonical
+  UUID). A person who has never opened Chit gets the user their first
+  browser request would make, and a `user_provisioned` audit record names
+  the client. The header is now also accepted on `POST /channels` (the
+  person must be on the team and becomes the creator), on
+  `POST /channels/{id}/members` (the person must be allowed to add a
+  member), and on `GET /users/me`, which returns the person; without the
+  header a machine actor gets itself, which is how halod learns its user ID.
+  `channel_created` and `channel_member_added` audit records name the
+  client. Refused: a malformed `kratos:` value, an identity Kratos does not
+  know, an inactive identity and a deactivated user (400); a client not on
+  the list or a person's session (403).
+- A Kratos identity without a `username` trait (HALO's schema has only
+  `email`) can be provisioned, from a browser or on behalf of. Its username
+  is the email's local part, lowercased, with each run of other characters
+  than `a-z 0-9 . _ -` made one `-`, cut to fit, then `-` and the first 8
+  hex digits of the Kratos ID (`sam.smith-6f1f2a64`); `user-` and 12 digits
+  without a usable email. A taken name takes a longer suffix (12, 16, then
+  32 digits). The display name falls back to it. An explicit
+  `traits.username` is used as before.
 - Scoped tags (P-CHIT-7 for HALO): `scope` and `channel_id` on `POST /tags`;
   `PUT`/`DELETE /tags/{id}` (owner only); tags on channels
   (`POST`/`GET /channels/{id}/tags`, `DELETE /channels/{id}/tags/{tag_id}`,
@@ -293,6 +314,9 @@ Behaviour changes an operator must act on or know about:
 
 ### Changed
 
+- A deactivated user's Kratos identity is refused with `403` before
+  Kratos is asked. chitd used to fetch the identity and fail to save a
+  second user for it (`409`).
 - `chit-claude` stops gracefully: runs in progress get
   `CHIT_CLAUDE_SHUTDOWN_GRACE` to finish and post their answers, the rest are
   stopped with a reply saying why, and threads with unstarted messages are

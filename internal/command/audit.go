@@ -58,6 +58,19 @@ func (a *AuditLogger) LogPostOnBehalfOf(eventID, actorID, clientID, principalID,
 	)
 }
 
+// LogOnBehalfOf records an act other than a post that an allowlisted OAuth2
+// client did on behalf of a person: action names it (user_provisioned,
+// channel_created, channel_member_added), and attrs are its key-value pairs.
+func (a *AuditLogger) LogOnBehalfOf(eventID, action, actorID, clientID, principalID string, attrs ...any) {
+	a.logger.Info("on_behalf_of", append([]any{
+		"event_id", eventID,
+		"action", action,
+		"actor_id", actorID,
+		"client_id", clientID,
+		"principal_id", principalID,
+	}, attrs...)...)
+}
+
 // Close flushes and closes the underlying file, if any.
 func (a *AuditLogger) Close() error {
 	if a.file != nil {
