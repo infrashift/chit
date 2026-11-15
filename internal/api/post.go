@@ -22,6 +22,7 @@ func createPost(a *app.App) http.HandlerFunc {
 			RootID    string         `json:"root_id"`
 			Content   string         `json:"content"`
 			Props     map[string]any `json:"props"`
+			FileIDs   []string       `json:"file_ids"`
 		}
 		if !decodeBody(w, r, &body, "createPost") {
 			return
@@ -38,6 +39,7 @@ func createPost(a *app.App) http.HandlerFunc {
 			RootID:    body.RootID,
 			Content:   body.Content,
 			Props:     body.Props,
+			FileIDs:   body.FileIDs,
 			UserID:    user.ID,
 		}, ContextGetActor(r))
 		if err != nil {

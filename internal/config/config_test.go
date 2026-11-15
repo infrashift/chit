@@ -81,6 +81,13 @@ func TestLoad_Validation(t *testing.T) {
 		{"more idle than open connections", map[string]string{"CHIT_DB_MAX_IDLE_CONN": "30"}, false},
 		{"an unknown log level", map[string]string{"CHIT_LOG_LEVEL": "verbose"}, false},
 		{"an unparseable duration", map[string]string{"CHIT_WS_WRITE_TIMEOUT": "soon"}, false},
+		{"S3 without credentials", map[string]string{"CHIT_S3_ENDPOINT": "http://localhost:8333"}, false},
+		{"S3 complete", map[string]string{"CHIT_S3_ENDPOINT": "http://localhost:8333",
+			"CHIT_S3_ACCESS_KEY_ID": "a", "CHIT_S3_SECRET_ACCESS_KEY": "s"}, true},
+		{"S3 with a zero quota", map[string]string{"CHIT_S3_ENDPOINT": "http://localhost:8333",
+			"CHIT_S3_ACCESS_KEY_ID": "a", "CHIT_S3_SECRET_ACCESS_KEY": "s", "CHIT_FILE_QUOTA_BYTES": "0"}, false},
+		{"S3 with a zero grace", map[string]string{"CHIT_S3_ENDPOINT": "http://localhost:8333",
+			"CHIT_S3_ACCESS_KEY_ID": "a", "CHIT_S3_SECRET_ACCESS_KEY": "s", "CHIT_FILE_ORPHAN_GRACE": "0s"}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -58,6 +58,9 @@ func New(a *app.App) http.Handler {
 
 		// Authenticated endpoints
 		r.Group(func(r chi.Router) {
+			// First, so that a refusal by AuthExtract on a file route
+			// carries the attachment headers too.
+			r.Use(FileResponseHeaders)
 			r.Use(AuthExtract(a))
 			r.Use(RateLimit(10, 50))
 
@@ -148,6 +151,12 @@ func New(a *app.App) http.Handler {
 			// the "/posts/{id}" routes, so chi binds id="tags" and answers
 			// 405 for a method those routes do not define.
 			r.Post("/tags/posts", getTagsForPosts(a))
+
+			// Attachments
+			r.Post("/channels/{id}/files", uploadFile(a))
+			r.Get("/files/{id}", downloadFile(a))
+			r.Get("/files/{id}/info", getFileInfo(a))
+			r.Post("/files/search", searchFiles(a))
 
 			// Commands
 			r.Get("/commands", listCommands(a))

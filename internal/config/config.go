@@ -63,6 +63,25 @@ type Config struct {
 
 	EnableOpenAPIValidation bool `koanf:"enable_openapi_validation"`
 
+	// Attachments (P-CHIT-5). With S3Endpoint empty, attachments are off:
+	// the file routes answer 503 and a post with file_ids is a 400.
+	// S3Endpoint is an S3-compatible endpoint (SeaweedFS), addressed
+	// path-style; chitd creates S3Bucket at start when it is missing.
+	S3Endpoint        string `koanf:"s3_endpoint"`
+	S3Bucket          string `koanf:"s3_bucket"`
+	S3Region          string `koanf:"s3_region"`
+	S3AccessKeyID     string `koanf:"s3_access_key_id"`
+	S3SecretAccessKey string `koanf:"s3_secret_access_key"`
+	// FileQuotaBytes bounds the live attachment bytes of one person.
+	FileQuotaBytes int64 `koanf:"file_quota_bytes"`
+	// FileOrphanGrace is how long an upload may wait for a post before the
+	// sweep deletes it, and how long a deleted file's object is kept.
+	FileOrphanGrace time.Duration `koanf:"file_orphan_grace"`
+	// FileSweepInterval and FileSweepBatch bound the sweep: at most
+	// FileSweepBatch files each FileSweepInterval.
+	FileSweepInterval time.Duration `koanf:"file_sweep_interval"`
+	FileSweepBatch    int           `koanf:"file_sweep_batch"`
+
 	// Slash Commands
 	CommandsCUEDir     string `koanf:"commands_cue_dir"`
 	AuditLogPath       string `koanf:"audit_log_path"`
@@ -104,6 +123,12 @@ func Defaults() *Config {
 		WebhookWorkerCount:      4,
 		WebhookQueueSize:        1024,
 		WebhookTimeoutSec:       10,
+		S3Bucket:                "chit-files",
+		S3Region:                "us-east-1",
+		FileQuotaBytes:          1 << 30,
+		FileOrphanGrace:         24 * time.Hour,
+		FileSweepInterval:       10 * time.Minute,
+		FileSweepBatch:          100,
 	}
 }
 
@@ -211,6 +236,17 @@ func (c *Config) validate() error {
 	case "json", "text":
 	default:
 		errs = append(errs, fmt.Errorf("CHIT_LOG_FORMAT must be json or text, got %q", c.LogFormat))
+	}
+
+	if c.S3Endpoint != "" {
+		if c.S3Bucket == "" || c.S3Region == "" || c.S3AccessKeyID == "" || c.S3SecretAccessKey == "" {
+			errs = append(errs, errors.New("CHIT_S3_BUCKET, CHIT_S3_REGION, CHIT_S3_ACCESS_KEY_ID and "+
+				"CHIT_S3_SECRET_ACCESS_KEY are required when CHIT_S3_ENDPOINT is set"))
+		}
+		positive("CHIT_FILE_QUOTA_BYTES", c.FileQuotaBytes)
+		positive("CHIT_FILE_ORPHAN_GRACE", int64(c.FileOrphanGrace))
+		positive("CHIT_FILE_SWEEP_INTERVAL", int64(c.FileSweepInterval))
+		positive("CHIT_FILE_SWEEP_BATCH", int64(c.FileSweepBatch))
 	}
 
 	if c.WebhookEnabled {

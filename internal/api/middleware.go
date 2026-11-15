@@ -127,6 +127,10 @@ var onBehalfOfRoutes = []struct {
 	{http.MethodPost, "POST /tags", regexp.MustCompile(`^/api/v1/tags$`)},
 	{http.MethodPost, "POST /posts/{id}/tags", regexp.MustCompile(`^/api/v1/posts/[^/]+/tags$`)},
 	{http.MethodPost, "POST /channels/{id}/tags", regexp.MustCompile(`^/api/v1/channels/[^/]+/tags$`)},
+	// Attachments: halod uploads a person's image, and fetches an image
+	// for the person it shows it to (halod proxies downloads).
+	{http.MethodPost, "POST /channels/{id}/files", regexp.MustCompile(`^/api/v1/channels/[^/]+/files$`)},
+	{http.MethodGet, "GET /files/{id}", regexp.MustCompile(`^/api/v1/files/[^/]+$`)},
 	// Conversations: halod creates a person's private channel and adds
 	// itself to it, as the person. GET /users/me returns the person, which
 	// is how halod learns the user ID of a kratos: principal.
