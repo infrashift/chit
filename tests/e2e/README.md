@@ -53,6 +53,13 @@ Created/Modified Files
   - Scenario 7: @mentions
   - Scenario 8: Slash commands
   - Scenario 9: Authorization enforcement
+  - Scenario 10: On behalf of a Kratos identity (HALO P-CHIT-8) — creates the
+    Hydra client `chit-e2e-halod` (declared for chitd in `deploy/chit.kube.yml`),
+    takes a `client_credentials` token, and through Oathkeeper: reads halod's
+    own user, refuses a malformed, unknown and session `X-On-Behalf-Of`,
+    provisions a never-seen Kratos identity with `kratos:<id>`, creates her
+    private channel and adds halod as her, posts as her, reads as halod, and
+    checks that her own first login finds the same user
 
   The Keto checks in scenarios 2 and 4 read `chit/channel` tuples, which chitd
   writes best-effort; members added when a channel is created are written in

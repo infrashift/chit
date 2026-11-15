@@ -598,6 +598,13 @@ spec:
           value: admin
         - name: CHIT_ZINCSEARCH_PASSWORD
           value: admin
+        # A HALO-like machine actor for tests/e2e/test_e2e.sh scenario 10,
+        # which creates the Hydra client chit-e2e-halod. It may act on
+        # behalf of any person: never copy it into a real deployment.
+        - name: CHIT_MACHINE_ACTORS
+          value: '[{"client_id":"chit-e2e-halod","username":"halod-e2e","display_name":"halod (e2e)","roles":"system_user","actor_type":"agent"}]'
+        - name: CHIT_ON_BEHALF_OF_CLIENTS
+          value: chit-e2e-halod
 
   volumes:
     - name: kratos-config
