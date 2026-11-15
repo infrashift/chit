@@ -397,6 +397,27 @@ data:
     	}
     }
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chit-seaweedfs-config
+# The S3 identity chitd uses for attachments (CHIT_S3_ACCESS_KEY_ID and
+# CHIT_S3_SECRET_ACCESS_KEY). With an identity file the gateway refuses
+# anonymous requests. Dev credentials: never copy them into a deployment.
+data:
+  s3.json: |
+    {
+      "identities": [
+        {
+          "name": "chitd",
+          "credentials": [
+            {"accessKey": "chit-dev-access-key", "secretKey": "chit-dev-secret-key"}
+          ],
+          "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+        }
+      ]
+    }
+---
 # Pod 1: Database — starts PostgreSQL immediately
 apiVersion: v1
 kind: Pod
@@ -613,6 +634,38 @@ spec:
         - name: zincdata
           mountPath: /data
 
+    - name: seaweedfs
+      # The attachment store (CHIT_S3_*): trusted-service-containers
+      # SeaweedFS 4.51, built from source on ubi9-micro, pinned by digest.
+      # One weed process runs the master, a volume server, the filer and the
+      # S3 gateway, all on 127.0.0.1. The ports avoid 8080 (the volume
+      # server's default) and the gateway's default gRPC port 18333.
+      # chitd creates the chit-files bucket at start.
+      image: ghcr.io/infrashift/trusted-service-containers/trusted/seaweedfs:4.51-382cdac@sha256:7c6682e56006764282eb70a6a96703aafa6d808cd0c13ff6b8b1514b680985b7
+      args:
+        - server
+        - -dir=/data
+        - -ip=127.0.0.1
+        - -ip.bind=127.0.0.1
+        - -master.port=9333
+        - -master.port.grpc=19333
+        - -master.volumeSizeLimitMB=1024
+        - -volume.port=8380
+        - -volume.port.grpc=18380
+        - -filer.port=8888
+        - -filer.port.grpc=18888
+        - -s3
+        - -s3.port=8333
+        - -s3.port.grpc=18334
+        - -s3.port.iceberg=0
+        - -s3.port.lance=0
+        - -s3.config=/etc/seaweedfs/s3.json
+      volumeMounts:
+        - name: seaweedfs-config
+          mountPath: /etc/seaweedfs
+        - name: seaweeddata
+          mountPath: /data
+
     - name: chitd
       image: localhost/chit:latest
       env:
@@ -630,11 +683,18 @@ spec:
           value: admin
         - name: CHIT_ZINCSEARCH_PASSWORD
           value: admin
+        - name: CHIT_S3_ENDPOINT
+          value: http://127.0.0.1:8333
+        - name: CHIT_S3_ACCESS_KEY_ID
+          value: chit-dev-access-key
+        - name: CHIT_S3_SECRET_ACCESS_KEY
+          value: chit-dev-secret-key
         # A HALO-like machine actor for tests/e2e/test_e2e.sh scenario 10,
         # which creates the Hydra client chit-e2e-halod. It may act on
         # behalf of any person: never copy it into a real deployment.
+        # chit-e2e-bot (scenario 11) is a machine actor that may not.
         - name: CHIT_MACHINE_ACTORS
-          value: '[{"client_id":"chit-e2e-halod","username":"halod-e2e","display_name":"halod (e2e)","roles":"system_user","actor_type":"agent"}]'
+          value: '[{"client_id":"chit-e2e-halod","username":"halod-e2e","display_name":"halod (e2e)","roles":"system_user","actor_type":"agent"},{"client_id":"chit-e2e-bot","username":"bot-e2e","display_name":"bot (e2e)","roles":"system_user","actor_type":"bot"}]'
         - name: CHIT_ON_BEHALF_OF_CLIENTS
           value: chit-e2e-halod
 
@@ -654,6 +714,12 @@ spec:
     - name: hydra-config
       configMap:
         name: chit-hydra-config
+    - name: seaweedfs-config
+      configMap:
+        name: chit-seaweedfs-config
+    - name: seaweeddata
+      persistentVolumeClaim:
+        claimName: chit-seaweeddata
     - name: zincdata
       persistentVolumeClaim:
         claimName: chit-zincdata
