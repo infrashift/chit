@@ -82,6 +82,19 @@ type Config struct {
 	FileSweepInterval time.Duration `koanf:"file_sweep_interval"`
 	FileSweepBatch    int           `koanf:"file_sweep_batch"`
 
+	// Membership policy hook (P-CHIT-2). With MembershipHookURL empty the
+	// hook is off and members are added as before. With it set, chitd POSTs
+	// each new member to the URL before it adds them, and refuses the add
+	// unless the answer is {"allow":true}. It authenticates with a Hydra
+	// client_credentials token of its own OAuth2 client.
+	MembershipHookURL          string        `koanf:"membership_hook_url"`
+	MembershipHookTimeout      time.Duration `koanf:"membership_hook_timeout"`
+	MembershipHookTokenURL     string        `koanf:"membership_hook_token_url"`
+	MembershipHookClientID     string        `koanf:"membership_hook_client_id"`
+	MembershipHookClientSecret string        `koanf:"membership_hook_client_secret"`
+	// MembershipHookScope is optional: space-separated OAuth2 scopes.
+	MembershipHookScope string `koanf:"membership_hook_scope"`
+
 	// Slash Commands
 	CommandsCUEDir     string `koanf:"commands_cue_dir"`
 	AuditLogPath       string `koanf:"audit_log_path"`
@@ -129,6 +142,7 @@ func Defaults() *Config {
 		FileOrphanGrace:         24 * time.Hour,
 		FileSweepInterval:       10 * time.Minute,
 		FileSweepBatch:          100,
+		MembershipHookTimeout:   5 * time.Second,
 	}
 }
 
@@ -247,6 +261,14 @@ func (c *Config) validate() error {
 		positive("CHIT_FILE_ORPHAN_GRACE", int64(c.FileOrphanGrace))
 		positive("CHIT_FILE_SWEEP_INTERVAL", int64(c.FileSweepInterval))
 		positive("CHIT_FILE_SWEEP_BATCH", int64(c.FileSweepBatch))
+	}
+
+	if c.MembershipHookURL != "" {
+		if c.MembershipHookTokenURL == "" || c.MembershipHookClientID == "" || c.MembershipHookClientSecret == "" {
+			errs = append(errs, errors.New("CHIT_MEMBERSHIP_HOOK_TOKEN_URL, CHIT_MEMBERSHIP_HOOK_CLIENT_ID and "+
+				"CHIT_MEMBERSHIP_HOOK_CLIENT_SECRET are required when CHIT_MEMBERSHIP_HOOK_URL is set"))
+		}
+		positive("CHIT_MEMBERSHIP_HOOK_TIMEOUT", int64(c.MembershipHookTimeout))
 	}
 
 	if c.WebhookEnabled {

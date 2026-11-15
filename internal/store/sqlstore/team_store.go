@@ -180,6 +180,15 @@ func (s *SqlTeamStore) GetMembers(ctx context.Context, teamID string, page, perP
 	return members, rows.Err()
 }
 
+func (s *SqlTeamStore) GetMemberIDs(ctx context.Context, teamID string) ([]string, error) {
+	rows, err := s.sqlStore.pool.Query(ctx,
+		`SELECT user_id::text FROM team_members WHERE team_id = $1 AND delete_at = 0 ORDER BY create_at, user_id`, teamID)
+	if err != nil {
+		return nil, fmt.Errorf("get team member ids: %w", err)
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
 func (s *SqlTeamStore) GetMember(ctx context.Context, teamID, userID string) (*model.TeamMember, error) {
 	if !validIDs(teamID, userID) {
 		return nil, model.NewNotFoundError("SqlTeamStore.GetMember", teamID+"/"+userID)

@@ -16,7 +16,9 @@ import (
 )
 
 // CreateChannel creates an open or private team channel and adds the creator
-// as a member. For open channels, all team members are automatically added.
+// as a member. For open channels, all team members are automatically added;
+// with the membership hook on, each of them is asked about first, and one
+// refusal refuses the channel.
 //
 // Direct and group channels are NOT created here: they have no team, and their
 // name is the sorted member list that CreateDirectChannel and
@@ -35,12 +37,30 @@ func (a *App) CreateChannel(ctx context.Context, channel *model.Channel) (*model
 		return nil, err
 	}
 
+	// With the membership hook on, the team members of a new open channel
+	// are asked about first, the creator excepted, under the channel's ID
+	// to be. One refusal refuses the channel: nothing is saved.
+	var checked []string
+	if a.MembershipHook != nil && channel.Type == model.ChannelOpen {
+		channel.PreSave()
+		if err := channel.IsValid(); err != nil {
+			return nil, err
+		}
+		teamIDs, err := a.Store.Team().GetMemberIDs(ctx, channel.TeamID)
+		if err != nil {
+			return nil, err
+		}
+		if checked, err = a.checkMemberIDs(ctx, channel.ID, otherMembers(teamIDs, channel.CreatorID), channel.CreatorID); err != nil {
+			return nil, err
+		}
+	}
+
 	saved, err := a.Store.Channel().Save(ctx, channel)
 	if err != nil {
 		return nil, err
 	}
 
-	if _, err := a.Store.Channel().SaveMember(ctx, &model.ChannelMember{
+	if _, err = a.Store.Channel().SaveMember(ctx, &model.ChannelMember{
 		ChannelID: saved.ID,
 		UserID:    saved.CreatorID,
 	}); err != nil {
@@ -52,8 +72,15 @@ func (a *App) CreateChannel(ctx context.Context, channel *model.Channel) (*model
 	// in every member's sidebar via GetChannelsForUser. One INSERT ... SELECT,
 	// rather than reading up to 10,000 members (silently stopping there)
 	// and inserting them one by one inside the request.
+	// With the hook on, only the members it allowed are added; one who
+	// joined the team since was not asked, and can join the channel.
 	if saved.Type == model.ChannelOpen {
-		added, err := a.Store.Channel().AddTeamMembers(ctx, saved.ID, saved.TeamID)
+		var added []string
+		if a.MembershipHook != nil {
+			added, err = a.Store.Channel().AddTeamMembersAmong(ctx, saved.ID, saved.TeamID, checked)
+		} else {
+			added, err = a.Store.Channel().AddTeamMembers(ctx, saved.ID, saved.TeamID)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -215,6 +242,9 @@ func (a *App) CreateDirectChannel(ctx context.Context, actorID, userID1, userID2
 		Type:        model.ChannelDirect,
 		CreatorID:   userID1,
 	}
+	if err := a.checkNewChannelMembers(ctx, channel, members, actorID); err != nil {
+		return nil, err
+	}
 
 	saved, err := a.saveDirectChannel(ctx, channel, members)
 	if err != nil {
@@ -262,6 +292,9 @@ func (a *App) CreateGroupChannel(ctx context.Context, actorID string, userIDs []
 		Type:        model.ChannelGroup,
 		CreatorID:   userIDs[0],
 	}
+	if err := a.checkNewChannelMembers(ctx, channel, userIDs, actorID); err != nil {
+		return nil, err
+	}
 
 	saved, err := a.saveDirectChannel(ctx, channel, userIDs)
 	if err != nil {
@@ -275,6 +308,19 @@ func (a *App) CreateGroupChannel(ctx context.Context, actorID string, userIDs []
 
 	a.broadcastChannelEvent(ctx, model.WebSocketEventChannelCreated, saved)
 	return saved, nil
+}
+
+// checkNewChannelMembers asks the membership hook about the members of a
+// new direct or group channel that actorID, who creates it, adds: every one
+// but actorID. It gives the channel its ID first, so that the hook is told
+// the ID the channel will have.
+func (a *App) checkNewChannelMembers(ctx context.Context, channel *model.Channel, members []string, actorID string) error {
+	if a.MembershipHook == nil {
+		return nil
+	}
+	channel.PreSave()
+	_, err := a.checkMemberIDs(ctx, channel.ID, otherMembers(members, actorID), actorID)
+	return err
 }
 
 // saveDirectChannel saves a new direct or group channel. If a concurrent
@@ -316,6 +362,9 @@ func (a *App) requireUsersExist(ctx context.Context, op string, ids []string) er
 //
 // Direct and group channels have a fixed membership: their name IS the member
 // list, and adding a third person to a DM would hand them its whole history.
+//
+// With the membership hook on, the hook is asked before the member is added,
+// a user joining an open channel included, and a refusal adds nothing.
 func (a *App) AddChannelMember(ctx context.Context, channelID, userID, actorID string) (*model.ChannelMember, error) {
 	channel, err := a.Store.Channel().Get(ctx, channelID)
 	if err != nil {
@@ -339,6 +388,16 @@ func (a *App) AddChannelMember(ctx context.Context, channelID, userID, actorID s
 	// Re-adding is a no-op: say so without announcing a join that did not happen.
 	if existing, lookupErr := a.Store.Channel().GetMember(ctx, channelID, userID); lookupErr == nil {
 		return existing, nil
+	}
+
+	if a.MembershipHook != nil {
+		user, lookupErr := a.Store.User().Get(ctx, userID)
+		if lookupErr != nil {
+			return nil, lookupErr
+		}
+		if refusal := a.checkMembership(ctx, channelID, user, actorID); refusal != nil {
+			return nil, refusal
+		}
 	}
 
 	member := &model.ChannelMember{

@@ -26,6 +26,22 @@ info:
     Channel membership is the access check for everything in a channel.
     Operations a caller may not perform answer 403.
 
+    ## Membership policy hook
+    When `CHIT_MEMBERSHIP_HOOK_URL` is set, chitd asks that URL before it
+    adds any member to a channel: `POST /channels/{id}/members` (a join and an
+    on-behalf-of add included), the team members of a new Open channel, the
+    other members of a new direct or group channel, and `/invite`. The
+    creator of a new channel is not asked about. The request is `POST` with
+    a Hydra client-credentials bearer token and the JSON body
+    `{"channel_id", "user_id", "kratos_identity_id", "actor_type"
+    (human, agent or bot), "added_by", "via_actor_id"}`. Only a 200 with
+    `{"allow": true}` allows the add. A 200 with `{"allow": false, "reason",
+    "detail"}` refuses it, and so does any other status, a timeout, a
+    network error or a body that is not that JSON. A refusal is a 403 with
+    the `id` `channel.membership_refused`, the hook's `reason` and `detail`
+    (`hook_unavailable` when the hook gave no valid answer), and nothing
+    is added: a request that adds several members adds all or none.
+
     ## Pagination
     List endpoints accept `page` (0-indexed) and `per_page` (default 60,
     at most 200). `page * per_page` is capped at 100,000.
@@ -575,6 +591,11 @@ paths:
         `channel_created` WebSocket event is broadcast (to the team for an
         Open channel, otherwise to the channel).
 
+        **Membership hook.** When it is on, each team member that an Open
+        channel adds is checked first; one refusal is a 403
+        `channel.membership_refused`, and no channel is created. The creator
+        is not checked, so a Private channel checks nobody.
+
         **On behalf of a person.** With `X-On-Behalf-Of`, an allowlisted
         client creates the channel as the person: the person must be a
         member of the team, and becomes the channel's creator (`creator_id`)
@@ -780,6 +801,8 @@ paths:
         must be the caller. The channel name is the sorted user IDs joined by
         `__`. If the DM already exists (including one created concurrently),
         the existing channel is returned. A DM's membership is fixed.
+        When the membership hook is on, a new DM checks the other user first;
+        a refusal is a 403 `channel.membership_refused`.
       tags: [Channels]
       requestBody:
         required: true
@@ -818,7 +841,9 @@ paths:
         Creates a group message channel with 3-8 distinct members, one of whom
         must be the caller. Repeated IDs count once; every ID must name an
         existing user. If a group with exactly these members exists, it is
-        returned. A group's membership is fixed.
+        returned. A group's membership is fixed. When the membership hook is
+        on, a new group checks each member but the caller; one refusal is a
+        403 `channel.membership_refused`, and no channel is created.
       tags: [Channels]
       requestBody:
         required: true
@@ -856,6 +881,11 @@ paths:
         added must be on the channel's team. Direct and group channels have a
         fixed membership (403). Adding an existing member changes nothing.
         Broadcasts a `user_added` WebSocket event to the channel.
+
+        **Membership hook.** When it is on, the hook is asked before the
+        member is added, a user who joins an Open channel included. A
+        refusal is a 403 with the `id` `channel.membership_refused` and the
+        hook's `reason` and `detail`; nothing is added.
 
         **On behalf of a person.** With `X-On-Behalf-Of`, an allowlisted
         client adds the member as the person, so the person must be allowed
@@ -2469,6 +2499,17 @@ components:
         status_code:
           type: integer
           description: HTTP status code
+        reason:
+          type: string
+          description: |
+            Only on a `channel.membership_refused`: the membership hook's
+            short stable code, or `hook_unavailable` when the hook gave no
+            valid answer. At most 64 bytes.
+        detail:
+          type: string
+          description: |
+            Only on a `channel.membership_refused`: the membership hook's
+            text for a person. At most 1024 bytes.
       example:
         id: createPost
         message: invalid request body
