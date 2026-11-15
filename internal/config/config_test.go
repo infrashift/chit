@@ -88,6 +88,20 @@ func TestLoad_Validation(t *testing.T) {
 			"CHIT_S3_ACCESS_KEY_ID": "a", "CHIT_S3_SECRET_ACCESS_KEY": "s", "CHIT_FILE_QUOTA_BYTES": "0"}, false},
 		{"S3 with a zero grace", map[string]string{"CHIT_S3_ENDPOINT": "http://localhost:8333",
 			"CHIT_S3_ACCESS_KEY_ID": "a", "CHIT_S3_SECRET_ACCESS_KEY": "s", "CHIT_FILE_ORPHAN_GRACE": "0s"}, false},
+		{"membership hook without a token URL", map[string]string{"CHIT_MEMBERSHIP_HOOK_URL": "http://h/check",
+			"CHIT_MEMBERSHIP_HOOK_CLIENT_ID": "chit", "CHIT_MEMBERSHIP_HOOK_CLIENT_SECRET": "s"}, false},
+		{"membership hook without a client ID", map[string]string{"CHIT_MEMBERSHIP_HOOK_URL": "http://h/check",
+			"CHIT_MEMBERSHIP_HOOK_TOKEN_URL": "http://t", "CHIT_MEMBERSHIP_HOOK_CLIENT_SECRET": "s"}, false},
+		{"membership hook without a client secret", map[string]string{"CHIT_MEMBERSHIP_HOOK_URL": "http://h/check",
+			"CHIT_MEMBERSHIP_HOOK_TOKEN_URL": "http://t", "CHIT_MEMBERSHIP_HOOK_CLIENT_ID": "chit"}, false},
+		{"membership hook with a zero timeout", map[string]string{"CHIT_MEMBERSHIP_HOOK_URL": "http://h/check",
+			"CHIT_MEMBERSHIP_HOOK_TOKEN_URL": "http://t", "CHIT_MEMBERSHIP_HOOK_CLIENT_ID": "chit",
+			"CHIT_MEMBERSHIP_HOOK_CLIENT_SECRET": "s", "CHIT_MEMBERSHIP_HOOK_TIMEOUT": "0s"}, false},
+		{"membership hook complete", map[string]string{"CHIT_MEMBERSHIP_HOOK_URL": "http://h/check",
+			"CHIT_MEMBERSHIP_HOOK_TOKEN_URL": "http://t", "CHIT_MEMBERSHIP_HOOK_CLIENT_ID": "chit",
+			"CHIT_MEMBERSHIP_HOOK_CLIENT_SECRET": "s"}, true},
+		{"membership hook credentials alone do nothing", map[string]string{"CHIT_MEMBERSHIP_HOOK_CLIENT_ID": "chit",
+			"CHIT_MEMBERSHIP_HOOK_TIMEOUT": "0s"}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -131,6 +145,33 @@ func TestLoad_Durations(t *testing.T) {
 	}
 	if cfg.WSPingInterval != 45*time.Second || cfg.CacheTTL != 2*time.Minute {
 		t.Fatalf("ping=%v ttl=%v", cfg.WSPingInterval, cfg.CacheTTL)
+	}
+}
+
+// The membership hook is off by default, and its timeout is 5 seconds.
+func TestLoad_MembershipHook(t *testing.T) {
+	cfg, err := LoadWithoutDatabase()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MembershipHookURL != "" || cfg.MembershipHookTimeout != 5*time.Second {
+		t.Fatalf("defaults: url=%q timeout=%v", cfg.MembershipHookURL, cfg.MembershipHookTimeout)
+	}
+	t.Setenv("CHIT_MEMBERSHIP_HOOK_URL", "http://halod:8080/internal/chit/membership-check")
+	t.Setenv("CHIT_MEMBERSHIP_HOOK_TIMEOUT", "750ms")
+	t.Setenv("CHIT_MEMBERSHIP_HOOK_TOKEN_URL", "http://hydra:4444/oauth2/token")
+	t.Setenv("CHIT_MEMBERSHIP_HOOK_CLIENT_ID", "chit")
+	t.Setenv("CHIT_MEMBERSHIP_HOOK_CLIENT_SECRET", "secret")
+	t.Setenv("CHIT_MEMBERSHIP_HOOK_SCOPE", "halo:membership")
+	if cfg, err = LoadWithoutDatabase(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MembershipHookURL != "http://halod:8080/internal/chit/membership-check" ||
+		cfg.MembershipHookTimeout != 750*time.Millisecond ||
+		cfg.MembershipHookTokenURL != "http://hydra:4444/oauth2/token" ||
+		cfg.MembershipHookClientID != "chit" || cfg.MembershipHookClientSecret != "secret" ||
+		cfg.MembershipHookScope != "halo:membership" {
+		t.Fatalf("not read from the environment: %+v", cfg)
 	}
 }
 

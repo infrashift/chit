@@ -18,7 +18,8 @@ var errCommandUsage = errors.New("Usage: specify a username, for example `bob`")
 
 // HandleInvite implements /invite <user>, adding a user to the current
 // channel. Authorization is left to AddChannelMember, which already enforces
-// the team-vs-channel membership rules for each channel type.
+// the team-vs-channel membership rules for each channel type, and asks the
+// membership hook when it is on.
 func (a *App) HandleInvite(ctx context.Context, actorID, channelID, args string) (*command.CommandResult, error) {
 	target, err := a.resolveCommandUser(ctx, args)
 	if err != nil {
@@ -26,6 +27,14 @@ func (a *App) HandleInvite(ctx context.Context, actorID, channelID, args string)
 	}
 
 	if _, err := a.AddChannelMember(ctx, channelID, target.ID, actorID); err != nil {
+		// A membership refusal reads as the policy's own words.
+		if refusal, ok := IsMembershipRefusal(err); ok {
+			text := fmt.Sprintf("Could not add %#q: the membership policy refused (%s).", target.Username, refusal.Reason)
+			if refusal.Detail != "" {
+				text += " " + refusal.Detail
+			}
+			return &command.CommandResult{ResponseText: text}, nil
+		}
 		return &command.CommandResult{
 			ResponseText: fmt.Sprintf("Could not add `%s`: %s", target.Username, err.Error()),
 		}, nil

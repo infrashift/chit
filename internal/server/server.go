@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/infrashift/chit/internal/config"
 	"github.com/infrashift/chit/internal/jobs"
 	"github.com/infrashift/chit/internal/jobs/workers"
+	"github.com/infrashift/chit/internal/memberhook"
 	"github.com/infrashift/chit/internal/pubsub"
 	"github.com/infrashift/chit/internal/store/sqlstore"
 	"github.com/infrashift/chit/internal/websocket"
@@ -67,6 +69,9 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 
 	s.initCommands()
+	if err := s.initMembershipHook(); err != nil {
+		return nil, fmt.Errorf("init membership hook: %w", err)
+	}
 	s.initJobs()
 	s.initHTTP()
 
@@ -199,6 +204,38 @@ func (s *Server) initBlobs() error {
 	}
 	s.app.Blobs = store
 	slog.Info("attachments are on", "endpoint", s.config.S3Endpoint, "bucket", s.config.S3Bucket)
+	return nil
+}
+
+// initMembershipHook connects the membership policy hook when
+// CHIT_MEMBERSHIP_HOOK_URL is set. Its answers are audited, so it makes sure
+// there is an audit log even when slash commands, which open it, are off.
+func (s *Server) initMembershipHook() error {
+	if s.config.MembershipHookURL == "" {
+		slog.Info("membership hook is off: CHIT_MEMBERSHIP_HOOK_URL is not set")
+		return nil
+	}
+	hook, err := memberhook.New(&memberhook.Config{
+		URL:          s.config.MembershipHookURL,
+		Timeout:      s.config.MembershipHookTimeout,
+		TokenURL:     s.config.MembershipHookTokenURL,
+		ClientID:     s.config.MembershipHookClientID,
+		ClientSecret: s.config.MembershipHookClientSecret,
+		Scopes:       strings.Fields(s.config.MembershipHookScope),
+	})
+	if err != nil {
+		return err
+	}
+	s.app.MembershipHook = hook
+	if s.app.AuditLogger == nil {
+		al, err := command.NewAuditLogger(s.config.AuditLogPath)
+		if err != nil {
+			slog.Warn("failed to create audit logger, using stderr", "error", err)
+			al, _ = command.NewAuditLogger("-")
+		}
+		s.app.AuditLogger = al
+	}
+	slog.Info("membership hook is on", "url", s.config.MembershipHookURL, "client_id", s.config.MembershipHookClientID)
 	return nil
 }
 

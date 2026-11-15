@@ -14,6 +14,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Behaviour changes an operator must act on or know about:
 
+- **The membership policy hook, and a stub of it in the dev stack.** With
+  `CHIT_MEMBERSHIP_HOOK_URL` unset nothing changes. With it set, chitd asks
+  that URL before it adds any member to a channel and refuses the add (403
+  `channel.membership_refused`) unless the answer is `{"allow":true}`; a
+  failed or slow hook refuses too. It needs `CHIT_MEMBERSHIP_HOOK_TOKEN_URL`,
+  `_CLIENT_ID` and `_CLIENT_SECRET` for its own Hydra client, or chitd does
+  not start. `deploy/chit.kube.yml` turns it on: a new `memberhook-stub`
+  container (the pinned `golang:1.26-alpine` builder image, running
+  `tests/e2e/hookstub` from the checkout on 127.0.0.1:4490) registers the
+  Hydra client `chit-e2e-memberhook` and allows every member unless the
+  e2e names one to refuse. The UAT stack keeps the hook off, and
+  `scripts/seed-uat`, which writes members straight to the database, will
+  not run with the URL set.
 - **Attachments (migration `000009`) and a SeaweedFS container.** The
   migration adds `files` and `post_files`; its down migration drops them
   and leaves the objects in the bucket. Attachments are off until
@@ -179,6 +192,21 @@ Behaviour changes an operator must act on or know about:
 
 ### Added
 
+- The membership policy hook (P-CHIT-2 for HALO). When
+  `CHIT_MEMBERSHIP_HOOK_URL` is set, chitd POSTs
+  `{"channel_id", "user_id", "kratos_identity_id", "actor_type", "added_by",
+  "via_actor_id"}` to it, with a Hydra `client_credentials` bearer token
+  (kept until 30 s before expiry, fetched again once after a 401), before
+  every channel add: `POST /channels/{id}/members` (a join and an
+  on-behalf-of add included), each team member of a new Open channel, each
+  other member of a new direct or group channel, and `/invite`. The creator
+  of a new channel is not checked. Only `{"allow":true}` allows; a refusal,
+  any other status, a timeout (`CHIT_MEMBERSHIP_HOOK_TIMEOUT`, 5 s), a
+  network error or bad JSON is a 403 `channel.membership_refused` with the
+  hook's `reason` and `detail` (`hook_unavailable` when it gave none), and
+  nothing is added: a request that adds several members adds all or none.
+  `AppError` gains the optional `reason` and `detail`. Each answer is a
+  `membership_check` audit record.
 - Attachments (P-CHIT-5 for HALO): `POST /channels/{id}/files` uploads an
   image (multipart `file` and `alt_text`), `GET /files/{id}` serves its
   bytes, `GET /files/{id}/info` its metadata, and `POST /files/search`

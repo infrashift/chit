@@ -365,6 +365,16 @@ func (s *TeamStore) GetMembers(_ context.Context, teamID string, page, perPage i
 	return paginate(out, page, perPage), nil
 }
 
+func (s *TeamStore) GetMemberIDs(_ context.Context, teamID string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ids := make([]string, 0, len(s.members[teamID]))
+	for _, m := range s.members[teamID] {
+		ids = append(ids, m.UserID)
+	}
+	return ids, nil
+}
+
 func (s *TeamStore) GetMember(_ context.Context, teamID, userID string) (*model.TeamMember, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -625,6 +635,25 @@ func (s *ChannelStore) AddTeamMembers(_ context.Context, channelID, teamID strin
 	var added []string
 	for _, uid := range userIDs {
 		if !s.isMember(channelID, uid) {
+			s.members[channelID] = append(s.members[channelID], &model.ChannelMember{
+				ChannelID: channelID, UserID: uid, Roles: "channel_user", CreateAt: model.GetMillis(),
+			})
+			added = append(added, uid)
+		}
+	}
+	return added, nil
+}
+
+func (s *ChannelStore) AddTeamMembersAmong(_ context.Context, channelID, teamID string, userIDs []string) ([]string, error) {
+	members, err := s.teamMembers(teamID)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var added []string
+	for _, uid := range userIDs {
+		if slices.Contains(members, uid) && !s.isMember(channelID, uid) {
 			s.members[channelID] = append(s.members[channelID], &model.ChannelMember{
 				ChannelID: channelID, UserID: uid, Roles: "channel_user", CreateAt: model.GetMillis(),
 			})

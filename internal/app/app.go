@@ -34,6 +34,9 @@ type App struct {
 	Config *config.Config
 	// Blobs holds attachment bytes; nil when attachments are off.
 	Blobs blob.Store
+	// MembershipHook is asked before a member is added to a channel; nil
+	// when CHIT_MEMBERSHIP_HOOK_URL is not set.
+	MembershipHook MembershipChecker
 
 	// Slash commands (nil when commands are disabled).
 	CommandRegistry *command.Registry

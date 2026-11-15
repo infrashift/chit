@@ -39,12 +39,14 @@ Then the services:
 | **oathkeeper** | TSC `oathkeeper:v26.2.0` | 4455, 4456 | Authentication proxy |
 | **zincsearch** | `zinclabs/zincsearch:0.4.10` | 4080 | Full-text search index |
 | **seaweedfs** | TSC `seaweedfs:4.51-382cdac` | 8333 (S3), 9333, 8380, 8888; gRPC 19333, 18380, 18888, 18334; all on 127.0.0.1 | Attachment store: one `weed server` with master, volume server, filer and S3 gateway. The gateway accepts only the identity in `chit-seaweedfs-config`. chitd creates the `chit-files` bucket. |
+| **memberhook-stub** | `golang:1.26-alpine` (the builder image of `deploy/Containerfile`) | 4490 on 127.0.0.1 | A stub of HALO's membership hook for the stack e2e, `go run` from `tests/e2e/hookstub` in the checkout. It registers chitd's Hydra client `chit-e2e-memberhook` and allows every member until the e2e names one to refuse. Test only. |
 | **chitd** | `localhost/chit:latest` | 8065 | The Chit server |
 
 The chitd container is configured in the manifest with the database URL, the
 Kratos and Keto URLs, the ZincSearch URL and credentials, and the SeaweedFS
-endpoint and its dev S3 key (`CHIT_S3_*`); everything else
-takes chitd's defaults. To set more (for example `CHIT_MACHINE_ACTORS` or
+endpoint and its dev S3 key (`CHIT_S3_*`), the e2e machine actors, and the
+membership hook (`CHIT_MEMBERSHIP_HOOK_*`, pointing at `memberhook-stub`);
+everything else takes chitd's defaults. To set more (for example `CHIT_MACHINE_ACTORS` or
 `CHIT_TRUSTED_PROXY_SECRET`), add it to the `chitd` container's `env` and run
 `make kube-restart`, or run chitd locally with `.env` (see
 [Startup Order](#startup-order)).
@@ -57,8 +59,9 @@ Every image is pinned by digest in the manifest. "TSC" is
 `trusted/postgresql17`: the signed PGDG RPMs, contrib included, on UBI9
 Minimal. It runs as UID 26 with primary group 0, refuses to run as root, and
 keeps the `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` contract of
-the Docker images. ZincSearch and
-`migrate/migrate` are not in TSC and come from their upstream registries.
+the Docker images. ZincSearch,
+`migrate/migrate` and the Go builder image are not in TSC and come from
+their upstream registries.
 TSC builds keto-cue from source (commit `809351b3`) on trusted UBI9 Micro,
 the same way it builds the Ory images.
 

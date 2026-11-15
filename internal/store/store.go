@@ -49,6 +49,8 @@ type TeamStore interface {
 	RemoveMember(ctx context.Context, teamID, userID string) error
 	GetMembers(ctx context.Context, teamID string, page, perPage int) ([]*model.TeamMember, error)
 	GetMember(ctx context.Context, teamID, userID string) (*model.TeamMember, error)
+	// GetMemberIDs returns the user ID of every live member of teamID.
+	GetMemberIDs(ctx context.Context, teamID string) ([]string, error)
 }
 
 // ChannelStore handles persistence for channels and channel membership.
@@ -83,6 +85,10 @@ type ChannelStore interface {
 	// AddTeamMembers adds every member of the channel's team to it, returning
 	// the user IDs added.
 	AddTeamMembers(ctx context.Context, channelID, teamID string) ([]string, error)
+	// AddTeamMembersAmong is AddTeamMembers limited to userIDs: it adds
+	// each of them that is still a member of teamID, and returns the user
+	// IDs added. The membership hook checks userIDs first.
+	AddTeamMembersAmong(ctx context.Context, channelID, teamID string, userIDs []string) ([]string, error)
 	// DeleteForTeam soft-deletes every channel on a team, returning their IDs.
 	DeleteForTeam(ctx context.Context, teamID string, deleteAt int64) ([]string, error)
 	// RemoveMemberFromTeam removes a user from every channel on a team,

@@ -71,6 +71,24 @@ func (a *AuditLogger) LogOnBehalfOf(eventID, action, actorID, clientID, principa
 	}, attrs...)...)
 }
 
+// LogMembershipCheck records one answer of the membership policy hook: the
+// member userID (of memberType) that addedBy, through the on-behalf-of
+// client viaActorID when it is not empty, would add to channelID, and
+// whether the hook allowed it. A refusal carries the hook's reason; a hook
+// that could not be asked is a refusal with the reason hook_unavailable.
+func (a *AuditLogger) LogMembershipCheck(eventID, channelID, userID, memberType, addedBy, viaActorID string, allowed bool, reason string) {
+	a.logger.Info("membership_check",
+		"event_id", eventID,
+		"channel_id", channelID,
+		"user_id", userID,
+		"member_actor_type", memberType,
+		"added_by", addedBy,
+		"via_actor_id", viaActorID,
+		"allowed", allowed,
+		"reason", reason,
+	)
+}
+
 // Close flushes and closes the underlying file, if any.
 func (a *AuditLogger) Close() error {
 	if a.file != nil {

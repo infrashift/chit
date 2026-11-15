@@ -50,6 +50,12 @@ func run(ctx context.Context) error {
 	if dbURL == "" {
 		return errors.New("CHIT_DATABASE_URL is not set")
 	}
+	// This seed writes channel members straight to the database, past the
+	// membership hook that chitd asks before every add. It is for a UAT
+	// stack with the hook off; it does not run against one with it on.
+	if os.Getenv("CHIT_MEMBERSHIP_HOOK_URL") != "" {
+		return errors.New("CHIT_MEMBERSHIP_HOOK_URL is set: seed-uat adds members without the membership hook, so it does not run")
+	}
 
 	store, err := sqlstore.New(ctx, dbURL, 5, 2)
 	if err != nil {
