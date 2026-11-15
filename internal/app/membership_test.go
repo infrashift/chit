@@ -2,6 +2,7 @@ package app
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -368,6 +369,27 @@ func TestMembershipHook_CreateOpenChannelAddsOnlyCheckedMembers(t *testing.T) {
 	}
 	if got := channelMemberNames(t, f.fixture, created.ID); !slices.Equal(got, []string{"alice", "creator"}) {
 		t.Fatalf("members %v; the late team member was never asked about", got)
+	}
+}
+
+// A member the hook allowed but who left the team before the insert is not
+// added: the add is still limited to the team.
+func TestMembershipHook_CreateOpenChannelSkipsAMemberWhoLeft(t *testing.T) {
+	f := newHookFixture(t, allowAll)
+	f.joinTeam("creator", "alice", "leaver")
+	leaver := f.user("leaver")
+	f.hook.SetPolicy(func(*memberhook.Request) memberhooktest.Answer {
+		_ = f.store.Teams.RemoveMember(context.Background(), f.team.ID, leaver.ID)
+		return memberhooktest.Allow
+	})
+	created, err := f.app.CreateChannel(t.Context(), &model.Channel{
+		TeamID: f.team.ID, Name: "open-chan", DisplayName: "O", Type: model.ChannelOpen, CreatorID: f.user("creator").ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := channelMemberNames(t, f.fixture, created.ID); !slices.Equal(got, []string{"alice", "creator"}) {
+		t.Fatalf("members %v; the member who left the team was added", got)
 	}
 }
 

@@ -77,15 +77,15 @@ func TestCheck_RefusalReasonDefaultsAndBounds(t *testing.T) {
 // caller turns into a refusal.
 func TestCheck_FailsClosed(t *testing.T) {
 	cases := map[string]memberhooktest.Answer{
-		"500":                {Status: 500, Body: `{"allow":true}`},
-		"403":                {Status: 403, Body: `{"allow":true}`},
-		"204":                {Status: 204, Body: ``},
-		"invalid JSON":       {Status: 200, Body: `{"allow":tru`},
-		"not an object":      {Status: 200, Body: `true`},
-		"no allow":           {Status: 200, Body: `{"reason":"x"}`},
-		"allow is a string":  {Status: 200, Body: `{"allow":"true"}`},
-		"allow is null":      {Status: 200, Body: `{"allow":null}`},
-		"empty body":         {Status: 200, Body: ``},
+		"500":               {Status: 500, Body: `{"allow":true}`},
+		"403":               {Status: 403, Body: `{"allow":true}`},
+		"204":               {Status: 204, Body: ``},
+		"invalid JSON":      {Status: 200, Body: `{"allow":tru`},
+		"not an object":     {Status: 200, Body: `true`},
+		"no allow":          {Status: 200, Body: `{"reason":"x"}`},
+		"allow is a string": {Status: 200, Body: `{"allow":"true"}`},
+		"allow is null":     {Status: 200, Body: `{"allow":null}`},
+		"empty body":        {Status: 200, Body: ``},
 		// Valid JSON in its first 64 KiB: only the size bound refuses it.
 		"answer is too long": {Status: 200, Body: `{"allow":true}` + strings.Repeat(" ", 70<<10)},
 	}
