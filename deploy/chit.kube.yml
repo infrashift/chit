@@ -514,10 +514,7 @@ spec:
         - --yes
 
     - name: migrate-keto
-      # PENDING trusted-service-containers P-TSC-2: keto-cue has no trusted
-      # image yet. `make keto-cue-image` builds this local one; replace it
-      # with the TSC image pinned by digest when P-TSC-2 publishes it.
-      image: localhost/keto-cue:2a6c583e
+      image: ghcr.io/infrashift/trusted-service-containers/trusted/keto-cue:v0.0.0-20261114211924-809351b32b9c-6a44b89@sha256:db55bf1db0721e03d6ea8fc250ded0271087a889a013f5dc36dbb5addeac0e9b
       command:
         - keto
         - migrate
@@ -577,10 +574,7 @@ spec:
           mountPath: /etc/kratos
 
     - name: keto
-      # PENDING trusted-service-containers P-TSC-2: keto-cue has no trusted
-      # image yet. `make keto-cue-image` builds this local one; replace it
-      # with the TSC image pinned by digest when P-TSC-2 publishes it.
-      image: localhost/keto-cue:2a6c583e
+      image: ghcr.io/infrashift/trusted-service-containers/trusted/keto-cue:v0.0.0-20261114211924-809351b32b9c-6a44b89@sha256:db55bf1db0721e03d6ea8fc250ded0271087a889a013f5dc36dbb5addeac0e9b
       args:
         - serve
         - -c
