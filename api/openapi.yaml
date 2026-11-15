@@ -1563,6 +1563,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/OnBehalfOfHeader"
       responses:
         "200":
           description: Visible tags
@@ -1652,6 +1653,8 @@ paths:
         matches nothing. Each result carries the channel-level tags the
         caller can see.
       tags: [Tags]
+      parameters:
+        - $ref: "#/components/parameters/OnBehalfOfHeader"
       requestBody:
         required: true
         content:
@@ -1732,6 +1735,7 @@ paths:
       tags: [Tags]
       parameters:
         - $ref: "#/components/parameters/ChannelIdParam"
+        - $ref: "#/components/parameters/OnBehalfOfHeader"
       responses:
         "200":
           description: Tags on the channel itself
@@ -1761,6 +1765,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/OnBehalfOfHeader"
       responses:
         "200":
           description: Tag removed from the channel
@@ -1812,6 +1817,8 @@ paths:
         than refused, so one inaccessible ID does not fail the batch. Replaces
         one request per post when opening a channel.
       tags: [Tags]
+      parameters:
+        - $ref: "#/components/parameters/OnBehalfOfHeader"
       requestBody:
         required: true
         content:
@@ -1919,6 +1926,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/OnBehalfOfHeader"
       responses:
         "200":
           description: Tag removed from post
@@ -2335,10 +2343,13 @@ components:
         Accepted only from a client_credentials machine actor, and only on
         `POST /posts`, `POST /channels/{id}/stream_status`, `POST /channels`,
         `POST /channels/{id}/members`, `GET /users/me`, the Tag routes
-        `POST /tags`, `POST /posts/{id}/tags` and `POST /channels/{id}/tags`,
-        and the attachment routes `POST /channels/{id}/files` and
-        `GET /files/{id}`; elsewhere it is a 400. The request is authorized
-        as the person: they see only files of their channels. A client
+        `POST /tags`, `GET /tags`, `POST /posts/{id}/tags`,
+        `DELETE /posts/{id}/tags/{tag_id}`, `POST /channels/{id}/tags`,
+        `GET /channels/{id}/tags`, `DELETE /channels/{id}/tags/{tag_id}`,
+        `POST /tags/posts` and `POST /tags/channels`, and the attachment
+        routes `POST /channels/{id}/files` and `GET /files/{id}`; elsewhere
+        it is a 400. The request is authorized as the person: they see only
+        their own private tags, and only files of their channels. A client
         that is not on the list, or a Kratos session, gets 403. An empty or
         malformed value, an unknown user or Kratos identity, a deactivated
         person, and an agent or bot get 400.
