@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -51,17 +52,54 @@ func TestProvisionUser(t *testing.T) {
 		calls := fakeKratos(t, f, nil, http.StatusInternalServerError)
 		existing := f.user("known")
 
-		u, err := f.app.ProvisionUser(t.Context(), existing.KratosID)
-		if err != nil || u.ID != existing.ID || calls.Load() != 0 {
-			t.Fatalf("got %v, %v after %d Kratos calls", u, err, calls.Load())
+		u, created, err := f.app.provisionUser(t.Context(), existing.KratosID)
+		if err != nil || u.ID != existing.ID || created || calls.Load() != 0 {
+			t.Fatalf("got %v, created=%v, %v after %d Kratos calls", u, created, err, calls.Load())
 		}
 	})
 
 	t.Run("a Kratos failure is an error, not a nameless user", func(t *testing.T) {
 		f := newFixture(t)
 		fakeKratos(t, f, nil, http.StatusNotFound)
-		if _, err := f.app.ProvisionUser(t.Context(), model.NewID()); err == nil {
-			t.Fatal("provisioned a user Kratos does not know")
+		_, err := f.app.ProvisionUser(t.Context(), model.NewID())
+		if !errors.Is(err, ErrKratosIdentityNotFound) {
+			t.Fatalf("got %v, want ErrKratosIdentityNotFound for a user Kratos does not know", err)
+		}
+	})
+
+	t.Run("an inactive Kratos identity is not provisioned", func(t *testing.T) {
+		f := newFixture(t)
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"state":"inactive","traits":{"username":"idle","email":"idle@example.com"}}`))
+		}))
+		t.Cleanup(srv.Close)
+		f.app.Config.KratosAdminURL = srv.URL
+		kratosID := model.NewID()
+		_, err := f.app.ProvisionUser(t.Context(), kratosID)
+		if !errors.Is(err, ErrKratosIdentityInactive) {
+			t.Fatalf("got %v, want ErrKratosIdentityInactive", err)
+		}
+		if _, err := f.store.Users.GetByKratosID(t.Context(), kratosID); err == nil {
+			t.Fatal("an inactive identity was provisioned")
+		}
+	})
+
+	// A deactivated user still holds their Kratos ID. They are refused
+	// without asking Kratos, and no second user is made for them.
+	t.Run("a deactivated user is refused, not provisioned again", func(t *testing.T) {
+		f := newFixture(t)
+		calls := fakeKratos(t, f, map[string]string{"username": "gone", "email": "gone@example.com"}, http.StatusOK)
+		gone := &model.User{ID: model.NewID(), KratosID: model.NewID(), Username: "gone", DisplayName: "Gone",
+			Email: "gone@example.com", Roles: "system_user", ActorType: model.ActorTypeUser, CreateAt: 1, UpdateAt: 1, DeleteAt: 2}
+		f.store.Users.Seed(gone)
+
+		_, err := f.app.ProvisionUser(t.Context(), gone.KratosID)
+		var appErr *model.AppError
+		if !errors.As(err, &appErr) || appErr.StatusCode != http.StatusForbidden {
+			t.Fatalf("got %v, want 403", err)
+		}
+		if calls.Load() != 0 {
+			t.Fatalf("Kratos called %d times for a deactivated user", calls.Load())
 		}
 	})
 
@@ -76,9 +114,10 @@ func TestProvisionUser(t *testing.T) {
 			Email: "r@example.com", Roles: "system_user", ActorType: model.ActorTypeUser, CreateAt: 1, UpdateAt: 1}
 		f.app.Store = &racingStore{Store: f.store, users: &racingUsers{UserStore: f.store.Users, winner: winner}}
 
-		u, err := f.app.ProvisionUser(t.Context(), kratosID)
-		if err != nil || u.ID != winner.ID {
-			t.Fatalf("got %v, %v; want the winner's row", u, err)
+		// Not created by this request, so not audited as created by it.
+		u, created, err := f.app.provisionUser(t.Context(), kratosID)
+		if err != nil || u.ID != winner.ID || created {
+			t.Fatalf("got %v, created=%v, %v; want the winner's row, not created", u, created, err)
 		}
 	})
 }

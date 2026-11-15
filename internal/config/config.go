@@ -37,7 +37,7 @@ type Config struct {
 	// undeclared client is authenticated and nobody. See app.MachineActor.
 	MachineActors string `koanf:"machine_actors"`
 	// OnBehalfOfClients lists the OAuth2 client IDs (comma-separated in
-	// CHIT_ON_BEHALF_OF_CLIENTS) that may post as a person by naming them in
+	// CHIT_ON_BEHALF_OF_CLIENTS) that may act as a person by naming them in
 	// X-On-Behalf-Of. Each must be a machine actor in MachineActors, that is a
 	// Hydra client_credentials client. Empty: no client may.
 	OnBehalfOfClients []string `koanf:"on_behalf_of_clients"`

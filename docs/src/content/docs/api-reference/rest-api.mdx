@@ -32,6 +32,44 @@ are configurable (`CHIT_TRUSTED_PROXY_HEADER`, `CHIT_TRUSTED_CLIENT_HEADER`).
 
 See [Ory Stack](/chit/deployment/ory-stack/) for the full authentication flow.
 
+### On behalf of a person
+
+A machine actor whose OAuth2 client is in `CHIT_ON_BEHALF_OF_CLIENTS` may act
+as a person by naming them in `X-On-Behalf-Of`. The request is then
+authorized as the person, with every check the person would face, and the
+audit log records the client beside them. The value is one of:
+
+- the person's Chit user ID;
+- `kratos:` and the person's Kratos identity ID, as a canonical (lowercase,
+  hyphenated) UUID. When the identity has no Chit user yet, chitd provisions
+  one from the Kratos traits, exactly as the person's first browser request
+  would, and writes a `user_provisioned` audit record.
+
+The header is accepted only on these routes; on any other route it is a
+`400`:
+
+| Method | Path | As the person |
+|---|---|---|
+| POST | `/posts` | Post; `props.on_behalf_of.actor_id` names the client |
+| POST | `/channels/{id}/stream_status` | Send a stream status |
+| POST | `/tags`, `/posts/{id}/tags`, `/channels/{id}/tags` | Create and apply tags |
+| POST | `/channels` | Create a channel; the person must be on the team, and is its creator |
+| POST | `/channels/{id}/members` | Add a member; the person must be allowed to add one |
+| GET | `/users/me` | Return the person: how a client learns a `kratos:` person's user ID |
+
+Refused: a client not on the list, or a person's session, with the header
+(`403`); an empty or malformed value, an unknown user or Kratos identity, a
+deactivated person (in Chit, or inactive in Kratos), and an agent or bot
+(`400`). A machine actor learns its own user ID with `GET /users/me` and no
+`X-On-Behalf-Of`.
+
+HALO creates a Conversation this way: `GET /users/me` for the person
+(`kratos:<id>`), add the person to halod's team as halod
+(`POST /teams/{id}/members`), `POST /channels` with `"type": "P"` for the
+person, `POST /channels/{id}/members` with halod's user ID for the person,
+`POST /posts` for the person, and `GET /channels/{id}/posts` as halod, which
+is now a member.
+
 ## Limits
 
 | Limit | Value | Response |
@@ -88,7 +126,7 @@ All `*_at` fields are **Unix millisecond timestamps** (int64).
 |---|---|---|---|
 | POST | `/users` | Create a user, including a machine actor bound to an OAuth2 client | `system_admin` |
 | GET | `/users?term=` | Search users by username or display name (substring; `%` and `_` are literal) | Any user |
-| GET | `/users/me` | Get the caller | Any user |
+| GET | `/users/me` | Get the caller; with `X-On-Behalf-Of`, the person (provisioned for `kratos:`) | Any user |
 | PUT | `/users/me` | Change the caller's `username` and/or `display_name`; a taken username is `409` | Any user |
 | GET | `/users/{id}` | Get user by ID | Any user |
 | GET | `/users/username/{username}` | Get user by username | Any user |

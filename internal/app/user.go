@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/infrashift/chit/internal/model"
@@ -10,22 +11,50 @@ import (
 // ProvisionUser creates or retrieves a local user for the given Kratos
 // identity. Results are cached (TTL-bounded) so the per-request auth path does
 // not hit the database every time.
+//
+// A deactivated user is refused (403), not provisioned again: their row
+// still holds the Kratos ID, so a second row could not be saved anyway.
 func (a *App) ProvisionUser(ctx context.Context, kratosID string) (*model.User, error) {
+	user, _, err := a.provisionUser(ctx, kratosID)
+	if errors.Is(err, errUserDeactivated) {
+		return nil, model.NewForbiddenError("App.ProvisionUser", "this user is deactivated")
+	}
+	return user, err
+}
+
+// errUserDeactivated is provisionUser's error for a Kratos identity whose
+// user is deactivated.
+var errUserDeactivated = errors.New("user is deactivated")
+
+// provisionUser is ProvisionUser, and also reports whether it created the
+// user. A browser request and an on-behalf-of request (X-On-Behalf-Of:
+// kratos:<id>) both come here, so both make the same user.
+func (a *App) provisionUser(ctx context.Context, kratosID string) (*model.User, bool, error) {
 	if a.userCache != nil {
 		if user, ok := a.userCache.Get(kratosID); ok {
-			return user, nil
+			return user, false, nil
 		}
 	}
 
 	user, err := a.Store.User().GetByKratosID(ctx, kratosID)
 	if err == nil {
 		a.cacheUser(user)
-		return user, nil
+		return user, false, nil
+	}
+	if !isNotFound(err) {
+		return nil, false, err
+	}
+	deactivated, err := a.Store.User().KratosIDDeactivated(ctx, kratosID)
+	if err != nil {
+		return nil, false, err
+	}
+	if deactivated {
+		return nil, false, errUserDeactivated
 	}
 
 	username, displayName, email, err := a.FetchKratosIdentity(ctx, kratosID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	user = &model.User{
@@ -43,13 +72,13 @@ func (a *App) ProvisionUser(ctx context.Context, kratosID string) (*model.User, 
 		existing, err2 := a.Store.User().GetByKratosID(ctx, kratosID)
 		if err2 == nil {
 			a.cacheUser(existing)
-			return existing, nil
+			return existing, false, nil
 		}
-		return nil, err
+		return nil, false, err
 	}
 
 	a.cacheUser(saved)
-	return saved, nil
+	return saved, true, nil
 }
 
 // CreateUser provisions a user on an administrator's behalf.

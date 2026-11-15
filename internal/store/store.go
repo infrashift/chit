@@ -22,6 +22,10 @@ type UserStore interface {
 	Save(ctx context.Context, user *model.User) (*model.User, error)
 	Get(ctx context.Context, id string) (*model.User, error)
 	GetByKratosID(ctx context.Context, kratosID string) (*model.User, error)
+	// KratosIDDeactivated reports whether a deactivated user (delete_at set)
+	// holds the Kratos identity. GetByKratosID does not see such a row, and
+	// the identity cannot be provisioned again while it is there.
+	KratosIDDeactivated(ctx context.Context, kratosID string) (bool, error)
 	GetByUsername(ctx context.Context, username string) (*model.User, error)
 	GetByOAuthClientID(ctx context.Context, clientID string) (*model.User, error)
 	Update(ctx context.Context, user *model.User) (*model.User, error)

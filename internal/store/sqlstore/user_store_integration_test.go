@@ -243,6 +243,41 @@ func TestUserStoreIntegration_MachineActorsHaveNoIdentity(t *testing.T) {
 	}
 }
 
+// A deactivated user is invisible to GetByKratosID, but still holds the
+// Kratos ID: KratosIDDeactivated is how provisioning tells the two apart.
+func TestUserStoreIntegration_KratosIDDeactivated(t *testing.T) {
+	ss := testStore(t)
+	store := ss.User()
+	live, err := store.Save(t.Context(), newTestUser("live"))
+	if err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	gone, err := store.Save(t.Context(), newTestUser("gone"))
+	if err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if _, err = ss.pool.Exec(t.Context(), `UPDATE users SET delete_at = 5 WHERE id = $1`, gone.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, kratosID string
+		want           bool
+	}{
+		{"deactivated", gone.KratosID, true},
+		{"live", live.KratosID, false},
+		{"unknown", model.NewID(), false},
+		{"not a UUID", "not-a-uuid", false},
+	} {
+		got, err := store.KratosIDDeactivated(t.Context(), tc.kratosID)
+		if err != nil || got != tc.want {
+			t.Errorf("%s: got %v, %v; want %v", tc.name, got, err, tc.want)
+		}
+	}
+	if _, err := store.GetByKratosID(t.Context(), gone.KratosID); err == nil {
+		t.Error("GetByKratosID found a deactivated user")
+	}
+}
+
 func TestUserStoreIntegration_GetByNonUUIDIsNotFound(t *testing.T) {
 	store := testStore(t).User()
 	for name, get := range map[string]func() error{

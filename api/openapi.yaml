@@ -178,8 +178,20 @@ paths:
     get:
       operationId: get_me
       summary: Get current user
-      description: Returns the full profile of the authenticated user, including email.
+      description: |
+        Returns the full profile of the authenticated user, including email.
+        A machine actor (an OAuth2 client) gets its own user: this is how a
+        client such as halod learns its user ID.
+
+        **On behalf of a person.** With `X-On-Behalf-Of`, an allowlisted
+        client gets the person instead. With `kratos:<Kratos identity ID>`,
+        the person's user is created first if they have never opened Chit,
+        exactly as their first browser request would create it, and a
+        `user_provisioned` audit record names the client. This is how the
+        client learns that person's user ID.
       tags: [Users]
+      parameters:
+        - $ref: "#/components/parameters/OnBehalfOfHeader"
       responses:
         "200":
           description: Current user profile
@@ -187,8 +199,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
     put:
       operationId: update_me
       summary: Update current user
@@ -556,7 +572,14 @@ paths:
         `/channels/direct` and `/channels/group`, not here. A
         `channel_created` WebSocket event is broadcast (to the team for an
         Open channel, otherwise to the channel).
+
+        **On behalf of a person.** With `X-On-Behalf-Of`, an allowlisted
+        client creates the channel as the person: the person must be a
+        member of the team, and becomes the channel's creator (`creator_id`)
+        and first member. A `channel_created` audit record names the client.
       tags: [Channels]
+      parameters:
+        - $ref: "#/components/parameters/OnBehalfOfHeader"
       requestBody:
         required: true
         content:
@@ -831,9 +854,16 @@ paths:
         added must be on the channel's team. Direct and group channels have a
         fixed membership (403). Adding an existing member changes nothing.
         Broadcasts a `user_added` WebSocket event to the channel.
+
+        **On behalf of a person.** With `X-On-Behalf-Of`, an allowlisted
+        client adds the member as the person, so the person must be allowed
+        to add one: a member of a Private channel, a team member for an Open
+        one. A client adds itself this way to a person's Private channel. A
+        `channel_member_added` audit record names the client.
       tags: [Channels]
       parameters:
         - $ref: "#/components/parameters/ChannelIdParam"
+        - $ref: "#/components/parameters/OnBehalfOfHeader"
       requestBody:
         required: true
         content:
@@ -2096,15 +2126,23 @@ components:
       in: header
       required: false
       description: |
-        The user ID of the person an allowlisted OAuth2 client
-        (`CHIT_ON_BEHALF_OF_CLIENTS`) acts for. Accepted only from a
-        client_credentials machine actor, and only on `POST /posts`,
-        `POST /channels/{id}/stream_status`, `POST /tags`,
-        `POST /posts/{id}/tags` and `POST /channels/{id}/tags`; elsewhere
-        it is a 400.
+        The person an allowlisted OAuth2 client (`CHIT_ON_BEHALF_OF_CLIENTS`)
+        acts for: their Chit user ID, or `kratos:` and their Kratos identity
+        ID as a canonical (lowercase, hyphenated) UUID. A Kratos identity
+        that has no user yet gets one, as on the person's first browser
+        request, and a `user_provisioned` audit record names the client.
+
+        Accepted only from a client_credentials machine actor, and only on
+        `POST /posts`, `POST /channels/{id}/stream_status`, `POST /tags`,
+        `POST /posts/{id}/tags`, `POST /channels/{id}/tags`,
+        `POST /channels`, `POST /channels/{id}/members` and
+        `GET /users/me`; elsewhere it is a 400. A client that is not on the
+        list, or a Kratos session, gets 403. An empty or malformed value, an
+        unknown user or Kratos identity, a deactivated person, and an agent
+        or bot get 400.
       schema:
         type: string
-        format: uuid
+        pattern: "^(kratos:)?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
     TagIdParam:
       name: id
       in: path

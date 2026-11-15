@@ -39,6 +39,7 @@ func createChannel(a *app.App) http.HandlerFunc {
 			WriteAppError(w, "createChannel", err)
 			return
 		}
+		a.AuditOnBehalfOf(ContextGetActor(r), "channel_created", user.ID, "channel_id", saved.ID)
 
 		WriteJSON(w, http.StatusCreated, saved)
 	}
@@ -219,6 +220,8 @@ func addChannelMember(a *app.App) http.HandlerFunc {
 			WriteAppError(w, "addChannelMember", err)
 			return
 		}
+		a.AuditOnBehalfOf(ContextGetActor(r), "channel_member_added", user.ID,
+			"channel_id", channelID, "user_id", member.UserID)
 
 		WriteJSON(w, http.StatusCreated, member)
 	}

@@ -158,6 +158,17 @@ func (s *UserStore) GetByKratosID(_ context.Context, id string) (*model.User, er
 	return s.getBy("UserStore.GetByKratosID", id, func(u *model.User) bool { return id != "" && u.KratosID == id })
 }
 
+func (s *UserStore) KratosIDDeactivated(_ context.Context, id string) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, u := range s.byID {
+		if id != "" && u.KratosID == id && u.DeleteAt != 0 {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (s *UserStore) GetByUsername(_ context.Context, name string) (*model.User, error) {
 	return s.getBy("UserStore.GetByUsername", name, func(u *model.User) bool { return u.Username == name })
 }
