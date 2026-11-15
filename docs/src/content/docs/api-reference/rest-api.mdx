@@ -75,6 +75,26 @@ person, `POST /channels/{id}/members` with halod's user ID for the person,
 `POST /posts` for the person, and `GET /channels/{id}/posts` as halod, which
 is now a member.
 
+### Membership hook
+
+When `CHIT_MEMBERSHIP_HOOK_URL` is set, chitd asks the hook before it adds a
+member to a channel: `POST /channels/{id}/members` (a join and an
+on-behalf-of add included), the team members of a new Open channel, the
+other members of a new direct or group channel, and `/invite`. The creator of
+a new channel is not asked about. Any answer but `{"allow": true}` refuses
+the add, a failed or slow hook included. A refused request adds nobody,
+however many members it adds, and answers `403`:
+
+```json
+{"id": "channel.membership_refused", "status_code": 403,
+ "message": "the membership policy refused to add user <user ID> to this channel",
+ "reason": "<the hook's code, or hook_unavailable>",
+ "detail": "<the hook's text for a person>"}
+```
+
+[Configuration](/chit/reference/configuration/#membership-hook) gives the
+hook's request and answer.
+
 ## Limits
 
 | Limit | Value | Response |

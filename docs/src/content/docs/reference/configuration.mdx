@@ -41,13 +41,19 @@ exists.
 | `CHIT_FILE_ORPHAN_GRACE` | duration | `24h` | How long an upload may wait for its post, and how long a deleted file's object is kept |
 | `CHIT_FILE_SWEEP_INTERVAL` | duration | `10m` | How often the attachment sweep runs |
 | `CHIT_FILE_SWEEP_BATCH` | int | `100` | Most files the sweep expires, and most it purges, per run |
+| `CHIT_MEMBERSHIP_HOOK_URL` | string | _(empty)_ | The membership policy hook, such as HALO's `http://halod:8080/internal/chit/membership-check`. Empty turns it off. When set, chitd asks it before it adds any member to a channel, and refuses the add unless it answers `{"allow":true}`. See [Membership hook](#membership-hook). |
+| `CHIT_MEMBERSHIP_HOOK_TIMEOUT` | duration | `5s` | Bounds one check, the token request and the retry after a 401 included. A check that runs out of time refuses the add. |
+| `CHIT_MEMBERSHIP_HOOK_TOKEN_URL` | string | _(empty)_ | Hydra token endpoint for chitd's own `client_credentials` client; required with `CHIT_MEMBERSHIP_HOOK_URL` |
+| `CHIT_MEMBERSHIP_HOOK_CLIENT_ID` | string | _(empty)_ | chitd's Hydra client ID; required with `CHIT_MEMBERSHIP_HOOK_URL` |
+| `CHIT_MEMBERSHIP_HOOK_CLIENT_SECRET` | string | _(empty)_ | chitd's Hydra client secret; required with `CHIT_MEMBERSHIP_HOOK_URL` |
+| `CHIT_MEMBERSHIP_HOOK_SCOPE` | string | _(empty)_ | Space-separated scopes to request with the token; empty requests none |
 | `CHIT_WS_PING_INTERVAL` | duration | `30s` | Interval between WebSocket ping frames |
 | `CHIT_WS_WRITE_TIMEOUT` | duration | `10s` | Write deadline for WebSocket messages |
 | `CHIT_CACHE_SIZE` | int | `20000` | Maximum entries in the user LRU cache |
 | `CHIT_CACHE_TTL` | duration | `5m` | Time-to-live for cache entries |
 | `CHIT_ENABLE_OPENAPI_VALIDATION` | bool | `true` | Validate requests against the OpenAPI spec |
 | `CHIT_COMMANDS_CUE_DIR` | string | `auth` | Directory containing the CUE definitions for slash commands, roles and actors. The container image sets `/etc/chit/auth`. |
-| `CHIT_AUDIT_LOG_PATH` | string | `/var/log/chit/audit.log` | Slash-command audit log file. Empty or `-` logs to stderr; so does a path chitd cannot create or open (with a warning). |
+| `CHIT_AUDIT_LOG_PATH` | string | `/var/log/chit/audit.log` | Audit log file: slash commands, on-behalf-of acts and membership hook answers. Empty or `-` logs to stderr; so does a path chitd cannot create or open (with a warning). |
 | `CHIT_WEBHOOK_ENABLED` | bool | `false` | Enable the CloudEvents webhook dispatcher for slash commands |
 | `CHIT_WEBHOOK_URL` | string | _(empty)_ | Destination URL for webhook deliveries |
 | `CHIT_WEBHOOK_SECRET` | string | _(empty)_ | Shared secret used to sign webhook deliveries |
@@ -71,8 +77,61 @@ is wrong, exits with every problem listed at once. It refuses to start when:
   `CHIT_LOG_FORMAT` is not `json` or `text`;
 - `CHIT_WEBHOOK_ENABLED=true` and `CHIT_WEBHOOK_URL` is empty, or the webhook
   worker count, queue size or timeout is not positive;
+- `CHIT_MEMBERSHIP_HOOK_URL` is set and the token URL, client ID or client
+  secret is empty, or `CHIT_MEMBERSHIP_HOOK_TIMEOUT` is not positive; or the
+  URL is not an absolute `http` or `https` URL (checked at start);
 - `CHIT_MACHINE_ACTORS` is not valid JSON or declares an invalid actor (checked
   just after the database connects).
+
+### Membership hook
+
+HALO records the Tools and OKF namespaces behind each Profile message, so a
+person added to a channel later could read output made with somebody else's
+access. The membership hook lets HALO's `halod` refuse such an add. When
+`CHIT_MEMBERSHIP_HOOK_URL` is set, chitd asks the hook before it adds a member
+on every path that adds one:
+
+| Path | Who is checked |
+|---|---|
+| `POST /channels/{id}/members`, also on behalf of a person and when a user joins an Open channel | The user added |
+| `POST /channels` for an Open channel | Each team member it adds; the creator is not checked |
+| `POST /channels` for a Private channel | Nobody: the creator is its only member |
+| `POST /channels/direct` and `POST /channels/group` (a new channel only) | Each member but the caller |
+| `/invite` | The user invited |
+
+Joining a team adds no channel memberships, so it asks nothing. An existing
+member, an existing direct or group channel, and an add that its own checks
+refuse ask nothing either.
+
+The request is `POST <CHIT_MEMBERSHIP_HOOK_URL>` with
+`Authorization: Bearer <token>` (chitd's Hydra `client_credentials` token,
+kept until 30 seconds before it expires and fetched again once after a 401)
+and `Content-Type: application/json`:
+
+```json
+{"channel_id": "<channel ID>", "user_id": "<user ID of the new member>",
+ "kratos_identity_id": "<their Kratos identity ID, or empty>",
+ "actor_type": "human | agent | bot",
+ "added_by": "<user ID of the actor; on behalf of, the person>",
+ "via_actor_id": "<user ID of the on-behalf-of client, or empty>"}
+```
+
+A 200 with `{"allow": true}` allows the add. A 200 with
+`{"allow": false, "reason": "<code>", "detail": "<text>"}` refuses it. Any
+other status, a timeout, a network error or another body refuses it too: the
+hook fails closed. A refusal adds nothing and answers 403:
+
+```json
+{"id": "channel.membership_refused", "status_code": 403,
+ "message": "the membership policy refused to add user <user ID> to this channel",
+ "reason": "<the hook's code, or hook_unavailable>", "detail": "<the hook's text>"}
+```
+
+A request that adds several members (an Open channel, a group) asks about
+each one, at most 8 at a time, and adds all or none: one refusal refuses the
+request. `/invite` answers with the reason and detail as its text. Each
+answer is a `membership_check` record in the audit log, with the channel,
+the member, `added_by`, `via_actor_id`, `allowed` and `reason`.
 
 ### Machine actors
 
