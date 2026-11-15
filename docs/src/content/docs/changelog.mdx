@@ -14,6 +14,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Behaviour changes an operator must act on or know about:
 
+- **Rate limits are configurable, and an on-behalf-of client has an
+  aggregate limit of its own (P-CHIT-8 for HALO).** A person, and a machine
+  actor not in `CHIT_ON_BEHALF_OF_CLIENTS`, keeps 10 requests a second in
+  bursts of 50, now `CHIT_RATE_LIMIT_USER_PER_SECOND` and
+  `CHIT_RATE_LIMIT_USER_BURST`. A client in `CHIT_ON_BEHALF_OF_CLIENTS` is
+  no longer held to the per-user limit for what it does as itself: it has
+  an aggregate limit, `CHIT_RATE_LIMIT_CLIENT_PER_SECOND` (1500) in bursts
+  of `CHIT_RATE_LIMIT_CLIENT_BURST` (3000), that counts everything it does,
+  on behalf of anyone included. A request on behalf of a person still
+  counts against that person's own limit too. chitd refuses to start with a
+  rate of 0 or less or above 100,000, or a burst below 1 or above
+  1,000,000.
 - **The membership policy hook, and a stub of it in the dev stack.** With
   `CHIT_MEMBERSHIP_HOOK_URL` unset nothing changes. With it set, chitd asks
   that URL before it adds any member to a channel and refuses the add (403
@@ -192,6 +204,20 @@ Behaviour changes an operator must act on or know about:
 
 ### Added
 
+- Configurable rate limits, and an aggregate limit for each on-behalf-of
+  client (P-CHIT-8 for HALO). halod acts for every Subject through one
+  machine actor, and its own requests (history and member reads,
+  `stream_status`, replies) shared one per-user bucket of 10 a second:
+  HALO's load test was stable at 60 Subjects, of the 2000 it targets. The
+  client's aggregate bucket (`CHIT_RATE_LIMIT_CLIENT_*`, 1500 a second in
+  bursts of 3000, sized in the configuration reference for 2000 Subjects
+  at one Message a minute) now bounds everything it does instead; each
+  Subject it acts for keeps their own per-user budget. A request takes a
+  token from each of its buckets or from none. Every `429` from a rate
+  limit, `stream_status`'s included, carries `Retry-After`, and each
+  refusal of the request limit logs a `rate limit exceeded` warning with
+  the bucket, method, path and who: `user_id`, or `actor_id`, `client_id`
+  and, on behalf of a person, `principal_id`.
 - The membership policy hook (P-CHIT-2 for HALO). When
   `CHIT_MEMBERSHIP_HOOK_URL` is set, chitd POSTs
   `{"channel_id", "user_id", "kratos_identity_id", "actor_type", "added_by",

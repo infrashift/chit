@@ -49,8 +49,14 @@ info:
     ## Errors and limits
     Failures return an `AppError`. A 5xx carries no `detailed_error`; the
     cause is logged server-side. Request bodies over 1 MiB are refused with
-    413. Each user may make 10 requests a second, in bursts of up to 50;
-    beyond that requests are refused with 429.
+    413. Each user may make 10 requests a second, in bursts of up to 50
+    (`CHIT_RATE_LIMIT_USER_PER_SECOND` and `CHIT_RATE_LIMIT_USER_BURST`);
+    beyond that requests are refused with 429 and a `Retry-After` header.
+    A request with `X-On-Behalf-Of` counts against the person's limit. An
+    OAuth2 client in `CHIT_ON_BEHALF_OF_CLIENTS` has an aggregate limit
+    instead of a per-user one, 1500 a second in bursts of 3000 by default
+    (`CHIT_RATE_LIMIT_CLIENT_PER_SECOND` and `CHIT_RATE_LIMIT_CLIENT_BURST`),
+    that counts everything it does, as itself and on behalf of anyone.
 
     ## IDs
     All resource IDs are UUIDv7 strings.
@@ -2445,6 +2451,12 @@ components:
             $ref: "#/components/schemas/AppError"
     TooManyRequests:
       description: Rate limit exceeded
+      headers:
+        Retry-After:
+          description: Seconds until the limit that refused the request would allow it, rounded up.
+          schema:
+            type: integer
+            minimum: 1
       content:
         application/json:
           schema:
