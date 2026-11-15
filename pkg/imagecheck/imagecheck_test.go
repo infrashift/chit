@@ -237,6 +237,8 @@ func TestCheck_RefusesSVG(t *testing.T) {
 	// Declared as an image it is not.
 	wantReason(t, firstErr(Check(TypePNG, svg, DefaultLimits())), ErrSVG)
 	wantReason(t, firstErr(Check(TypePNG, []byte("  <svg onload=alert(1)>"), DefaultLimits())), ErrSVG)
+	// Declared SVG is refused as SVG whatever the bytes are.
+	wantReason(t, firstErr(Check("image/svg+xml; charset=utf-8", pngBytes(t), DefaultLimits())), ErrSVG)
 }
 
 func firstErr(_ *Image, err error) error { return err }
@@ -320,6 +322,17 @@ func TestCheck_RefusesTooManyPixelsFromTheHeader(t *testing.T) {
 func TestCheck_RefusesTooManyBytes(t *testing.T) {
 	data := pngBytes(t)
 	wantReason(t, firstErr(Check(TypePNG, data, Limits{MaxBytes: int64(len(data) - 1), MaxPixels: MaxImagePixels})), ErrTooLarge)
+}
+
+// The input limit applies on its own: a file padded with a large, harmless
+// text chunk is refused although its re-encoded image would be small.
+func TestCheck_RefusesAnInputOverTheLimitThatWouldShrink(t *testing.T) {
+	data := insertPNGChunk(pngBytes(t), pngChunk("tEXt", append([]byte("Comment\x00"), bytes.Repeat([]byte("a"), 4096)...)))
+	lim := Limits{MaxBytes: 1024, MaxPixels: MaxImagePixels}
+	if img, err := Check(TypePNG, data, DefaultLimits()); err != nil || len(img.Data) > 1024 {
+		t.Fatalf("the fixture: %v", err)
+	}
+	wantReason(t, firstErr(Check(TypePNG, data, lim)), ErrTooLarge)
 }
 
 // The output limit applies too: a WebP re-encoded as PNG can grow.
