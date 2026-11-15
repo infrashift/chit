@@ -168,7 +168,7 @@ const (
 )
 
 func sendStreamStatus(a *app.App) http.HandlerFunc {
-	limiters := newUserLimiters(streamStatusPerSecond, streamStatusBurst, time.Now)
+	limiters := newUserLimiters(streamStatusPerSecond, streamStatusBurst, time.Now())
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
 		channelID := chi.URLParam(r, "id")
@@ -179,7 +179,8 @@ func sendStreamStatus(a *app.App) http.HandlerFunc {
 		if !decodeBody(w, r, &body, "sendStreamStatus") {
 			return
 		}
-		if !limiters.allow(user.ID + " " + channelID) {
+		if refused, wait := take(time.Now(), []bucket{{"stream_status", limiters, user.ID + " " + channelID}}); refused != nil {
+			setRetryAfter(w, wait)
 			WriteError(w, model.NewAppError("sendStreamStatus", "stream_status rate limit exceeded", "", http.StatusTooManyRequests))
 			return
 		}

@@ -62,7 +62,14 @@ func New(a *app.App) http.Handler {
 			// carries the attachment headers too.
 			r.Use(FileResponseHeaders)
 			r.Use(AuthExtract(a))
-			r.Use(RateLimit(10, 50))
+			// After AuthExtract, which names the person and, on behalf of
+			// them, the client: see ratelimit.go.
+			r.Use(RateLimit(RateLimits{
+				UserPerSecond:   a.Config.RateLimitUserPerSecond,
+				UserBurst:       a.Config.RateLimitUserBurst,
+				ClientPerSecond: a.Config.RateLimitClientPerSecond,
+				ClientBurst:     a.Config.RateLimitClientBurst,
+			}, a.OnBehalfOfAllowed))
 
 			// OpenAPI request validation (optional)
 			if a.Config.EnableOpenAPIValidation {
