@@ -88,6 +88,15 @@ Created/Modified Files
     refuses with `hook_unavailable`; and that the audit log records the
     answers. `HOOK_STUB` and `E2E_AUDIT` point the scenario at another stub
     or pod.
+  - Scenario 13: Rate limits (HALO P-CHIT-8) — sends 120 requests at once, 16
+    in parallel: as halod itself, all are served (its aggregate limit, not
+    the per-user burst of 50); on behalf of Erin, some are refused with 429
+    and `Retry-After: 1` (her own per-user budget), while halod as itself
+    and Alice are still served; as `chit-e2e-bot`, a machine actor not on
+    `CHIT_ON_BEHALF_OF_CLIENTS`, some are refused (the per-user limit). Then
+    checks chitd's log for the `rate limit exceeded` lines: the bucket, the
+    actor and client ID, and Erin as the principal. `E2E_CHITD_LOG` points
+    it at another pod.
 
   The Keto checks in scenarios 2 and 4 read `chit/channel` tuples, which chitd
   writes best-effort; members added when a channel is created are written in
