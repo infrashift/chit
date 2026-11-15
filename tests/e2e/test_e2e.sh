@@ -343,7 +343,7 @@ if [[ -z "$DAVE_ID" || "$DAVE_ID" == "null" ]]; then
   echo -e "${RED}FATAL: could not provision Dave.${NC}"
   exit 1
 fi
-DAVE_ROLES=$($E2E_PSQL "UPDATE users SET roles = 'system_user system_admin' WHERE id = '${DAVE_ID}' RETURNING roles" | head -1)
+DAVE_ROLES=$($E2E_PSQL "UPDATE users SET roles = 'system_user system_admin' WHERE id = '${DAVE_ID}' RETURNING roles" | sed -n 1p)
 if [[ "$DAVE_ROLES" != *system_admin* ]]; then
   echo -e "${RED}FATAL: could not grant system_admin to Dave with: ${E2E_PSQL}${NC}"
   exit 1
@@ -1431,6 +1431,25 @@ curl_api_full GET "/users/me"
 assert_json "10.11 Erin's session is the provisioned user" ".id" "$ERIN_ID" "$LAST_BODY"
 curl_api_full GET "/channels/${CONV_ID}/posts"
 assert_status "10.11 Erin reads her conversation" 200 "$LAST_STATUS" "$LAST_BODY"
+
+# 10.12 An identity with only an email (HALO's schema has no username or
+# name trait): Chit derives the username from the email and the Kratos ID.
+FRANK_KRATOS_ID=$(curl -s -X POST "${KRATOS_ADMIN}/admin/identities" -H "Content-Type: application/json" \
+  -d '{"schema_id":"email-only","traits":{"email":"Frank.Only+halo@test.local"}}' | jq -r '.id')
+if [[ -z "$FRANK_KRATOS_ID" || "$FRANK_KRATOS_ID" == "null" ]]; then
+  FRANK_KRATOS_ID=$(curl -s "${KRATOS_ADMIN}/admin/identities?credentials_identifier=frank.only%2Bhalo@test.local" | jq -r '.[0].id')
+fi
+FRANK_USERNAME="frank.only-halo-$(echo "$FRANK_KRATOS_ID" | tr -d '-' | cut -c1-8)"
+halod_api GET "/users/me" "" "kratos:${FRANK_KRATOS_ID}"
+assert_status "10.12 provision an email-only identity" 200 "$LAST_STATUS" "$LAST_BODY"
+assert_json "10.12 derived username" ".username" "$FRANK_USERNAME" "$LAST_BODY"
+assert_json "10.12 display name falls back to it" ".display_name" "$FRANK_USERNAME" "$LAST_BODY"
+FRANK_ID=$(echo "$LAST_BODY" | jq -r '.id')
+halod_api POST "/teams/${HALO_TEAM_ID}/members" "{\"user_id\":\"${FRANK_ID}\"}"
+assert_status "10.12 halod adds Frank to its team" 201 "$LAST_STATUS" "$LAST_BODY"
+halod_api POST "/channels" "{\"team_id\":\"${HALO_TEAM_ID}\",\"name\":\"conversation-frank\",\"display_name\":\"Conversation\",\"type\":\"P\"}" "kratos:${FRANK_KRATOS_ID}"
+assert_status "10.12 create a channel on behalf of Frank" 201 "$LAST_STATUS" "$LAST_BODY"
+assert_json "10.12 Frank is the creator" ".creator_id" "$FRANK_ID" "$LAST_BODY"
 
 # ============================================================================
 # SUMMARY

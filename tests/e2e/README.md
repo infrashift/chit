@@ -59,7 +59,9 @@ Created/Modified Files
     own user, refuses a malformed, unknown and session `X-On-Behalf-Of`,
     provisions a never-seen Kratos identity with `kratos:<id>`, creates her
     private channel and adds halod as her, posts as her, reads as halod, and
-    checks that her own first login finds the same user
+    checks that her own first login finds the same user; then provisions an
+    identity of the `email-only` Kratos schema (like HALO's) and checks its
+    derived username
 
   The Keto checks in scenarios 2 and 4 read `chit/channel` tuples, which chitd
   writes best-effort; members added when a channel is created are written in

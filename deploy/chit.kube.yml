@@ -49,6 +49,10 @@ data:
       schemas:
         - id: default
           url: file:///etc/kratos/identity.schema.json
+        # Email only, like HALO's schema: Chit derives the username. Used by
+        # tests/e2e/test_e2e.sh scenario 10.
+        - id: email-only
+          url: file:///etc/kratos/identity.email-only.schema.json
 
     log:
       level: info
@@ -99,6 +103,34 @@ data:
             }
           },
           "required": ["email", "username", "display_name"],
+          "additionalProperties": false
+        }
+      }
+    }
+  identity.email-only.schema.json: |
+    {
+      "$id": "https://schemas.chit.infrashift.com/identity.email-only.schema.json",
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Email-only Identity",
+      "type": "object",
+      "properties": {
+        "traits": {
+          "type": "object",
+          "properties": {
+            "email": {
+              "type": "string",
+              "format": "email",
+              "title": "Email",
+              "ory.sh/kratos": {
+                "credentials": {
+                  "password": {
+                    "identifier": true
+                  }
+                }
+              }
+            }
+          },
+          "required": ["email"],
           "additionalProperties": false
         }
       }
