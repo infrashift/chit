@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -26,16 +27,19 @@ func createPost(a *app.App) http.HandlerFunc {
 			return
 		}
 		// mentions is computed by the server; a client-supplied list would be
-		// stored as-is whenever the content mentions nobody.
+		// stored as-is whenever the content mentions nobody. on_behalf_of is
+		// the server's record of who posted for whom.
 		delete(body.Props, "mentions")
+		delete(body.Props, model.PropOnBehalfOf)
 
-		saved, err := a.CreatePost(r.Context(), &model.Post{
+		// With X-On-Behalf-Of, user is the person and actor the client.
+		saved, err := a.CreatePostAs(r.Context(), &model.Post{
 			ChannelID: body.ChannelID,
 			RootID:    body.RootID,
 			Content:   body.Content,
 			Props:     body.Props,
 			UserID:    user.ID,
-		})
+		}, ContextGetActor(r))
 		if err != nil {
 			WriteAppError(w, "createPost", err)
 			return
@@ -149,5 +153,38 @@ func getPinnedPosts(a *app.App) http.HandlerFunc {
 			return
 		}
 		WriteJSON(w, http.StatusOK, posts)
+	}
+}
+
+// streamStatusLimit bounds stream_status events per sender and channel: two a
+// second, in bursts of five. A progress event every few hundred milliseconds
+// is plenty to show activity, and the limit keeps one client from flooding a
+// channel's members.
+const (
+	streamStatusPerSecond = 2
+	streamStatusBurst     = 5
+)
+
+func sendStreamStatus(a *app.App) http.HandlerFunc {
+	limiters := newUserLimiters(streamStatusPerSecond, streamStatusBurst, time.Now)
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := ContextGetUser(r)
+		channelID := chi.URLParam(r, "id")
+		var body struct {
+			Status   string `json:"status"`
+			StreamID string `json:"stream_id"`
+		}
+		if !decodeBody(w, r, &body, "sendStreamStatus") {
+			return
+		}
+		if !limiters.allow(user.ID + " " + channelID) {
+			WriteError(w, model.NewAppError("sendStreamStatus", "stream_status rate limit exceeded", "", http.StatusTooManyRequests))
+			return
+		}
+		if err := a.SendStreamStatus(r.Context(), channelID, user, ContextGetActor(r), body.Status, body.StreamID); err != nil {
+			WriteAppError(w, "sendStreamStatus", err)
+			return
+		}
+		writeOK(w)
 	}
 }

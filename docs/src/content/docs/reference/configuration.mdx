@@ -25,6 +25,7 @@ exists.
 | `CHIT_TRUSTED_CLIENT_HEADER` | string | `X-Client-Id` | Header carrying a machine actor's OAuth2 `client_id`, set by Oathkeeper after introspecting a Hydra token. Checked before `CHIT_TRUSTED_PROXY_HEADER`. The client must be bound to a user (see `CHIT_MACHINE_ACTORS`); an unknown client gets 401 and is never auto-created. |
 | `CHIT_TRUSTED_PROXY_SECRET` | string | _(empty)_ | When set, every authenticated request must carry a matching `X-Proxy-Secret` header before either identity header is trusted; recommended in production |
 | `CHIT_MACHINE_ACTORS` | JSON | _(empty)_ | Machine actors (agents and bots) to create or update at boot. See [Machine actors](#machine-actors). |
+| `CHIT_ON_BEHALF_OF_CLIENTS` | list | _(empty)_ | Comma-separated OAuth2 client IDs of machine actors that may post (and send `stream_status`) as a person by naming the person's user ID in `X-On-Behalf-Of`. The request is authorized as that person, and `props.on_behalf_of.actor_id` and the audit log record the client. Each must be in `CHIT_MACHINE_ACTORS`, or chitd does not start. A person's session can never use the header. |
 | `CHIT_KRATOS_ADMIN_URL` | string | `http://localhost:4434` | Ory Kratos admin API base URL |
 | `CHIT_KETO_READ_URL` | string | `http://localhost:4466` | Ory Keto read API base URL |
 | `CHIT_KETO_WRITE_URL` | string | `http://localhost:4467` | Ory Keto write API base URL |

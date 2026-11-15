@@ -9,7 +9,10 @@ import (
 
 type contextKey string
 
-const userContextKey contextKey = "user"
+const (
+	userContextKey  contextKey = "user"
+	actorContextKey contextKey = "actor"
+)
 
 // ContextSetUser stores the authenticated user in the request context.
 func ContextSetUser(r *http.Request, user *model.User) *http.Request {
@@ -20,4 +23,17 @@ func ContextSetUser(r *http.Request, user *model.User) *http.Request {
 func ContextGetUser(r *http.Request) *model.User {
 	user, _ := r.Context().Value(userContextKey).(*model.User)
 	return user
+}
+
+// ContextSetActor records the allowlisted machine actor acting on behalf of
+// the request's user (X-On-Behalf-Of).
+func ContextSetActor(r *http.Request, actor *model.User) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), actorContextKey, actor))
+}
+
+// ContextGetActor returns the machine actor acting on behalf of the request's
+// user, or nil when the user acts for themselves.
+func ContextGetActor(r *http.Request) *model.User {
+	actor, _ := r.Context().Value(actorContextKey).(*model.User)
+	return actor
 }

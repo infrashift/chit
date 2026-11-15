@@ -18,6 +18,17 @@ const (
 	// WebSocketEventPostTagsUpdated carries a post's whole tag list after a
 	// tag is added or removed.
 	WebSocketEventPostTagsUpdated = "post_tags_updated"
+	// WebSocketEventStreamStatus tells a channel that a member, or an agent
+	// working for one, is producing a reply. chitd relays it and never
+	// stores it.
+	WebSocketEventStreamStatus = "stream_status"
+)
+
+// Stream status values.
+const (
+	StreamStatusStarted  = "started"
+	StreamStatusProgress = "progress"
+	StreamStatusFinished = "finished"
 )
 
 // WebSocketEvent is sent to clients over WebSocket connections.

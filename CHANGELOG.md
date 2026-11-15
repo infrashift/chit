@@ -128,6 +128,23 @@ Behaviour changes an operator must act on or know about:
 
 ### Added
 
+- On-behalf-of posting (P-CHIT-1 for HALO): a machine actor listed in
+  `CHIT_ON_BEHALF_OF_CLIENTS` may post as a person, and send
+  `stream_status` for them, by naming the person's user ID in
+  `X-On-Behalf-Of`. The post is authorized as the person and stored as
+  theirs; `props.on_behalf_of.actor_id` and a `post_on_behalf_of` audit
+  record name the client. A client not on the list, a person's session, and
+  an empty, malformed, unknown or non-person principal are refused, and the
+  header is refused on every other route.
+- `props.provenance` (P-CHIT-3): `tool_ids`, `okf_namespace_ids` and
+  `attachment_ids` (UUIDs), `okf_blob_sha256` (64 lowercase hex) and
+  `model`, validated on create and edit (400). Only an agent or bot, or a
+  post made on behalf of a person, may set or remove it (403).
+- `stream_status` WebSocket event (P-CHIT-4), sent with
+  `POST /channels/{id}/stream_status` (`started`, `progress`, `finished`,
+  optional `stream_id`) by a member or for one. It goes to the channel's
+  members and is never stored; two a second per sender and channel, bursts
+  of five, then 429.
 - `chit-claude`: control words in a thread (`!new [message]`, `!stop`,
   `!status`); a `⏳ Working on it…` note for runs past 10 seconds, deleted when
   the reply lands; author tags on prompts (`[@alice] …`); a new session

@@ -36,6 +36,11 @@ type Config struct {
 	// nothing can vouch for it the way ProvisionUser does for a person — an
 	// undeclared client is authenticated and nobody. See app.MachineActor.
 	MachineActors string `koanf:"machine_actors"`
+	// OnBehalfOfClients lists the OAuth2 client IDs (comma-separated in
+	// CHIT_ON_BEHALF_OF_CLIENTS) that may post as a person by naming them in
+	// X-On-Behalf-Of. Each must be a machine actor in MachineActors, that is a
+	// Hydra client_credentials client. Empty: no client may.
+	OnBehalfOfClients []string `koanf:"on_behalf_of_clients"`
 	// AllowedOrigins is the CORS / WebSocket origin allowlist
 	// (comma-separated in CHIT_ALLOWED_ORIGINS). "*" allows any origin.
 	AllowedOrigins []string `koanf:"allowed_origins"`
@@ -137,7 +142,7 @@ func load() (*Config, error) {
 
 	err := k.Load(env.ProviderWithValue("CHIT_", ".", func(key, value string) (string, any) {
 		key = strings.ToLower(strings.TrimPrefix(key, "CHIT_"))
-		if key == "allowed_origins" {
+		if key == "allowed_origins" || key == "on_behalf_of_clients" {
 			parts := strings.Split(value, ",")
 			origins := make([]string, 0, len(parts))
 			for _, p := range parts {

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"regexp"
 	"sync"
 	"time"
 
@@ -44,8 +45,34 @@ func AuthExtract(a *app.App) func(http.Handler) http.Handler {
 					WriteError(w, model.NewUnauthorizedError("AuthExtract", "unknown oauth client"))
 					return
 				}
+				if principalID, ok := onBehalfOf(r); ok {
+					if !onBehalfOfRoute(r) {
+						WriteError(w, model.NewBadRequestError("AuthExtract",
+							OnBehalfOfHeader+" is accepted only on POST /posts and POST /channels/{id}/stream_status"))
+						return
+					}
+					principal, err := a.ResolvePrincipal(r.Context(), user, principalID)
+					if err != nil {
+						slog.Warn("auth: on-behalf-of refused", "client_id", clientID, "principal_id", principalID, "error", err)
+						WriteAppError(w, "AuthExtract", err)
+						return
+					}
+					// Authorized as the person from here on; the client is
+					// kept beside them for the record.
+					r = ContextSetActor(ContextSetUser(r, principal), user)
+					next.ServeHTTP(w, r)
+					return
+				}
 				r = ContextSetUser(r, user)
 				next.ServeHTTP(w, r)
+				return
+			}
+
+			// A person's session never acts for somebody else. Refused rather
+			// than ignored, so a caller that meant it learns it did not happen.
+			if _, ok := onBehalfOf(r); ok {
+				WriteError(w, model.NewForbiddenError("AuthExtract",
+					OnBehalfOfHeader+" is only for allowlisted OAuth2 clients"))
 				return
 			}
 
@@ -66,6 +93,43 @@ func AuthExtract(a *app.App) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// OnBehalfOfHeader names the person an allowlisted OAuth2 client acts for.
+const OnBehalfOfHeader = "X-On-Behalf-Of"
+
+// onBehalfOf returns the X-On-Behalf-Of value and whether the header is
+// present at all: present and empty is a request to act for nobody, and is
+// refused, not read as "no header".
+func onBehalfOf(r *http.Request) (string, bool) {
+	values, ok := r.Header[http.CanonicalHeaderKey(OnBehalfOfHeader)]
+	if !ok {
+		return "", false
+	}
+	if len(values) != 1 {
+		return "", true
+	}
+	return values[0], true
+}
+
+// onBehalfOfRoutes are the only requests that may act on behalf of a person:
+// posting, and saying that a reply is being produced. Everything else a
+// client does, it does as itself. Keep in step with the routes in api.go.
+var onBehalfOfRoutes = []struct {
+	method string
+	path   *regexp.Regexp
+}{
+	{http.MethodPost, regexp.MustCompile(`^/api/v1/posts$`)},
+	{http.MethodPost, regexp.MustCompile(`^/api/v1/channels/[^/]+/stream_status$`)},
+}
+
+func onBehalfOfRoute(r *http.Request) bool {
+	for _, route := range onBehalfOfRoutes {
+		if r.Method == route.method && route.path.MatchString(r.URL.Path) {
+			return true
+		}
+	}
+	return false
 }
 
 // StructuredLogger logs each request using slog.
