@@ -29,8 +29,8 @@ clean:
 
 E2E_POD     := chit-tui-e2e
 E2E_IMAGE   := chit-tui-e2e:latest
-# The trusted-service-containers PostgreSQL 17 mirror; see the root Makefile.
-PG_IMAGE    := ghcr.io/infrashift/trusted-service-containers/quarantine/postgres:17-debian-382cdac@sha256:66dcbc496311685361b6a56e261e6694454daea3e297604dfd79590275f03910
+# The trusted-service-containers PostgreSQL 17 on UBI; see the root Makefile.
+PG_IMAGE    := ghcr.io/infrashift/trusted-service-containers/trusted/postgresql17:17.12-9410cd4@sha256:6375c284b5aaa6d83096d74ae6b1b7a3340bcd81739e4309465b18a3e781d6e3
 CHIT_IMAGE  := chit-e2e:latest
 CHIT_SRC    ?= ../..
 

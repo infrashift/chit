@@ -430,7 +430,7 @@ spec:
   restartPolicy: Always
   containers:
     - name: postgres
-      image: ghcr.io/infrashift/trusted-service-containers/quarantine/postgres:17-debian-382cdac@sha256:66dcbc496311685361b6a56e261e6694454daea3e297604dfd79590275f03910
+      image: ghcr.io/infrashift/trusted-service-containers/trusted/postgresql17:17.12-9410cd4@sha256:6375c284b5aaa6d83096d74ae6b1b7a3340bcd81739e4309465b18a3e781d6e3
       env:
         - name: POSTGRES_USER
           value: chit
@@ -438,15 +438,17 @@ spec:
           value: chit
         - name: POSTGRES_DB
           value: chit
-      # The TSC image is the Debian-based Docker Hardened Image: PGDATA is
-      # /var/lib/postgresql/17/data, and it runs as UID 70 like the Alpine
-      # image did, so a volume from 17-alpine mounts here unchanged. Its
-      # entrypoint does not run /docker-entrypoint-initdb.d; the app pod's
-      # ensure-databases init container creates the Ory databases. Text
-      # indexes built under Alpine's musl need a REINDEX: see the upgrade notes.
+      # The TSC postgresql17 image: the signed PGDG RPMs on UBI9 Minimal. It
+      # runs as UID 26 with primary group 0 and refuses root. The volume
+      # mounts at /var/lib/pgsql/data and the cluster lives one level down,
+      # PGDATA=/var/lib/pgsql/data/userdata; the entrypoint creates it on an
+      # empty volume. A volume from the DHI image (UID 70,
+      # /var/lib/postgresql/17/data) does not mount here: dump and restore it,
+      # see the upgrade notes. The app pod's ensure-databases init container
+      # creates the Ory databases on every start.
       volumeMounts:
         - name: pgdata
-          mountPath: /var/lib/postgresql/17/data
+          mountPath: /var/lib/pgsql/data
 
   volumes:
     - name: pgdata
@@ -466,7 +468,7 @@ spec:
 
   initContainers:
     - name: wait-postgres
-      image: ghcr.io/infrashift/trusted-service-containers/quarantine/postgres:17-debian-382cdac@sha256:66dcbc496311685361b6a56e261e6694454daea3e297604dfd79590275f03910
+      image: ghcr.io/infrashift/trusted-service-containers/trusted/postgresql17:17.12-9410cd4@sha256:6375c284b5aaa6d83096d74ae6b1b7a3340bcd81739e4309465b18a3e781d6e3
       command:
         - sh
         - -c
@@ -478,13 +480,13 @@ spec:
           done
           echo "PostgreSQL is ready."
 
-    # The only place the Ory databases are created. The postgres entrypoint
-    # runs no init scripts, and an init script would only have run on a
-    # *fresh* data directory anyway. Creating them idempotently here also
+    # The only place the Ory databases are created. An init script in
+    # /docker-entrypoint-initdb.d would run only on a *fresh* data
+    # directory. Creating them idempotently here also
     # upgrades an existing chit-pgdata volume that lacks one (for example
     # 'database "hydra" does not exist').
     - name: ensure-databases
-      image: ghcr.io/infrashift/trusted-service-containers/quarantine/postgres:17-debian-382cdac@sha256:66dcbc496311685361b6a56e261e6694454daea3e297604dfd79590275f03910
+      image: ghcr.io/infrashift/trusted-service-containers/trusted/postgresql17:17.12-9410cd4@sha256:6375c284b5aaa6d83096d74ae6b1b7a3340bcd81739e4309465b18a3e781d6e3
       env:
         - name: PGPASSWORD
           value: chit
@@ -494,7 +496,6 @@ spec:
         - |
           set -e
           for db in kratos keto hydra; do
-            # No grep: the hardened postgres image does not ship it.
             if [ "$(psql -h localhost -U chit -d postgres -tAc \
                  "SELECT 1 FROM pg_database WHERE datname='$db'")" = 1 ]; then
               echo "database $db already exists"

@@ -81,28 +81,44 @@ Behaviour changes an operator must act on or know about:
   needs is the `version:` key (`v26.2.0`); the init containers migrate the
   Kratos and Hydra databases. The images run as UID 1001 with
   `HOME=/home/ory`.
-- **PostgreSQL 17 is the hardened Debian image, and text indexes need a
-  `REINDEX`.** The deploy files, `make test-integration`, `make test-e2e` and
-  CI use the trusted-service-containers mirror of Docker's hardened
-  `postgres:17-debian`, pinned by its immutable quarantine tag
-  (`17-debian-382cdac`) because the mirror has not cleared policy yet. Its
-  `PGDATA` is `/var/lib/postgresql/17/data`, where the manifests now mount
-  `chit-pgdata`; it runs as UID 70 like the Alpine image, so an existing
-  volume mounts unchanged. Alpine sorts text with musl, Debian with glibc, so
-  every index on a collatable column built under Alpine is out of order on
-  Debian, and lookups through it miss rows (a test volume found 0 of 200
-  matching rows by index until the `REINDEX`). PostgreSQL does not warn:
-  Alpine records no collation version. Before you serve traffic from an
-  existing volume, run `REINDEX DATABASE <db>;` in each database (`chit`,
-  `kratos`, `keto`, `hydra`), for example `podman exec chit-db-postgres psql
-  -U chit -d chit -c 'REINDEX DATABASE chit;'`. Do not run `ALTER DATABASE
-  ... REFRESH COLLATION VERSION`: with no recorded version it fails. A fresh
-  volume needs nothing.
-- **The postgres entrypoint runs no init scripts.** The hardened image ignores
-  `/docker-entrypoint-initdb.d`, so the `chit-postgres-init` ConfigMap is
-  gone; the `ensure-databases` init container (now in the UAT manifest too)
-  creates the Ory databases. The image has `sh`, `psql` and `pg_isready` but
-  no `grep`.
+- **PostgreSQL 17 is the trusted-service-containers postgresql17 image on
+  UBI, and an existing `chit-pgdata` volume must be dumped and restored.**
+  The deploy files, `make test-integration`, `make test-e2e`, the chit-tui
+  `make test-e2e` and CI use
+  `trusted/postgresql17:17.12-9410cd4`, pinned by digest: the signed PGDG
+  RPMs (contrib included, for `pgcrypto`) on trusted UBI9 Minimal. It
+  replaces the quarantined mirror of Docker's hardened `postgres:17-debian`.
+  The `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` contract and
+  port 5432 do not change. The image runs as UID 26 with primary group 0
+  and refuses to run as root. The volume now mounts at
+  `/var/lib/pgsql/data`, and the cluster lives in
+  `PGDATA=/var/lib/pgsql/data/userdata`. New databases use the PostgreSQL
+  builtin `C.UTF-8` collation, so text sorts by code point (for example,
+  channel and team lists by `display_name` put capitals first).
+  A volume from the old image (UID 70, `/var/lib/postgresql/17/data`,
+  glibc `en_US.UTF-8`) **does not mount** in the new one, and the new image
+  has no `en_US.UTF-8` locale. Before you pull this change, dump the
+  cluster with the old image: `podman exec chit-db-postgres pg_dumpall -U
+  chit > chit-pgdumpall.sql`, and check that the file ends with
+  `PostgreSQL database cluster dump complete`. Then run `make kube-down` and
+  `podman volume rm chit-pgdata` (only that volume: `make kube-clean` also
+  deletes the search index and the attachments). After the pull, restore
+  into a fresh volume on the new image before `make kube-up`. Create the
+  `kratos`, `keto` and `hydra` databases first, because `pg_dumpall` names
+  the old locale in each `CREATE DATABASE` and those statements fail. The
+  restore then prints `role "chit" already exists` and one
+  `invalid LC_COLLATE locale name: "en_US.UTF-8"` per database, which are
+  expected. "Upgrading from the DHI PostgreSQL image" in
+  `docs/.../deployment/podman-kube.mdx` lists the commands. A restore
+  rebuilds every index under the new collation, so the `REINDEX` that an
+  Alpine volume needed is done too. A volume with nothing to keep, such as
+  the UAT stack's `chit-uat-pgdata` or a throwaway dev stack's, must still
+  be created again, because the old one does not start: run `make uat-clean` or `make kube-clean` once, and the next
+  `make uat-up` or `make kube-up` initialises an empty volume.
+- **The `chit-postgres-init` ConfigMap is gone.** The `ensure-databases`
+  init container (now in the UAT manifest too) creates the Ory databases on
+  every start, which also mends a volume that lacks one. An init script in
+  `/docker-entrypoint-initdb.d` would run only on a fresh data directory.
 - **`chit-reconcile` now revokes, and needs the Keto read API.** It makes
   the `chit/command` namespace match the CUE, deleting any tuple there the CUE
   does not declare (including grants added to Keto by hand). It lists through
