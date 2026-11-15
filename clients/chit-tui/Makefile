@@ -29,7 +29,8 @@ clean:
 
 E2E_POD     := chit-tui-e2e
 E2E_IMAGE   := chit-tui-e2e:latest
-PG_IMAGE    := docker.io/library/postgres:17-alpine
+# The trusted-service-containers PostgreSQL 17 mirror; see the root Makefile.
+PG_IMAGE    := ghcr.io/infrashift/trusted-service-containers/quarantine/postgres:17-debian-382cdac@sha256:66dcbc496311685361b6a56e261e6694454daea3e297604dfd79590275f03910
 CHIT_IMAGE  := chit-e2e:latest
 CHIT_SRC    ?= ../..
 

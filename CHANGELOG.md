@@ -10,6 +10,64 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Behaviour changes an operator must act on or know about:
 
+- **Keto is now keto-cue, with a CUE permission schema.**
+  [keto-cue](https://github.com/infrashift/keto-cue) is the Ory Keto fork that
+  reads CUE instead of OPL; its server, storage and REST API are upstream
+  Keto's (master after v26.2.0). `deploy/keto/keto.yml` now points
+  `namespaces.location` at the directory `deploy/keto/schema/`, whose
+  `chit.cue` declares `chit/channel`, `chit/command` and a subject-only
+  `chit/actor`; the `chit-keto-config` and `chit-keto-schema` ConfigMaps
+  carry them. keto-cue compiles every file in that directory as one
+  package, so a service sharing the instance (HALO) adds one file in
+  `package keto` with its own namespace prefix. Tuples, paths and request
+  shapes do not change, and `make test-keto` runs the same assertions against
+  either server. Two answers differ from v0.12: a write to an undeclared
+  namespace is a `404`, and a check of an undeclared relation is a `400`
+  (v0.12 said `403`, not allowed). Chit treats both as a denial. Add a
+  relation to the schema before Chit writes or checks it, and run
+  `make keto-validate`. `keto migrate up` upgrades an existing v0.12
+  database in place.
+- **Keto tuple writes look before they write.** Keto stores a row per
+  write, so every `chit-reconcile` run and every channel re-join used to
+  add duplicate rows. The client now lists the exact tuple and writes only
+  when it is absent, which also means a write needs the Keto read API
+  (`CHIT_KETO_READ_URL`). Duplicates already stored stay, harmlessly; a
+  narrow race between two writers can still add one.
+- **keto-cue comes from trusted-service-containers.** The deploy files,
+  `make keto-validate` and `make test-keto` pull
+  `trusted/keto-cue:v0.0.0-20261114211924-809351b32b9c-6a44b89`, pinned by
+  digest: keto-cue `809351b3`, built from source on UBI9 Micro. Like the Ory
+  images it runs as UID 1001 with `HOME=/home/ory`, and its entrypoint is
+  `keto`. There is no local keto-cue build to run first.
+- **Ory images moved to trusted-service-containers v26.2.0**: Kratos (from
+  v1.3), Hydra (from v2.2) and Oathkeeper (from v0.40), built from source on
+  UBI9 Micro and pinned by digest. Every image in the deploy files and
+  Makefiles is now pinned by digest. The only configuration change the jump
+  needs is the `version:` key (`v26.2.0`); the init containers migrate the
+  Kratos and Hydra databases. The images run as UID 1001 with
+  `HOME=/home/ory`.
+- **PostgreSQL 17 is the hardened Debian image, and text indexes need a
+  `REINDEX`.** The deploy files, `make test-integration`, `make test-e2e` and
+  CI use the trusted-service-containers mirror of Docker's hardened
+  `postgres:17-debian`, pinned by its immutable quarantine tag
+  (`17-debian-382cdac`) because the mirror has not cleared policy yet. Its
+  `PGDATA` is `/var/lib/postgresql/17/data`, where the manifests now mount
+  `chit-pgdata`; it runs as UID 70 like the Alpine image, so an existing
+  volume mounts unchanged. Alpine sorts text with musl, Debian with glibc, so
+  every index on a collatable column built under Alpine is out of order on
+  Debian, and lookups through it miss rows (a test volume found 0 of 200
+  matching rows by index until the `REINDEX`). PostgreSQL does not warn:
+  Alpine records no collation version. Before you serve traffic from an
+  existing volume, run `REINDEX DATABASE <db>;` in each database (`chit`,
+  `kratos`, `keto`, `hydra`), for example `podman exec chit-db-postgres psql
+  -U chit -d chit -c 'REINDEX DATABASE chit;'`. Do not run `ALTER DATABASE
+  ... REFRESH COLLATION VERSION`: with no recorded version it fails. A fresh
+  volume needs nothing.
+- **The postgres entrypoint runs no init scripts.** The hardened image ignores
+  `/docker-entrypoint-initdb.d`, so the `chit-postgres-init` ConfigMap is
+  gone; the `ensure-databases` init container (now in the UAT manifest too)
+  creates the Ory databases. The image has `sh`, `psql` and `pg_isready` but
+  no `grep`.
 - **`chit-reconcile` now revokes, and needs the Keto read API.** It makes
   the `chit/command` namespace match the CUE, deleting any tuple there the CUE
   does not declare (including grants added to Keto by hand). It lists through

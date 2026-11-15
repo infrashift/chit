@@ -94,7 +94,9 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:17-alpine
+        # The trusted-service-containers PostgreSQL 17 mirror, as in the
+        # Makefile's PG_IMAGE.
+        image: ghcr.io/infrashift/trusted-service-containers/quarantine/postgres:17-debian-382cdac@sha256:66dcbc496311685361b6a56e261e6694454daea3e297604dfd79590275f03910
         env:
           POSTGRES_USER: chit
           POSTGRES_PASSWORD: chit

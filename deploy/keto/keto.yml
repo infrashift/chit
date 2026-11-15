@@ -1,5 +1,9 @@
-version: v0.12.0
-
+# keto-cue configuration. keto-cue is the Ory Keto fork that reads the
+# permission schema in CUE. namespaces.location is a directory: keto-cue
+# compiles every *.cue file in it as one package, so services that share
+# this keto-cue each add one file (see schema/chit.cue). The kube files
+# mount this file at /etc/keto and schema/ at /etc/keto/schema. DSN comes
+# from the environment.
 serve:
   read:
     host: 0.0.0.0
@@ -9,10 +13,7 @@ serve:
     port: 4467
 
 namespaces:
-  - id: 0
-    name: chit/channel
-  - id: 1
-    name: chit/command
+  location: file:///etc/keto/schema
 
 log:
   level: info

@@ -11,10 +11,10 @@ security without embedding auth logic in the application.
 
 | Component | Version | Role | Port(s) |
 |---|---|---|---|
-| **Kratos** | v1.3 | Identity management for people (registration, login, sessions) | 4433 (public), 4434 (admin) |
-| **Hydra** | v2.2 | OAuth2 server; issues `client_credentials` tokens to machine actors | 4444 (public), 4445 (admin) |
-| **Oathkeeper** | v0.40 | Authentication proxy (validates sessions and tokens, forwards identity) | 4455 (proxy), 4456 (API) |
-| **Keto** | v0.12 | Authorization engine for slash commands | 4466 (read), 4467 (write) |
+| **Kratos** | v26.2.0 | Identity management for people (registration, login, sessions) | 4433 (public), 4434 (admin) |
+| **Hydra** | v26.2.0 | OAuth2 server; issues `client_credentials` tokens to machine actors | 4444 (public), 4445 (admin) |
+| **Oathkeeper** | v26.2.0 | Authentication proxy (validates sessions and tokens, forwards identity) | 4455 (proxy), 4456 (API) |
+| **Keto** | keto-cue `809351b3` | Authorization engine for slash commands ([keto-cue](https://github.com/infrashift/keto-cue): Keto with CUE permission schemas) | 4466 (read), 4467 (write) |
 
 ## Authentication Flow
 
@@ -90,12 +90,39 @@ user record is always created in the context of a valid request.
 
 ## Keto Authorization (ReBAC)
 
-Chit uses two Keto namespaces:
+Chit uses two Keto namespaces, declared in its file of the keto-cue schema
+directory, `deploy/keto/schema/chit.cue` (a third, `chit/actor`, only names
+the subject type of the IDs Chit writes):
 
 | Namespace | Relation | Meaning |
 |---|---|---|
 | `chit/command` | `execute` | Actor may execute a slash command |
 | `chit/channel` | `member` | Mirror of channel membership; not used for access checks |
+
+### Permission Schema
+
+keto-cue reads the schema from `namespaces.location` in `keto.yml`, a
+directory. It compiles every `*.cue` file there as one CUE package, which is
+how one keto-cue serves several services:
+
+- Each file has the clause `package keto`. Two package names in one directory
+  are an error.
+- Each service declares namespaces only under its own prefix (`chit/`,
+  `halo/`). CUE unifies a namespace that two files declare instead of
+  refusing it, so a shared name would merge two services' rules.
+- Definitions and hidden fields are package-wide: prefix them too
+  (`#chit_...`).
+- A file may name another service's namespace as a subject type, as
+  `internal/keto/testdata/halo.cue` names `chit/actor`.
+
+keto-cue refuses a write to a namespace the schema does not declare (`404`)
+and a check of a relation it does not declare (`400`), so add a relation to
+`deploy/keto/schema/chit.cue` before Chit uses it. `make keto-validate`
+compiles the directory as the server does, then Chit's file next to the
+sample HALO file; `TestKetoSchemaInSync` keeps the ConfigMap copies the same,
+`TestKetoSchemaSharesThePackage` checks the package and the prefix, and `TestKetoSchemaDeclaresWhatChitUses` checks the
+schema against the constants in `internal/model`. Keto runs in its default,
+non-strict mode, so checks expand every subject set, as Keto v0.12 did.
 
 ### Permission Checks
 
@@ -110,6 +137,9 @@ Channel access checks (read, post, pin, invite) use the PostgreSQL
 `chit/channel` namespace.
 
 ### Relationship Management
+
+Keto stores a row for every write, even of a tuple it already holds, so the
+client lists the exact tuple first and writes only when it is absent.
 
 chitd mirrors channel membership into `chit/channel` on a best-effort basis: a
 failed Keto write does not fail the request and is not retried.
@@ -132,7 +162,7 @@ ConfigMaps:
 | Kratos config | `chit-kratos-config` | Server settings, self-service flows, identity schema |
 | Hydra config | `chit-hydra-config` | Ports, issuer URL, opaque 1-hour access tokens, system secret |
 | Oathkeeper config | `chit-oathkeeper-config` | Access rules, authenticators, authorizers, mutators |
-| Keto config | `chit-keto-config` | Namespace definitions and server settings |
+| Keto config | `chit-keto-config` | Server settings and the CUE permission schema |
 
 The database DSNs are passed to each service as the `DSN` environment
 variable in the pod spec. The Hydra system secret in the manifest is a

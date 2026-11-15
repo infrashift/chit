@@ -1,4 +1,4 @@
-.PHONY: build build-mcp build-reconcile build-claude build-tui build-all run test test-integration test-tui test-all test-container test-e2e test-e2e-tui test-e2e-clean lint vuln lint-tui check-deps validate-spec cue-validate reconcile migrate-up migrate-down kube-migrate kube-build kube-up kube-down kube-restart kube-logs kube-clean uat-up uat-seed-kratos uat-down uat-clean docs-dev clean
+.PHONY: keto-validate test-keto build build-mcp build-reconcile build-claude build-tui build-all run test test-integration test-tui test-all test-container test-e2e test-e2e-tui test-e2e-clean lint vuln lint-tui check-deps validate-spec cue-validate reconcile migrate-up migrate-down kube-migrate kube-build kube-up kube-down kube-restart kube-logs kube-clean uat-up uat-seed-kratos uat-down uat-clean docs-dev clean
 
 BINARY=bin/chitd
 MCP_BINARY=bin/chit-mcp
@@ -11,7 +11,21 @@ CHIT_IMAGE?=localhost/chit:latest
 
 E2E_POD=chit-e2e
 E2E_IMAGE=chit-e2e:latest
-PG_IMAGE=docker.io/library/postgres:17-alpine
+
+# Third-party images, pinned by digest. docs/.../deployment/podman-kube.mdx
+# lists where each one comes from; keep the deploy/*.kube.yml copies the same.
+# PostgreSQL 17 is the trusted-service-containers mirror of the Docker
+# Hardened Image. It is in quarantine, so only its immutable -<shortsha> tag
+# exists.
+PG_IMAGE=ghcr.io/infrashift/trusted-service-containers/quarantine/postgres:17-debian-382cdac@sha256:66dcbc496311685361b6a56e261e6694454daea3e297604dfd79590275f03910
+# Not in trusted-service-containers: upstream, pinned by digest.
+MIGRATE_IMAGE=docker.io/migrate/migrate:v4.15.0@sha256:f613168b682b4c17033a1d5b381e0cb474c05715b843f4b160fb7bab9cead0c5
+
+# keto-cue, the Keto fork that reads CUE permission schemas, built by
+# trusted-service-containers from keto-cue 809351b3 on trusted ubi9-micro.
+KETO_CUE_IMAGE=ghcr.io/infrashift/trusted-service-containers/trusted/keto-cue:v0.0.0-20261114211924-809351b32b9c-6a44b89@sha256:db55bf1db0721e03d6ea8fc250ded0271087a889a013f5dc36dbb5addeac0e9b
+# The schema directory keto-cue loads: one CUE package, one file per service.
+KETO_SCHEMA=deploy/keto/schema
 
 
 # Server-module Go invocations run with GOWORK=off so each module in the
@@ -157,8 +171,40 @@ migrate-down:
 # migration files without restarting the pod. Requires no local migrate binary.
 kube-migrate:
 	podman run --rm --network host -v $(CURDIR)/migrations:/migrations:ro,Z \
-		docker.io/migrate/migrate:v4.15.0 \
+		$(MIGRATE_IMAGE) \
 		-database "$(MIGRATE_URL)" -path /migrations up
+
+## --- Keto (keto-cue) ---
+
+# Compiles Chit's schema directory as the keto-cue server does, then the
+# same file next to a sample HALO file, as one package in one directory: the
+# shared keto-cue that HALO and Chit will use.
+keto-validate:
+	podman run --rm -v $(CURDIR)/$(KETO_SCHEMA):/schema:ro,Z $(KETO_CUE_IMAGE) \
+		namespace validate /schema
+	podman run --rm -v $(CURDIR)/$(KETO_SCHEMA)/chit.cue:/shared/chit.cue:ro,Z \
+		-v $(CURDIR)/internal/keto/testdata/halo.cue:/shared/halo.cue:ro,Z $(KETO_CUE_IMAGE) \
+		namespace validate /shared
+
+# Runs the Keto client and reconciler tests (internal/keto, integration tag)
+# against a throwaway keto-cue with Chit's schema and an in-memory store.
+# Set KETO_TEST_IMAGE to run the same assertions against another Keto build.
+KETO_TEST_IMAGE?=$(KETO_CUE_IMAGE)
+KETO_TEST_READ_PORT?=54466
+KETO_TEST_WRITE_PORT?=54467
+test-keto:
+	-podman rm -f chit-ktest 2>/dev/null
+	podman run -d --rm --name chit-ktest \
+		-p $(KETO_TEST_READ_PORT):4466 -p $(KETO_TEST_WRITE_PORT):4467 \
+		-v $(CURDIR)/deploy/keto:/etc/keto:ro,Z -e DSN=memory \
+		$(KETO_TEST_IMAGE) serve -c /etc/keto/keto.yml
+	@until curl -sf http://localhost:$(KETO_TEST_READ_PORT)/health/ready >/dev/null; do sleep 1; done
+	CHIT_KETO_READ_URL=http://localhost:$(KETO_TEST_READ_PORT) \
+	CHIT_KETO_WRITE_URL=http://localhost:$(KETO_TEST_WRITE_PORT) \
+		GOWORK=off go test -race -count=1 -tags integration ./internal/keto/... ; \
+	EXIT_CODE=$$? ; \
+	podman rm -f chit-ktest >/dev/null ; \
+	exit $$EXIT_CODE
 
 ## --- Podman Kube ---
 

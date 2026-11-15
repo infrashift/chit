@@ -23,7 +23,8 @@ type Client struct {
 }
 
 // New returns a client for the Keto read and write APIs at the given base
-// URLs. Either may be empty when the caller only uses the other.
+// URLs. A write also reads (see WriteRelation), so a writer needs both; a
+// caller that only checks or lists may leave the write URL empty.
 func New(readURL, writeURL string, httpClient *http.Client) *Client {
 	return &Client{readURL: readURL, writeURL: writeURL, http: httpClient}
 }
@@ -42,8 +43,23 @@ func (c *Client) Check(ctx context.Context, namespace, object, relation, subject
 	return result.Allowed, nil
 }
 
-// WriteRelation writes the tuple namespace:object#relation@subjectID.
+// WriteRelation writes the tuple namespace:object#relation@subjectID unless
+// Keto already stores it.
+//
+// Keto stores a tuple once per PUT: it has no uniqueness constraint, so
+// writing an existing tuple adds a duplicate row. Chit re-writes the same
+// tuples all the time (chit-reconcile on every run, the channel mirror on
+// every re-join), so it lists the exact tuple first and writes only when it
+// is absent. This is check-then-write, not atomic: two writers that list
+// at the same moment can still both write, and leave one duplicate row.
+// A duplicate changes no check result, and a delete removes every copy.
 func (c *Client) WriteRelation(ctx context.Context, namespace, object, relation, subjectID string) error {
+	q := url.Values{
+		"namespace": {namespace}, "object": {object}, "relation": {relation}, "subject_id": {subjectID},
+	}
+	if found, err := c.exists(ctx, q); err != nil || found {
+		return err
+	}
 	body := map[string]string{
 		"namespace": namespace, "object": object, "relation": relation, "subject_id": subjectID,
 	}
@@ -56,9 +72,19 @@ func (c *Client) WriteRelation(ctx context.Context, namespace, object, relation,
 // WriteSubjectSetRelation writes a tuple whose subject is another relation.
 // Keto expands a subject set when checking; a subject_id holding the same
 // "Role:admin#member" text is an opaque string and matches nobody, which is
-// why role-based grants have to be written this way.
+// why role-based grants have to be written this way. Like WriteRelation, it
+// writes only when the tuple is absent, with the same narrow race.
 func (c *Client) WriteSubjectSetRelation(ctx context.Context, namespace, object, relation,
 	subjectNamespace, subjectObject, subjectRelation string) error {
+	q := url.Values{
+		"namespace": {namespace}, "object": {object}, "relation": {relation},
+		"subject_set.namespace": {subjectNamespace},
+		"subject_set.object":    {subjectObject},
+		"subject_set.relation":  {subjectRelation},
+	}
+	if found, err := c.exists(ctx, q); err != nil || found {
+		return err
+	}
 	body := map[string]any{
 		"namespace": namespace, "object": object, "relation": relation,
 		"subject_set": map[string]string{
@@ -69,6 +95,20 @@ func (c *Client) WriteSubjectSetRelation(ctx context.Context, namespace, object,
 		return fmt.Errorf("keto subject-set write: %w", err)
 	}
 	return nil
+}
+
+// exists reports whether Keto stores the tuple that q names in full. A list
+// filters on every field it is given, so one result is enough. It reads
+// through the read API: the write port answers a list with 405.
+func (c *Client) exists(ctx context.Context, q url.Values) (bool, error) {
+	q.Set("page_size", "1")
+	var page struct {
+		Tuples []Tuple `json:"relation_tuples"`
+	}
+	if err := c.do(ctx, http.MethodGet, c.readURL+"/relation-tuples?"+q.Encode(), nil, &page); err != nil {
+		return false, fmt.Errorf("keto lookup before write: %w", err)
+	}
+	return len(page.Tuples) > 0, nil
 }
 
 // DeleteRelation deletes the tuple namespace:object#relation@subjectID.

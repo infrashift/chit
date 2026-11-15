@@ -14,7 +14,7 @@ for it, runs the migrations and starts everything else.
 
 | Container | Image | Port(s) | Purpose |
 |---|---|---|---|
-| **postgres** | `postgres:17-alpine` | 5432 | Primary data store; also holds the `kratos`, `keto` and `hydra` databases |
+| **postgres** | TSC `quarantine/postgres:17-debian-382cdac` | 5432 | Primary data store; also holds the `kratos`, `keto` and `hydra` databases |
 
 ### `chit-app`
 
@@ -22,22 +22,22 @@ Init containers run in order before the services start:
 
 | Init container | Image | Purpose |
 |---|---|---|
-| **wait-postgres** | `postgres:17-alpine` | Waits until PostgreSQL accepts connections |
-| **ensure-databases** | `postgres:17-alpine` | Creates the `kratos`, `keto` and `hydra` databases if missing (the init SQL only runs on a fresh volume) |
-| **migrate-kratos** | `oryd/kratos:v1.3` | Kratos schema migrations |
-| **migrate-keto** | `oryd/keto:v0.12` | Keto schema migrations |
-| **migrate-hydra** | `oryd/hydra:v2.2` | Hydra schema migrations |
+| **wait-postgres** | TSC `postgres:17-debian` | Waits until PostgreSQL accepts connections |
+| **ensure-databases** | TSC `postgres:17-debian` | Creates the `kratos`, `keto` and `hydra` databases if missing (the hardened postgres image runs no init scripts) |
+| **migrate-kratos** | TSC `kratos:v26.2.0` | Kratos schema migrations |
+| **migrate-keto** | TSC `keto-cue:v0.0.0-20261114211924-809351b32b9c-6a44b89` | keto-cue schema migrations |
+| **migrate-hydra** | TSC `hydra:v26.2.0` | Hydra schema migrations |
 | **migrate-chit** | `migrate/migrate:v4.15.0` | Chit schema migrations from `migrations/` (mounted from the checkout) |
 
 Then the services:
 
 | Container | Image | Port(s) | Purpose |
 |---|---|---|---|
-| **kratos** | `oryd/kratos:v1.3` | 4433, 4434 | Identity management (people) |
-| **keto** | `oryd/keto:v0.12` | 4466, 4467 | Slash-command authorization |
-| **hydra** | `oryd/hydra:v2.2` | 4444, 4445 | OAuth2 tokens for machine actors (`--dev`: plain HTTP) |
-| **oathkeeper** | `oryd/oathkeeper:v0.40` | 4455, 4456 | Authentication proxy |
-| **zincsearch** | `zincsearch:latest` | 4080 | Full-text search index |
+| **kratos** | TSC `kratos:v26.2.0` | 4433, 4434 | Identity management (people) |
+| **keto** | TSC `keto-cue:v0.0.0-20261114211924-809351b32b9c-6a44b89` | 4466, 4467 | Slash-command authorization (keto-cue, CUE schema) |
+| **hydra** | TSC `hydra:v26.2.0` | 4444, 4445 | OAuth2 tokens for machine actors (`--dev`: plain HTTP) |
+| **oathkeeper** | TSC `oathkeeper:v26.2.0` | 4455, 4456 | Authentication proxy |
+| **zincsearch** | `zinclabs/zincsearch:0.4.10` | 4080 | Full-text search index |
 | **chitd** | `localhost/chit:latest` | 8065 | The Chit server |
 
 The chitd container is configured in the manifest with the database URL, the
@@ -49,21 +49,27 @@ takes chitd's defaults. To set more (for example `CHIT_MACHINE_ACTORS` or
 
 Podman names each container `<pod>-<container>`, e.g. `chit-app-chitd`.
 
+Every image is pinned by digest in the manifest. "TSC" is
+`ghcr.io/infrashift/trusted-service-containers`. ZincSearch and
+`migrate/migrate` are not in TSC and come from their upstream registries.
+TSC builds keto-cue from source (commit `809351b3`) on trusted UBI9 Micro,
+the same way it builds the Ory images.
+
 ## ConfigMaps
 
 | ConfigMap | Contents |
 |---|---|
-| `chit-postgres-init` | SQL that creates the `kratos`, `keto` and `hydra` databases on a fresh volume |
 | `chit-kratos-config` | Kratos server config + identity schema |
 | `chit-hydra-config` | Hydra server config (issuer, opaque 1-hour access tokens, placeholder system secret) |
 | `chit-oathkeeper-config` | Oathkeeper access rules and server config |
-| `chit-keto-config` | Keto server config and namespaces |
+| `chit-keto-config` | keto-cue server config, a copy of `deploy/keto/keto.yml` |
+| `chit-keto-schema` | Chit's file of the keto-cue schema directory, a copy of `deploy/keto/schema/chit.cue`, mounted at `/etc/keto/schema` |
 
 ## Persistent Volumes
 
 | PVC | Mount | Purpose |
 |---|---|---|
-| `chit-pgdata` | `/var/lib/postgresql/data` | PostgreSQL data directory |
+| `chit-pgdata` | `/var/lib/postgresql/17/data` | PostgreSQL data directory |
 | `chit-zincdata` | `/data` | ZincSearch index data |
 
 ## Networking
@@ -116,6 +122,8 @@ See [Manual Acceptance Testing](/chit/getting-started/manual-acceptance-testing/
 | `make check-deps` | Check that client binaries do not link server-side dependencies, and that TUI dependencies stay out of the server module |
 | `make validate-spec` | Validate `api/openapi.yaml` |
 | `make cue-validate` | Evaluate the CUE definitions in `auth/` |
+| `make keto-validate` | Compile `deploy/keto/schema/` with keto-cue, as the server does, and again next to a sample HALO file |
+| `make test-keto` | Run the Keto client and reconciler tests against a throwaway keto-cue (`KETO_TEST_IMAGE` runs them against another Keto) |
 
 ## Containerfile
 

@@ -2,19 +2,10 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: chit-postgres-init
-data:
-  init-databases.sql: |
-    CREATE DATABASE kratos;
-    CREATE DATABASE keto;
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
   name: chit-kratos-config
 data:
   kratos.yml: |
-    version: v1.3.0
+    version: v26.2.0
 
     serve:
       public:
@@ -204,10 +195,15 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: chit-keto-config
+# A copy of deploy/keto/keto.yml. TestKetoSchemaInSync fails when they differ.
 data:
   keto.yml: |
-    version: v0.12.0
-
+    # keto-cue configuration. keto-cue is the Ory Keto fork that reads the
+    # permission schema in CUE. namespaces.location is a directory: keto-cue
+    # compiles every *.cue file in it as one package, so services that share
+    # this keto-cue each add one file (see schema/chit.cue). The kube files
+    # mount this file at /etc/keto and schema/ at /etc/keto/schema. DSN comes
+    # from the environment.
     serve:
       read:
         host: 0.0.0.0
@@ -217,14 +213,66 @@ data:
         port: 4467
 
     namespaces:
-      - id: 0
-        name: chit/channel
-      - id: 1
-        name: chit/command
+      location: file:///etc/keto/schema
 
     log:
       level: info
       format: json
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chit-keto-schema
+# Chit's file of the shared keto-cue schema directory, a copy of
+# deploy/keto/schema/chit.cue. A service that shares this keto-cue adds its
+# own file to the directory. TestKetoSchemaInSync fails when they differ.
+data:
+  chit.cue: |
+    // Chit's part of the keto-cue permission schema.
+    //
+    // One keto-cue instance serves Chit and HALO. keto-cue compiles every *.cue
+    // file of its schema directory (namespaces.location) as ONE CUE package, so
+    // each service ships one file and every file follows these rules:
+    //
+    //   - The package clause is `package keto`, the name of keto-cue's base
+    //     schema. Two different package names in one directory are an error.
+    //   - A service declares namespaces only under its own prefix: Chit uses
+    //     "chit/...". CUE unifies a namespace that two files declare instead of
+    //     refusing it, so a shared name would silently merge two services' rules.
+    //   - Definitions (#name) and hidden fields (_name) are package-wide too:
+    //     prefix them with the service name (#chit_...).
+    //   - A file may refer to another service's namespace as a subject type,
+    //     for example ["chit/actor"].
+    //
+    // `make keto-validate` compiles this file alone and next to a sample HALO
+    // file (internal/keto/testdata/halo.cue). The chit-keto-schema ConfigMap in
+    // deploy/chit.kube.yml and deploy/chit-uat.kube.yml carries a copy, and
+    // TestKetoSchemaInSync keeps them the same.
+    //
+    // The schema declares only what Chit writes and checks. Keto runs in its
+    // default, non-strict mode, so a check follows every subject set, exactly as
+    // the namespace list of Keto v0.12 did.
+    package keto
+
+    namespaces: {
+    	// The subject type of the subject IDs that Chit writes: a user ID in
+    	// chit/channel, and "Actor:<user ID>" in chit/command. Keto does not
+    	// type-check a subject ID; this namespace only names it. No tuple lives
+    	// here.
+    	"chit/actor": {}
+
+    	// A mirror of channel_members, written best-effort. Chit never checks it
+    	// to grant access: <channel ID>#member@<user ID>.
+    	"chit/channel": relations: member: ["chit/actor"]
+
+    	// Slash-command authorization. chit-reconcile owns this namespace.
+    	//   Role:<name>#member@Actor:<user ID>
+    	//   Command:<slug>#execute@chit/command:Role:<name>#member
+    	"chit/command": relations: {
+    		member: ["chit/actor"]
+    		execute: ["chit/command#member"]
+    	}
+    }
 ---
 # Pod 1: Database — starts PostgreSQL immediately
 apiVersion: v1
@@ -239,7 +287,7 @@ spec:
   restartPolicy: Always
   containers:
     - name: postgres
-      image: docker.io/library/postgres:17-alpine
+      image: ghcr.io/infrashift/trusted-service-containers/quarantine/postgres:17-debian-382cdac@sha256:66dcbc496311685361b6a56e261e6694454daea3e297604dfd79590275f03910
       env:
         - name: POSTGRES_USER
           value: chit
@@ -247,19 +295,20 @@ spec:
           value: chit
         - name: POSTGRES_DB
           value: chit
+      # The TSC image is the Debian-based Docker Hardened Image: PGDATA is
+      # /var/lib/postgresql/17/data, and it runs as UID 70 like the Alpine
+      # image did, so a volume from 17-alpine mounts here unchanged. Its
+      # entrypoint does not run /docker-entrypoint-initdb.d; the app pod's
+      # ensure-databases init container creates the Ory databases. Text
+      # indexes built under Alpine's musl need a REINDEX: see the upgrade notes.
       volumeMounts:
         - name: pgdata
-          mountPath: /var/lib/postgresql/data
-        - name: pg-init
-          mountPath: /docker-entrypoint-initdb.d
+          mountPath: /var/lib/postgresql/17/data
 
   volumes:
     - name: pgdata
       persistentVolumeClaim:
         claimName: chit-uat-pgdata
-    - name: pg-init
-      configMap:
-        name: chit-postgres-init
 ---
 # Pod 2: App — init containers wait for postgres, run migrations, seed UAT data, then start services
 apiVersion: v1
@@ -275,7 +324,7 @@ spec:
 
   initContainers:
     - name: wait-postgres
-      image: docker.io/library/postgres:17-alpine
+      image: ghcr.io/infrashift/trusted-service-containers/quarantine/postgres:17-debian-382cdac@sha256:66dcbc496311685361b6a56e261e6694454daea3e297604dfd79590275f03910
       command:
         - sh
         - -c
@@ -287,8 +336,31 @@ spec:
           done
           echo "PostgreSQL is ready."
 
+    # The postgres entrypoint does not run init scripts, so create the Ory
+    # databases here, idempotently, before their migrations.
+    - name: ensure-databases
+      image: ghcr.io/infrashift/trusted-service-containers/quarantine/postgres:17-debian-382cdac@sha256:66dcbc496311685361b6a56e261e6694454daea3e297604dfd79590275f03910
+      env:
+        - name: PGPASSWORD
+          value: chit
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          for db in kratos keto; do
+            # No grep: the hardened postgres image does not ship it.
+            if [ "$(psql -h localhost -U chit -d postgres -tAc \
+                 "SELECT 1 FROM pg_database WHERE datname='$db'")" = 1 ]; then
+              echo "database $db already exists"
+            else
+              echo "creating database $db"
+              createdb -h localhost -U chit "$db"
+            fi
+          done
+
     - name: migrate-kratos
-      image: docker.io/oryd/kratos:v1.3
+      image: ghcr.io/infrashift/trusted-service-containers/trusted/kratos:v26.2.0-382cdac@sha256:3162b223e4190e51ecf5e66159b324de3d50c6ca720f935118919717b83eb817
       command:
         - kratos
         - migrate
@@ -297,21 +369,26 @@ spec:
         - --yes
 
     - name: migrate-keto
-      image: docker.io/oryd/keto:v0.12
+      image: ghcr.io/infrashift/trusted-service-containers/trusted/keto-cue:v0.0.0-20261114211924-809351b32b9c-6a44b89@sha256:db55bf1db0721e03d6ea8fc250ded0271087a889a013f5dc36dbb5addeac0e9b
       command:
         - keto
         - migrate
         - up
         - --yes
+        - -c
+        - /etc/keto/keto.yml
       env:
         - name: DSN
           value: postgres://chit:chit@localhost:5432/keto?sslmode=disable
       volumeMounts:
         - name: keto-config
-          mountPath: /home/ory
+          mountPath: /etc/keto
+        - name: keto-schema
+          mountPath: /etc/keto/schema
 
     - name: migrate-chit
-      image: docker.io/migrate/migrate:v4.15.0
+      # Not in trusted-service-containers (gap): upstream, pinned by digest.
+      image: docker.io/migrate/migrate:v4.15.0@sha256:f613168b682b4c17033a1d5b381e0cb474c05715b843f4b160fb7bab9cead0c5
       args:
         - -database
         - postgres://chit:chit@localhost:5432/chit?sslmode=disable
@@ -332,7 +409,7 @@ spec:
 
   containers:
     - name: kratos
-      image: docker.io/oryd/kratos:v1.3
+      image: ghcr.io/infrashift/trusted-service-containers/trusted/kratos:v26.2.0-382cdac@sha256:3162b223e4190e51ecf5e66159b324de3d50c6ca720f935118919717b83eb817
       args:
         - serve
         - --config
@@ -347,7 +424,7 @@ spec:
           mountPath: /etc/kratos
 
     - name: keto
-      image: docker.io/oryd/keto:v0.12
+      image: ghcr.io/infrashift/trusted-service-containers/trusted/keto-cue:v0.0.0-20261114211924-809351b32b9c-6a44b89@sha256:db55bf1db0721e03d6ea8fc250ded0271087a889a013f5dc36dbb5addeac0e9b
       args:
         - serve
         - -c
@@ -358,9 +435,11 @@ spec:
       volumeMounts:
         - name: keto-config
           mountPath: /etc/keto
+        - name: keto-schema
+          mountPath: /etc/keto/schema
 
     - name: oathkeeper
-      image: docker.io/oryd/oathkeeper:v0.40
+      image: ghcr.io/infrashift/trusted-service-containers/trusted/oathkeeper:v26.2.0-382cdac@sha256:dfa66c5314c05c864f8e8bcbf946ce9e6c9c8d2840c7c52ebe0b4048142c7288
       args:
         - serve
         - --config
@@ -370,7 +449,8 @@ spec:
           mountPath: /etc/oathkeeper
 
     - name: zincsearch
-      image: public.ecr.aws/zinclabs/zincsearch:latest
+      # Not in trusted-service-containers (gap): upstream, pinned by digest.
+      image: public.ecr.aws/zinclabs/zincsearch:0.4.10@sha256:fd865f7d0393428479726117c9f3b827e26eaee7f2fb21a22d8bc894e8f8f40e
       env:
         - name: ZINC_FIRST_ADMIN_USER
           value: admin
@@ -410,6 +490,9 @@ spec:
     - name: keto-config
       configMap:
         name: chit-keto-config
+    - name: keto-schema
+      configMap:
+        name: chit-keto-schema
     - name: zincdata
       persistentVolumeClaim:
         claimName: chit-uat-zincdata
