@@ -34,6 +34,9 @@ E2E_PSQL="${E2E_PSQL:-podman exec -i chit-db-postgres psql -U chit -d chit -tAc}
 # another pod with E2E_AUDIT="podman exec <pod>-chitd cat /var/log/chit/audit.log".
 HOOK_STUB="${HOOK_STUB:-http://127.0.0.1:4490}"
 E2E_AUDIT="${E2E_AUDIT:-podman exec chit-app-chitd cat /var/log/chit/audit.log}"
+# chitd's own log (stderr), for scenario 13; for another pod,
+# E2E_CHITD_LOG="podman logs <pod>-chitd".
+E2E_CHITD_LOG="${E2E_CHITD_LOG:-podman logs chit-app-chitd}"
 
 # ---------------------------------------------------------------------------
 # Counters
@@ -1743,6 +1746,50 @@ AUDIT=$($E2E_AUDIT 2>/dev/null | jq -s -c '[.[] | select(.msg == "membership_che
 assert_json "12.12 audit: Bob allowed" "[.[] | select(.user_id == \"${BOB_ID}\" and .allowed == true and .added_by == \"${ALICE_ID}\")] | length" "1" "$AUDIT"
 assert_json "12.12 audit: Charlie refused by the hook" "[.[] | select(.user_id == \"${CHARLIE_ID}\" and .allowed == false and .reason == \"e2e_refused\")] | length" "2" "$AUDIT"
 assert_json "12.12 audit: Charlie refused, the hook failing" "[.[] | select(.user_id == \"${CHARLIE_ID}\" and .allowed == false and .reason == \"hook_unavailable\")] | length" "1" "$AUDIT"
+
+section "Scenario 13: Rate Limits"
+
+# burst TOKEN N [ON_BEHALF_OF] — N GET /users/me at once, 16 in parallel;
+# prints each response's status and Retry-After header, one per line.
+burst() {
+  local token="$1" n="$2" obo="${3:-}"
+  local args=(-s -o /dev/null -D - -H "Authorization: Bearer ${token}")
+  [[ -n "$obo" ]] && args+=(-H "X-On-Behalf-Of: ${obo}")
+  seq "$n" | xargs -P 16 -I{} curl "${args[@]}" "${API}/users/me" \
+    | tr -d '\r' | awk 'tolower($1) ~ /^http\// {print $2} tolower($1) == "retry-after:" {print "retry-after " $2}'
+}
+
+# 13.1 halod as itself, past the per-user burst of 50: what an allowlisted
+# client does as itself counts against its aggregate limit (1500 a second,
+# bursts of 3000), not a per-user one.
+OUT=$(burst "$HALOD_TOKEN" 120)
+assert_json "13.1 halod as itself: 120 at once, all served" "." "120" "$(grep -cx 200 <<< "$OUT")"
+
+# 13.2 On behalf of Erin, halod spends Erin's per-user budget: some of 120
+# at once are refused, each with Retry-After.
+OUT=$(burst "$HALOD_TOKEN" 120 "kratos:${ERIN_KRATOS_ID}")
+REFUSED=$(grep -cx 429 <<< "$OUT")
+assert_json_gte "13.2 on behalf of Erin: refused past her burst" "." 1 "$REFUSED"
+assert_json "13.2 each refusal has Retry-After: 1" "." "$REFUSED" "$(grep -cx 'retry-after 1' <<< "$OUT")"
+assert_json "13.2 the rest are served" "." "$((120 - REFUSED))" "$(grep -cx 200 <<< "$OUT")"
+
+# 13.3 Erin's budget is hers: halod as itself, and another person, are served.
+halod_api GET "/users/me"
+assert_status "13.3 halod as itself is still served" 200 "$LAST_STATUS" "$LAST_BODY"
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Session-Token: ${ALICE_TOKEN}" "${API}/users/me")
+assert_status "13.3 Alice is still served" 200 "$STATUS"
+
+# 13.4 A machine actor that is not on CHIT_ON_BEHALF_OF_CLIENTS keeps the
+# per-user limit.
+OUT=$(burst "$BOT_TOKEN" 120)
+assert_json_gte "13.4 chit-e2e-bot: refused past the per-user burst" "." 1 "$(grep -cx 429 <<< "$OUT")"
+
+# 13.5 chitd logs each refusal with the actor and the principal.
+LOG=$($E2E_CHITD_LOG 2>&1 | jq -c -R 'fromjson? | select(.msg == "rate limit exceeded")' | jq -s -c '.' 2>/dev/null || echo '[]')
+assert_json_gte "13.5 log: on behalf of Erin, her bucket, actor and principal" \
+  "[.[] | select(.bucket == \"user\" and .principal_id == \"${ERIN_ID}\" and .actor_id == \"${HALOD_USER_ID}\" and .client_id == \"${HALOD_CLIENT_ID}\")] | length" 1 "$LOG"
+assert_json_gte "13.5 log: chit-e2e-bot, its own bucket" \
+  "[.[] | select(.bucket == \"user\" and .client_id == \"${BOT_CLIENT_ID}\" and .path == \"/api/v1/users/me\")] | length" 1 "$LOG"
 
 # ============================================================================
 # SUMMARY

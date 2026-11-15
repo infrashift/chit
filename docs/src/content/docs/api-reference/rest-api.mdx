@@ -62,6 +62,11 @@ The header is accepted only on these routes; on any other route it is a
 | POST | `/channels/{id}/members` | Add a member; the person must be allowed to add one |
 | GET | `/users/me` | Return the person: how a client learns a `kratos:` person's user ID |
 
+A request on behalf of a person counts against the person's per-user rate
+limit and the client's aggregate one; what the client does as itself counts
+against its aggregate limit only (see
+[Rate limits](/chit/reference/configuration/#rate-limits)).
+
 Refused: a client not on the list, or a person's session, with the header
 (`403`); an empty or malformed value, an unknown user or Kratos identity, a
 deactivated person (in Chit, or inactive in Kratos), and an agent or bot
@@ -99,7 +104,8 @@ hook's request and answer.
 
 | Limit | Value | Response |
 |---|---|---|
-| Rate limit | 10 requests/s per authenticated user, burst 50 | `429` |
+| Rate limit, per user | `CHIT_RATE_LIMIT_USER_PER_SECOND` (10) requests/s, burst `CHIT_RATE_LIMIT_USER_BURST` (50); on behalf of a person, the person's | `429`, `Retry-After` |
+| Rate limit, per on-behalf-of client | `CHIT_RATE_LIMIT_CLIENT_PER_SECOND` (1500) requests/s, burst `CHIT_RATE_LIMIT_CLIENT_BURST` (3000), for all it does | `429`, `Retry-After` |
 | Request body | 1 MiB | `413` |
 | Malformed JSON body | | `400` |
 | Post content | 65,535 bytes | `400` |

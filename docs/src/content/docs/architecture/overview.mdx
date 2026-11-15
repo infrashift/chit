@@ -36,9 +36,11 @@ HTTP Request
 
 The API layer (`internal/api`) uses the [chi](https://github.com/go-chi/chi)
 router. Middleware resolves the caller from the trusted proxy headers, applies
-a per-user rate limit, and (by default) validates requests against
-`api/openapi.yaml`. Each handler decodes the request into a request-specific
-struct (bodies are capped at 1 MiB), calls the App layer, and writes JSON.
+the rate limits (per user, and per on-behalf-of client; see
+[Rate limits](/chit/reference/configuration/#rate-limits)), and (by default)
+validates requests against `api/openapi.yaml`. Each handler decodes the
+request into a request-specific struct (bodies are capped at 1 MiB), calls
+the App layer, and writes JSON.
 Errors are written as `AppError` JSON with their status code.
 
 ### App Layer

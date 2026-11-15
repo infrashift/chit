@@ -41,6 +41,16 @@ type Config struct {
 	// X-On-Behalf-Of. Each must be a machine actor in MachineActors, that is a
 	// Hydra client_credentials client. Empty: no client may.
 	OnBehalfOfClients []string `koanf:"on_behalf_of_clients"`
+	// Rate limits (P-CHIT-8). Each user has a bucket of RateLimitUserPerSecond
+	// requests a second, in bursts of RateLimitUserBurst. A client in
+	// OnBehalfOfClients acts for many people, so it has a bucket of its own
+	// instead, RateLimitClientPerSecond in bursts of RateLimitClientBurst,
+	// that counts everything it does: as itself and on behalf of anyone. A
+	// request on behalf of a person also counts against that person's bucket.
+	RateLimitUserPerSecond   float64 `koanf:"rate_limit_user_per_second"`
+	RateLimitUserBurst       int     `koanf:"rate_limit_user_burst"`
+	RateLimitClientPerSecond float64 `koanf:"rate_limit_client_per_second"`
+	RateLimitClientBurst     int     `koanf:"rate_limit_client_burst"`
 	// AllowedOrigins is the CORS / WebSocket origin allowlist
 	// (comma-separated in CHIT_ALLOWED_ORIGINS). "*" allows any origin.
 	AllowedOrigins []string `koanf:"allowed_origins"`
@@ -117,9 +127,18 @@ func Defaults() *Config {
 		TrustedProxyHeader:  "X-User-Id",
 		TrustedClientHeader: "X-Client-Id",
 		AllowedOrigins:      []string{"*"},
-		KratosAdminURL:      "http://localhost:4434",
-		KetoReadURL:         "http://localhost:4466",
-		KetoWriteURL:        "http://localhost:4467",
+		// The per-user limit chitd has always had.
+		RateLimitUserPerSecond: 10,
+		RateLimitUserBurst:     50,
+		// Sized for HALO's halod with about 2000 Subjects at about one
+		// Message a minute each, with streamed replies: about 1000 requests
+		// a second, so 1500 leaves half again as much. The burst is two
+		// seconds of it. See the configuration reference for the arithmetic.
+		RateLimitClientPerSecond: 1500,
+		RateLimitClientBurst:     3000,
+		KratosAdminURL:           "http://localhost:4434",
+		KetoReadURL:              "http://localhost:4466",
+		KetoWriteURL:             "http://localhost:4467",
 		// Empty: ZincSearch is opt-in. Search then uses SQL, and no indexer
 		// runs. The deploy manifests set it.
 		ZincSearchURL:           "",
@@ -207,6 +226,15 @@ func load() (*Config, error) {
 	return cfg, nil
 }
 
+// Bounds of the rate limits. A limit of 0 would refuse every request, and
+// there is no setting that turns the limit off: a limit above these is a
+// typo, not a deployment (one chitd serves well under 100,000 requests a
+// second).
+const (
+	MaxRateLimitPerSecond = 100_000
+	MaxRateLimitBurst     = 1_000_000
+)
+
 // validate refuses settings that would fail later and less legibly: a zero
 // ping interval panics on the first WebSocket connection (time.NewTicker), a
 // zero cache TTL expires every entry at once, and a misspelt pubsub backend
@@ -237,6 +265,19 @@ func (c *Config) validate() error {
 	default:
 		errs = append(errs, fmt.Errorf("CHIT_PUBSUB_BACKEND must be pgnotify or nats, got %q", c.PubSubBackend))
 	}
+
+	rateLimit := func(name string, perSecond float64, burstName string, burst int) {
+		// Written so that NaN fails too: every comparison with NaN is false.
+		if !(perSecond > 0 && perSecond <= MaxRateLimitPerSecond) {
+			errs = append(errs, fmt.Errorf("%s must be more than 0 and at most %d, got %v",
+				name, MaxRateLimitPerSecond, perSecond))
+		}
+		if burst < 1 || burst > MaxRateLimitBurst {
+			errs = append(errs, fmt.Errorf("%s must be between 1 and %d, got %d", burstName, MaxRateLimitBurst, burst))
+		}
+	}
+	rateLimit("CHIT_RATE_LIMIT_USER_PER_SECOND", c.RateLimitUserPerSecond, "CHIT_RATE_LIMIT_USER_BURST", c.RateLimitUserBurst)
+	rateLimit("CHIT_RATE_LIMIT_CLIENT_PER_SECOND", c.RateLimitClientPerSecond, "CHIT_RATE_LIMIT_CLIENT_BURST", c.RateLimitClientBurst)
 
 	if c.TrustedProxyHeader == "" {
 		errs = append(errs, errors.New("CHIT_TRUSTED_PROXY_HEADER must not be empty"))

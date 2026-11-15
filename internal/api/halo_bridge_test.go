@@ -375,15 +375,21 @@ func TestStreamStatus_Refusals(t *testing.T) {
 func TestStreamStatus_RateLimited(t *testing.T) {
 	e := newBridgeEnv(t)
 	codes := []int{}
+	var last *httptest.ResponseRecorder
 	for range streamStatusBurst + 1 {
-		codes = append(codes, e.do(t, http.MethodPost, streamPath(), "user:"+testKratosID, `{"status":"progress"}`, nil).Code)
+		last = e.do(t, http.MethodPost, streamPath(), "user:"+testKratosID, `{"status":"progress"}`, nil)
+		codes = append(codes, last.Code)
 	}
 	for i, c := range codes[:streamStatusBurst] {
 		if c != http.StatusOK {
 			t.Fatalf("event %d: got %d within the burst", i, c)
 		}
 	}
-	if last := codes[streamStatusBurst]; last != http.StatusTooManyRequests {
-		t.Fatalf("event past the burst: got %d, want 429", last)
+	if last.Code != http.StatusTooManyRequests {
+		t.Fatalf("event past the burst: got %d, want 429", last.Code)
+	}
+	// Two a second: the next token is under a second away.
+	if got := last.Header().Get("Retry-After"); got != "1" {
+		t.Fatalf("Retry-After = %q, want 1", got)
 	}
 }

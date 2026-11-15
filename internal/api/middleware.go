@@ -9,10 +9,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
-
-	"golang.org/x/time/rate"
 
 	"github.com/infrashift/chit/internal/app"
 	"github.com/infrashift/chit/internal/model"
@@ -202,79 +199,4 @@ func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 		return nil, nil, fmt.Errorf("underlying ResponseWriter does not implement http.Hijacker")
 	}
 	return h.Hijack()
-}
-
-// RateLimit applies per-user rate limiting: requestsPerSecond sustained,
-// with bursts up to burst.
-func RateLimit(requestsPerSecond float64, burst int) func(http.Handler) http.Handler {
-	limiters := newUserLimiters(rate.Limit(requestsPerSecond), burst, time.Now)
-
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			key := r.RemoteAddr
-			if user := ContextGetUser(r); user != nil {
-				key = user.ID
-			}
-			if !limiters.allow(key) {
-				WriteError(w, model.NewAppError("RateLimit", "rate limit exceeded", "", http.StatusTooManyRequests))
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
-// userLimiters holds one token bucket per caller.
-//
-// Idle buckets are evicted as requests arrive, not by a background goroutine.
-// The old janitor was started once per RateLimit call and never stopped, and
-// it wiped every bucket every ten minutes, which refilled the burst of
-// whoever was busy at that moment. A bucket idle for idleAfter has refilled
-// completely, so evicting it changes nothing.
-type userLimiters struct {
-	mu        sync.Mutex
-	limit     rate.Limit
-	burst     int
-	idleAfter time.Duration
-	now       func() time.Time
-	lastSweep time.Time
-	entries   map[string]*limiterEntry
-}
-
-type limiterEntry struct {
-	limiter  *rate.Limiter
-	lastSeen time.Time
-}
-
-func newUserLimiters(limit rate.Limit, burst int, now func() time.Time) *userLimiters {
-	// Time for an empty bucket to refill, with margin; at least a minute.
-	idle := time.Minute
-	if limit > 0 {
-		idle = max(idle, 2*time.Duration(float64(burst)/float64(limit)*float64(time.Second)))
-	}
-	return &userLimiters{
-		limit: limit, burst: burst, idleAfter: idle, now: now,
-		lastSweep: now(), entries: map[string]*limiterEntry{},
-	}
-}
-
-func (u *userLimiters) allow(key string) bool {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	now := u.now()
-	if now.Sub(u.lastSweep) > u.idleAfter {
-		for k, e := range u.entries {
-			if now.Sub(e.lastSeen) > u.idleAfter {
-				delete(u.entries, k)
-			}
-		}
-		u.lastSweep = now
-	}
-	e, ok := u.entries[key]
-	if !ok {
-		e = &limiterEntry{limiter: rate.NewLimiter(u.limit, u.burst)}
-		u.entries[key] = e
-	}
-	e.lastSeen = now
-	return e.limiter.AllowN(now, 1)
 }

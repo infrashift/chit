@@ -193,3 +193,67 @@ func TestLoad_OnBehalfOfClients(t *testing.T) {
 		t.Fatalf("got %q, want %q", cfg.OnBehalfOfClients, want)
 	}
 }
+
+// The per-user limit keeps the values chitd always had; the aggregate limit
+// of an on-behalf-of client is sized for HALO (see Defaults).
+func TestLoad_RateLimits(t *testing.T) {
+	cfg, err := LoadWithoutDatabase()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RateLimitUserPerSecond != 10 || cfg.RateLimitUserBurst != 50 ||
+		cfg.RateLimitClientPerSecond != 1500 || cfg.RateLimitClientBurst != 3000 {
+		t.Fatalf("defaults: user %v/%d, client %v/%d", cfg.RateLimitUserPerSecond, cfg.RateLimitUserBurst,
+			cfg.RateLimitClientPerSecond, cfg.RateLimitClientBurst)
+	}
+	t.Setenv("CHIT_RATE_LIMIT_USER_PER_SECOND", "2.5")
+	t.Setenv("CHIT_RATE_LIMIT_USER_BURST", "7")
+	t.Setenv("CHIT_RATE_LIMIT_CLIENT_PER_SECOND", "400")
+	t.Setenv("CHIT_RATE_LIMIT_CLIENT_BURST", "900")
+	if cfg, err = LoadWithoutDatabase(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RateLimitUserPerSecond != 2.5 || cfg.RateLimitUserBurst != 7 ||
+		cfg.RateLimitClientPerSecond != 400 || cfg.RateLimitClientBurst != 900 {
+		t.Fatalf("not read from the environment: user %v/%d, client %v/%d", cfg.RateLimitUserPerSecond,
+			cfg.RateLimitUserBurst, cfg.RateLimitClientPerSecond, cfg.RateLimitClientBurst)
+	}
+}
+
+// Every limit must be a real one: no zero (which refuses everything), no
+// "off", and nothing past the bounds.
+func TestLoad_RateLimitBounds(t *testing.T) {
+	type bound struct {
+		value string
+		ok    bool
+	}
+	rates := []bound{
+		{"0.001", true}, {"1", true}, {"100000", true},
+		{"0", false}, {"-1", false}, {"100000.5", false}, {"NaN", false}, {"Inf", false}, {"-Inf", false},
+		{"fast", false}, {"", false},
+	}
+	bursts := []bound{
+		{"1", true}, {"1000000", true},
+		{"0", false}, {"-5", false}, {"1000001", false}, {"2.5", false}, {"many", false},
+	}
+	for _, name := range []string{"CHIT_RATE_LIMIT_USER_PER_SECOND", "CHIT_RATE_LIMIT_CLIENT_PER_SECOND"} {
+		for _, b := range rates {
+			t.Run(name+"="+b.value, func(t *testing.T) {
+				t.Setenv(name, b.value)
+				if _, err := LoadWithoutDatabase(); (err == nil) != b.ok {
+					t.Fatalf("err = %v, want ok=%v", err, b.ok)
+				}
+			})
+		}
+	}
+	for _, name := range []string{"CHIT_RATE_LIMIT_USER_BURST", "CHIT_RATE_LIMIT_CLIENT_BURST"} {
+		for _, b := range bursts {
+			t.Run(name+"="+b.value, func(t *testing.T) {
+				t.Setenv(name, b.value)
+				if _, err := LoadWithoutDatabase(); (err == nil) != b.ok {
+					t.Fatalf("err = %v, want ok=%v", err, b.ok)
+				}
+			})
+		}
+	}
+}
