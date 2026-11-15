@@ -25,7 +25,7 @@ Init containers run in order before the services start:
 | **wait-postgres** | TSC `postgres:17-debian` | Waits until PostgreSQL accepts connections |
 | **ensure-databases** | TSC `postgres:17-debian` | Creates the `kratos`, `keto` and `hydra` databases if missing (the hardened postgres image runs no init scripts) |
 | **migrate-kratos** | TSC `kratos:v26.2.0` | Kratos schema migrations |
-| **migrate-keto** | `localhost/keto-cue:2a6c583e` | keto-cue schema migrations |
+| **migrate-keto** | TSC `keto-cue:v0.0.0-20261114211924-809351b32b9c-6a44b89` | keto-cue schema migrations |
 | **migrate-hydra** | TSC `hydra:v26.2.0` | Hydra schema migrations |
 | **migrate-chit** | `migrate/migrate:v4.15.0` | Chit schema migrations from `migrations/` (mounted from the checkout) |
 
@@ -34,7 +34,7 @@ Then the services:
 | Container | Image | Port(s) | Purpose |
 |---|---|---|---|
 | **kratos** | TSC `kratos:v26.2.0` | 4433, 4434 | Identity management (people) |
-| **keto** | `localhost/keto-cue:2a6c583e` | 4466, 4467 | Slash-command authorization (keto-cue, CUE schema) |
+| **keto** | TSC `keto-cue:v0.0.0-20261114211924-809351b32b9c-6a44b89` | 4466, 4467 | Slash-command authorization (keto-cue, CUE schema) |
 | **hydra** | TSC `hydra:v26.2.0` | 4444, 4445 | OAuth2 tokens for machine actors (`--dev`: plain HTTP) |
 | **oathkeeper** | TSC `oathkeeper:v26.2.0` | 4455, 4456 | Authentication proxy |
 | **zincsearch** | `zinclabs/zincsearch:0.4.10` | 4080 | Full-text search index |
@@ -51,9 +51,9 @@ Podman names each container `<pod>-<container>`, e.g. `chit-app-chitd`.
 
 Every image is pinned by digest in the manifest. "TSC" is
 `ghcr.io/infrashift/trusted-service-containers`. ZincSearch and
-`migrate/migrate` are not in TSC and come from their upstream registries;
-keto-cue waits for a TSC image (P-TSC-2) and is built locally by
-`make keto-cue-image`, which `make kube-up` runs when the image is missing.
+`migrate/migrate` are not in TSC and come from their upstream registries.
+TSC builds keto-cue from source (commit `809351b3`) on trusted UBI9 Micro,
+the same way it builds the Ory images.
 
 ## ConfigMaps
 
@@ -122,7 +122,6 @@ See [Manual Acceptance Testing](/chit/getting-started/manual-acceptance-testing/
 | `make check-deps` | Check that client binaries do not link server-side dependencies, and that TUI dependencies stay out of the server module |
 | `make validate-spec` | Validate `api/openapi.yaml` |
 | `make cue-validate` | Evaluate the CUE definitions in `auth/` |
-| `make keto-cue-image` | Build the interim `localhost/keto-cue` image from `../keto-cue` (`KETO_CUE_SRC`), pending trusted-service-containers P-TSC-2 |
 | `make keto-validate` | Compile `deploy/keto/schema/` with keto-cue, as the server does, and again next to a sample HALO file |
 | `make test-keto` | Run the Keto client and reconciler tests against a throwaway keto-cue (`KETO_TEST_IMAGE` runs them against another Keto) |
 

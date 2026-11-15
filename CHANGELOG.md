@@ -33,11 +33,12 @@ Behaviour changes an operator must act on or know about:
   when it is absent, which also means a write needs the Keto read API
   (`CHIT_KETO_READ_URL`). Duplicates already stored stay, harmlessly; a
   narrow race between two writers can still add one.
-- **keto-cue runs from a local image for now.** It has no
-  trusted-service-containers image yet (P-TSC-2), so the deploy files name
-  `localhost/keto-cue:2a6c583e`, which `make keto-cue-image` builds from a
-  `../keto-cue` checkout at that commit (`KETO_CUE_SRC` overrides the path).
-  `make kube-up` and `make uat-up` build it when it is missing.
+- **keto-cue comes from trusted-service-containers.** The deploy files,
+  `make keto-validate` and `make test-keto` pull
+  `trusted/keto-cue:v0.0.0-20261114211924-809351b32b9c-6a44b89`, pinned by
+  digest: keto-cue `809351b3`, built from source on UBI9 Micro. Like the Ory
+  images it runs as UID 1001 with `HOME=/home/ory`, and its entrypoint is
+  `keto`. There is no local keto-cue build to run first.
 - **Ory images moved to trusted-service-containers v26.2.0**: Kratos (from
   v1.3), Hydra (from v2.2) and Oathkeeper (from v0.40), built from source on
   UBI9 Micro and pinned by digest. Every image in the deploy files and
