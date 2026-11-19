@@ -1,4 +1,4 @@
-.PHONY: semscope docs-lexis wiki check keto-validate test-keto build build-mcp build-reconcile build-claude build-tui build-all run test test-integration test-tui test-all test-container test-e2e test-e2e-tui test-e2e-clean lint vuln lint-tui check-deps validate-spec cue-validate reconcile migrate-up migrate-down kube-migrate kube-build kube-up kube-down kube-restart kube-logs kube-clean uat-up uat-seed-kratos uat-down uat-clean docs-dev clean
+.PHONY: semscope docs-lexis wiki check keto-validate test-keto build build-mcp build-reconcile build-claude build-tui build-all run test test-integration test-tui test-all test-container test-e2e test-e2e-tui test-e2e-clean lint vuln lint-tui check-deps validate-spec cue-validate reconcile migrate-up migrate-down kube-migrate kube-build kube-preflight kube-up kube-down kube-restart kube-logs kube-clean uat-preflight uat-up uat-seed-kratos uat-down uat-clean docs-dev clean
 
 BINARY=bin/chitd
 MCP_BINARY=bin/chit-mcp
@@ -241,7 +241,12 @@ test-keto:
 kube-build:
 	podman build -t $(CHIT_IMAGE) -f deploy/Containerfile .
 
-kube-up: kube-build
+# Fails fast when chit-pgdata is from an older PostgreSQL image, which the
+# postgresql17 image cannot use (see scripts/check-pgdata.sh).
+kube-preflight:
+	@scripts/check-pgdata.sh chit-pgdata
+
+kube-up: kube-preflight kube-build
 	sed "s|__PROJECT_ROOT__|$(CURDIR)|g" $(KUBE_FILE) | podman kube play --network host -
 
 kube-down:
@@ -260,7 +265,10 @@ kube-clean: kube-down
 
 ## --- UAT (Manual Acceptance Testing) ---
 
-uat-up: kube-build
+uat-preflight:
+	@scripts/check-pgdata.sh chit-uat-pgdata
+
+uat-up: uat-preflight kube-build
 	podman build -t $(E2E_IMAGE) -f Containerfiles/Containerfile.e2e .
 	sed "s|__PROJECT_ROOT__|$(CURDIR)|g" $(UAT_KUBE_FILE) | podman kube play --network host -
 	@echo ""

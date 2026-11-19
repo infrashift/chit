@@ -97,7 +97,17 @@ the DHI `postgres:17-debian` mirror. UID 70 owns this cluster. It is at
 `/var/lib/postgresql/17/data`, and its `LC_COLLATE` is the glibc
 `en_US.UTF-8` locale. The new
 image cannot start on that volume, and it has no `en_US.UTF-8` locale, so move
-the data with a dump and a restore:
+the data with a dump and a restore.
+
+`make kube-up` and `make uat-up` check the volume first. If an older image
+made it, they stop before Podman starts and show this message:
+
+```text
+ERROR: the Podman volume 'chit-pgdata' belongs to UID 70, not UID 26.
+```
+
+If the volume holds only test data, remove it with `podman volume rm
+chit-pgdata`. To keep the data, do these steps:
 
 ```bash
 # 1. With the old checkout and the old stack still running:
@@ -147,7 +157,7 @@ and Oathkeeper forwards `/api/v1/**` to whatever listens on `localhost:8065`.
 | Target | Description |
 |---|---|
 | `make kube-build` | Build the chitd image `localhost/chit:latest` from `deploy/Containerfile` |
-| `make kube-up` | `kube-build`, then `podman kube play --network host` on `deploy/chit.kube.yml` (migrations run automatically in init containers) |
+| `make kube-up` | Check the `chit-pgdata` volume, `kube-build`, then `podman kube play --network host` on `deploy/chit.kube.yml` (migrations run automatically in init containers) |
 | `make kube-down` | Stop and remove the pods (volumes are kept) |
 | `make kube-restart` | `kube-down` then `kube-up`; rebuilds the image |
 | `make kube-logs` | Follow the logs of every container in `chit-app` |
@@ -162,7 +172,7 @@ and Oathkeeper forwards `/api/v1/**` to whatever listens on `localhost:8065`.
 
 | Target | Description |
 |---|---|
-| `make uat-up` | Build the images and start `deploy/chit-uat.kube.yml` with seeded test data |
+| `make uat-up` | Check the `chit-uat-pgdata` volume, build the images and start `deploy/chit-uat.kube.yml` with seeded test data |
 | `make uat-seed-kratos` | Create Kratos identities for the seeded users |
 | `make uat-down` | Stop and remove the UAT pods |
 | `make uat-clean` | `uat-down`, then delete the UAT volumes |

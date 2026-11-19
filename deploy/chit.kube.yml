@@ -473,8 +473,16 @@ spec:
         - sh
         - -c
         - |
+          # At most 90 tries (3 minutes): a PostgreSQL that cannot start
+          # fails the pod, and podman kube play does not wait forever.
           echo "Waiting for PostgreSQL..."
+          tries=0
           until pg_isready -h localhost -p 5432 -U chit; do
+            tries=$((tries + 1))
+            if [ "$tries" -ge 90 ]; then
+              echo "PostgreSQL is not ready after 3 minutes; see: podman logs chit-db-postgres" >&2
+              exit 1
+            fi
             echo "PostgreSQL not ready, retrying in 2s..."
             sleep 2
           done
