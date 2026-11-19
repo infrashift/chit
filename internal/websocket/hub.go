@@ -93,7 +93,9 @@ func NewHub(checker MembershipChecker) *Hub {
 func (h *Hub) run() {
 	defer close(h.done)
 
-	for {
+	// The loop ends when Stop closes h.stop (Power of 10 rule 2).
+	running := true
+	for running {
 		select {
 		case client := <-h.register:
 			h.addClient(client)
@@ -107,7 +109,7 @@ func (h *Hub) run() {
 			h.applyMembershipChange(change)
 		case <-h.stop:
 			h.closeAll()
-			return
+			running = false
 		}
 	}
 }

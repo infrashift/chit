@@ -191,12 +191,16 @@ func (t *Tuple) String() string {
 // listPageSize is how many tuples one list request asks for.
 const listPageSize = 500
 
+// listMaxPages caps ListRelations at 1,000 pages (500,000 tuples), so the
+// loop has a fixed bound (Power of 10 rule 2).
+const listMaxPages = 1000
+
 // ListRelations returns every tuple in namespace, following Keto's pagination.
 // Listing is a read-API call: Keto's write port answers it with 405.
 func (c *Client) ListRelations(ctx context.Context, namespace string) ([]Tuple, error) {
 	var all []Tuple
 	token := ""
-	for {
+	for range listMaxPages {
 		q := url.Values{"namespace": {namespace}, "page_size": {strconv.Itoa(listPageSize)}}
 		if token != "" {
 			q.Set("page_token", token)
@@ -214,6 +218,7 @@ func (c *Client) ListRelations(ctx context.Context, namespace string) ([]Tuple, 
 		}
 		token = page.Next
 	}
+	return nil, fmt.Errorf("keto list: %s has more than %d pages", namespace, listMaxPages)
 }
 
 // DeleteTuple deletes t, whichever kind of subject it has.

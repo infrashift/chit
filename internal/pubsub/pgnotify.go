@@ -57,7 +57,7 @@ func NewPGNotify(pool *pgxpool.Pool) (*PGNotify, error) {
 func (pg *PGNotify) listen(ctx context.Context) {
 	defer close(pg.done)
 
-	for {
+	for ctx.Err() == nil {
 		if err := pg.listenOnce(ctx); err != nil {
 			if ctx.Err() != nil {
 				return
@@ -97,18 +97,17 @@ func (pg *PGNotify) listenOnce(ctx context.Context) error {
 		}
 	}
 
-	for {
-		// Pick up newly requested subscriptions.
-		for {
-			select {
-			case topic := <-pg.pending:
-				if err := execListen(ctx, conn, topic); err != nil {
-					return err
-				}
-				continue
-			default:
+	for ctx.Err() == nil {
+		// Pick up newly requested subscriptions. This goroutine is the only
+		// receiver, so a receive after len > 0 does not block, and the
+		// capacity bounds the loop (Power of 10 rule 2).
+		for range cap(pg.pending) {
+			if len(pg.pending) == 0 {
+				break
 			}
-			break
+			if err := execListen(ctx, conn, <-pg.pending); err != nil {
+				return err
+			}
 		}
 
 		waitCtx, cancel := context.WithTimeout(ctx, waitInterval)
@@ -141,6 +140,7 @@ func (pg *PGNotify) listenOnce(ctx context.Context) error {
 			}()
 		}
 	}
+	return nil
 }
 
 func execListen(ctx context.Context, conn *pgxpool.Conn, topic string) error {

@@ -412,11 +412,7 @@ func (c *Client) Listen(ctx context.Context, handle func(*model.WebSocketEvent))
 	wsURL := strings.Replace(c.baseURL, "http", "ws", 1) + "/api/v1/websocket"
 	backoff := time.Second
 
-	for {
-		if ctx.Err() != nil {
-			return
-		}
-
+	for ctx.Err() == nil {
 		headers, err := c.authHeaders()
 		if err != nil {
 			// A token fetch failure is usually transient (Hydra restarting,
@@ -462,20 +458,19 @@ func (c *Client) Listen(ctx context.Context, handle func(*model.WebSocketEvent))
 			}
 		}()
 
-		for {
-			_, message, err := conn.ReadMessage()
-			if err != nil {
-				if ctx.Err() == nil {
-					slog.Info("websocket read failed, reconnecting", "error", err)
-				}
-				break
-			}
+		// The loop ends when a read fails: on a lost connection, or when
+		// the goroutine above closes conn on shutdown (Power of 10 rule 2).
+		_, message, err := conn.ReadMessage()
+		for ; err == nil; _, message, err = conn.ReadMessage() {
 			var event model.WebSocketEvent
-			if err := json.Unmarshal(message, &event); err != nil {
-				slog.Info("invalid websocket event", "error", err)
+			if decodeErr := json.Unmarshal(message, &event); decodeErr != nil {
+				slog.Info("invalid websocket event", "error", decodeErr)
 				continue
 			}
 			handle(&event)
+		}
+		if ctx.Err() == nil {
+			slog.Info("websocket read failed, reconnecting", "error", err)
 		}
 		close(done)
 		errlog.Close(conn, "websocket connection")

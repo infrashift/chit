@@ -58,23 +58,21 @@ func (c *Client) readPump() {
 		return c.conn.SetReadDeadline(time.Now().Add(c.pingInterval * 2))
 	})
 
-	for {
-		_, message, err := c.conn.ReadMessage()
-		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
-				slog.Warn("websocket: unexpected close", "user_id", c.UserID, "error", err)
-			}
-			return
-		}
-
+	// The loop ends when a read fails. The read deadline above makes a
+	// silent peer fail, so the loop has a bound (Power of 10 rule 2).
+	_, message, err := c.conn.ReadMessage()
+	for ; err == nil; _, message, err = c.conn.ReadMessage() {
 		var wsMsg model.WebSocketMessage
-		if err := json.Unmarshal(message, &wsMsg); err != nil {
-			slog.Warn("websocket: invalid message", "user_id", c.UserID, "error", err)
+		if decodeErr := json.Unmarshal(message, &wsMsg); decodeErr != nil {
+			slog.Warn("websocket: invalid message", "user_id", c.UserID, "error", decodeErr)
 			continue
 		}
 
 		// Handle client messages (e.g., typing indicators)
 		c.handleMessage(&wsMsg)
+	}
+	if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+		slog.Warn("websocket: unexpected close", "user_id", c.UserID, "error", err)
 	}
 }
 
@@ -85,32 +83,43 @@ func (c *Client) writePump() {
 		errlog.Close(c.conn, "websocket connection (write pump)")
 	}()
 
-	for {
+	// The loop ends when the hub closes send or a write fails. The write
+	// deadline makes a stuck peer fail (Power of 10 rule 2).
+	open := true
+	for open {
 		select {
 		case event, ok := <-c.send:
-			if err := c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout)); err != nil {
-				return
-			}
-			if !ok {
-				// The hub closed send; tell the peer, best effort.
-				errlog.Debug(c.conn.WriteMessage(websocket.CloseMessage, []byte{}), "websocket write close message")
-				return
-			}
-
-			if err := c.conn.WriteJSON(event); err != nil {
-				slog.Warn("websocket: write error", "user_id", c.UserID, "error", err)
-				return
-			}
-
+			open = c.writeEvent(event, ok)
 		case <-ticker.C:
-			if err := c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout)); err != nil {
-				return
-			}
-			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				return
-			}
+			open = c.writePing()
 		}
 	}
+}
+
+// writeEvent writes one event from send. ok is false when the hub closed
+// send. It reports whether the pump goes on.
+func (c *Client) writeEvent(event *model.WebSocketEvent, ok bool) bool {
+	if err := c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout)); err != nil {
+		return false
+	}
+	if !ok {
+		// The hub closed send; tell the peer, best effort.
+		errlog.Debug(c.conn.WriteMessage(websocket.CloseMessage, []byte{}), "websocket write close message")
+		return false
+	}
+	if err := c.conn.WriteJSON(event); err != nil {
+		slog.Warn("websocket: write error", "user_id", c.UserID, "error", err)
+		return false
+	}
+	return true
+}
+
+// writePing sends a ping frame. It reports whether the pump goes on.
+func (c *Client) writePing() bool {
+	if err := c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout)); err != nil {
+		return false
+	}
+	return c.conn.WriteMessage(websocket.PingMessage, nil) == nil
 }
 
 func (c *Client) handleMessage(msg *model.WebSocketMessage) {

@@ -71,7 +71,7 @@ func (d *WebhookDispatcher) Stop() {
 
 func (d *WebhookDispatcher) worker(ctx context.Context, id int) {
 	defer d.wg.Done()
-	for {
+	for ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
 			return

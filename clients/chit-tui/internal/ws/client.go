@@ -191,12 +191,23 @@ func (c *wsClient) emitState(s ConnState) {
 	}
 }
 
+// closed reports, without a wait, whether stop is closed.
+func closed(stop chan struct{}) bool {
+	select {
+	case <-stop:
+		return true
+	default:
+		return false
+	}
+}
+
 // run owns one session: it reads conn until it fails, then redials, until
 // stop is closed. A nil conn means the first dial failed and it starts by
-// redialing.
+// redialing. A conn given at the start is read even when stop is closed, so
+// it is released (Power of 10 rule 2: the loop ends when stop is closed).
 func (c *wsClient) run(stop chan struct{}, conn *websocket.Conn) {
 	backoff := c.newBackoff()
-	for {
+	for conn != nil || !closed(stop) {
 		if conn == nil {
 			conn = c.redial(stop, backoff)
 			if conn == nil {
@@ -208,10 +219,8 @@ func (c *wsClient) run(stop chan struct{}, conn *websocket.Conn) {
 		err := c.read(stop, conn)
 		c.release(conn)
 		conn = nil
-		select {
-		case <-stop:
+		if closed(stop) {
 			return
-		default:
 		}
 		c.emitState(ConnState{Connected: false, Err: err})
 	}
@@ -245,7 +254,9 @@ func (c *wsClient) read(stop chan struct{}, conn *websocket.Conn) error {
 	// desynced marks an overflow already reported, so one burst of drops
 	// asks for one resync rather than one per lost event.
 	desynced := false
-	for {
+	// The loop ends when stop is closed or a read fails. The read deadline
+	// makes a silent link fail (Power of 10 rule 2).
+	for !closed(stop) {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
 			return err
@@ -272,6 +283,7 @@ func (c *wsClient) read(stop chan struct{}, conn *websocket.Conn) error {
 			}
 		}
 	}
+	return nil
 }
 
 // ping keeps a quiet link provably alive until done is closed. WriteControl
@@ -279,7 +291,7 @@ func (c *wsClient) read(stop chan struct{}, conn *websocket.Conn) error {
 func (c *wsClient) ping(conn *websocket.Conn, done chan struct{}) {
 	t := time.NewTicker(c.pingPeriod)
 	defer t.Stop()
-	for {
+	for !closed(done) {
 		select {
 		case <-done:
 			return
@@ -294,7 +306,7 @@ func (c *wsClient) ping(conn *websocket.Conn, done chan struct{}) {
 // redial dials until it connects, stop is closed, or the credentials are
 // rejected. It returns the adopted connection, or nil if the session ends.
 func (c *wsClient) redial(stop chan struct{}, backoff *Backoff) *websocket.Conn {
-	for {
+	for !closed(stop) {
 		select {
 		case <-stop:
 			return nil
@@ -318,6 +330,7 @@ func (c *wsClient) redial(stop chan struct{}, backoff *Backoff) *websocket.Conn 
 		backoff.Reset()
 		return conn
 	}
+	return nil
 }
 
 // Close ends the session. It is safe to call more than once, and Connect

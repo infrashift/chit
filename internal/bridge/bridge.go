@@ -519,7 +519,7 @@ func (b *Bridge) threadWorker(ctx context.Context, root string, queue chan queue
 	defer b.wg.Done()
 	idle := time.NewTimer(b.idleTimeout)
 	defer idle.Stop()
-	for {
+	for ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
 			return
@@ -574,16 +574,15 @@ func (b *Bridge) abandon(ctx context.Context, root string, queue chan queued, ta
 	if taken != nil && taken.addressed {
 		last = taken.post
 	}
-	for {
-		select {
-		case q := <-queue:
-			if q.addressed {
-				last = q.post
-			}
-			continue
-		default:
+	// This worker is the only receiver, so a receive after len > 0 does not
+	// block, and the capacity bounds the loop (Power of 10 rule 2).
+	for range cap(queue) {
+		if len(queue) == 0 {
+			break
 		}
-		break
+		if q := <-queue; q.addressed {
+			last = q.post
+		}
 	}
 	if last == nil {
 		return

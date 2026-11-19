@@ -32,8 +32,8 @@ Tracking: [ISSUE-004](.okfw/issues/issue-004-r1-no-recursion--01a1f5379e46.md)
 ## Phase 5: R2, loops with a bound
 Tracking: [ISSUE-005](.okfw/issues/issue-005-r2-loops-with-a-bound--01a1f5379e4d.md)
 
-- [ ] Replace each `for {}` with an exit condition or a maximum count.
-- [ ] Remove the NASA-P10-02 omission.
+- [x] Replace each `for {}` with an exit condition or a maximum count.
+- [x] Remove the NASA-P10-02 omission.
 
 ## Phase 6: R9, no function types
 Tracking: [ISSUE-006](.okfw/issues/issue-006-r9-no-function-types-in-chit-code--01a1f5379e55.md)

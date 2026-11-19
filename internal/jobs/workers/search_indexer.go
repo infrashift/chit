@@ -24,6 +24,11 @@ const (
 	// indexer gives up on it and moves on. Without a limit one document the
 	// index refuses stopped indexing for everything after it, forever.
 	indexMaxAttempts = 3
+
+	// indexMaxBatchesPerTick caps one tick at 100 batches (20,000 posts), so
+	// runOnce has a fixed loop bound (Power of 10 rule 2). The next tick goes
+	// on from the cursor.
+	indexMaxBatchesPerTick = 100
 )
 
 // PostSource is what the indexer reads posts from: the one PostStore method
@@ -80,7 +85,7 @@ func (si *SearchIndexer) Start(ctx context.Context) error {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
-	for {
+	for ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
 			return nil
@@ -90,13 +95,14 @@ func (si *SearchIndexer) Start(ctx context.Context) error {
 			si.runOnce(ctx)
 		}
 	}
+	return nil
 }
 
 // runOnce syncs every settled post after the cursor. A post that fails is
 // retried on the next tick; after indexMaxAttempts it is logged and skipped.
 func (si *SearchIndexer) runOnce(ctx context.Context) {
 	until := si.now().Add(-indexSettleLag).UnixMilli()
-	for {
+	for range indexMaxBatchesPerTick {
 		posts, err := si.posts.GetPostsSince(ctx, si.cursor, until, indexBatchSize)
 		if err != nil {
 			slog.Warn("search indexer: failed to fetch posts", "error", err)
