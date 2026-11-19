@@ -49,7 +49,9 @@ func (b *Bridge) threadHistory(ctx context.Context, root, postID string) string 
 		}
 		content := p.Content
 		if p.UserID == b.agentUserID {
-			content, _, _ = strings.Cut(content, footerSeparator)
+			if i := strings.Index(content, footerSeparator); i >= 0 {
+				content = content[:i]
+			}
 		}
 		if content = strings.TrimSpace(content); content != "" {
 			lines = append(lines, b.tagged(ctx, p.UserID, content))

@@ -89,7 +89,10 @@ func TestCreatePost_IgnoresServerOwnedFields(t *testing.T) {
 func TestUpdatePost_ReturnsTheWholePost(t *testing.T) {
 	a, ms, cleanup := setupTestApp(t)
 	defer cleanup()
-	reply, _ := ms.Posts.Get(t.Context(), testReplyPost)
+	reply, err := ms.Posts.Get(t.Context(), testReplyPost)
+	if err != nil {
+		t.Fatalf("get reply: %v", err)
+	}
 	reply.Props = map[string]any{"keep": "me", "drop": "me"}
 	ms.Posts.Seed(reply)
 

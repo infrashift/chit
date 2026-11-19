@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"github.com/infrashift/chit/internal/app"
 	"github.com/infrashift/chit/internal/command"
 	"github.com/infrashift/chit/internal/config"
+	"github.com/infrashift/chit/internal/errlog"
 	"github.com/infrashift/chit/internal/jobs"
 	"github.com/infrashift/chit/internal/jobs/workers"
 	"github.com/infrashift/chit/internal/pubsub"
@@ -199,7 +201,10 @@ func (s *Server) initCommands() {
 	al, err := command.NewAuditLogger(s.config.AuditLogPath)
 	if err != nil {
 		slog.Warn("failed to create audit logger, using stderr", "error", err)
-		al, _ = command.NewAuditLogger("-")
+		// The stderr logger opens no file and cannot fail; if it did, al
+		// stays nil and commands are not audited.
+		al, err = command.NewAuditLogger("-")
+		errlog.Warn(err, "create stderr audit logger")
 	}
 	s.app.AuditLogger = al
 
@@ -295,8 +300,7 @@ func (s *Server) Start() error {
 	case err := <-errCh:
 		// The listener failed (a port in use, say). The scheduler, hub,
 		// pubsub and store are already running and must still be stopped.
-		_ = s.Shutdown()
-		return fmt.Errorf("server error: %w", err)
+		return errors.Join(fmt.Errorf("server error: %w", err), s.Shutdown())
 	case sig := <-quit:
 		slog.Info("shutdown signal received", "signal", sig)
 	}

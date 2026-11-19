@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -125,7 +124,7 @@ func getChannelPosts(a *app.App) http.HandlerFunc {
 		user := ContextGetUser(r)
 		channelID := chi.URLParam(r, "id")
 		page, perPage := parsePagination(r, 60)
-		since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
+		since := queryInt(r, "since", 64)
 
 		opts := model.GetPostsOptions{
 			Page:    page,

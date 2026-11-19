@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+
+	"github.com/infrashift/chit/internal/errlog"
 )
 
 // Client talks to Keto's read and write (admin) APIs.
@@ -146,7 +148,7 @@ func (c *Client) do(ctx context.Context, method, target string, body, out any) e
 	if err != nil {
 		return err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() { errlog.Debug(resp.Body.Close(), "close keto response body") }()
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("status %d", resp.StatusCode)
 	}

@@ -56,7 +56,10 @@ func (s *ChitMCPServer) handleAgentIdentity(ctx context.Context, req *mcp.ReadRe
 	if err != nil {
 		return nil, fmt.Errorf("get agent user: %w", err)
 	}
-	data, _ := json.Marshal(user)
+	data, err := json.Marshal(user)
+	if err != nil {
+		return nil, fmt.Errorf("marshal agent user: %w", err)
+	}
 	return &mcp.ReadResourceResult{
 		Contents: []*mcp.ResourceContents{
 			{URI: req.Params.URI, MIMEType: "application/json", Text: string(data)},
@@ -73,7 +76,10 @@ func (s *ChitMCPServer) handleChannelResource(ctx context.Context, req *mcp.Read
 	if err != nil {
 		return nil, fmt.Errorf("get channel: %w", err)
 	}
-	data, _ := json.Marshal(channel)
+	data, err := json.Marshal(channel)
+	if err != nil {
+		return nil, fmt.Errorf("marshal channel: %w", err)
+	}
 	return &mcp.ReadResourceResult{
 		Contents: []*mcp.ResourceContents{
 			{URI: req.Params.URI, MIMEType: "application/json", Text: string(data)},
@@ -91,7 +97,10 @@ func (s *ChitMCPServer) handleChannelRecentResource(ctx context.Context, req *mc
 	if err != nil {
 		return nil, fmt.Errorf("get channel posts: %w", err)
 	}
-	data, _ := json.Marshal(viewPostList(posts))
+	data, err := json.Marshal(viewPostList(posts))
+	if err != nil {
+		return nil, fmt.Errorf("marshal channel posts: %w", err)
+	}
 	return &mcp.ReadResourceResult{
 		Contents: []*mcp.ResourceContents{
 			{URI: req.Params.URI, MIMEType: "application/json", Text: string(data)},
@@ -108,7 +117,10 @@ func (s *ChitMCPServer) handleThreadResource(ctx context.Context, req *mcp.ReadR
 	if err != nil {
 		return nil, fmt.Errorf("get thread: %w", err)
 	}
-	data, _ := json.Marshal(viewPosts(posts))
+	data, err := json.Marshal(viewPosts(posts))
+	if err != nil {
+		return nil, fmt.Errorf("marshal thread: %w", err)
+	}
 	return &mcp.ReadResourceResult{
 		Contents: []*mcp.ResourceContents{
 			{URI: req.Params.URI, MIMEType: "application/json", Text: string(data)},
@@ -126,7 +138,10 @@ func (s *ChitMCPServer) handleTeamChannelsResource(ctx context.Context, req *mcp
 	if err != nil {
 		return nil, fmt.Errorf("get team channels: %w", err)
 	}
-	data, _ := json.Marshal(channels)
+	data, err := json.Marshal(channels)
+	if err != nil {
+		return nil, fmt.Errorf("marshal team channels: %w", err)
+	}
 	return &mcp.ReadResourceResult{
 		Contents: []*mcp.ResourceContents{
 			{URI: req.Params.URI, MIMEType: "application/json", Text: string(data)},

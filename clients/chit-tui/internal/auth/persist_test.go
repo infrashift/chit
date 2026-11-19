@@ -251,8 +251,14 @@ func TestSessionStore_TwoStoresIsolated(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	loaded1, _ := ss1.Load()
-	loaded2, _ := ss2.Load()
+	loaded1, err := ss1.Load()
+	if err != nil {
+		t.Fatalf("load store1: %v", err)
+	}
+	loaded2, err := ss2.Load()
+	if err != nil {
+		t.Fatalf("load store2: %v", err)
+	}
 
 	if loaded1.Token != "alice-tok" {
 		t.Errorf("store1 Token = %q, want alice-tok", loaded1.Token)
@@ -384,13 +390,21 @@ func TestSessionStore_FailedSaveLeavesNothingBehind(t *testing.T) {
 	if err := os.Chmod(dir, 0o500); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	t.Cleanup(func() {
+		if err := os.Chmod(dir, 0o700); err != nil {
+			t.Errorf("restore dir mode: %v", err)
+		}
+	})
 
 	err := auth.NewSessionStore(filepath.Join(dir, "session.json")).Save(auth.StoredSession{Token: "t"})
 	if err == nil {
 		t.Fatal("saved into a read-only directory")
 	}
-	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	if len(entries) != 0 {
 		t.Errorf("left %d files behind", len(entries))
 	}
 }
@@ -407,7 +421,10 @@ func TestSessionStore_SaveOverADirectoryFails(t *testing.T) {
 	if err := auth.NewSessionStore(target).Save(auth.StoredSession{Token: "t"}); err == nil {
 		t.Fatal("replaced a directory with the session")
 	}
-	entries, _ := os.ReadDir(dir)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
 	if len(entries) != 1 {
 		t.Errorf("dir holds %d entries, want only the directory that was there", len(entries))
 	}

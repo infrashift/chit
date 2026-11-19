@@ -46,6 +46,17 @@ func testModel() tui.Model {
 	return tui.NewModel(cfg, client, nil, s, nil, nil, nil)
 }
 
+// asModel returns the tui.Model that Update produced. Update always returns
+// one, so anything else fails the test.
+func asModel(t testing.TB, m tea.Model) tui.Model {
+	t.Helper()
+	got, ok := m.(tui.Model)
+	if !ok {
+		t.Fatalf("Update returned %T, want tui.Model", m)
+	}
+	return got
+}
+
 // modelWithClient builds a sized, logged-in model backed by a specific client,
 // so tests can observe the requests it makes.
 func modelWithClient(t *testing.T, client api.ChitClient) tui.Model {
@@ -55,9 +66,9 @@ func modelWithClient(t *testing.T, client api.ChitClient) tui.Model {
 	m := tui.NewModel(cfg, client, nil, styles.New(theme.TokyoNight()), nil, nil, nil)
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tui.UserLoadedMsg{User: &model.User{ID: "u1", Username: "alice"}})
-	return updated.(tui.Model)
+	return asModel(t, updated)
 }
 
 func setupModel(t *testing.T) tui.Model {
@@ -65,28 +76,28 @@ func setupModel(t *testing.T) tui.Model {
 	m := testModel()
 	// Simulate window size
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	// Load user
 	updated, _ = m.Update(tui.UserLoadedMsg{User: &model.User{ID: "u1", Username: "alice"}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	// Load teams
 	updated, _ = m.Update(tui.TeamsLoadedMsg{Teams: []*model.Team{{ID: "t1", DisplayName: "Engineering"}}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	// Load channels
 	updated, _ = m.Update(tui.ChannelsLoadedMsg{TeamID: "t1", Channels: []*model.Channel{{ID: "c1", DisplayName: "General"}}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	// Load posts
 	updated, _ = m.Update(tui.PostsLoadedMsg{
 		ChannelID: "c1",
 		Posts:     &model.PostList{Order: []*model.Post{{ID: "p1", UserID: "u1", Content: "Hello", CreateAt: 1700000000000}}},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	// Load users
 	updated, _ = m.Update(tui.UsersLoadedMsg{Users: []*model.User{{ID: "u1", Username: "alice"}}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	// Load commands
 	updated, _ = m.Update(tui.CommandsLoadedMsg{Commands: []*model.Command{{ID: "cmd1", Slug: "remind", Description: "Set reminder"}}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	return m
 }
 
@@ -100,7 +111,7 @@ func TestModel_Init_FetchesUserAndTeams(t *testing.T) {
 func TestModel_WindowSize(t *testing.T) {
 	m := testModel()
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	view := m.View()
 	if view == "" {
 		t.Error("expected non-empty view after resize")
@@ -112,15 +123,15 @@ func TestModel_TabCyclesFocus(t *testing.T) {
 
 	// Start at input, tab moves to viewport
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Tab again wraps back to input
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// And again to viewport
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// View should still render
 	view := m.View()
@@ -150,7 +161,7 @@ func TestModel_WSEventInsertsPost(t *testing.T) {
 		},
 	}
 	updated, _ := m.Update(wsEvt)
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "WS post") {
@@ -163,7 +174,7 @@ func TestModel_WSEventInsertsPost(t *testing.T) {
 func openThread(t *testing.T, m tui.Model) tui.Model {
 	t.Helper()
 	updated, cmd := m.Update(viewport.PostSelectedMsg{Post: &model.Post{ID: "p1", UserID: "u1", Content: "Hello"}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	wantMsg[tui.ThreadLoadedMsg](t, cmd)
 	updated, _ = m.Update(tui.ThreadLoadedMsg{
 		PostID: "p1",
@@ -174,7 +185,7 @@ func openThread(t *testing.T, m tui.Model) tui.Model {
 			},
 		},
 	})
-	return updated.(tui.Model)
+	return asModel(t, updated)
 }
 
 func TestModel_PostSelectionSwapsToThreadPane(t *testing.T) {
@@ -194,7 +205,7 @@ func TestModel_CtrlKOpensPalette(t *testing.T) {
 	m := setupModel(t)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "↵ select") {
@@ -209,9 +220,9 @@ func TestModel_PaletteSlashModeListsCommands(t *testing.T) {
 	m := setupModel(t)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "remind") {
@@ -269,7 +280,7 @@ func TestModel_ErrorMsg(t *testing.T) {
 	m := setupModel(t)
 
 	updated, _ := m.Update(tui.ErrMsg{Err: &model.AppError{Message: "test error"}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := m.View()
 	if !strings.Contains(view, "test error") {
@@ -290,7 +301,7 @@ func TestModel_ShiftTabCyclesFocusBackward(t *testing.T) {
 
 	// Start at input, shift-tab wraps to viewport
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := m.View()
 	if view == "" {
@@ -320,13 +331,13 @@ func TestModel_SendMsgInThreadPaneCreatesReply(t *testing.T) {
 	cfg := &config.Config{ServerURL: "http://localhost:8065", SessionToken: "test-token", WSScheme: "ws"}
 	m := tui.NewModel(cfg, client, nil, styles.New(theme.TokyoNight()), nil, nil, nil)
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tui.UserLoadedMsg{User: &model.User{ID: "u1", Username: "alice"}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tui.TeamsLoadedMsg{Teams: []*model.Team{{ID: "t1", DisplayName: "Engineering"}}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tui.ChannelsLoadedMsg{TeamID: "t1", Channels: []*model.Channel{{ID: "c1", DisplayName: "General"}}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	m = openThread(t, m)
 
 	// Sending from the input while in the thread pane creates a reply.
@@ -350,7 +361,7 @@ func TestModel_EscClosesThread(t *testing.T) {
 
 	// Escape returns to the channel pane.
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := testutil.StripANSI(m.View())
 	if strings.Contains(view, "First reply") {
@@ -414,9 +425,9 @@ func TestModel_DelegateKeyToThread(t *testing.T) {
 	m = openThread(t, m)
 	// Tab from input focuses the thread pane; send it a scroll key.
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	_ = m
 }
 
@@ -452,7 +463,7 @@ func TestModel_TabWithThread(t *testing.T) {
 	var updated tea.Model
 	for range 5 {
 		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-		m = updated.(tui.Model)
+		m = asModel(t, updated)
 	}
 	_ = m
 }
@@ -480,7 +491,7 @@ func TestModel_SearchResultsMsg(t *testing.T) {
 
 	// Open search
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Receive search results
 	updated, _ = m.Update(tui.SearchResultsMsg{
@@ -488,7 +499,7 @@ func TestModel_SearchResultsMsg(t *testing.T) {
 			{ID: "p1", UserID: "u1", Content: "found it"},
 		}},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := m.View()
 	if !strings.Contains(view, "found it") {
@@ -538,7 +549,7 @@ func TestModel_WSConnectedStartsListening(t *testing.T) {
 	m := tui.NewModel(cfg, client, wsClient, s, nil, nil, nil)
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	_, cmd := m.Update(tui.WSConnectedMsg{})
 	if cmd == nil {
@@ -557,7 +568,7 @@ func TestModel_ChannelMembersComputesUnread(t *testing.T) {
 			{ID: "c2", DisplayName: "Random", TotalMsgCount: 10},
 		},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Simulate channel members loaded with user having read 7 messages
 	updated, _ = m.Update(tui.ChannelMembersLoadedMsg{
@@ -566,7 +577,7 @@ func TestModel_ChannelMembersComputesUnread(t *testing.T) {
 			{ChannelID: "c2", UserID: "u1", MsgCount: 7},
 		},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if got := m.UnreadCount("c2"); got != 3 {
 		t.Fatalf("expected unread count 3, got %d", got)
@@ -574,7 +585,7 @@ func TestModel_ChannelMembersComputesUnread(t *testing.T) {
 
 	// The palette shows the badge.
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "(3)") {
 		t.Errorf("expected unread badge '(3)' in palette view:\n%s", view)
@@ -663,7 +674,7 @@ func TestModel_WSEventPostedOtherChannel(t *testing.T) {
 		},
 	}
 	updated, _ := m.Update(wsEvt)
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Post should NOT appear in viewport (different channel)
 	view := testutil.StripANSI(m.View())
@@ -682,7 +693,7 @@ func TestModel_WSEventPostedThreadReply(t *testing.T) {
 			Order: []*model.Post{{ID: "p1", UserID: "u1", Content: "Root", CreateAt: 1700000000000}},
 		},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// WS event: reply to open thread in active channel
 	wsEvt := tui.WebSocketEventMsg{
@@ -696,7 +707,7 @@ func TestModel_WSEventPostedThreadReply(t *testing.T) {
 		},
 	}
 	updated, _ = m.Update(wsEvt)
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "ws reply") {
@@ -717,7 +728,7 @@ func TestModel_WSEventThreadUpdated(t *testing.T) {
 			},
 		},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// thread_updated event
 	wsEvt := tui.WebSocketEventMsg{
@@ -737,7 +748,7 @@ func TestModel_WSEventThreadUpdated(t *testing.T) {
 		},
 	}
 	updated, _ = m.Update(wsEvt)
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "5 replies") {
@@ -758,7 +769,7 @@ func TestModel_ThreadLoadedCachesCount(t *testing.T) {
 			},
 		},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	m, _ = step(t, m, tea.KeyMsg{Type: tea.KeyEscape})
 
 	view := testutil.StripANSI(m.View())
@@ -795,7 +806,7 @@ func TestModel_CtrlDOpensPalettePeopleMode(t *testing.T) {
 	m := setupModel(t)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "Type a name") {
@@ -807,11 +818,11 @@ func TestModel_EscClosesPeopleMode(t *testing.T) {
 	m := setupModel(t)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Close with escape
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := testutil.StripANSI(m.View())
 	if strings.Contains(view, "Type a name") {
@@ -825,7 +836,7 @@ func TestModel_DMChannelsLoadedMsg_Error(t *testing.T) {
 	updated, _ := m.Update(tui.DMChannelsLoadedMsg{
 		Err: &model.AppError{Message: "dm fail"},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := m.View()
 	if !strings.Contains(view, "dm fail") {
@@ -845,12 +856,12 @@ func TestModel_UserSearchResultsMsg(t *testing.T) {
 
 	// Open DM picker first
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	updated, _ = m.Update(tui.UserSearchResultsMsg{
 		Users: []*model.User{{ID: "u2", Username: "bob"}},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := m.View()
 	if !strings.Contains(view, "bob") {
@@ -863,7 +874,7 @@ func TestModel_UserSearchResultsMsg_FiltersSelf(t *testing.T) {
 
 	// Open DM picker
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Results include self (u1/alice) and another user
 	updated, _ = m.Update(tui.UserSearchResultsMsg{
@@ -872,7 +883,7 @@ func TestModel_UserSearchResultsMsg_FiltersSelf(t *testing.T) {
 			{ID: "u2", Username: "bob"},
 		},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := m.View()
 	if strings.Contains(view, "@alice") {
@@ -889,7 +900,7 @@ func TestModel_UserSearchResultsMsg_Error(t *testing.T) {
 	updated, _ := m.Update(tui.UserSearchResultsMsg{
 		Err: &model.AppError{Message: "search fail"},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := m.View()
 	if !strings.Contains(view, "search fail") {
@@ -912,7 +923,7 @@ func TestModel_DMCreatedMsg(t *testing.T) {
 	updated, cmd := m.Update(tui.DMCreatedMsg{
 		Channel: &model.Channel{ID: "dm1", Name: "u1__u2", Type: "D"},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	wantMsg[tui.DMChannelsLoadedMsg](t, cmd)
 	_ = m.View()
@@ -924,7 +935,7 @@ func TestModel_DMCreatedMsg_Error(t *testing.T) {
 	updated, _ := m.Update(tui.DMCreatedMsg{
 		Err: &model.AppError{Message: "dm create fail"},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := m.View()
 	if !strings.Contains(view, "dm create fail") {
@@ -1021,17 +1032,17 @@ func TestModel_DMDisplayNameResolution(t *testing.T) {
 			{ID: "dm1", Name: "u1__u2", Type: "D"},
 		},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Load the other user
 	updated, _ = m.Update(tui.UsersLoadedMsg{
 		Users: []*model.User{{ID: "u2", Username: "bob", DisplayName: "Bob Smith"}},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// The resolved name shows up in the palette's DM rows.
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "Bob Smith") {
 		t.Errorf("expected resolved DM display name 'Bob Smith' in palette:\n%s", view)
@@ -1044,13 +1055,13 @@ func TestModel_DMDisplayNameResolution_MeArrivesAfterDMChannels(t *testing.T) {
 	// UserLoadedMsg also triggers resolution.
 	m := testModel()
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Load teams and channels so sidebar renders
 	updated, _ = m.Update(tui.TeamsLoadedMsg{Teams: []*model.Team{{ID: "t1", DisplayName: "Engineering"}}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tui.ChannelsLoadedMsg{TeamID: "t1", Channels: []*model.Channel{{ID: "c1", DisplayName: "General"}}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// DM channels arrive first (m.me is still nil)
 	updated, _ = m.Update(tui.DMChannelsLoadedMsg{
@@ -1058,11 +1069,11 @@ func TestModel_DMDisplayNameResolution_MeArrivesAfterDMChannels(t *testing.T) {
 			{ID: "dm1", Name: "u1__u2", Type: "D"},
 		},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Now current user arrives — should trigger DM resolution + fetch missing users
 	updated, cmd := m.Update(tui.UserLoadedMsg{User: &model.User{ID: "u1", Username: "alice"}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	wantMsg[tui.UsersLoadedMsg](t, cmd)
 
@@ -1070,10 +1081,10 @@ func TestModel_DMDisplayNameResolution_MeArrivesAfterDMChannels(t *testing.T) {
 	updated, _ = m.Update(tui.UsersLoadedMsg{
 		Users: []*model.User{{ID: "u2", Username: "bob", DisplayName: "Bob Smith"}},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "Bob Smith") {
 		t.Errorf("expected resolved DM display name 'Bob Smith' in palette:\n%s", view)
@@ -1087,12 +1098,12 @@ func TestModel_StatusBarDMChannel(t *testing.T) {
 	updated, _ := m.Update(tui.UsersLoadedMsg{
 		Users: []*model.User{{ID: "u2", Username: "bob"}},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Switch to DM channel
 	dmCh := &model.Channel{ID: "dm1", Name: "u1__u2", Type: "D"}
 	updated, _ = m.Update(palette.ChannelChosenMsg{Channel: dmCh})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := m.View()
 	if !strings.Contains(view, "bob") {
@@ -1109,7 +1120,7 @@ func TestModel_DMChannelsUnreadComputed(t *testing.T) {
 			{ID: "dm1", Name: "u1__u2", Type: "D", TotalMsgCount: 10},
 		},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Load channel members for DM
 	updated, _ = m.Update(tui.ChannelMembersLoadedMsg{
@@ -1118,14 +1129,14 @@ func TestModel_DMChannelsUnreadComputed(t *testing.T) {
 			{ChannelID: "dm1", UserID: "u1", MsgCount: 7},
 		},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if got := m.UnreadCount("dm1"); got != 3 {
 		t.Fatalf("expected DM unread count 3, got %d", got)
 	}
 
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "(3)") {
 		t.Errorf("expected unread badge '(3)' for DM channel in palette view:\n%s", view)
@@ -1136,7 +1147,7 @@ func TestModel_SlashSkinOpensSkinPicker(t *testing.T) {
 	m := setupModel(t)
 
 	updated, _ := m.Update(input.SlashTriggerMsg{Input: "/skin"})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := m.View()
 	if !strings.Contains(view, "Select Theme") {
@@ -1150,7 +1161,7 @@ func TestModel_SlashCommandIsSentToServer(t *testing.T) {
 	m := setupModel(t)
 
 	updated, cmd := m.Update(input.SlashTriggerMsg{Input: "/invite bob"})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	wantMsg[tui.PostCreatedMsg](t, cmd)
 
@@ -1164,7 +1175,7 @@ func TestModel_SkinSelectedMsg(t *testing.T) {
 	m := setupModel(t)
 
 	updated, _ := m.Update(skinpicker.SkinSelectedMsg{Name: "catppuccin"})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Should render without errors
 	view := m.View()
@@ -1178,11 +1189,11 @@ func TestModel_EscClosesSkinPicker(t *testing.T) {
 
 	// Open skin picker
 	updated, _ := m.Update(input.SlashTriggerMsg{Input: "/skin"})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Escape closes it
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := m.View()
 	if strings.Contains(view, "Select Theme") {
@@ -1195,11 +1206,11 @@ func TestModel_SkinPickerKeyInterception(t *testing.T) {
 
 	// Open skin picker
 	updated, _ := m.Update(input.SlashTriggerMsg{Input: "/skin"})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Down key should be consumed by skin picker
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Picker should still be visible
 	view := m.View()
@@ -1220,7 +1231,7 @@ func TestModel_GroupDisplayNameResolution(t *testing.T) {
 			{ID: "u3", Username: "charlie"},
 		},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Load DM channels including a group channel
 	updated, _ = m.Update(tui.DMChannelsLoadedMsg{
@@ -1228,10 +1239,10 @@ func TestModel_GroupDisplayNameResolution(t *testing.T) {
 			{ID: "g1", Name: "u1__u2__u3", Type: "G"},
 		},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "bob") || !strings.Contains(view, "charlie") {
 		t.Errorf("expected group display names in palette:\n%s", view)
@@ -1248,7 +1259,7 @@ func TestModel_StatusBarGroupChannel(t *testing.T) {
 			{ID: "u3", Username: "charlie"},
 		},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Load group DM channels
 	updated, _ = m.Update(tui.DMChannelsLoadedMsg{
@@ -1256,12 +1267,12 @@ func TestModel_StatusBarGroupChannel(t *testing.T) {
 			{ID: "g1", Name: "u1__u2__u3", Type: "G"},
 		},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Switch to group channel
 	groupCh := &model.Channel{ID: "g1", Name: "u1__u2__u3", Type: "G"}
 	updated, _ = m.Update(palette.ChannelChosenMsg{Channel: groupCh})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := m.View()
 	if !strings.Contains(view, "bob") {
@@ -1275,7 +1286,7 @@ func TestModel_CtrlNOpensChCreator(t *testing.T) {
 	m := setupModel(t)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := m.View()
 	if !strings.Contains(view, "Create Channel") {
@@ -1287,11 +1298,11 @@ func TestModel_CtrlNNoOpWithoutTeam(t *testing.T) {
 	m := testModel()
 	// Only set window size, don't load teams
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// No active team → ctrl+n should be a no-op
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := m.View()
 	if strings.Contains(view, "Create Channel") {
@@ -1304,11 +1315,11 @@ func TestModel_EscClosesChCreator(t *testing.T) {
 
 	// Open channel creator
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Close with escape
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := m.View()
 	if strings.Contains(view, "Create Channel") {
@@ -1321,11 +1332,11 @@ func TestModel_ChCreatorKeyInterception(t *testing.T) {
 
 	// Open channel creator
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Type in creator (keys should be consumed)
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := m.View()
 	if !strings.Contains(view, "Create Channel") {
@@ -1348,7 +1359,7 @@ func TestModel_ChannelCreatedMsg(t *testing.T) {
 	updated, cmd := m.Update(tui.ChannelCreatedMsg{
 		Channel: &model.Channel{ID: "ch-new", Name: "deploy", DisplayName: "Deploy", Type: "O"},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	wantMsg[tui.PostsLoadedMsg](t, cmd)
 	view := m.View()
@@ -1363,7 +1374,7 @@ func TestModel_ChannelCreatedMsg_Error(t *testing.T) {
 	updated, _ := m.Update(tui.ChannelCreatedMsg{
 		Err: &model.AppError{Message: "channel fail"},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := m.View()
 	if !strings.Contains(view, "channel fail") {
@@ -1526,14 +1537,14 @@ func TestModel_ClearErrMsg_ClearsError(t *testing.T) {
 	m := setupModel(t)
 	// Trigger an error
 	updated, _ := m.Update(tui.ErrMsg{Err: fmt.Errorf("bad request")})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	view := m.View()
 	if !strings.Contains(view, "bad request") {
 		t.Error("expected error in view")
 	}
 	// Clear with matching seq (seq=1 since this is the first error)
 	updated, _ = m.Update(tui.ClearErrMsg{Seq: 1})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	view = m.View()
 	if strings.Contains(view, "bad request") {
 		t.Error("expected error to be cleared")
@@ -1544,13 +1555,13 @@ func TestModel_ClearErrMsg_IgnoresStaleSeq(t *testing.T) {
 	m := setupModel(t)
 	// Trigger first error
 	updated, _ := m.Update(tui.ErrMsg{Err: fmt.Errorf("first error")})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	// Trigger second error (seq=2)
 	updated, _ = m.Update(tui.ErrMsg{Err: fmt.Errorf("second error")})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	// Clear with stale seq=1 (should be ignored)
 	updated, _ = m.Update(tui.ClearErrMsg{Seq: 1})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	view := m.View()
 	if !strings.Contains(view, "second error") {
 		t.Error("stale ClearErrMsg should not clear a newer error")
@@ -1584,13 +1595,13 @@ func TestModel_SendMsg_HashtagOnlyPreservesContent(t *testing.T) {
 
 	// Setup model state
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tui.UserLoadedMsg{User: &model.User{ID: "u1", Username: "alice"}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tui.TeamsLoadedMsg{Teams: []*model.Team{{ID: "t1", DisplayName: "Engineering"}}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tui.ChannelsLoadedMsg{TeamID: "t1", Channels: []*model.Channel{{ID: "c1", DisplayName: "General"}}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Send hashtag-only message
 	_, cmd := m.Update(input.SendMsg{Content: "#sometag"})
@@ -1636,13 +1647,13 @@ func TestModel_SendMsg_HashtagWithTextStripsCorrectly(t *testing.T) {
 	m := tui.NewModel(cfg, client, nil, s, nil, nil, nil)
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tui.UserLoadedMsg{User: &model.User{ID: "u1", Username: "alice"}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tui.TeamsLoadedMsg{Teams: []*model.Team{{ID: "t1", DisplayName: "Engineering"}}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tui.ChannelsLoadedMsg{TeamID: "t1", Channels: []*model.Channel{{ID: "c1", DisplayName: "General"}}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Send message with hashtag and text
 	_, cmd := m.Update(input.SendMsg{Content: "#sometag blah blah"})
@@ -1676,7 +1687,7 @@ func TestModel_SlashPrefixedMessageIsNotSwallowed(t *testing.T) {
 			m := setupModel(t)
 
 			updated, cmd := m.Update(input.SlashTriggerMsg{Input: content})
-			m = updated.(tui.Model)
+			m = asModel(t, updated)
 
 			if content == "/" {
 				// A bare slash browses instead of sending.
@@ -1702,7 +1713,7 @@ func TestModel_CommandChosenPrefillsInput(t *testing.T) {
 	updated, _ := m.Update(palette.CommandChosenMsg{
 		Command: &model.Command{ID: "cmd1", Slug: "invite"},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "/invite") {
@@ -1723,7 +1734,7 @@ func TestModel_CommandResponseIsDisplayed(t *testing.T) {
 			"command_slug": "invite",
 		},
 	}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "bob was added to the channel") {
@@ -1745,7 +1756,7 @@ func TestModel_CommandResponseForOtherChannelIsIgnored(t *testing.T) {
 			"channel_id": "other-channel",
 		},
 	}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if strings.Contains(testutil.StripANSI(m.View()), "secret from elsewhere") {
 		t.Error("a response for another channel was displayed")
@@ -1764,7 +1775,7 @@ func TestModel_ReplyButtonAppearsWhenHistoryFocused(t *testing.T) {
 	}
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if !strings.Contains(testutil.StripANSI(m.View()), "Reply") {
 		t.Errorf("Reply button missing after focusing history:\n%s",
@@ -1776,7 +1787,7 @@ func TestModel_ReplyButtonAppearsWhenHistoryFocused(t *testing.T) {
 func TestModel_ReplyButtonOpensThread(t *testing.T) {
 	m := setupModel(t)
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := testutil.StripANSI(m.View())
 	col := strings.Index(view[strings.LastIndex(view, "\n")+1:], "Reply")
@@ -1802,7 +1813,7 @@ func TestModel_TagPickerOpensFromThread(t *testing.T) {
 	updated, _ := m.Update(viewport.PostSelectedMsg{
 		Post: &model.Post{ID: "p1", UserID: "u1", Content: "root"},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	updated, _ = m.Update(tui.ThreadLoadedMsg{
 		PostID: "p1",
@@ -1810,13 +1821,13 @@ func TestModel_TagPickerOpensFromThread(t *testing.T) {
 			{ID: "p1", UserID: "u1", Content: "root", CreateAt: 1700000000000},
 		}},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if !strings.Contains(testutil.StripANSI(m.View()), "Filter tags") {
 		t.Errorf("tag picker did not open from the thread pane:\n%s",
@@ -1836,10 +1847,10 @@ func TestModel_SearchResultJumpsToPost(t *testing.T) {
 			{ID: "p2", UserID: "u1", Content: "needle here", CreateAt: 1700000001000},
 		}},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	updated, _ = m.Update(palette.PostChosenMsg{Post: &model.Post{ID: "p2"}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if got := m.SelectedPostID(); got != "p2" {
 		t.Errorf("selected post = %q, want p2", got)
@@ -1852,7 +1863,7 @@ func TestModel_SearchResultOutsideHistoryReportsError(t *testing.T) {
 	m := setupModel(t)
 
 	updated, cmd := m.Update(palette.PostChosenMsg{Post: &model.Post{ID: "ancient"}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if cmd == nil {
 		t.Error("no command returned; the user gets no feedback")
@@ -1869,9 +1880,9 @@ func setupModelWithWS(t *testing.T) (tui.Model, *mockWSClient) {
 	cfg := &config.Config{ServerURL: "http://localhost:8065"}
 	m := tui.NewModel(cfg, &mockClient{}, wsc, styles.New(theme.TokyoNight()), nil, nil, nil)
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tui.UserLoadedMsg{User: &model.User{ID: "u1", Username: "alice"}})
-	return updated.(tui.Model), wsc
+	return asModel(t, updated), wsc
 }
 
 // The client's channels outlive a sign-out, so the first session's listeners
@@ -1884,7 +1895,7 @@ func TestModel_WSListenersStartOnce(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("the first connect started no listeners")
 	}
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if _, cmd := m.Update(tui.WSConnectedMsg{}); cmd != nil {
 		t.Error("a second connect started another pair of listeners")
@@ -1897,7 +1908,7 @@ func TestModel_WSFirstDialFailureKeepsListening(t *testing.T) {
 	m, _ := setupModelWithWS(t)
 
 	updated, cmd := m.Update(tui.WSConnectedMsg{Err: errors.New("connection refused")})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	if cmd == nil {
 		t.Fatal("no listeners after a failed first dial")
 	}
@@ -1906,7 +1917,7 @@ func TestModel_WSFirstDialFailureKeepsListening(t *testing.T) {
 	}
 
 	updated, _ = m.Update(tui.WSStateMsg{Connected: true})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	if view := testutil.StripANSI(m.View()); !strings.Contains(view, "reconnected") {
 		t.Errorf("recovery not reported:\n%s", view)
 	}
@@ -1916,7 +1927,7 @@ func TestModel_WSFirstDialUnauthorizedPromptsLogin(t *testing.T) {
 	m, wsc := setupModelWithWS(t)
 
 	updated, _ := m.Update(tui.WSConnectedMsg{Err: fmt.Errorf("ws: %w (HTTP 401)", ws.ErrUnauthorized)})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	if view := testutil.StripANSI(m.View()); !strings.Contains(view, "Chit Login") {
 		t.Errorf("rejected credentials did not prompt sign-in:\n%s", view)
 	}
@@ -1930,10 +1941,10 @@ func TestModel_WSFirstDialUnauthorizedPromptsLogin(t *testing.T) {
 func TestModel_WSUnauthorizedKeepsTheStateListener(t *testing.T) {
 	m, _ := setupModelWithWS(t)
 	updated, _ := m.Update(tui.WSConnectedMsg{})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	updated, cmd := m.Update(tui.WSStateMsg{Unauthorized: true})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	if !strings.Contains(testutil.StripANSI(m.View()), "Chit Login") {
 		t.Error("socket expiry did not prompt sign-in")
 	}
@@ -1947,9 +1958,9 @@ func TestModel_WSUnauthorizedKeepsTheStateListener(t *testing.T) {
 func TestModel_WSListenersRearmWhileSignedOut(t *testing.T) {
 	m, _ := setupModelWithWS(t)
 	updated, _ := m.Update(tui.WSConnectedMsg{})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(input.SlashTriggerMsg{Input: "/logout"})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	if !strings.Contains(testutil.StripANSI(m.View()), "Chit Login") {
 		t.Fatal("not signed out")
 	}
@@ -1968,11 +1979,11 @@ func TestModel_DisconnectIsVisible(t *testing.T) {
 	m := setupModel(t)
 
 	updated, _ := m.Update(tui.WSConnectedMsg{})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	connected := testutil.StripANSI(m.View())
 
 	updated, _ = m.Update(tui.WSStateMsg{Connected: false})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	dropped := testutil.StripANSI(m.View())
 
 	if dropped == connected {
@@ -1989,10 +2000,10 @@ func TestModel_ReconnectBackfillsPosts(t *testing.T) {
 	m := setupModel(t)
 
 	updated, _ := m.Update(tui.WSStateMsg{Connected: false})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	updated, cmd := m.Update(tui.WSStateMsg{Connected: true})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if cmd == nil {
 		t.Fatal("reconnecting produced no commands; nothing was refetched")
@@ -2025,10 +2036,10 @@ func TestModel_DesyncResyncsWhileConnected(t *testing.T) {
 	// Already connected: this is not a reconnect, and the connected-state
 	// transition check would see no change and do nothing.
 	updated, _ := m.Update(tui.WSStateMsg{Connected: true})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	updated, cmd := m.Update(tui.WSStateMsg{Connected: true, Desynced: true})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if cmd == nil {
 		t.Fatal("a desync produced no commands; the stale view was never refetched")
@@ -2046,10 +2057,10 @@ func TestModel_DesyncNoticeIsNotAReconnectNotice(t *testing.T) {
 	m := setupModel(t)
 
 	updated, _ := m.Update(tui.WSStateMsg{Connected: true})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	updated, _ = m.Update(tui.WSStateMsg{Connected: true, Desynced: true})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if view := testutil.StripANSI(m.View()); strings.Contains(view, "reconnected") {
 		t.Errorf("desync reported as a reconnect:\n%s", view)
@@ -2062,7 +2073,7 @@ func TestModel_UnauthorizedTriggersReLogin(t *testing.T) {
 	m := setupModel(t)
 
 	updated, _ := m.Update(tui.WSStateMsg{Connected: false, Unauthorized: true})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if !strings.Contains(testutil.StripANSI(m.View()), "Chit Login") {
 		t.Errorf("expected the login screen:\n%s", testutil.StripANSI(m.View()))
@@ -2201,7 +2212,7 @@ func TestModel_OwnPostAppearsWithoutTheEcho(t *testing.T) {
 		Content: "sent while offline", CreateAt: 1700000009000}
 
 	updated, _ := m.Update(tui.PostCreatedMsg{Post: post})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if !strings.Contains(testutil.StripANSI(m.View()), "sent while offline") {
 		t.Errorf("own post not shown without the echo:\n%s", testutil.StripANSI(m.View()))
@@ -2216,7 +2227,7 @@ func TestModel_EchoDoesNotDuplicateOwnPost(t *testing.T) {
 		Content: "only once", CreateAt: 1700000009000}
 
 	updated, _ := m.Update(tui.PostCreatedMsg{Post: post})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	updated, _ = m.Update(tui.WebSocketEventMsg{Event: model.WebSocketEvent{
 		Event: model.WebSocketEventPosted,
@@ -2225,7 +2236,7 @@ func TestModel_EchoDoesNotDuplicateOwnPost(t *testing.T) {
 			"content": "only once", "create_at": 1700000009000,
 		},
 	}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if n := strings.Count(testutil.StripANSI(m.View()), "only once"); n != 1 {
 		t.Errorf("message appears %d times, want 1", n)
@@ -2241,7 +2252,7 @@ func TestModel_CommandResponsePostIsNotAppended(t *testing.T) {
 		ID: "cr1", ChannelID: "c1", UserID: "u1",
 		Type: "command_response", Content: "ephemeral reply",
 	}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if strings.Contains(testutil.StripANSI(m.View()), "ephemeral reply") {
 		t.Error("the command-response post was appended to the history")
@@ -2260,7 +2271,7 @@ func TestModel_PostEditedUpdatesInPlace(t *testing.T) {
 			"content": "edited text", "create_at": 1700000000000,
 		},
 	}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "edited text") {
@@ -2278,7 +2289,7 @@ func TestModel_PostDeletedRemovesIt(t *testing.T) {
 		Event: model.WebSocketEventPostDeleted,
 		Data:  map[string]any{"post_id": "p1", "channel_id": "c1"},
 	}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if strings.Contains(testutil.StripANSI(m.View()), "Hello") {
 		t.Errorf("deleted post is still shown:\n%s", testutil.StripANSI(m.View()))
@@ -2293,7 +2304,7 @@ func TestModel_ChannelUpdatedRenames(t *testing.T) {
 		Event: model.WebSocketEventChannelUpdated,
 		Data:  map[string]any{"id": "c1", "display_name": "Renamed Channel"},
 	}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if !strings.Contains(testutil.StripANSI(m.View()), "Renamed Channel") {
 		t.Errorf("rename not shown:\n%s", testutil.StripANSI(m.View()))
@@ -2309,7 +2320,7 @@ func TestModel_RemovedFromActiveChannel(t *testing.T) {
 		Event: model.WebSocketEventUserRemoved,
 		Data:  map[string]any{"channel_id": "c1", "user_id": "u1"},
 	}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if !strings.Contains(testutil.StripANSI(m.View()), "no longer available") {
 		t.Errorf("no explanation shown:\n%s", testutil.StripANSI(m.View()))
@@ -2324,7 +2335,7 @@ func TestModel_OtherUserRemovedRefetchesMembers(t *testing.T) {
 		Event: model.WebSocketEventUserRemoved,
 		Data:  map[string]any{"channel_id": "c1", "user_id": "someone-else"},
 	}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if cmd == nil {
 		t.Error("no refetch issued; the mention list stays stale")
@@ -2341,7 +2352,7 @@ func TestModel_ChannelDeletedMovesAway(t *testing.T) {
 		Event: model.WebSocketEventChannelDeleted,
 		Data:  map[string]any{"channel_id": "c1"},
 	}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if !strings.Contains(testutil.StripANSI(m.View()), "no longer available") {
 		t.Errorf("no explanation shown:\n%s", testutil.StripANSI(m.View()))
@@ -2364,12 +2375,12 @@ func TestModel_SendWhileEditingUpdatesThePost(t *testing.T) {
 	m := setupModel(t)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	updated, cmd := m.Update(input.SendMsg{Content: "revised text"})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	if cmd == nil {
 		t.Fatal("no command issued for the edit")
 	}
@@ -2377,7 +2388,7 @@ func TestModel_SendWhileEditingUpdatesThePost(t *testing.T) {
 	// Run it and feed the result back, as the runtime would.
 	if edited, ok := cmd().(tui.PostEditedMsg); ok {
 		updated, _ = m.Update(edited)
-		m = updated.(tui.Model)
+		m = asModel(t, updated)
 	} else {
 		t.Fatalf("expected PostEditedMsg, got %T", cmd())
 	}
@@ -2399,12 +2410,12 @@ func TestModel_CannotEditSomeoneElsesPost(t *testing.T) {
 			{ID: "p9", UserID: "someone-else", Content: "not mine", CreateAt: 1700000000000},
 		}},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if cmd != nil {
 		t.Error("delete was issued for another user's post")
@@ -2418,7 +2429,7 @@ func TestModel_DeleteRemovesOwnPost(t *testing.T) {
 	m := setupModel(t)
 
 	updated, _ := m.Update(tui.PostDeletedMsg{PostID: "p1"})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if strings.Contains(testutil.StripANSI(m.View()), "Hello") {
 		t.Errorf("post still shown after delete:\n%s", testutil.StripANSI(m.View()))
@@ -2446,10 +2457,10 @@ func TestModel_ScrollingToTopLoadsOlderPosts(t *testing.T) {
 	updated, _ := m.Update(tui.PostsLoadedMsg{
 		ChannelID: "c1", Posts: &model.PostList{Order: fullPage(t, "recent", 60)},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Scroll to the very top.
 	var cmd tea.Cmd
@@ -2457,7 +2468,7 @@ func TestModel_ScrollingToTopLoadsOlderPosts(t *testing.T) {
 		updated, cmd = m.Update(tea.MouseMsg{
 			X: 5, Y: 5, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp,
 		})
-		m = updated.(tui.Model)
+		m = asModel(t, updated)
 		if cmd != nil {
 			break
 		}
@@ -2494,13 +2505,13 @@ func TestModel_OlderPostsArePrepended(t *testing.T) {
 	updated, _ := m.Update(tui.PostsLoadedMsg{
 		ChannelID: "c1", Posts: &model.PostList{Order: fullPage(t, "recent", 60)},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	updated, _ = m.Update(tui.OlderPostsLoadedMsg{
 		ChannelID: "c1", Page: 1,
 		Posts: &model.PostList{Order: fullPage(t, "older", 60)},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if !strings.Contains(testutil.StripANSI(m.View()), "recent message") {
 		t.Error("the current page was replaced instead of extended")
@@ -2514,17 +2525,17 @@ func TestModel_ShortPageStopsPaging(t *testing.T) {
 	updated, _ := m.Update(tui.PostsLoadedMsg{
 		ChannelID: "c1", Posts: &model.PostList{Order: fullPage(t, "recent", 3)},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	for range 50 {
 		var cmd tea.Cmd
 		updated, cmd = m.Update(tea.MouseMsg{
 			X: 5, Y: 5, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp,
 		})
-		m = updated.(tui.Model)
+		m = asModel(t, updated)
 		if cmd != nil {
 			t.Fatal("kept paging after a short first page")
 		}
@@ -2539,13 +2550,13 @@ func TestModel_OlderPostsForAnotherChannelIgnored(t *testing.T) {
 	updated, _ := m.Update(tui.PostsLoadedMsg{
 		ChannelID: "c1", Posts: &model.PostList{Order: fullPage(t, "recent", 60)},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	updated, _ = m.Update(tui.OlderPostsLoadedMsg{
 		ChannelID: "other", Page: 1,
 		Posts: &model.PostList{Order: fullPage(t, "elsewhere", 60)},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if strings.Contains(testutil.StripANSI(m.View()), "elsewhere message") {
 		t.Error("a page for another channel was spliced in")
@@ -2560,7 +2571,7 @@ func TestModel_ChannelViewedErrorIsReported(t *testing.T) {
 	updated, _ := m.Update(tui.ChannelViewedMsg{
 		ChannelID: "c1", Err: errors.New("boom"),
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if !strings.Contains(testutil.StripANSI(m.View()), "mark the channel read") {
 		t.Errorf("no explanation shown:\n%s", testutil.StripANSI(m.View()))
@@ -2574,7 +2585,7 @@ func TestModel_TagLoadErrorIsReported(t *testing.T) {
 	updated, _ := m.Update(tui.PostTagsLoadedMsg{
 		PostID: "p1", Err: errors.New("boom"),
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if !strings.Contains(testutil.StripANSI(m.View()), "load tags") {
 		t.Errorf("no explanation shown:\n%s", testutil.StripANSI(m.View()))
@@ -2621,7 +2632,7 @@ func TestModel_SessionExpiryFromAnyRequest(t *testing.T) {
 			m := setupModel(t)
 
 			updated, _ := m.Update(tc.msg)
-			m = updated.(tui.Model)
+			m = asModel(t, updated)
 
 			if !strings.Contains(testutil.StripANSI(m.View()), "Chit Login") {
 				t.Errorf("expiry noticed by %s did not prompt re-login:\n%s",
@@ -2641,10 +2652,10 @@ func TestModel_PinWorksOnAnyPost(t *testing.T) {
 			{ID: "p9", UserID: "someone-else", Content: "not mine", CreateAt: 1700000000000},
 		}},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
 	if cmd == nil {
@@ -2666,7 +2677,7 @@ func TestModel_PinEventUsesPostIDPayload(t *testing.T) {
 		Event: model.WebSocketEventPostPinned,
 		Data:  map[string]any{"post_id": "p1", "channel_id": "c1"},
 	}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if !strings.Contains(testutil.StripANSI(m.View()), "[pinned]") {
 		t.Errorf("pin badge not shown:\n%s", testutil.StripANSI(m.View()))
@@ -2676,7 +2687,7 @@ func TestModel_PinEventUsesPostIDPayload(t *testing.T) {
 		Event: model.WebSocketEventPostUnpinned,
 		Data:  map[string]any{"post_id": "p1", "channel_id": "c1"},
 	}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if strings.Contains(testutil.StripANSI(m.View()), "[pinned]") {
 		t.Errorf("pin badge still shown after unpin:\n%s", testutil.StripANSI(m.View()))
@@ -2695,12 +2706,12 @@ func TestModel_GlobalSearchResultSwitchesChannel(t *testing.T) {
 			{ID: "c2", DisplayName: "Elsewhere"},
 		},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	updated, cmd := m.Update(palette.PostChosenMsg{
 		Post: &model.Post{ID: "far", ChannelID: "c2"},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if cmd == nil {
 		t.Fatal("choosing a result in another channel did nothing")
@@ -2727,7 +2738,7 @@ func TestModel_SearchEverywhereUsesTheGlobalEndpoint(t *testing.T) {
 func TestModel_SearchEverywhereWithoutActiveChannel(t *testing.T) {
 	m := testModel()
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	_, cmd := m.Update(palette.SearchSubmitMsg{Term: "needle", Everywhere: true})
 	if cmd == nil {
@@ -2755,7 +2766,7 @@ func TestModel_LeftChannelIsRemovedLocally(t *testing.T) {
 	m := setupModel(t)
 
 	updated, _ := m.Update(tui.ChannelLeftMsg{ChannelID: "c1"})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if !strings.Contains(testutil.StripANSI(m.View()), "no longer available") {
 		t.Errorf("no explanation after leaving:\n%s", testutil.StripANSI(m.View()))
@@ -2793,7 +2804,7 @@ func openGroupPicker(t *testing.T, m tui.Model) tui.Model {
 	t.Helper()
 
 	updated, _ := m.Update(input.SlashTriggerMsg{Input: "/group"})
-	return updated.(tui.Model)
+	return asModel(t, updated)
 }
 
 // CreateGroupChannel was implemented, tested, and reachable over REST, but
@@ -2856,7 +2867,7 @@ func TestModel_GroupBelowThreeIsRefusedLocally(t *testing.T) {
 	updated, _ := m.Update(dmpicker.MembersPickedMsg{Users: []*model.User{
 		{ID: "u2", Username: "bob"},
 	}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if client.calls != 0 {
 		t.Errorf("CreateGroupChannel called with %v; a pair is a DM", client.gotIDs)
@@ -2873,7 +2884,7 @@ func TestModel_AbandonedGroupPickCreatesNothing(t *testing.T) {
 	m = openGroupPicker(t, m)
 
 	updated, cmd := m.Update(dmpicker.CancelledMsg{})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	if cmd != nil {
 		cmd()
 	}
@@ -2950,7 +2961,7 @@ func TestModel_ProfileUpdateRefreshesTheView(t *testing.T) {
 	updated, _ := m.Update(tui.ProfileUpdatedMsg{
 		User: &model.User{ID: "u1", Username: "alicea", DisplayName: "Alice Anderson"},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "alicea") {
@@ -2967,7 +2978,7 @@ func TestModel_ProfileCommandsRefuseEmptyArguments(t *testing.T) {
 	for _, cmdText := range []string{"/nick", "/username", "/nick   "} {
 		m := setupModel(t)
 		updated, _ := m.Update(input.SlashTriggerMsg{Input: cmdText})
-		m = updated.(tui.Model)
+		m = asModel(t, updated)
 
 		if view := testutil.StripANSI(m.View()); !strings.Contains(view, "usage:") {
 			t.Errorf("%q gave no usage hint:\n%s", cmdText, view)
@@ -2982,7 +2993,7 @@ func TestModel_UsernameRejectsSpaces(t *testing.T) {
 	m := modelWithClient(t, client)
 
 	updated, _ := m.Update(input.SlashTriggerMsg{Input: "/username Alice Anderson"})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "cannot contain spaces") {
@@ -3009,7 +3020,7 @@ func TestModel_ThreadsCommandOpensTheInbox(t *testing.T) {
 	m := setupModel(t)
 
 	updated, cmd := m.Update(input.SlashTriggerMsg{Input: "/threads"})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	if cmd == nil {
 		t.Fatal("/threads produced no command; the list was never fetched")
 	}
@@ -3020,7 +3031,7 @@ func TestModel_ThreadsCommandOpensTheInbox(t *testing.T) {
 	updated, _ = m.Update(tui.ThreadsLoadedMsg{
 		Threads: []*model.ThreadResponse{inboxThread("p9", "c1", "the deploy is stuck", 300, 100)},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "the deploy is stuck") {
@@ -3044,12 +3055,12 @@ func TestModel_OpeningAnInboxThreadSwitchesChannel(t *testing.T) {
 	m := modelWithClient(t, client)
 
 	updated, _ := m.Update(tui.TeamsLoadedMsg{Teams: []*model.Team{{ID: "t1", DisplayName: "Eng"}}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tui.ChannelsLoadedMsg{TeamID: "t1", Channels: client.channels})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	updated, cmd := m.Update(threadinbox.ThreadChosenMsg{RootID: "p9", ChannelID: "c2"})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	if cmd == nil {
 		t.Fatal("choosing a thread produced no command")
 	}
@@ -3070,7 +3081,7 @@ func TestModel_UnfollowFromTheInboxReachesTheServer(t *testing.T) {
 	m := modelWithClient(t, client)
 
 	updated, _ := m.Update(tui.TeamsLoadedMsg{Teams: []*model.Team{{ID: "t1", DisplayName: "Eng"}}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	_, cmd := m.Update(threadinbox.FollowToggledMsg{RootID: "p9", Following: false})
 	if cmd == nil {
@@ -3091,12 +3102,12 @@ func TestModel_ThreadsInboxShowsDirectThreads(t *testing.T) {
 	m := setupModel(t)
 
 	updated, _ := m.Update(input.SlashTriggerMsg{Input: "/threads"})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tui.ThreadsLoadedMsg{
 		Threads: []*model.ThreadResponse{inboxThread("p1", "c1", "team thread", 300, 100)},
 		Direct:  []*model.ThreadResponse{inboxThread("p2", "dm1", "dm thread", 300, 100)},
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := testutil.StripANSI(m.View())
 	for _, want := range []string{"In Engineering", "team thread", "Direct messages", "dm thread"} {
@@ -3112,7 +3123,7 @@ func TestModel_ThreadsWithoutATeamStillOpens(t *testing.T) {
 	m := modelWithClient(t, client)
 
 	updated, cmd := m.Update(input.SlashTriggerMsg{Input: "/threads"})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	if cmd == nil {
 		t.Fatal("/threads produced no command")
 	}
@@ -3129,7 +3140,7 @@ func TestModel_DirectThreadReadAndUnfollowWithoutATeam(t *testing.T) {
 	m := modelWithClient(t, client)
 
 	updated, cmd := m.Update(threadinbox.ThreadChosenMsg{RootID: "p2", ChannelID: "dm1"})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	drain(cmd)
 	_, cmd = m.Update(threadinbox.FollowToggledMsg{RootID: "p2", Following: false})
 	drain(cmd)
@@ -3148,9 +3159,9 @@ func TestModel_ThreadFetchFailureIsReported(t *testing.T) {
 	m := setupModel(t)
 
 	updated, _ := m.Update(input.SlashTriggerMsg{Input: "/threads"})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tui.ThreadsLoadedMsg{Err: errors.New("boom")})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := testutil.StripANSI(m.View())
 	if strings.Contains(view, "Loading") {
@@ -3159,4 +3170,14 @@ func TestModel_ThreadFetchFailureIsReported(t *testing.T) {
 	if !strings.Contains(view, "boom") {
 		t.Errorf("the failure is not reported:\n%s", view)
 	}
+}
+
+// mustMsg returns msg as a T, failing the test when it is something else.
+func mustMsg[T any](t *testing.T, msg tea.Msg) T {
+	t.Helper()
+	got, ok := msg.(T)
+	if !ok {
+		t.Fatalf("msg = %T, want %T", msg, got)
+	}
+	return got
 }

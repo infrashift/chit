@@ -73,12 +73,12 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 	case model.WebSocketEventPostPinned, model.WebSocketEventPostUnpinned:
 		// Unlike an edit, these carry only an ID, so the flag is flipped on
 		// the post already held rather than replacing it.
-		if postID, _ := evt.Data["post_id"].(string); postID != "" {
+		if postID := dataString(evt.Data, "post_id"); postID != "" {
 			m.viewport.SetPinned(postID, evt.Event == model.WebSocketEventPostPinned)
 		}
 
 	case model.WebSocketEventPostDeleted:
-		postID, _ := evt.Data["post_id"].(string)
+		postID := dataString(evt.Data, "post_id")
 		if postID != "" {
 			m.viewport.RemovePost(postID)
 			// Leave a thread whose root just disappeared, rather than
@@ -97,14 +97,14 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case model.WebSocketEventChannelDeleted:
-		channelID, _ := evt.Data["channel_id"].(string)
+		channelID := dataString(evt.Data, "channel_id")
 		if channelID != "" {
 			cmds = append(cmds, m.removeChannel(channelID)...)
 		}
 
 	case model.WebSocketEventUserRemoved:
-		channelID, _ := evt.Data["channel_id"].(string)
-		userID, _ := evt.Data["user_id"].(string)
+		channelID := dataString(evt.Data, "channel_id")
+		userID := dataString(evt.Data, "user_id")
 		if m.me != nil && userID == m.me.ID {
 			// Removed from a channel: it is no longer reachable.
 			cmds = append(cmds, m.removeChannel(channelID)...)
@@ -120,9 +120,9 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 		// Ephemeral: broadcast to the invoking user only, never persisted.
 		// It is shown as a post so multi-line output such as /help stays
 		// readable, and it disappears on the next channel load.
-		text, _ := evt.Data["text"].(string)
-		channelID, _ := evt.Data["channel_id"].(string)
-		slug, _ := evt.Data["command_slug"].(string)
+		text := dataString(evt.Data, "text")
+		channelID := dataString(evt.Data, "channel_id")
+		slug := dataString(evt.Data, "command_slug")
 
 		if text != "" && m.activeChan != nil && channelID == m.activeChan.ID {
 			author := m.commandAuthor(slug)
@@ -143,8 +143,8 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 		// Tags are applied after a post is created, so a post arrives
 		// untagged and its tags follow in this event. It carries the whole
 		// list, which replaces what is shown.
-		postID, _ := evt.Data["post_id"].(string)
-		channelID, _ := evt.Data["channel_id"].(string)
+		postID := dataString(evt.Data, "post_id")
+		channelID := dataString(evt.Data, "channel_id")
 		if postID == "" || m.activeChan == nil || channelID != m.activeChan.ID {
 			break
 		}
@@ -178,7 +178,7 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 		// The server names the channel in the data; the broadcast only
 		// addresses the mentioned user. Reading the channel from the
 		// broadcast found nothing, so live mentions were never counted.
-		chanID, _ := evt.Data["channel_id"].(string)
+		chanID := dataString(evt.Data, "channel_id")
 		if chanID == "" && evt.Broadcast != nil {
 			chanID = evt.Broadcast.ChannelID
 		}
@@ -188,8 +188,8 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case model.WebSocketEventUserAdded:
-		userID, _ := evt.Data["user_id"].(string)
-		channelID, _ := evt.Data["channel_id"].(string)
+		userID := dataString(evt.Data, "user_id")
+		channelID := dataString(evt.Data, "channel_id")
 		switch {
 		case m.me != nil && userID == m.me.ID:
 			// The event names the channel but not its team, so every team
@@ -207,8 +207,8 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case model.WebSocketEventChannelCreated:
-		kind, _ := evt.Data["type"].(string)
-		teamID, _ := evt.Data["team_id"].(string)
+		kind := dataString(evt.Data, "type")
+		teamID := dataString(evt.Data, "team_id")
 		switch kind {
 		case model.ChannelDirect, model.ChannelGroup:
 			cmds = append(cmds, FetchDMChannels(m.reqCtx(), m.client))
@@ -321,4 +321,14 @@ func (m Model) handleWSConnected(msg WSConnectedMsg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.setError(fmt.Errorf("real-time updates are offline, retrying: %w", msg.Err)))
 	}
 	return m, tea.Batch(cmds...)
+}
+
+// dataString returns the string at key in an event's data, or "" when the
+// key is missing or holds something else.
+func dataString(data map[string]any, key string) string {
+	s, ok := data[key].(string)
+	if !ok {
+		return ""
+	}
+	return s
 }

@@ -29,7 +29,10 @@ func TestWebhookDispatcher_Delivery(t *testing.T) {
 		callCount++
 		gotContentType = r.Header.Get("Content-Type")
 		gotSignature = r.Header.Get("X-Chit-Signature")
-		gotBody, _ = io.ReadAll(r.Body)
+		var err error
+		if gotBody, err = io.ReadAll(r.Body); err != nil {
+			t.Errorf("read body: %v", err)
+		}
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()

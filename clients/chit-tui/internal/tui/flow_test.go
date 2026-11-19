@@ -34,7 +34,11 @@ func runningProgram(t *testing.T) *teatest.TestModel {
 	m := tui.NewModel(&config.Config{ServerURL: "http://localhost:8065"}, client, nil,
 		testutil.Styles(), nil, nil, nil)
 	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(120, 40))
-	t.Cleanup(func() { _ = tm.Quit() })
+	t.Cleanup(func() {
+		if err := tm.Quit(); err != nil {
+			t.Errorf("quit: %v", err)
+		}
+	})
 	return tm
 }
 
@@ -102,7 +106,7 @@ func finalViewAfter(t *testing.T, tm *teatest.TestModel, want string) string {
 	for time.Now().Before(deadline) {
 		time.Sleep(50 * time.Millisecond)
 		tm.Send(probeMsg{})
-		if strings.Contains(lastFrame(tm), want) {
+		if strings.Contains(lastFrame(t, tm), want) {
 			break
 		}
 	}
@@ -111,8 +115,11 @@ func finalViewAfter(t *testing.T, tm *teatest.TestModel, want string) string {
 
 type probeMsg struct{}
 
-func lastFrame(tm *teatest.TestModel) string {
+func lastFrame(t *testing.T, tm *teatest.TestModel) string {
+	t.Helper()
 	var buf bytes.Buffer
-	_, _ = buf.ReadFrom(tm.Output())
+	if _, err := buf.ReadFrom(tm.Output()); err != nil {
+		t.Fatalf("read output: %v", err)
+	}
 	return testutil.StripANSI(buf.String())
 }

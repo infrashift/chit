@@ -9,6 +9,7 @@ import (
 	bvp "github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
+	"github.com/infrashift/chit/clients/chit-tui/internal/errlog"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/post"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
@@ -175,12 +176,19 @@ func (m *Model) allPosts() []*model.Post {
 
 func (m *Model) ensureRenderer() {
 	if m.renderer == nil {
-		m.renderer, _ = glamour.NewTermRenderer(
+		r, err := glamour.NewTermRenderer(
 			glamour.WithStyles(m.styles.MarkdownStyleConfig),
 			glamour.WithWordWrap(max(m.width-10, 20)),
 			glamour.WithPreservedNewLines(),
 			glamour.WithEmoji(),
 		)
+		if err != nil {
+			// The renderer stays nil: posts show as plain text, and the
+			// next update tries again.
+			errlog.Debug(err, "create thread markdown renderer")
+			return
+		}
+		m.renderer = r
 	}
 }
 

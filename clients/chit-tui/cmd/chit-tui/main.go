@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"log"
 	"os"
 	"regexp"
 
@@ -23,6 +23,11 @@ var termResponseRe = regexp.MustCompile(
 )
 
 func main() {
+	// stderr reports problems found before the program starts. log.Logger
+	// with no prefix and no flags writes the same text fmt.Fprintf did, and
+	// it has no error to drop.
+	stderr := log.New(os.Stderr, "", 0)
+
 	opts, err := parseFlags(os.Stderr, os.Args[1:])
 	if err != nil {
 		// flag already reported the problem and printed usage.
@@ -38,10 +43,10 @@ func main() {
 	// Warnings describe settings that were ignored. They are printed even when
 	// the load then fails, since an ignored setting is often the reason.
 	for _, w := range warnings {
-		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+		stderr.Printf("warning: %s\n", w)
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
+		stderr.Printf("config error: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -49,10 +54,10 @@ func main() {
 	// the terminal, and the reply would land in the input stream otherwise.
 	activeTheme, themeWarnings, err := resolveTheme(opts, cfg)
 	for _, w := range themeWarnings {
-		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+		stderr.Printf("warning: %s\n", w)
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "theme error: %v\n", err)
+		stderr.Printf("theme error: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -80,7 +85,7 @@ func main() {
 
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg { return filterInput(msg) }))
 	if _, err := p.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		stderr.Printf("error: %v\n", err)
 		os.Exit(1)
 	}
 }

@@ -18,7 +18,7 @@ import (
 func readEvents(t *testing.T, conn *gws.Conn, want string) []model.WebSocketEvent {
 	t.Helper()
 	var got []model.WebSocketEvent
-	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	readDeadlineOK(t, conn, 3*time.Second)
 	for {
 		var evt model.WebSocketEvent
 		if err := conn.ReadJSON(&evt); err != nil {
@@ -45,20 +45,27 @@ func TestCreateReplyBroadcastsThreadUpdated(t *testing.T) {
 		t.Fatalf("dial: %v", err)
 	}
 	if resp != nil && resp.Body != nil {
-		_ = resp.Body.Close()
+		if err = resp.Body.Close(); err != nil {
+			t.Errorf("close handshake response body: %v", err)
+		}
 	}
-	defer func() { _ = conn.Close() }()
+	defer closeOK(t, conn, "websocket")
 	time.Sleep(50 * time.Millisecond) // let the hub register the client
 
 	body := `{"channel_id":"` + testChannelID + `","root_id":"` + testRootPost + `","content":"a reply"}`
-	req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL+"/api/v1/posts", strings.NewReader(body))
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL+"/api/v1/posts", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
 	req.Header = header.Clone()
 	req.Header.Set("Content-Type", "application/json")
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = res.Body.Close()
+	if err := res.Body.Close(); err != nil {
+		t.Errorf("close response body: %v", err)
+	}
 	if res.StatusCode != http.StatusCreated {
 		t.Fatalf("create reply: status %d", res.StatusCode)
 	}
@@ -67,11 +74,14 @@ func TestCreateReplyBroadcastsThreadUpdated(t *testing.T) {
 	if len(events) == 0 || events[len(events)-1].Event != model.WebSocketEventThreadUpdated {
 		t.Fatalf("no thread_updated; got %+v", events)
 	}
-	thread, _ := events[len(events)-1].Data["thread"].(map[string]any)
+	thread, ok := events[len(events)-1].Data["thread"].(map[string]any)
+	if !ok {
+		t.Fatalf("thread_updated has no thread object: %+v", events[len(events)-1].Data)
+	}
 	if thread["post_id"] != testRootPost {
 		t.Errorf("thread_updated for %v, want the root %s", thread["post_id"], testRootPost)
 	}
-	if n, _ := thread["reply_count"].(float64); n < 1 {
+	if n, ok := thread["reply_count"].(float64); !ok || n < 1 {
 		t.Errorf("reply_count = %v, want the new reply counted", thread["reply_count"])
 	}
 	if _, has := events[len(events)-1].Data["post"]; has {
@@ -88,23 +98,30 @@ func dialAs(t *testing.T, srv *httptest.Server) *gws.Conn {
 		t.Fatalf("dial: %v", err)
 	}
 	if resp != nil && resp.Body != nil {
-		_ = resp.Body.Close()
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close handshake response body: %v", err)
+		}
 	}
-	t.Cleanup(func() { _ = conn.Close() })
+	t.Cleanup(func() { closeOK(t, conn, "websocket") })
 	time.Sleep(50 * time.Millisecond) // let the hub register the client
 	return conn
 }
 
 func send(t *testing.T, method, url, body string) {
 	t.Helper()
-	req, _ := http.NewRequestWithContext(t.Context(), method, url, strings.NewReader(body))
+	req, err := http.NewRequestWithContext(t.Context(), method, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
 	req.Header.Set("X-User-Id", testKratosID)
 	req.Header.Set("Content-Type", "application/json")
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = res.Body.Close()
+	if err := res.Body.Close(); err != nil {
+		t.Errorf("close response body: %v", err)
+	}
 	if res.StatusCode >= 300 {
 		t.Fatalf("%s %s: status %d", method, url, res.StatusCode)
 	}
@@ -112,11 +129,20 @@ func send(t *testing.T, method, url, body string) {
 
 func tagNames(t *testing.T, evt model.WebSocketEvent) []string {
 	t.Helper()
-	raw, _ := evt.Data["tags"].([]any)
+	raw, ok := evt.Data["tags"].([]any)
+	if !ok {
+		t.Fatalf("%s has no tag list: %+v", evt.Event, evt.Data)
+	}
 	names := []string{}
 	for _, r := range raw {
-		tag, _ := r.(map[string]any)
-		name, _ := tag["name"].(string)
+		tag, ok := r.(map[string]any)
+		if !ok {
+			t.Fatalf("tag %v is not an object", r)
+		}
+		name, ok := tag["name"].(string)
+		if !ok {
+			t.Fatalf("tag %v has no name", tag)
+		}
 		names = append(names, name)
 	}
 	return names

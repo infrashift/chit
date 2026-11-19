@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/infrashift/chit/clients/chit-tui/internal/errlog"
 )
 
 // themeSettingRe matches an existing top-level assignment of each theme
@@ -71,10 +73,10 @@ func writeConfig(path, body string) error {
 
 	// Cleanup is best-effort: the write has already failed by the time it
 	// runs, and a leftover temp file is not worth masking the real error.
-	discard := func() { _ = os.Remove(tmpName) }
+	discard := func() { errlog.Debug(os.Remove(tmpName), "remove temp config") }
 
 	if _, err := tmp.WriteString(body); err != nil {
-		_ = tmp.Close()
+		errlog.Debug(tmp.Close(), "close temp config")
 		discard()
 		return fmt.Errorf("write temp config: %w", err)
 	}

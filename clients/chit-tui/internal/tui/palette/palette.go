@@ -523,8 +523,7 @@ func (m Model) maxVisibleRows() int {
 
 // windowStart is the index of the first visible row, keeping the cursor in view.
 func (m Model) windowStart() int {
-	start, _ := listwin.Window(m.cursor, len(m.rows), m.maxVisibleRows())
-	return start
+	return listwin.Start(m.cursor, len(m.rows), m.maxVisibleRows())
 }
 
 // contextLine renders the second line of the palette body.

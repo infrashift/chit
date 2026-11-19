@@ -26,5 +26,6 @@ vocabulary: {
 	// chit concepts.
 	provisioning: true // the first-request creation of a user from a Kratos identity
 	conversation: true // a HALO Conversation: a private channel for one person
+	integration:  true // the integration tests and the integration build tag
 	marketing:    true // the marketing words of the style rules
 }

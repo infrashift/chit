@@ -58,7 +58,9 @@ func TestFetchKratosIdentity_BothSchemaSpellings(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(
 				func(w http.ResponseWriter, _ *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
-					_, _ = w.Write([]byte(`{"traits":` + tc.traits + `}`))
+					if _, err := w.Write([]byte(`{"traits":` + tc.traits + `}`)); err != nil {
+						t.Errorf("write: %v", err)
+					}
 				}))
 			defer srv.Close()
 
@@ -84,9 +86,11 @@ func TestFetchKratosIdentity_ClusterTraitsDoNotBreakDecoding(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(
 		func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"traits":{"username":"erin","name":"Erin E",` +
+			if _, err := w.Write([]byte(`{"traits":{"username":"erin","name":"Erin E",` +
 				`"email":"erin@test.com","role":"auditor","kind":"agent",` +
-				`"pubkey":"0123456789abcdef"}}`))
+				`"pubkey":"0123456789abcdef"}}`)); err != nil {
+				t.Errorf("write: %v", err)
+			}
 		}))
 	defer srv.Close()
 

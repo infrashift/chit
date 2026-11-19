@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -23,7 +24,12 @@ func run(m *testing.M) int {
 	if err != nil {
 		panic(err)
 	}
-	defer func() { _ = os.RemoveAll(dir) }()
+	defer func() {
+		// Too late to fail the run; say so, so the leftover can be found.
+		if err := os.RemoveAll(dir); err != nil {
+			fmt.Fprintf(os.Stderr, "remove test home %s: %v\n", dir, err)
+		}
+	}()
 
 	if err := os.Setenv("CHIT_CONFIG_FILE", filepath.Join(dir, "absent.toml")); err != nil {
 		panic(err)

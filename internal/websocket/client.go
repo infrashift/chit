@@ -7,6 +7,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/infrashift/chit/internal/errlog"
 	"github.com/infrashift/chit/internal/model"
 )
 
@@ -46,13 +47,13 @@ func (c *Client) Start() {
 func (c *Client) readPump() {
 	defer func() {
 		c.hub.Unregister(c)
-		_ = c.conn.Close()
+		errlog.Close(c.conn, "websocket connection (read pump)")
 	}()
 
 	c.conn.SetReadLimit(4096)
 	// A failed deadline means the conn is already broken; the next read
 	// returns that error and ends the pump.
-	_ = c.conn.SetReadDeadline(time.Now().Add(c.pingInterval * 2))
+	errlog.Debug(c.conn.SetReadDeadline(time.Now().Add(c.pingInterval*2)), "websocket set read deadline")
 	c.conn.SetPongHandler(func(string) error {
 		return c.conn.SetReadDeadline(time.Now().Add(c.pingInterval * 2))
 	})
@@ -81,7 +82,7 @@ func (c *Client) writePump() {
 	ticker := time.NewTicker(c.pingInterval)
 	defer func() {
 		ticker.Stop()
-		_ = c.conn.Close()
+		errlog.Close(c.conn, "websocket connection (write pump)")
 	}()
 
 	for {
@@ -92,7 +93,7 @@ func (c *Client) writePump() {
 			}
 			if !ok {
 				// The hub closed send; tell the peer, best effort.
-				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				errlog.Debug(c.conn.WriteMessage(websocket.CloseMessage, []byte{}), "websocket write close message")
 				return
 			}
 

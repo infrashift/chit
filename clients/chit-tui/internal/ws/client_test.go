@@ -3,6 +3,8 @@ package ws_test
 import (
 	"encoding/json"
 	"errors"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -25,11 +27,30 @@ func newTestWSServer(t *testing.T, handler func(*websocket.Conn)) *httptest.Serv
 			t.Logf("upgrade error: %v", err)
 			return
 		}
-		defer func() { _ = conn.Close() }()
+		defer closeWS(t, conn, "server connection")
 		handler(conn)
 	}))
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// closeWS closes c and reports a failure. A connection that was already
+// closed, by a handler hanging up or by the other side, is not a failure.
+func closeWS(t *testing.T, c io.Closer, what string) {
+	t.Helper()
+	if err := c.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+		t.Errorf("close %s: %v", what, err)
+	}
+}
+
+// marshalEvent encodes evt for a test server to send.
+func marshalEvent(t *testing.T, evt model.WebSocketEvent) []byte {
+	t.Helper()
+	data, err := json.Marshal(evt)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	return data
 }
 
 func wsURL(srv *httptest.Server) string {
@@ -59,9 +80,12 @@ func TestWSClient_ConnectAndReceive(t *testing.T) {
 		Data:     map[string]any{"post": "data"},
 	}
 
+	data := marshalEvent(t, evt)
 	srv := newTestWSServer(t, func(conn *websocket.Conn) {
-		data, _ := json.Marshal(evt)
-		_ = conn.WriteMessage(websocket.TextMessage, data)
+		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+			t.Errorf("write event: %v", err)
+			return
+		}
 		// Keep connection alive briefly.
 		time.Sleep(100 * time.Millisecond)
 	})
@@ -70,7 +94,7 @@ func TestWSClient_ConnectAndReceive(t *testing.T) {
 	if err := client.Connect(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = client.Close() }()
+	defer closeWS(t, client, "client")
 
 	select {
 	case got := <-client.Events():
@@ -149,14 +173,18 @@ func TestWSClient_ReconnectsAfterDrop(t *testing.T) {
 		Data:     map[string]any{"post": "reconnected"},
 	}
 
+	data := marshalEvent(t, evt)
 	srv := newTestWSServer(t, func(conn *websocket.Conn) {
 		connections <- conn
-		// Send one event then close (simulating server drop)
-		data, _ := json.Marshal(evt)
-		_ = conn.WriteMessage(websocket.TextMessage, data)
+		// Send one event then close (simulating server drop). A write that
+		// fails ends the handler: a later session may still be running when
+		// the test is over, and must not report then.
+		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+			return
+		}
 		// Wait a moment then close to trigger reconnect
 		time.Sleep(50 * time.Millisecond)
-		_ = conn.Close()
+		closeWS(t, conn, "server connection")
 		// The handler returns but the server stays up,
 		// so the client can reconnect to a new handler invocation.
 	})
@@ -165,7 +193,7 @@ func TestWSClient_ReconnectsAfterDrop(t *testing.T) {
 	if err := client.Connect(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = client.Close() }()
+	defer closeWS(t, client, "client")
 
 	// Wait for first connection
 	select {
@@ -210,7 +238,7 @@ func TestWSClient_CloseStopsReconnect(t *testing.T) {
 		dials++
 		mu.Unlock()
 		// Hang up at once, so the client is always about to redial.
-		_ = conn.Close()
+		closeWS(t, conn, "server connection")
 	})
 
 	c := fastClient(srv, 8, time.Minute)
@@ -242,12 +270,12 @@ func TestConnStateReportsConnectAndDrop(t *testing.T) {
 			return
 		}
 		// Accept, then hang up, which is what a server restart looks like.
-		_ = conn.Close()
+		closeWS(t, conn, "server connection")
 	}))
 	defer srv.Close()
 
 	c := ws.NewWSClient("ws"+strings.TrimPrefix(srv.URL, "http"), "token", 8)
-	defer func() { _ = c.Close() }()
+	defer closeWS(t, c, "client")
 
 	if err := c.Connect(); err != nil {
 		t.Fatalf("Connect: %v", err)
@@ -288,7 +316,7 @@ func TestConnStateReportsUnauthorized(t *testing.T) {
 			if err != nil {
 				return
 			}
-			_ = conn.Close()
+			closeWS(t, conn, "server connection")
 			return
 		}
 		// The reconnect attempt is rejected.
@@ -297,7 +325,7 @@ func TestConnStateReportsUnauthorized(t *testing.T) {
 	defer srv.Close()
 
 	c := ws.NewWSClient("ws"+strings.TrimPrefix(srv.URL, "http"), "token", 8)
-	defer func() { _ = c.Close() }()
+	defer closeWS(t, c, "client")
 
 	if err := c.Connect(); err != nil {
 		t.Fatalf("Connect: %v", err)
@@ -327,10 +355,14 @@ func TestWSClient_ReportsDesyncWhenTheBufferOverflows(t *testing.T) {
 		// Comfortably more than the buffer holds, so the reader — which never
 		// drains here — must overflow.
 		for i := range buffered * 10 {
-			data, _ := json.Marshal(model.WebSocketEvent{
+			data, err := json.Marshal(model.WebSocketEvent{
 				Event:    model.WebSocketEventPosted,
 				Sequence: int64(i),
 			})
+			if err != nil {
+				t.Errorf("marshal event: %v", err)
+				return
+			}
 			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 				return
 			}
@@ -342,7 +374,7 @@ func TestWSClient_ReportsDesyncWhenTheBufferOverflows(t *testing.T) {
 	if err := client.Connect(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = client.Close() }()
+	defer closeWS(t, client, "client")
 
 	deadline := time.After(2 * time.Second)
 	for {
@@ -415,7 +447,7 @@ func TestWSClient_SurvivesCloseAndReconnect(t *testing.T) {
 	}
 	conn := <-sessions
 
-	evt, _ := json.Marshal(model.WebSocketEvent{Event: model.WebSocketEventPosted, Sequence: 7})
+	evt := marshalEvent(t, model.WebSocketEvent{Event: model.WebSocketEventPosted, Sequence: 7})
 	if err := conn.WriteMessage(websocket.TextMessage, evt); err != nil {
 		t.Fatal(err)
 	}
@@ -462,7 +494,7 @@ func TestWSClient_ReconnectsWhenTheLinkGoesQuiet(t *testing.T) {
 	})
 
 	c := fastClient(srv, 8, 100*time.Millisecond)
-	defer func() { _ = c.Close() }()
+	defer closeWS(t, c, "client")
 	if err := c.Connect(); err != nil {
 		t.Fatal(err)
 	}
@@ -490,7 +522,7 @@ func TestWSClient_KeepsAQuietHealthyLink(t *testing.T) {
 	})
 
 	c := fastClient(srv, 8, 100*time.Millisecond)
-	defer func() { _ = c.Close() }()
+	defer closeWS(t, c, "client")
 	if err := c.Connect(); err != nil {
 		t.Fatal(err)
 	}
@@ -522,7 +554,7 @@ func TestWSClient_RetriesWhenTheFirstDialFails(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer func() { _ = conn.Close() }()
+		defer closeWS(t, conn, "server connection")
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				return
@@ -532,7 +564,7 @@ func TestWSClient_RetriesWhenTheFirstDialFails(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := fastClient(srv, 8, time.Minute)
-	defer func() { _ = c.Close() }()
+	defer closeWS(t, c, "client")
 	if err := c.Connect(); err == nil {
 		t.Fatal("first dial should report its failure")
 	}
@@ -553,7 +585,7 @@ func TestWSClient_FirstDialUnauthorized(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := fastClient(srv, 8, time.Minute)
-	defer func() { _ = c.Close() }()
+	defer closeWS(t, c, "client")
 	err := c.Connect()
 	if !errors.Is(err, ws.ErrUnauthorized) {
 		t.Fatalf("err = %v, want ErrUnauthorized", err)
@@ -574,7 +606,11 @@ func TestWSClient_ReportsOneDesyncPerOverflow(t *testing.T) {
 	written := make(chan struct{})
 	srv := newTestWSServer(t, func(conn *websocket.Conn) {
 		for i := range buffered * 10 {
-			data, _ := json.Marshal(model.WebSocketEvent{Event: model.WebSocketEventPosted, Sequence: int64(i)})
+			data, err := json.Marshal(model.WebSocketEvent{Event: model.WebSocketEventPosted, Sequence: int64(i)})
+			if err != nil {
+				t.Errorf("marshal event: %v", err)
+				return
+			}
 			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 				return
 			}
@@ -584,7 +620,7 @@ func TestWSClient_ReportsOneDesyncPerOverflow(t *testing.T) {
 	})
 
 	c := fastClient(srv, buffered, time.Minute)
-	defer func() { _ = c.Close() }()
+	defer closeWS(t, c, "client")
 	if err := c.Connect(); err != nil {
 		t.Fatal(err)
 	}
@@ -618,13 +654,13 @@ func TestWSClient_RedialsWithTheCurrentTokenAndHeader(t *testing.T) {
 		if err != nil {
 			return
 		}
-		_ = conn.Close() // hang up, so the client redials
+		closeWS(t, conn, "server connection") // hang up, so the client redials
 	}))
 	t.Cleanup(srv.Close)
 
 	c := ws.NewWSClientWithHeader(wsURL(srv), "first", 8, "X-Custom-Auth")
 	ws.SetTimings(c, 10*time.Millisecond, time.Minute, 20*time.Second)
-	defer func() { _ = c.Close() }()
+	defer closeWS(t, c, "client")
 	if err := c.Connect(); err != nil {
 		t.Fatal(err)
 	}

@@ -20,8 +20,8 @@ Tracking: [ISSUE-002](.okfw/issues/issue-002-lint-gates-for-the-power-of-10-rule
 ## Phase 3: R7, check each return value
 Tracking: [ISSUE-003](.okfw/issues/issue-003-r7-check-each-return-value--01a1f5379e3e.md)
 
-- [ ] Fix each discarded result and each dropped error.
-- [ ] Remove the NASA-P10-07 omission. Turn on `errcheck` `check-blank` and `errorlint`.
+- [x] Fix each discarded result and each dropped error.
+- [x] Remove the NASA-P10-07 omission. Turn on `errcheck` `check-blank` and `errorlint`.
 
 ## Phase 4: R1, no recursion
 Tracking: [ISSUE-004](.okfw/issues/issue-004-r1-no-recursion--01a1f5379e46.md)

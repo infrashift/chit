@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/api"
+	"github.com/infrashift/chit/clients/chit-tui/internal/errlog"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/ws"
 )
@@ -220,11 +221,11 @@ func SetThreadFollowing(ctx context.Context, client api.ChitClient, rootID strin
 }
 
 // MarkThreadRead returns a command that clears a thread's unread state. The
-// result is deliberately dropped: the read marker is a convenience, and a
-// failure to record it should not interrupt reading the thread.
+// result is only logged: the read marker is a convenience, and a failure to
+// record it should not interrupt reading the thread.
 func MarkThreadRead(ctx context.Context, client api.ChitClient, rootID string) tea.Cmd {
 	return func() tea.Msg {
-		_ = client.MarkThreadRead(ctx, rootID)
+		errlog.Debug(client.MarkThreadRead(ctx, rootID), "mark thread read")
 		return nil
 	}
 }

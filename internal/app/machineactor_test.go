@@ -101,17 +101,23 @@ func TestEnsureMachineActors_ReconcilesRolesBothWays(t *testing.T) {
 	if err := a.EnsureMachineActors(ctx, []MachineActor{granted}); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := a.Store.User().GetByOAuthClientID(ctx, notifier)
+	got, err := a.Store.User().GetByOAuthClientID(ctx, notifier)
+	if err != nil {
+		t.Fatalf("GetByOAuthClientID: %v", err)
+	}
 	if !got.IsSystemAdmin() {
 		t.Fatal("grant did not apply")
 	}
 
 	revoked := base
 	revoked.Roles = "system_user"
-	if err := a.EnsureMachineActors(ctx, []MachineActor{revoked}); err != nil {
+	if err = a.EnsureMachineActors(ctx, []MachineActor{revoked}); err != nil {
 		t.Fatal(err)
 	}
-	got, _ = a.Store.User().GetByOAuthClientID(ctx, notifier)
+	got, err = a.Store.User().GetByOAuthClientID(ctx, notifier)
+	if err != nil {
+		t.Fatalf("GetByOAuthClientID: %v", err)
+	}
 	if got.IsSystemAdmin() {
 		t.Fatal("REVOKING system_admin in the declaration did not revoke it on the row")
 	}
@@ -167,7 +173,10 @@ func TestEnsureMachineActors_OmittedRolesAreStable(t *testing.T) {
 			t.Fatalf("boot %d: %v", i, err)
 		}
 	}
-	got, _ := a.Store.User().GetByOAuthClientID(context.Background(), notifier)
+	got, err := a.Store.User().GetByOAuthClientID(context.Background(), notifier)
+	if err != nil {
+		t.Fatalf("GetByOAuthClientID: %v", err)
+	}
 	if got.Roles != "system_user" {
 		t.Fatalf("roles = %q after a second boot, want system_user", got.Roles)
 	}
@@ -188,7 +197,10 @@ func TestEnsureMachineActors_ReconcilesEveryDeclaredField(t *testing.T) {
 	if err := a.EnsureMachineActors(context.Background(), []MachineActor{changed}); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := a.Store.User().GetByOAuthClientID(context.Background(), notifier)
+	got, err := a.Store.User().GetByOAuthClientID(context.Background(), notifier)
+	if err != nil {
+		t.Fatalf("GetByOAuthClientID: %v", err)
+	}
 	if got.Username != "forge" || got.DisplayName != "Forge" || got.ActorType != model.ActorTypeAgent {
 		t.Fatalf("row = %+v, want every declared field applied", got)
 	}

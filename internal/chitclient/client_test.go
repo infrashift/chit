@@ -26,7 +26,9 @@ type fakeHydra struct {
 func (h *fakeHydra) server(t *testing.T) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("parse form: %v", err)
+		}
 		h.mu.Lock()
 		h.issued++
 		h.lastForm = r.PostForm
@@ -39,11 +41,13 @@ func (h *fakeHydra) server(t *testing.T) *httptest.Server {
 			expires = 3600
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"access_token": fmt.Sprintf("access-token-%d", n),
 			"token_type":   "bearer",
 			"expires_in":   expires,
-		})
+		}); err != nil {
+			t.Errorf("encode token: %v", err)
+		}
 	}))
 	t.Cleanup(srv.Close)
 	return srv
@@ -63,7 +67,9 @@ func TestOAuthClientSendsBearerToken(t *testing.T) {
 	chitd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		gotUserID = r.Header.Get("X-User-Id")
-		_ = json.NewEncoder(w).Encode(&model.User{ID: "agent-1", Username: "claude-architect"})
+		if err := json.NewEncoder(w).Encode(&model.User{ID: "agent-1", Username: "claude-architect"}); err != nil {
+			t.Errorf("encode: %v", err)
+		}
 	}))
 	t.Cleanup(chitd.Close)
 
@@ -111,13 +117,17 @@ func TestOAuthClientSendsBearerToken(t *testing.T) {
 func TestOAuthWorksWithPostOnlyTokenEndpoint(t *testing.T) {
 	var sawBasicRejected bool
 	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("parse form: %v", err)
+		}
 		if _, _, ok := r.BasicAuth(); ok {
 			// Mirror Hydra: a post-only client refuses Basic auth.
 			sawBasicRejected = true
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"error":"invalid_client"}`))
+			if _, err := w.Write([]byte(`{"error":"invalid_client"}`)); err != nil {
+				t.Errorf("write: %v", err)
+			}
 			return
 		}
 		if r.PostForm.Get("client_secret") == "" {
@@ -125,16 +135,20 @@ func TestOAuthWorksWithPostOnlyTokenEndpoint(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"access_token": "post-style-token", "token_type": "bearer", "expires_in": 3600,
-		})
+		}); err != nil {
+			t.Errorf("encode token: %v", err)
+		}
 	}))
 	t.Cleanup(tokenSrv.Close)
 
 	var gotAuth string
 	chitd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
-		_ = json.NewEncoder(w).Encode(&model.User{ID: "agent-1"})
+		if err := json.NewEncoder(w).Encode(&model.User{ID: "agent-1"}); err != nil {
+			t.Errorf("encode: %v", err)
+		}
 	}))
 	t.Cleanup(chitd.Close)
 
@@ -160,7 +174,9 @@ func TestOAuthTokenIsReused(t *testing.T) {
 	hydraSrv := hydra.server(t)
 
 	chitd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(&model.User{ID: "agent-1"})
+		if err := json.NewEncoder(w).Encode(&model.User{ID: "agent-1"}); err != nil {
+			t.Errorf("encode: %v", err)
+		}
 	}))
 	t.Cleanup(chitd.Close)
 
@@ -214,7 +230,9 @@ func TestTrustedProxyModeUnchanged(t *testing.T) {
 		gotAuth = r.Header.Get("Authorization")
 		gotUserID = r.Header.Get("X-User-Id")
 		gotSecret = r.Header.Get("X-Proxy-Secret")
-		_ = json.NewEncoder(w).Encode(&model.User{ID: "agent-1"})
+		if err := json.NewEncoder(w).Encode(&model.User{ID: "agent-1"}); err != nil {
+			t.Errorf("encode: %v", err)
+		}
 	}))
 	t.Cleanup(chitd.Close)
 

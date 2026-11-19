@@ -70,7 +70,10 @@ func (s *ChitMCPServer) handleSummarizeChannel(ctx context.Context, req *mcp.Get
 		return nil, fmt.Errorf("get channel posts: %w", err)
 	}
 
-	postsJSON, _ := json.Marshal(viewPostList(posts))
+	postsJSON, err := json.Marshal(viewPostList(posts))
+	if err != nil {
+		return nil, fmt.Errorf("marshal channel posts: %w", err)
+	}
 
 	return &mcp.GetPromptResult{
 		Description: fmt.Sprintf("Summarize recent activity in #%s", channel.DisplayName),
@@ -104,7 +107,10 @@ func (s *ChitMCPServer) handleDraftReply(ctx context.Context, req *mcp.GetPrompt
 		return nil, fmt.Errorf("get thread: %w", err)
 	}
 
-	threadJSON, _ := json.Marshal(viewPosts(posts))
+	threadJSON, err := json.Marshal(viewPosts(posts))
+	if err != nil {
+		return nil, fmt.Errorf("marshal thread: %w", err)
+	}
 
 	promptText := fmt.Sprintf(
 		"Draft a reply to the following thread conversation.\n\nThread (JSON):\n%s",

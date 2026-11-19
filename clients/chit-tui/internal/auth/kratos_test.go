@@ -3,6 +3,7 @@ package auth_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,11 +19,20 @@ func kratosServer(t *testing.T, mux *http.ServeMux) (*auth.KratosClient, *httpte
 	return auth.NewKratosClient(srv.URL), srv
 }
 
+// writeKratosJSON writes v as the JSON response body. It runs in the
+// server's goroutine, so a failure is reported with t.Errorf.
+func writeKratosJSON(t *testing.T, w http.ResponseWriter, v any) {
+	t.Helper()
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		t.Errorf("encode response: %v", err)
+	}
+}
+
 func TestInitLoginFlow_Success(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /self-service/login/api", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		writeKratosJSON(t, w, map[string]any{
 			"id":         "flow-123",
 			"expires_at": "2026-12-31T23:59:59Z",
 		})
@@ -64,13 +74,13 @@ func TestSubmitLogin_Success(t *testing.T) {
 		}
 		if body["identifier"] != "alice@example.com" || body["password"] != "secret" {
 			w.WriteHeader(401)
-			_ = json.NewEncoder(w).Encode(map[string]any{
+			writeKratosJSON(t, w, map[string]any{
 				"error": map[string]string{"message": "invalid credentials"},
 			})
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		writeKratosJSON(t, w, map[string]any{
 			"session_token": "tok-abc",
 			"session": map[string]any{
 				"expires_at": "2026-12-31T23:59:59Z",
@@ -107,7 +117,7 @@ func TestSubmitLogin_WrongPassword(t *testing.T) {
 	mux.HandleFunc("POST /self-service/login", func(w http.ResponseWriter, _ *http.Request) {
 		// Kratos returns 400 with the flow object containing ui.messages on bad credentials.
 		w.WriteHeader(400)
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		writeKratosJSON(t, w, map[string]any{
 			"id": "flow-123",
 			"ui": map[string]any{
 				"nodes": []any{},
@@ -127,8 +137,8 @@ func TestSubmitLogin_WrongPassword(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for wrong password")
 	}
-	kratosErr, ok := err.(*auth.KratosError)
-	if !ok {
+	var kratosErr *auth.KratosError
+	if !errors.As(err, &kratosErr) {
 		t.Fatalf("expected *KratosError, got %T", err)
 	}
 	if kratosErr.StatusCode != 400 {
@@ -143,7 +153,7 @@ func TestSubmitLogin_ExpiredFlow(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /self-service/login", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(410)
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		writeKratosJSON(t, w, map[string]any{
 			"error": map[string]string{"message": "flow expired"},
 		})
 	})
@@ -153,8 +163,8 @@ func TestSubmitLogin_ExpiredFlow(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for expired flow")
 	}
-	kratosErr, ok := err.(*auth.KratosError)
-	if !ok {
+	var kratosErr *auth.KratosError
+	if !errors.As(err, &kratosErr) {
 		t.Fatalf("expected *KratosError, got %T", err)
 	}
 	if kratosErr.StatusCode != 410 {
@@ -168,13 +178,13 @@ func TestCheckSession_Success(t *testing.T) {
 		tok := r.Header.Get("X-Session-Token")
 		if tok != "valid-tok" {
 			w.WriteHeader(401)
-			_ = json.NewEncoder(w).Encode(map[string]any{
+			writeKratosJSON(t, w, map[string]any{
 				"error": map[string]string{"message": "unauthorized"},
 			})
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		writeKratosJSON(t, w, map[string]any{
 			"identity": map[string]any{
 				"id": "id-alice",
 				"traits": map[string]string{
@@ -199,7 +209,7 @@ func TestCheckSession_InvalidToken(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /sessions/whoami", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(401)
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		writeKratosJSON(t, w, map[string]any{
 			"error": map[string]string{"message": "unauthorized"},
 		})
 	})
@@ -227,7 +237,7 @@ func TestInitLoginFlow_ServerError(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /self-service/login/api", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(500)
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		writeKratosJSON(t, w, map[string]any{
 			"error": map[string]string{"message": "internal error"},
 		})
 	})
@@ -237,8 +247,8 @@ func TestInitLoginFlow_ServerError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for server error")
 	}
-	kratosErr, ok := err.(*auth.KratosError)
-	if !ok {
+	var kratosErr *auth.KratosError
+	if !errors.As(err, &kratosErr) {
 		t.Fatalf("expected *KratosError, got %T", err)
 	}
 	if kratosErr.StatusCode != 500 {
@@ -250,7 +260,9 @@ func TestCheckSession_ServerError(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /sessions/whoami", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(500)
-		_, _ = w.Write([]byte("not json at all"))
+		if _, err := w.Write([]byte("not json at all")); err != nil {
+			t.Errorf("write response: %v", err)
+		}
 	})
 	client, _ := kratosServer(t, mux)
 
@@ -280,7 +292,7 @@ func TestParseError_EmptyMessage(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /self-service/login/api", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(400)
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		writeKratosJSON(t, w, map[string]any{
 			"error": map[string]string{},
 		})
 	})
@@ -296,7 +308,7 @@ func TestParseError_UIMessages(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /self-service/login/api", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(400)
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		writeKratosJSON(t, w, map[string]any{
 			"id": "flow-abc",
 			"ui": map[string]any{
 				"messages": []map[string]any{
@@ -320,7 +332,7 @@ func TestParseError_TopLevelMessage(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /self-service/login/api", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(422)
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		writeKratosJSON(t, w, map[string]any{
 			"message": "validation failed",
 		})
 	})
@@ -341,7 +353,7 @@ func TestSubmitLogin_ReportsFieldErrors(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /self-service/login", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		writeKratosJSON(t, w, map[string]any{
 			"id": "flow-1",
 			"ui": map[string]any{
 				"nodes": []any{
@@ -381,7 +393,11 @@ func TestIsSessionRejected(t *testing.T) {
 // not an empty session.
 func TestKratos_UnreadableSuccessBodies(t *testing.T) {
 	mux := http.NewServeMux()
-	garbage := func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("<html>proxy page</html>")) }
+	garbage := func(w http.ResponseWriter, _ *http.Request) {
+		if _, err := w.Write([]byte("<html>proxy page</html>")); err != nil {
+			t.Errorf("write response: %v", err)
+		}
+	}
 	mux.HandleFunc("GET /self-service/login/api", garbage)
 	mux.HandleFunc("POST /self-service/login", garbage)
 	mux.HandleFunc("GET /sessions/whoami", garbage)

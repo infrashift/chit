@@ -157,7 +157,10 @@ func TestTagStoreIntegration_ChannelTagsFilterAndDeleteByOwner(t *testing.T) {
 	if err = ss.Post().Delete(t.Context(), post.ID, 5000); err != nil {
 		t.Fatal(err)
 	}
-	if match, _ = ss.Tag().FilterChannelIDsByTags(t.Context(), []string{channel.ID}, []string{a.ID, b.ID}); len(match) != 0 {
+	if match, err = ss.Tag().FilterChannelIDsByTags(t.Context(), []string{channel.ID}, []string{a.ID, b.ID}); err != nil {
+		t.Fatalf("FilterChannelIDsByTags after delete: %v", err)
+	}
+	if len(match) != 0 {
 		t.Errorf("a deleted post still matched: %v", match)
 	}
 

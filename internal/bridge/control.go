@@ -46,7 +46,10 @@ func (b *Bridge) parseControl(content string) (word, rest string) {
 			lower = strings.ToLower(s)
 		}
 	}
-	word, rest, _ = strings.Cut(s, " ")
+	var found bool
+	if word, rest, found = strings.Cut(s, " "); !found {
+		rest = "" // the post is the control word alone
+	}
 	switch word = strings.ToLower(strings.TrimSpace(word)); word {
 	case controlNew, controlStop, controlStatus:
 		return word, strings.TrimSpace(rest)

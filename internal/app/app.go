@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/infrashift/chit/internal/errlog"
 	"github.com/infrashift/chit/internal/jobs/workers"
 	"github.com/infrashift/chit/internal/keto"
 
@@ -154,13 +155,14 @@ func (a *App) FetchKratosIdentity(ctx context.Context, kratosID string) (usernam
 	if err != nil {
 		return "", "", "", fmt.Errorf("fetch kratos identity: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() { errlog.Debug(resp.Body.Close(), "close kratos identity response body") }()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return "", "", "", fmt.Errorf("%w: %s", ErrKratosIdentityNotFound, kratosID)
 	}
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		errlog.Debug(readErr, "read kratos identity error body")
 		return "", "", "", fmt.Errorf("kratos identity fetch failed: status %d, body: %s", resp.StatusCode, string(bodyBytes))
 	}
 

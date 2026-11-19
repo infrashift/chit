@@ -148,7 +148,7 @@ func (s *SqlTagStore) DeleteByOwner(ctx context.Context, ownerID string) error {
 	if err != nil {
 		return fmt.Errorf("delete tags by owner: %w", err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer rollback(ctx, tx)
 	for _, q := range []string{
 		`DELETE FROM tags WHERE owner_id = $1`,
 		`UPDATE message_tags SET applied_by = NULL WHERE applied_by = $1`,

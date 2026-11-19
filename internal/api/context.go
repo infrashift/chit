@@ -21,7 +21,10 @@ func ContextSetUser(r *http.Request, user *model.User) *http.Request {
 
 // ContextGetUser retrieves the authenticated user from the request context.
 func ContextGetUser(r *http.Request) *model.User {
-	user, _ := r.Context().Value(userContextKey).(*model.User)
+	user, ok := r.Context().Value(userContextKey).(*model.User)
+	if !ok {
+		return nil
+	}
 	return user
 }
 
@@ -34,6 +37,9 @@ func ContextSetActor(r *http.Request, actor *model.User) *http.Request {
 // ContextGetActor returns the machine actor acting on behalf of the request's
 // user, or nil when the user acts for themselves.
 func ContextGetActor(r *http.Request) *model.User {
-	actor, _ := r.Context().Value(actorContextKey).(*model.User)
+	actor, ok := r.Context().Value(actorContextKey).(*model.User)
+	if !ok {
+		return nil
+	}
 	return actor
 }

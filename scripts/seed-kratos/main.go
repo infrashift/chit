@@ -15,6 +15,8 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+
+	"github.com/infrashift/chit/internal/errlog"
 )
 
 type seedIdentity struct {
@@ -58,7 +60,7 @@ func run(ctx context.Context) error {
 	for i := range 30 {
 		resp, err := httpDo(ctx, client, http.MethodGet, kratosAdminURL+"/health/ready", nil)
 		if err == nil {
-			_ = resp.Body.Close()
+			errlog.Debug(resp.Body.Close(), "close kratos health response body")
 			if resp.StatusCode == 200 {
 				fmt.Printf("Kratos admin is ready (%ds).\n", i)
 				break
@@ -75,7 +77,7 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("connect to database: %w", err)
 	}
-	defer func() { _ = db.Close() }()
+	defer errlog.Close(db, "chit database")
 
 	if err = db.PingContext(ctx); err != nil {
 		return fmt.Errorf("ping database: %w", err)
@@ -99,8 +101,10 @@ func run(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("update kratos_id for %s: %w", id.Username, err)
 		}
-		rows, _ := result.RowsAffected()
-		if rows == 0 {
+		rows, err := result.RowsAffected()
+		if err != nil {
+			fmt.Printf("  WARNING: rows affected for %s: %v\n", id.Username, err)
+		} else if rows == 0 {
 			fmt.Printf("  WARNING: no Chit user found with email %s\n", id.Email)
 		}
 	}
@@ -166,10 +170,11 @@ func findIdentityByEmail(ctx context.Context, client *http.Client, baseURL, emai
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() { errlog.Debug(resp.Body.Close(), "close kratos response body") }()
 
 	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(resp.Body)
+		errlog.Debug(readErr, "read kratos error body")
 		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -212,10 +217,11 @@ func createIdentity(ctx context.Context, client *http.Client, baseURL string, id
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() { errlog.Debug(resp.Body.Close(), "close kratos response body") }()
 
 	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, readErr := io.ReadAll(resp.Body)
+		errlog.Debug(readErr, "read kratos error body")
 		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
 	}
 
@@ -255,10 +261,11 @@ func updatePassword(ctx context.Context, client *http.Client, baseURL, kratosID 
 	if err != nil {
 		return err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() { errlog.Debug(resp.Body.Close(), "close kratos response body") }()
 
 	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, readErr := io.ReadAll(resp.Body)
+		errlog.Debug(readErr, "read kratos error body")
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
 	}
 	return nil

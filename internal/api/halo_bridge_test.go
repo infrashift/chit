@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -61,7 +62,7 @@ func newBridgeEnv(t *testing.T) *bridgeEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = al.Close() })
+	t.Cleanup(func() { closeOK(t, al, "audit logger") })
 	a.AuditLogger = al
 	return &bridgeEnv{a: a, ms: ms, router: New(a), audit: audit}
 }
@@ -109,8 +110,8 @@ func TestOnBehalfOf_AllowlistedClientPostsAsThePerson(t *testing.T) {
 	if post.UserID != testUserID {
 		t.Errorf("author %q, want the principal %q", post.UserID, testUserID)
 	}
-	rec, _ := post.Props[model.PropOnBehalfOf].(map[string]any)
-	if rec["actor_id"] != haloAgentID {
+	rec, ok := post.Props[model.PropOnBehalfOf].(map[string]any)
+	if !ok || rec["actor_id"] != haloAgentID {
 		t.Errorf("props.on_behalf_of = %v, want actor_id %s", post.Props[model.PropOnBehalfOf], haloAgentID)
 	}
 
@@ -158,7 +159,10 @@ func TestOnBehalfOf_Refusals(t *testing.T) {
 			if w.Code != tc.want {
 				t.Fatalf("got %d, want %d: %s", w.Code, tc.want, w.Body.String())
 			}
-			list, _ := e.ms.Posts.GetPostsForChannel(t.Context(), testChannelID, model.GetPostsOptions{PerPage: 100})
+			list, err := e.ms.Posts.GetPostsForChannel(t.Context(), testChannelID, model.GetPostsOptions{PerPage: 100})
+			if err != nil {
+				t.Fatalf("list posts: %v", err)
+			}
 			if len(list.Order) != 2 {
 				t.Fatalf("%d posts in the channel after a refusal, want the 2 seeded", len(list.Order))
 			}
@@ -258,7 +262,8 @@ func TestProvenance_MalformedIsRefused(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err := e.a.CreatePost(t.Context(), &model.Post{ChannelID: testChannelID, UserID: otherAgentID, Content: "x", Props: props})
-			if appErr, ok := err.(*model.AppError); !ok || appErr.StatusCode != http.StatusBadRequest {
+			var appErr *model.AppError
+			if !errors.As(err, &appErr) || appErr.StatusCode != http.StatusBadRequest {
 				t.Fatalf("app: got %v, want a 400", err)
 			}
 		})
@@ -321,18 +326,23 @@ func TestStreamStatus_RelayedAndNotStored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer func() { _ = conn.Close() }()
-	_ = resp.Body.Close()
+	defer closeOK(t, conn, "websocket")
+	if err = resp.Body.Close(); err != nil {
+		t.Errorf("close handshake response body: %v", err)
+	}
 
-	before, _ := e.ms.Channels.Get(t.Context(), testChannelID)
+	before, err := e.ms.Channels.Get(t.Context(), testChannelID)
+	if err != nil {
+		t.Fatalf("get channel: %v", err)
+	}
 	w := e.do(t, http.MethodPost, streamPath(), "client:"+haloClientID, `{"status":"started","stream_id":"reply-1"}`, obo(testUserID))
 	if w.Code != http.StatusOK {
 		t.Fatalf("got %d: %s", w.Code, w.Body.String())
 	}
 
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	readDeadlineOK(t, conn, 2*time.Second)
 	var ev model.WebSocketEvent
-	if err := conn.ReadJSON(&ev); err != nil {
+	if err = conn.ReadJSON(&ev); err != nil {
 		t.Fatalf("read: %v", err)
 	}
 	if ev.Event != model.WebSocketEventStreamStatus || ev.Data["status"] != "started" || ev.Data["user_id"] != testUserID ||
@@ -340,11 +350,17 @@ func TestStreamStatus_RelayedAndNotStored(t *testing.T) {
 		t.Fatalf("got %+v", ev)
 	}
 
-	list, _ := e.ms.Posts.GetPostsForChannel(t.Context(), testChannelID, model.GetPostsOptions{PerPage: 100})
+	list, err := e.ms.Posts.GetPostsForChannel(t.Context(), testChannelID, model.GetPostsOptions{PerPage: 100})
+	if err != nil {
+		t.Fatalf("list posts: %v", err)
+	}
 	if len(list.Order) != 2 {
 		t.Errorf("%d posts in the channel, want the 2 seeded: stream_status was stored", len(list.Order))
 	}
-	after, _ := e.ms.Channels.Get(t.Context(), testChannelID)
+	after, err := e.ms.Channels.Get(t.Context(), testChannelID)
+	if err != nil {
+		t.Fatalf("get channel: %v", err)
+	}
 	if after.TotalMsgCount != before.TotalMsgCount || after.LastPostAt != before.LastPostAt {
 		t.Errorf("channel counters moved: %+v -> %+v", before, after)
 	}

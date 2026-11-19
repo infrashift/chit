@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"github.com/infrashift/chit/clients/chit-tui/internal/errlog"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 )
 
@@ -142,7 +144,7 @@ func (c *wsClient) dial() (*websocket.Conn, error) {
 	conn, resp, err := websocket.DefaultDialer.Dial(c.url, header)
 	if err != nil {
 		if resp != nil {
-			_ = resp.Body.Close()
+			errlog.Close(resp.Body, "websocket handshake response body")
 			if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 				return nil, fmt.Errorf("ws: %w: %w (HTTP %d)", ErrUnauthorized, err, resp.StatusCode)
 			}
@@ -160,7 +162,7 @@ func (c *wsClient) adopt(stop chan struct{}, conn *websocket.Conn) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.stop != stop {
-		_ = conn.Close()
+		errlog.Debug(conn.Close(), "close websocket dialed after the session closed")
 		return false
 	}
 	c.conn = conn
@@ -174,7 +176,7 @@ func (c *wsClient) release(conn *websocket.Conn) {
 		c.conn = nil
 	}
 	c.mu.Unlock()
-	_ = conn.Close()
+	errlog.Debug(conn.Close(), "close websocket connection")
 }
 
 // State returns the connection-state channel.
@@ -220,7 +222,11 @@ func (c *wsClient) run(stop chan struct{}, conn *websocket.Conn) {
 // silent for longer than pongWait is treated as dead, since a half-open TCP
 // connection would otherwise block here forever.
 func (c *wsClient) read(stop chan struct{}, conn *websocket.Conn) error {
-	alive := func() { _ = conn.SetReadDeadline(time.Now().Add(c.pongWait)) }
+	// A deadline that cannot be set means the connection is already closed,
+	// and the read below reports that.
+	alive := func() {
+		errlog.Debug(conn.SetReadDeadline(time.Now().Add(c.pongWait)), "set websocket read deadline")
+	}
 	alive()
 	conn.SetPongHandler(func(string) error { alive(); return nil })
 	conn.SetPingHandler(func(data string) error {

@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"flag"
 	"strings"
 	"testing"
 
@@ -63,7 +65,9 @@ func TestParseFlags(t *testing.T) {
 // out where settings live.
 func TestParseFlagsUsageMentionsConfigFile(t *testing.T) {
 	var out bytes.Buffer
-	_, _ = parseFlags(&out, []string{"--help"})
+	if _, err := parseFlags(&out, []string{"--help"}); !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("parseFlags(--help) error = %v, want flag.ErrHelp", err)
+	}
 
 	if !strings.Contains(out.String(), config.FilePath()) {
 		t.Errorf("usage does not mention the config file path:\n%s", out.String())

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/infrashift/chit/clients/chit-tui/internal/errlog"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 )
 
@@ -34,7 +35,7 @@ func IsUnauthorized(err error) bool {
 
 // parseErrorResponse reads the response body and returns an APIError.
 func parseErrorResponse(resp *http.Response) *APIError {
-	defer func() { _ = resp.Body.Close() }()
+	defer errlog.Close(resp.Body, "api error response body")
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

@@ -33,7 +33,9 @@ func migrationDB(t *testing.T, before int) *pgxpool.Pool {
 	}
 	t.Cleanup(admin.Close)
 	name := fmt.Sprintf("chit_migtest_%d", os.Getpid())
-	_, _ = admin.Exec(ctx, "DROP DATABASE IF EXISTS "+name)
+	if _, dropErr := admin.Exec(ctx, "DROP DATABASE IF EXISTS "+name); dropErr != nil {
+		t.Fatal(dropErr)
+	}
 	if _, createErr := admin.Exec(ctx, "CREATE DATABASE "+name); createErr != nil {
 		t.Fatal(createErr)
 	}
@@ -48,7 +50,9 @@ func migrationDB(t *testing.T, before int) *pgxpool.Pool {
 	}
 	t.Cleanup(func() {
 		pool.Close()
-		_, _ = admin.Exec(context.Background(), "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)")
+		if _, dropErr := admin.Exec(context.Background(), "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)"); dropErr != nil {
+			t.Errorf("drop %s: %v", name, dropErr)
+		}
 	})
 	for v := 1; v < before; v++ {
 		applyMigration(t, pool, v, "up")
@@ -151,7 +155,9 @@ func TestMigration000008_ScopedTags(t *testing.T) {
 		defer r.Close()
 		for r.Next() {
 			var id string
-			_ = r.Scan(&id)
+			if err := r.Scan(&id); err != nil {
+				t.Fatal(err)
+			}
 			ids = append(ids, id)
 		}
 		return ids

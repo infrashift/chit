@@ -37,7 +37,11 @@ func newCommandFixture(t *testing.T, ketoAllowed bool) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = al.Close() })
+	t.Cleanup(func() {
+		if err := al.Close(); err != nil {
+			t.Errorf("close audit logger: %v", err)
+		}
+	})
 	f.app.AuditLogger = al
 	return f
 }
@@ -120,7 +124,7 @@ func TestCreatePost_SlashCommandNotPersisted(t *testing.T) {
 	if result.Type != "command_response" {
 		t.Errorf("type = %q, want command_response", result.Type)
 	}
-	if ephemeral, _ := result.Props["ephemeral"].(bool); !ephemeral {
+	if ephemeral, ok := result.Props["ephemeral"].(bool); !ok || !ephemeral {
 		t.Error("expected props.ephemeral=true")
 	}
 	if n := channelPostCount(t, f); n != 0 {

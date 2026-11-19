@@ -38,7 +38,9 @@ func TestValidationMiddleware_ValidRequest(t *testing.T) {
 	r.Use(mw)
 	r.Get("/api/v1/system/ping", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
+		if _, err := w.Write([]byte(`{"status":"ok"}`)); err != nil {
+			t.Errorf("write: %v", err)
+		}
 	})
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/system/ping", http.NoBody)

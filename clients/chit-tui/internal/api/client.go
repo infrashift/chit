@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/infrashift/chit/clients/chit-tui/internal/errlog"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 )
 
@@ -164,8 +165,10 @@ func (c *httpClient) do(req *http.Request, out any) error {
 	defer func() {
 		// A body left partly unread closes the connection rather than
 		// returning it for reuse.
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
-		_ = resp.Body.Close()
+		if _, err := io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10)); err != nil {
+			errlog.Debug(err, "drain api response body")
+		}
+		errlog.Close(resp.Body, "api response body")
 	}()
 	if resp.StatusCode >= 400 {
 		return parseErrorResponse(resp)

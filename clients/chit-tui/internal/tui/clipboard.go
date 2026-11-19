@@ -6,6 +6,8 @@ import (
 
 	"github.com/aymanbagabas/go-osc52/v2"
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/infrashift/chit/clients/chit-tui/internal/errlog"
 )
 
 // clipboardOut is where the OSC 52 sequence goes: the terminal, except in
@@ -29,7 +31,9 @@ func copyToClipboard(text string) tea.Cmd {
 		// A failed write means the terminal did not receive the sequence;
 		// there is no recovery and no channel to report it on, and the
 		// acknowledgement below is already best-effort for the same reason.
-		_, _ = osc52.New(text).WriteTo(clipboardOut)
+		if _, err := osc52.New(text).WriteTo(clipboardOut); err != nil {
+			errlog.Debug(err, "write OSC 52 clipboard sequence")
+		}
 		return clipboardCopiedMsg{lines: countLines(text)}
 	}
 }

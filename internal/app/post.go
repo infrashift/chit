@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 
+	"github.com/infrashift/chit/internal/errlog"
 	"github.com/infrashift/chit/internal/model"
 	"github.com/infrashift/chit/internal/pubsub"
 )
@@ -67,8 +68,10 @@ func (a *App) CreatePostAs(ctx context.Context, post *model.Post, actor *model.U
 		}
 	}
 
-	// Process mentions
-	mentionedUserIDs, _ := a.processMentions(ctx, post)
+	// Process mentions. A failed lookup must not fail the post: it is
+	// logged, and the post keeps the IDs processMentions returned.
+	mentionedUserIDs, err := a.processMentions(ctx, post)
+	errlog.Warn(err, "process mentions")
 	if len(mentionedUserIDs) > 0 {
 		if post.Props == nil {
 			post.Props = make(map[string]any)
@@ -205,8 +208,11 @@ func (a *App) UpdatePost(ctx context.Context, id string, patch PostPatch, actorI
 		return nil, err
 	}
 
-	// Re-parse mentions on plaintext for correct client rendering
-	mentionedUserIDs, _ := a.processMentions(ctx, post)
+	// Re-parse mentions on plaintext for correct client rendering. A failed
+	// lookup must not fail the edit: it is logged, and the post keeps the IDs
+	// processMentions returned.
+	mentionedUserIDs, err := a.processMentions(ctx, post)
+	errlog.Warn(err, "process mentions")
 	if len(mentionedUserIDs) > 0 {
 		post.Props["mentions"] = mentionedUserIDs
 	} else {

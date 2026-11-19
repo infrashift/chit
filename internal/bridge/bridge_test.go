@@ -97,12 +97,14 @@ func (f *fakeChitd) server(t *testing.T) *httptest.Server {
 		f.mu.Lock()
 		f.lastAuth = r.Header.Get("X-User-Id")
 		f.mu.Unlock()
-		_ = json.NewEncoder(w).Encode(&model.User{
+		if err := json.NewEncoder(w).Encode(&model.User{
 			ID:        testAgentID,
 			KratosID:  testKratosID,
 			Username:  testAgentUsername,
 			ActorType: model.ActorTypeAgent,
-		})
+		}); err != nil {
+			t.Errorf("encode: %v", err)
+		}
 	})
 	mux.HandleFunc("GET /api/v1/users/{id}", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -113,7 +115,9 @@ func (f *fakeChitd) server(t *testing.T) *httptest.Server {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(user)
+		if err := json.NewEncoder(w).Encode(user); err != nil {
+			t.Errorf("encode: %v", err)
+		}
 	})
 	mux.HandleFunc("POST /api/v1/posts", func(w http.ResponseWriter, r *http.Request) {
 		var post model.Post
@@ -127,19 +131,25 @@ func (f *fakeChitd) server(t *testing.T) *httptest.Server {
 		f.posts = append(f.posts, &post)
 		f.mu.Unlock()
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(&post)
+		if err := json.NewEncoder(w).Encode(&post); err != nil {
+			t.Errorf("encode: %v", err)
+		}
 	})
 	mux.HandleFunc("DELETE /api/v1/posts/{id}", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.deleted = append(f.deleted, r.PathValue("id"))
 		f.mu.Unlock()
-		_, _ = w.Write([]byte(`{"status":"OK"}`))
+		if _, err := w.Write([]byte(`{"status":"OK"}`)); err != nil {
+			t.Errorf("write: %v", err)
+		}
 	})
 	mux.HandleFunc("GET /api/v1/posts/{id}/thread", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		f.threadCalls++
-		_ = json.NewEncoder(w).Encode(&model.PostList{Order: f.thread})
+		if err := json.NewEncoder(w).Encode(&model.PostList{Order: f.thread}); err != nil {
+			t.Errorf("encode: %v", err)
+		}
 	})
 	mux.HandleFunc("GET /api/v1/channels/{id}", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -152,7 +162,9 @@ func (f *fakeChitd) server(t *testing.T) *httptest.Server {
 		case !ok:
 			http.Error(w, "not found", http.StatusNotFound)
 		default:
-			_ = json.NewEncoder(w).Encode(channel)
+			if err := json.NewEncoder(w).Encode(channel); err != nil {
+				t.Errorf("encode: %v", err)
+			}
 		}
 	})
 	mux.HandleFunc("GET /api/v1/users/me/teams/{id}/channels/members", func(w http.ResponseWriter, r *http.Request) {
@@ -162,14 +174,20 @@ func (f *fakeChitd) server(t *testing.T) *httptest.Server {
 		for _, id := range f.memberOf {
 			members = append(members, &model.ChannelMember{ChannelID: id, UserID: testAgentID})
 		}
-		_ = json.NewEncoder(w).Encode(members)
+		if err := json.NewEncoder(w).Encode(members); err != nil {
+			t.Errorf("encode: %v", err)
+		}
 	})
 	mux.HandleFunc("GET /api/v1/websocket", func(w http.ResponseWriter, r *http.Request) {
 		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
 		if err != nil {
 			return
 		}
-		defer func() { _ = conn.Close() }()
+		defer func() {
+			if err := conn.Close(); err != nil {
+				t.Errorf("close websocket: %v", err)
+			}
+		}()
 		f.mu.Lock()
 		f.wsConnects++
 		f.mu.Unlock()
@@ -233,10 +251,16 @@ func testConfig(t *testing.T, serverURL, claudeBin string) *Config {
 	return cfg
 }
 
-func postedEvent(post *model.Post) *model.WebSocketEvent {
-	data, _ := json.Marshal(post)
+func postedEvent(t *testing.T, post *model.Post) *model.WebSocketEvent {
+	t.Helper()
+	data, err := json.Marshal(post)
+	if err != nil {
+		t.Fatalf("marshal post: %v", err)
+	}
 	var m map[string]any
-	_ = json.Unmarshal(data, &m)
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("unmarshal post: %v", err)
+	}
 	return &model.WebSocketEvent{Event: model.WebSocketEventPosted, Data: m}
 }
 
@@ -265,6 +289,16 @@ func readArgv(t *testing.T, argvFile string) []string {
 		t.Fatalf("read argv: %v", err)
 	}
 	return strings.Split(strings.TrimSpace(string(data)), "\n")
+}
+
+// readFileOK returns the contents of a file the fake claude wrote.
+func readFileOK(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return data
 }
 
 // hasFlag reports whether argv holds flag immediately followed by value.
@@ -326,7 +360,7 @@ func TestClaudeRunner_PromptOnStdinNotArgv(t *testing.T) {
 		if argv := readArgv(t, argvFile); slices.Contains(argv, prompt) {
 			t.Errorf("prompt %q must not be in argv: %q", prompt, argv)
 		}
-		stdin, _ := os.ReadFile(argvFile + ".stdin")
+		stdin := readFileOK(t, argvFile+".stdin")
 		if string(stdin) != prompt {
 			t.Errorf("stdin = %q, want %q", stdin, prompt)
 		}
@@ -526,7 +560,7 @@ func TestBridge_FollowsThreadsItJoined(t *testing.T) {
 	b, ctx := liveBridge(t, cfg)
 
 	say := func(id, content string) {
-		b.handleEvent(ctx, postedEvent(&model.Post{ID: id, ChannelID: testChannelID,
+		b.handleEvent(ctx, postedEvent(t, &model.Post{ID: id, ChannelID: testChannelID,
 			UserID: testOtherUser, RootID: "root-1", Content: content}))
 	}
 	threadCalls := func() int {
@@ -773,7 +807,7 @@ func TestBridge_PostTriggersRunAndThreadedReply(t *testing.T) {
 	b.agentUserID = me.ID
 
 	rootPost := &model.Post{ID: "root-1", ChannelID: testChannelID, UserID: testOtherUser, Content: "plan service X"}
-	b.handleEvent(ctx, postedEvent(rootPost))
+	b.handleEvent(ctx, postedEvent(t, rootPost))
 
 	posts := waitForPosts(t, chitd, 1)
 	reply := posts[0]
@@ -796,10 +830,10 @@ func TestBridge_PostTriggersRunAndThreadedReply(t *testing.T) {
 	// A thread reply resumes the same session.
 	followUp := &model.Post{ID: "msg-2", ChannelID: testChannelID, UserID: testOtherUser,
 		RootID: "root-1", Content: "looks good, proceed"}
-	b.handleEvent(ctx, postedEvent(followUp))
+	b.handleEvent(ctx, postedEvent(t, followUp))
 
 	waitForPosts(t, chitd, 2)
-	argv, _ := os.ReadFile(argvFile)
+	argv := readFileOK(t, argvFile)
 	if !strings.Contains(string(argv), "--resume\n"+fakeSessionID) {
 		t.Errorf("follow-up must resume session %s; argv:\n%s", fakeSessionID, argv)
 	}
@@ -844,7 +878,7 @@ func TestBridge_ReplyCarriesHopCount(t *testing.T) {
 	b, ctx := liveBridge(t, cfg)
 
 	// A human turn resets the chain: the reply starts at hop 0.
-	b.handleEvent(ctx, postedEvent(&model.Post{ID: "root-1", ChannelID: testChannelID,
+	b.handleEvent(ctx, postedEvent(t, &model.Post{ID: "root-1", ChannelID: testChannelID,
 		UserID: testOtherUser, Content: "plan service X"}))
 	posts := waitForPosts(t, chitd, 1)
 	// Props round-trip through JSON, so read via agentHops rather than
@@ -854,7 +888,7 @@ func TestBridge_ReplyCarriesHopCount(t *testing.T) {
 	}
 
 	// An agent naming this one extends the chain to hop 1.
-	b.handleEvent(ctx, postedEvent(&model.Post{ID: "root-2", ChannelID: testChannelID,
+	b.handleEvent(ctx, postedEvent(t, &model.Post{ID: "root-2", ChannelID: testChannelID,
 		UserID: testAgentID2, Content: "@chit-agent can you review?"}))
 	posts = waitForPosts(t, chitd, 2)
 	if got := agentHops(posts[1]); got != 1 {
@@ -864,10 +898,10 @@ func TestBridge_ReplyCarriesHopCount(t *testing.T) {
 	// At the cap the chain stops. A human post queued behind the capped one
 	// in the same thread is answered only after the capped one was handled,
 	// so once that answer lands, a reply to the capped post would have too.
-	b.handleEvent(ctx, postedEvent(&model.Post{ID: "root-3", ChannelID: testChannelID,
+	b.handleEvent(ctx, postedEvent(t, &model.Post{ID: "root-3", ChannelID: testChannelID,
 		UserID: testAgentID2, Content: "@chit-agent one more?",
 		Props: map[string]any{hopsProp: float64(2)}}))
-	b.handleEvent(ctx, postedEvent(&model.Post{ID: "msg-4", ChannelID: testChannelID,
+	b.handleEvent(ctx, postedEvent(t, &model.Post{ID: "msg-4", ChannelID: testChannelID,
 		UserID: testOtherUser, RootID: "root-3", Content: "never mind"}))
 	posts = waitForPosts(t, chitd, 3)
 	if n := len(posts); n != 3 {
@@ -916,12 +950,12 @@ FAKEEOF
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(func() { cancel(); b.wg.Wait() })
 	for i := range 3 {
-		b.handleEvent(ctx, postedEvent(&model.Post{ID: fmt.Sprintf("root-%d", i),
+		b.handleEvent(ctx, postedEvent(t, &model.Post{ID: fmt.Sprintf("root-%d", i),
 			ChannelID: testChannelID, UserID: testOtherUser, Content: "go"}))
 	}
 	waitForPosts(t, chitd, 3)
 
-	got, _ := os.ReadFile(peak)
+	got := readFileOK(t, peak)
 	if strings.TrimSpace(string(got)) != "1" {
 		t.Errorf("peak concurrent runs = %s, want 1", got)
 	}
@@ -967,7 +1001,7 @@ func TestBridge_RunFailurePostsErrorReply(t *testing.T) {
 
 	b, ctx := liveBridge(t, testConfig(t, srv.URL, bin))
 	post := &model.Post{ID: "root-9", ChannelID: testChannelID, UserID: testOtherUser, Content: "do a thing"}
-	b.handleEvent(ctx, postedEvent(post))
+	b.handleEvent(ctx, postedEvent(t, post))
 
 	posts := waitForPosts(t, chitd, 1)
 	if !strings.Contains(posts[0].Content, "Claude run failed") || !strings.Contains(posts[0].Content, "auth expired") {
@@ -1024,7 +1058,7 @@ esac
 echo '{"result":"fresh answer","session_id":"`+fakeSessionID2+`"}'
 `)
 	b, ctx := liveBridge(t, testConfig(t, srv.URL, bin))
-	b.handleEvent(ctx, postedEvent(&model.Post{ID: "msg-2", ChannelID: testChannelID,
+	b.handleEvent(ctx, postedEvent(t, &model.Post{ID: "msg-2", ChannelID: testChannelID,
 		UserID: testOtherUser, RootID: "root-1", Content: "carry on"}))
 
 	reply := waitForPosts(t, chitd, 1)[0]
@@ -1045,7 +1079,7 @@ func TestBridge_RootPostSkipsSessionLookup(t *testing.T) {
 	srv := chitd.server(t)
 	b, ctx := liveBridge(t, testConfig(t, srv.URL, writeEchoClaude(t, t.TempDir())))
 
-	b.handleEvent(ctx, postedEvent(&model.Post{ID: "root-1", ChannelID: testChannelID,
+	b.handleEvent(ctx, postedEvent(t, &model.Post{ID: "root-1", ChannelID: testChannelID,
 		UserID: testOtherUser, Content: "hello"}))
 	waitForPosts(t, chitd, 1)
 	chitd.mu.Lock()
@@ -1066,7 +1100,7 @@ i=0; while [ $i -lt 1100 ]; do printf '%s\\n' "012345678901234567890123456789012
 printf '","session_id":"`+fakeSessionID+`"}'
 `)
 	b, ctx := liveBridge(t, testConfig(t, srv.URL, bin))
-	b.handleEvent(ctx, postedEvent(&model.Post{ID: "root-1", ChannelID: testChannelID,
+	b.handleEvent(ctx, postedEvent(t, &model.Post{ID: "root-1", ChannelID: testChannelID,
 		UserID: testOtherUser, Content: "write a lot"}))
 
 	// ~71.5k bytes is two parts. Were it split into more, the second would
@@ -1095,9 +1129,9 @@ func TestBridge_DuplicateDeliveryRunsOnce(t *testing.T) {
 	b, ctx := liveBridge(t, testConfig(t, srv.URL, writeEchoClaude(t, t.TempDir())))
 
 	first := &model.Post{ID: "root-1", ChannelID: testChannelID, UserID: testOtherUser, Content: "alpha"}
-	b.handleEvent(ctx, postedEvent(first))
-	b.handleEvent(ctx, postedEvent(first))
-	b.handleEvent(ctx, postedEvent(&model.Post{ID: "msg-2", ChannelID: testChannelID,
+	b.handleEvent(ctx, postedEvent(t, first))
+	b.handleEvent(ctx, postedEvent(t, first))
+	b.handleEvent(ctx, postedEvent(t, &model.Post{ID: "msg-2", ChannelID: testChannelID,
 		UserID: testOtherUser, RootID: "root-1", Content: "beta"}))
 
 	// The thread's queue is FIFO, so a duplicate run would land before beta.
@@ -1140,7 +1174,7 @@ echo '{"result":"done","session_id":"`+fakeSessionID+`"}'
 	b, ctx := liveBridge(t, testConfig(t, srv.URL, bin))
 
 	post := func(i int) {
-		b.handleEvent(ctx, postedEvent(&model.Post{ID: fmt.Sprintf("msg-%d", i), ChannelID: testChannelID,
+		b.handleEvent(ctx, postedEvent(t, &model.Post{ID: fmt.Sprintf("msg-%d", i), ChannelID: testChannelID,
 			UserID: testOtherUser, RootID: "root-1", Content: "more"}))
 	}
 	// The first post is taken off the queue and blocks in claude ...
@@ -1191,14 +1225,14 @@ func TestBridge_SessionRetiredAtTokenCeiling(t *testing.T) {
 	cfg.MaxSessionTokens = 40_000
 	b, ctx := liveBridge(t, cfg)
 
-	b.handleEvent(ctx, postedEvent(&model.Post{ID: "root-1", ChannelID: testChannelID,
+	b.handleEvent(ctx, postedEvent(t, &model.Post{ID: "root-1", ChannelID: testChannelID,
 		UserID: testOtherUser, Content: "big task"}))
 	first := waitForPosts(t, chitd, 1)[0]
 	if !strings.Contains(first.Content, "starts a new session") || first.Props[sessionResetProp] != true {
 		t.Errorf("the reply should announce and mark the reset: %q %v", first.Content, first.Props)
 	}
 
-	b.handleEvent(ctx, postedEvent(&model.Post{ID: "msg-2", ChannelID: testChannelID,
+	b.handleEvent(ctx, postedEvent(t, &model.Post{ID: "msg-2", ChannelID: testChannelID,
 		UserID: testOtherUser, RootID: "root-1", Content: "next"}))
 	waitForPosts(t, chitd, 2)
 	if argv := readArgv(t, argvFile); slices.Contains(argv, "--resume") {
@@ -1228,7 +1262,7 @@ func TestBridge_FooterCanBeOff(t *testing.T) {
 	cfg.Footer = false
 	b, ctx := liveBridge(t, cfg)
 
-	b.handleEvent(ctx, postedEvent(&model.Post{ID: "root-1", ChannelID: testChannelID,
+	b.handleEvent(ctx, postedEvent(t, &model.Post{ID: "root-1", ChannelID: testChannelID,
 		UserID: testOtherUser, Content: "hi"}))
 	reply := waitForPosts(t, chitd, 1)[0]
 	if strings.Contains(reply.Content, "⚙") {
@@ -1252,7 +1286,7 @@ func TestBridge_LogsRunComplete(t *testing.T) {
 	dir := t.TempDir()
 	b, ctx := liveBridge(t, testConfig(t, srv.URL,
 		writeFakeClaude(t, dir, filepath.Join(dir, "argv"), fakeResultJSON(fakeSessionID), 0)))
-	b.handleEvent(ctx, postedEvent(&model.Post{ID: "root-1", ChannelID: testChannelID,
+	b.handleEvent(ctx, postedEvent(t, &model.Post{ID: "root-1", ChannelID: testChannelID,
 		UserID: testOtherUser, Content: "hi"}))
 	waitForPosts(t, chitd, 1)
 

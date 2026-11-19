@@ -46,7 +46,7 @@ func signedInAsAlice(t *testing.T) (tui.Model, *mockClient, *mockWSClient) {
 		tui.UsersLoadedMsg{Users: []*model.User{alice}},
 	} {
 		updated, _ := m.Update(msg)
-		m = updated.(tui.Model)
+		m = asModel(t, updated)
 	}
 	if !strings.Contains(testutil.StripANSI(m.View()), aliceHistory) {
 		t.Fatal("setup: alice's history is not on screen")
@@ -57,7 +57,7 @@ func signedInAsAlice(t *testing.T) (tui.Model, *mockClient, *mockWSClient) {
 func step(t *testing.T, m tui.Model, msg tea.Msg) (tui.Model, tea.Cmd) {
 	t.Helper()
 	updated, cmd := m.Update(msg)
-	return updated.(tui.Model), cmd
+	return asModel(t, updated), cmd
 }
 
 func signOut(t *testing.T, m tui.Model) tui.Model {

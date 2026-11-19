@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/auth"
+	"github.com/infrashift/chit/clients/chit-tui/internal/errlog"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/login"
 )
@@ -84,7 +85,7 @@ func (m Model) handleAuthExpired() (tea.Model, tea.Cmd) {
 
 	// Close existing WS connection.
 	if m.wsClient != nil {
-		_ = m.wsClient.Close()
+		errlog.Debug(m.wsClient.Close(), "close websocket client")
 	}
 
 	return m, nil
@@ -95,7 +96,7 @@ func (m Model) handleLogout() (tea.Model, tea.Cmd) {
 		m.tokenStore.Set("")
 	}
 	if m.wsClient != nil {
-		_ = m.wsClient.Close()
+		errlog.Debug(m.wsClient.Close(), "close websocket client")
 	}
 
 	// Whoever signs in next starts from nothing. Keeping the session showed
@@ -128,7 +129,11 @@ func (m Model) resumeAfterReLogin(u *model.User) (tea.Model, tea.Cmd) {
 	}
 
 	updated, cmd := m.Update(UserLoadedMsg{User: u})
-	m = updated.(Model)
+	next, ok := updated.(Model)
+	if !ok {
+		panic(fmt.Sprintf("tui: Update returned %T, want Model", updated))
+	}
+	m = next
 	if m.activeChan != nil {
 		cmd = tea.Batch(cmd, m.selectChannel(m.activeChan))
 	}

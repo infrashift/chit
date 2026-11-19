@@ -612,9 +612,9 @@ func (b *Bridge) processPost(ctx context.Context, root string, post *model.Post)
 	// unless !new or a retirement asked for a clean start.
 	sessionID, seed := "", false
 	if root != post.ID {
-		var clean bool
-		sessionID, _, clean = b.threadState(ctx, root)
-		seed = sessionID == "" && !clean
+		t := b.thread(ctx, root)
+		sessionID = t.sessionID
+		seed = sessionID == "" && !t.clean
 	}
 
 	// The run gets its own context so !stop can cancel it alone.
@@ -805,6 +805,19 @@ func splitContent(s string, limit int) []string {
 	return append(parts, s)
 }
 
+// threadInfo is threadState's answer as one value, for a caller that needs
+// only part of it.
+type threadInfo struct {
+	sessionID     string
+	joined, clean bool
+}
+
+// thread returns threadState's answer as a threadInfo.
+func (b *Bridge) thread(ctx context.Context, root string) threadInfo {
+	sessionID, joined, clean := b.threadState(ctx, root)
+	return threadInfo{sessionID: sessionID, joined: joined, clean: clean}
+}
+
 // threadState returns the claude session to resume in a thread, whether this
 // agent has replied there, and whether its next session was asked to start
 // clean (by !new, or by outgrowing MaxSessionTokens). It answers from memory
@@ -833,7 +846,7 @@ func (b *Bridge) threadState(ctx context.Context, root string) (sessionID string
 			continue
 		}
 		joined = true
-		if reset, _ := p.Props[sessionResetProp].(bool); reset {
+		if reset, ok := p.Props[sessionResetProp].(bool); ok && reset {
 			clean = true
 			break
 		}
@@ -857,7 +870,7 @@ func (b *Bridge) threadState(ctx context.Context, root string) (sessionID string
 // follow-up there needs no mention. The answer is remembered either way; the
 // agent's own replies keep it current.
 func (b *Bridge) participates(ctx context.Context, root string) bool {
-	_, joined, _ := b.threadState(ctx, root)
+	joined := b.thread(ctx, root).joined
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if joined {

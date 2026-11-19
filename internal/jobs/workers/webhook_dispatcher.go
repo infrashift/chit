@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/infrashift/chit/internal/command"
+	"github.com/infrashift/chit/internal/errlog"
 )
 
 // WebhookDispatcher is a worker pool that delivers CloudEvents to a webhook target.
@@ -115,7 +116,7 @@ func (d *WebhookDispatcher) deliver(ctx context.Context, evt *command.WebhookEve
 	if err != nil {
 		return fmt.Errorf("webhook post: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() { errlog.Debug(resp.Body.Close(), "close webhook response body") }()
 
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("webhook target returned status %d", resp.StatusCode)

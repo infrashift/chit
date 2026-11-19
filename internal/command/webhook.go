@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/infrashift/chit/internal/errlog"
 )
 
 // WebhookEvent contains the data to be dispatched as a CloudEvent.
@@ -68,6 +70,8 @@ func NewCloudEvent(evt *WebhookEvent) *CloudEvent {
 // SignPayload computes an HMAC-SHA256 hex digest of payload using secret.
 func SignPayload(payload []byte, secret string) string {
 	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write(payload)
+	// hash.Hash.Write never returns an error; the check satisfies rule 7.
+	_, err := mac.Write(payload)
+	errlog.Warn(err, "hmac write")
 	return hex.EncodeToString(mac.Sum(nil))
 }

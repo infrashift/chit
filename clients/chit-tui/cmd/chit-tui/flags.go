@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
 
 	"github.com/infrashift/chit/clients/chit-tui/internal/config"
+	"github.com/infrashift/chit/clients/chit-tui/internal/errlog"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
 
@@ -37,9 +39,17 @@ func parseFlags(out io.Writer, args []string) (options, error) {
 		"list the available themes and exit")
 
 	fs.Usage = func() {
-		_, _ = fmt.Fprintf(out, "Usage: chit-tui [flags]\n\nFlags:\n")
+		// The text is built in memory and written once, so one error check
+		// covers it. PrintDefaults writes to the flag set's output, which is
+		// pointed at the builder for the call.
+		var b strings.Builder
+		fmt.Fprintf(&b, "Usage: chit-tui [flags]\n\nFlags:\n")
+		fs.SetOutput(&b)
 		fs.PrintDefaults()
-		_, _ = fmt.Fprintf(out, "\nConfiguration is read from %s.\n", config.FilePath())
+		fs.SetOutput(out)
+		fmt.Fprintf(&b, "\nConfiguration is read from %s.\n", config.FilePath())
+		_, err := io.WriteString(out, b.String())
+		errlog.Debug(err, "write usage")
 	}
 
 	if err := fs.Parse(args); err != nil {
@@ -55,13 +65,16 @@ func listThemes(out io.Writer) {
 		bundled[n] = true
 	}
 
+	var b strings.Builder
 	for _, name := range theme.ListAvailable(config.ThemesDir()) {
 		if bundled[name] {
-			_, _ = fmt.Fprintf(out, "%s\n", name)
+			fmt.Fprintf(&b, "%s\n", name)
 			continue
 		}
-		_, _ = fmt.Fprintf(out, "%s (local)\n", name)
+		fmt.Fprintf(&b, "%s (local)\n", name)
 	}
+	_, err := io.WriteString(out, b.String())
+	errlog.Debug(err, "write theme list")
 }
 
 // resolveTheme turns the command line and configuration into a theme.
@@ -91,7 +104,10 @@ func themeRequest(opts options, cfg *config.Config) (theme.Request, error) {
 
 	// A bad appearance in the config file is a warning, not a failure, so it
 	// is parsed leniently here and simply left unset when invalid.
-	cfgAppearance, _ := theme.ParseAppearance(cfg.Appearance)
+	cfgAppearance, err := theme.ParseAppearance(cfg.Appearance)
+	if err != nil {
+		cfgAppearance = theme.AppearanceUnset
+	}
 
 	return theme.Request{
 		FlagTheme:        opts.theme,

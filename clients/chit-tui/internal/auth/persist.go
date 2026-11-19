@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/infrashift/chit/clients/chit-tui/internal/config"
+	"github.com/infrashift/chit/clients/chit-tui/internal/errlog"
 )
 
 const (
@@ -84,21 +85,21 @@ func writeFileAtomic(path string, data []byte) error {
 	}
 	name := tmp.Name()
 	if err := tmp.Chmod(filePermissions); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(name)
+		errlog.Debug(tmp.Close(), "close temp session file")
+		errlog.Debug(os.Remove(name), "remove temp session file")
 		return err
 	}
 	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(name)
+		errlog.Debug(tmp.Close(), "close temp session file")
+		errlog.Debug(os.Remove(name), "remove temp session file")
 		return err
 	}
 	if err := tmp.Close(); err != nil {
-		_ = os.Remove(name)
+		errlog.Debug(os.Remove(name), "remove temp session file")
 		return err
 	}
 	if err := os.Rename(name, path); err != nil {
-		_ = os.Remove(name)
+		errlog.Debug(os.Remove(name), "remove temp session file")
 		return err
 	}
 	return nil
@@ -143,8 +144,10 @@ func (ss *SessionStore) moveLegacy(p string) ([]byte, error) {
 		return nil, err
 	}
 	// Moved; the old copy would only be found again after a sign-out.
-	_ = os.Remove(legacy)
-	_ = os.Remove(filepath.Dir(legacy)) // only if now empty
+	errlog.Debug(os.Remove(legacy), "remove legacy session file")
+	// Removes the directory only if it is now empty; otherwise the error is
+	// expected.
+	errlog.Debug(os.Remove(filepath.Dir(legacy)), "remove legacy session directory")
 	return data, nil
 }
 

@@ -54,9 +54,14 @@ func TestSearchIndexer_IndexPost_Success(t *testing.T) {
 		user, _, _ := r.BasicAuth()
 		gotAuth = user
 		gotContentType = r.Header.Get("Content-Type")
-		gotBody, _ = io.ReadAll(r.Body)
+		var err error
+		if gotBody, err = io.ReadAll(r.Body); err != nil {
+			t.Errorf("read body: %v", err)
+		}
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"id":"doc-1"}`))
+		if _, err := w.Write([]byte(`{"id":"doc-1"}`)); err != nil {
+			t.Errorf("write: %v", err)
+		}
 	}))
 	defer srv.Close()
 
@@ -114,7 +119,9 @@ func TestSearchIndexer_Search_Success(t *testing.T) {
 			t.Errorf("expected URL=/api/chit-posts/_search, got %q", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Errorf("encode: %v", err)
+		}
 	}))
 	defer srv.Close()
 
@@ -140,7 +147,9 @@ func TestSearchIndexer_Search_EmptyHits(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Errorf("encode: %v", err)
+		}
 	}))
 	defer srv.Close()
 

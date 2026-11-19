@@ -14,9 +14,19 @@ func Window(cursor, total, visible int) (start, end int) {
 	if visible <= 0 || total <= 0 {
 		return 0, 0
 	}
+	start = Start(cursor, total, visible)
+	return start, min(start+visible, total)
+}
+
+// Start returns the first row Window draws, for a caller that needs only
+// where the window begins.
+func Start(cursor, total, visible int) int {
+	if visible <= 0 || total <= 0 {
+		return 0
+	}
+	start := 0
 	if cursor >= visible {
 		start = cursor - visible + 1
 	}
-	start = min(start, max(total-visible, 0))
-	return start, min(start+visible, total)
+	return min(start, max(total-visible, 0))
 }

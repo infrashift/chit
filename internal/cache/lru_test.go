@@ -23,7 +23,10 @@ func TestNewLRU_ZeroSize(t *testing.T) {
 }
 
 func TestSetAndGet(t *testing.T) {
-	c, _ := NewLRU[string, int](10, time.Minute)
+	c, err := NewLRU[string, int](10, time.Minute)
+	if err != nil {
+		t.Fatalf("NewLRU: %v", err)
+	}
 	c.Set("key1", 42)
 
 	val, ok := c.Get("key1")
@@ -36,7 +39,10 @@ func TestSetAndGet(t *testing.T) {
 }
 
 func TestGet_Miss(t *testing.T) {
-	c, _ := NewLRU[string, int](10, time.Minute)
+	c, err := NewLRU[string, int](10, time.Minute)
+	if err != nil {
+		t.Fatalf("NewLRU: %v", err)
+	}
 
 	val, ok := c.Get("absent")
 	if ok {
@@ -48,7 +54,10 @@ func TestGet_Miss(t *testing.T) {
 }
 
 func TestGet_Expired(t *testing.T) {
-	c, _ := NewLRU[string, int](10, time.Millisecond)
+	c, err := NewLRU[string, int](10, time.Millisecond)
+	if err != nil {
+		t.Fatalf("NewLRU: %v", err)
+	}
 	c.Set("key1", 42)
 
 	time.Sleep(5 * time.Millisecond)
@@ -60,7 +69,10 @@ func TestGet_Expired(t *testing.T) {
 }
 
 func TestLRU_Eviction(t *testing.T) {
-	c, _ := NewLRU[string, int](2, time.Minute)
+	c, err := NewLRU[string, int](2, time.Minute)
+	if err != nil {
+		t.Fatalf("NewLRU: %v", err)
+	}
 	c.Set("a", 1)
 	c.Set("b", 2)
 	c.Set("c", 3) // should evict "a"
@@ -78,7 +90,10 @@ func TestLRU_Eviction(t *testing.T) {
 }
 
 func TestRemove(t *testing.T) {
-	c, _ := NewLRU[string, int](10, time.Minute)
+	c, err := NewLRU[string, int](10, time.Minute)
+	if err != nil {
+		t.Fatalf("NewLRU: %v", err)
+	}
 	c.Set("key1", 42)
 	c.Remove("key1")
 

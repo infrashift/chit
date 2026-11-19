@@ -51,8 +51,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleLoginSuccess(msg)
 
 	case login.LoginErrorMsg:
-		m.loginModel, _ = m.loginModel.Update(msg)
-		return m, nil
+		var cmd tea.Cmd
+		m.loginModel, cmd = m.loginModel.Update(msg)
+		return m, cmd
 
 	case tea.MouseMsg:
 		return m.handleMouse(msg)

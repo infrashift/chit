@@ -26,7 +26,7 @@ func setupModelWithManyPosts(t *testing.T) tui.Model {
 		}
 	}
 	updated, _ := m.Update(tui.PostsLoadedMsg{ChannelID: "c1", Posts: &model.PostList{Order: posts}})
-	return updated.(tui.Model)
+	return asModel(t, updated)
 }
 
 func TestModel_MouseWheelScrollsViewport(t *testing.T) {
@@ -34,7 +34,7 @@ func TestModel_MouseWheelScrollsViewport(t *testing.T) {
 	before := m.View()
 
 	updated, _ := m.Update(tea.MouseMsg{X: 60, Y: 20, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if after := m.View(); after == before {
 		t.Error("expected view to change after wheel-up scroll")
@@ -46,9 +46,9 @@ func TestModel_MouseWheelDownAfterUpRestoresBottom(t *testing.T) {
 	bottom := m.View()
 
 	updated, _ := m.Update(tea.MouseMsg{X: 60, Y: 20, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tea.MouseMsg{X: 60, Y: 20, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if got := m.View(); got != bottom {
 		t.Error("expected wheel down to scroll back to the bottom view")
@@ -60,7 +60,7 @@ func TestModel_MouseClickBarOpensPalette(t *testing.T) {
 
 	// Bar is the last row; the first button "[^K Jump]" spans columns [1,10).
 	updated, _ := m.Update(tea.MouseMsg{X: 2, Y: 39, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "↵ select") {
@@ -73,7 +73,7 @@ func TestModel_MouseClickBarOpensSearchMode(t *testing.T) {
 
 	// Second button "[^S Search]" spans columns [11,22).
 	updated, _ := m.Update(tea.MouseMsg{X: 12, Y: 39, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "Search in General") {
@@ -85,11 +85,11 @@ func TestModel_MouseClickOutsidePaletteCloses(t *testing.T) {
 	m := setupModel(t)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Click far outside the palette (bottom bar area) — closes the palette.
 	updated, _ = m.Update(tea.MouseMsg{X: 12, Y: 39, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := testutil.StripANSI(m.View())
 	if strings.Contains(view, "↵ select") {
@@ -101,7 +101,7 @@ func TestModel_MouseClickPaletteRowSelectsChannel(t *testing.T) {
 	m := setupModel(t)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// The palette is centered at y=2; content rows start after the chrome
 	// (2) plus input and context lines (2). Row 0 is "General".
@@ -110,7 +110,7 @@ func TestModel_MouseClickPaletteRowSelectsChannel(t *testing.T) {
 		t.Fatalf("expected General row in palette:\n%s", pv)
 	}
 	updated, cmd := m.Update(tea.MouseMsg{X: 60, Y: 6, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	wantMsg[palette.ChannelChosenMsg](t, cmd)
 
 	view := testutil.StripANSI(m.View())
@@ -124,11 +124,11 @@ func TestModel_MouseClickBarIgnoredWhenOverlayOpen(t *testing.T) {
 
 	// Open the channel creator (a non-palette overlay).
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Click the search button on the bar — must not stack a second overlay.
 	updated, _ = m.Update(tea.MouseMsg{X: 12, Y: 39, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := testutil.StripANSI(m.View())
 	if strings.Contains(view, "↵ select") {
@@ -147,13 +147,13 @@ func TestModel_MouseWheelMovesPaletteCursor(t *testing.T) {
 		{ID: "c1", DisplayName: "General", TeamID: "t1"},
 		{ID: "c2", DisplayName: "Random", TeamID: "t1"},
 	}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	before := m.View()
 
 	updated, _ = m.Update(tea.MouseMsg{X: 60, Y: 6, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if after := m.View(); after == before {
 		t.Error("expected palette cursor to move on wheel scroll")
@@ -165,7 +165,7 @@ func TestModel_MouseClickOutsideBarIsNoOp(t *testing.T) {
 	before := m.View()
 
 	updated, _ := m.Update(tea.MouseMsg{X: 60, Y: 20, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if after := m.View(); after != before {
 		t.Error("expected click outside the bar to be a no-op")
@@ -180,7 +180,7 @@ func TestModel_ActionBarShowsConnectionState(t *testing.T) {
 	}
 
 	updated, _ := m.Update(tui.WSConnectedMsg{})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if view := testutil.StripANSI(m.View()); !strings.Contains(view, "●") {
 		t.Errorf("expected connected indicator after WSConnectedMsg:\n%s", view)
@@ -198,7 +198,7 @@ func TestMouse_WheelOverInputDoesNotScrollHistory(t *testing.T) {
 	updated, _ := m.Update(tea.MouseMsg{
 		X: 10, Y: 37, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp,
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if testutil.StripANSI(m.View()) != before {
 		t.Error("wheel over the input scrolled the history")
@@ -227,12 +227,12 @@ func TestMouse_DragExtendsSelection(t *testing.T) {
 	updated, _ := m.Update(tea.MouseMsg{
 		X: 5, Y: 2, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	updated, _ = m.Update(tea.MouseMsg{
 		X: 5, Y: 4, Action: tea.MouseActionMotion, Button: tea.MouseButtonLeft,
 	})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if !m.HasSelection() {
 		t.Error("dragging did not produce a selection")

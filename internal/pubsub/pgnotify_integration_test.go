@@ -32,7 +32,11 @@ func TestPGNotifyIntegration_PublishSubscribeRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPGNotify: %v", err)
 	}
-	defer func() { _ = ps.Close() }()
+	defer func() {
+		if cerr := ps.Close(); cerr != nil {
+			t.Errorf("close: %v", cerr)
+		}
+	}()
 
 	received := make(chan []byte, 1)
 	if err := ps.Subscribe(context.Background(), "chit_test_topic", func(data []byte) {

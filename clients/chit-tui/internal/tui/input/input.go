@@ -154,9 +154,13 @@ func (m *Model) detectAtTrigger() tea.Cmd {
 // characters. The typed prefix is deleted at the cursor and the name
 // inserted there, so the cursor ends up after it on whichever line it is.
 func (m *Model) ReplaceAtMention(startCol int, username string) {
+	// Each backspace returns a command that restarts the cursor blink. A
+	// mention pick has never scheduled it, so it is not run.
+	var restartBlink tea.Cmd
 	for range max(m.cursorCol()-startCol, 0) {
-		m.textarea, _ = m.textarea.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+		m.textarea, restartBlink = m.textarea.Update(tea.KeyMsg{Type: tea.KeyBackspace})
 	}
+	_ = restartBlink
 	m.textarea.InsertString("@" + username + " ")
 }
 

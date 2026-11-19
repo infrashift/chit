@@ -59,8 +59,10 @@ func (m Model) handleSlash(msg input.SlashTriggerMsg) (tea.Model, tea.Cmd) {
 
 	// Split off the verb so commands that take arguments are matched the
 	// same way as the ones that do not. "/leave now" is still /leave.
-	verb, args, _ := strings.Cut(trimmed, " ")
-	args = strings.TrimSpace(args)
+	verb, args, hasArgs := strings.Cut(trimmed, " ")
+	if hasArgs {
+		args = strings.TrimSpace(args)
+	}
 
 	// These act on this client alone; the server knows nothing about them.
 	switch verb {

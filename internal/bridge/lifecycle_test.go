@@ -48,7 +48,11 @@ func startRun(t *testing.T, b *Bridge) (stop func() error) {
 			return errors.New("Run did not return after cancel")
 		}
 	}
-	t.Cleanup(func() { _ = stop() })
+	t.Cleanup(func() {
+		if err := stop(); err != nil {
+			t.Errorf("stop bridge: %v", err)
+		}
+	})
 	return stop
 }
 
@@ -87,7 +91,7 @@ func TestBridge_RunServesOverWebSocket(t *testing.T) {
 	stop := startRun(t, b)
 	waitForConnect(t, chitd)
 
-	chitd.events <- postedEvent(&model.Post{ID: "root-1", ChannelID: testChannelID,
+	chitd.events <- postedEvent(t, &model.Post{ID: "root-1", ChannelID: testChannelID,
 		UserID: testOtherUser, Content: "hello"})
 	reply := waitForPosts(t, chitd, 1)[0]
 	if reply.RootID != "root-1" || !strings.HasPrefix(reply.Content, "re: [@alice] hello") {
@@ -164,7 +168,7 @@ func TestBridge_ShutdownFinishesRunInProgress(t *testing.T) {
 	waitForConnect(t, chitd)
 
 	for i, id := range []string{"msg-0", "msg-1", "msg-2"} {
-		chitd.events <- postedEvent(&model.Post{ID: id, ChannelID: testChannelID,
+		chitd.events <- postedEvent(t, &model.Post{ID: id, ChannelID: testChannelID,
 			UserID: testOtherUser, RootID: "root-1", Content: "step"})
 		if i == 0 {
 			waitFor(t, "the first run to start", func() bool { return fileExists(started) })
@@ -220,7 +224,7 @@ func TestBridge_ShutdownGraceStopsRuns(t *testing.T) {
 	stop := startRun(t, b)
 	waitForConnect(t, chitd)
 
-	chitd.events <- postedEvent(&model.Post{ID: "root-1", ChannelID: testChannelID,
+	chitd.events <- postedEvent(t, &model.Post{ID: "root-1", ChannelID: testChannelID,
 		UserID: testOtherUser, Content: "long task"})
 	waitFor(t, "the run to start", func() bool { return fileExists(started) })
 
@@ -245,7 +249,7 @@ func TestBridge_IdleWorkerRetires(t *testing.T) {
 	b, ctx := liveBridge(t, testConfig(t, srv.URL, writeEchoClaude(t, t.TempDir())))
 	b.idleTimeout = 50 * time.Millisecond
 
-	b.handleEvent(ctx, postedEvent(&model.Post{ID: "root-1", ChannelID: testChannelID,
+	b.handleEvent(ctx, postedEvent(t, &model.Post{ID: "root-1", ChannelID: testChannelID,
 		UserID: testOtherUser, Content: "first"}))
 	waitForPosts(t, chitd, 1)
 	waitFor(t, "the idle worker to retire", func() bool {
@@ -256,7 +260,7 @@ func TestBridge_IdleWorkerRetires(t *testing.T) {
 		return !queued && !session
 	})
 
-	b.handleEvent(ctx, postedEvent(&model.Post{ID: "msg-2", ChannelID: testChannelID,
+	b.handleEvent(ctx, postedEvent(t, &model.Post{ID: "msg-2", ChannelID: testChannelID,
 		UserID: testOtherUser, RootID: "root-1", Content: "second"}))
 	if reply := waitForPosts(t, chitd, 2)[1]; !strings.HasPrefix(reply.Content, "re: [@alice] second") {
 		t.Errorf("a woken thread should be answered, got %q", reply.Content)

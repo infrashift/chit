@@ -1,6 +1,7 @@
 package tui_test
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -27,7 +28,12 @@ func run(m *testing.M) int {
 	if err != nil {
 		panic(err)
 	}
-	defer func() { _ = os.RemoveAll(dir) }()
+	defer func() {
+		// Too late to fail the run; say so, so the leftover can be found.
+		if err := os.RemoveAll(dir); err != nil {
+			fmt.Fprintf(os.Stderr, "remove test home %s: %v\n", dir, err)
+		}
+	}()
 
 	for k, v := range map[string]string{
 		"HOME":             dir,

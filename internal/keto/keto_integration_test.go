@@ -104,8 +104,12 @@ func TestKetoIntegration_ListPaginates(t *testing.T) {
 		}
 	}
 	t.Cleanup(func() {
+		// t.Context() is already canceled when cleanups run.
 		for i := range n {
-			_ = c.DeleteRelation(t.Context(), ns, channel, model.KetoRelationMember, fmt.Sprintf("user-%03d", i))
+			if err := c.DeleteRelation(context.Background(), ns, channel, model.KetoRelationMember, fmt.Sprintf("user-%03d", i)); err != nil {
+				t.Errorf("delete %d: %v", i, err)
+				return
+			}
 		}
 	})
 
@@ -241,7 +245,11 @@ func TestKetoIntegration_ReconcileTwiceDoesNotGrow(t *testing.T) {
 	if err := rec.Reconcile(t.Context(), &command.CUEConfig{}); err != nil {
 		t.Fatalf("empty reconcile: %v", err)
 	}
-	t.Cleanup(func() { _ = rec.Reconcile(context.Background(), &command.CUEConfig{}) })
+	t.Cleanup(func() {
+		if err := rec.Reconcile(context.Background(), &command.CUEConfig{}); err != nil {
+			t.Errorf("empty reconcile: %v", err)
+		}
+	})
 	rows := func() int {
 		t.Helper()
 		tuples, err := c.ListRelations(t.Context(), ns)

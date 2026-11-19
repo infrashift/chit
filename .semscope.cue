@@ -24,5 +24,4 @@ rules: "NASA-P10-02": enabled: false // Phase 5
 rules: "NASA-P10-04": enabled: false // Phase 8
 rules: "NASA-P10-05": enabled: false // Phase 9
 rules: "NASA-P10-06": enabled: false // Phase 7
-rules: "NASA-P10-07": enabled: false // Phase 3
 rules: "NASA-P10-09": enabled: false // Phase 6

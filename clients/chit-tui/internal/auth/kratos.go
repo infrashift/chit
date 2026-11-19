@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/infrashift/chit/clients/chit-tui/internal/errlog"
 )
 
 // LoginFlow represents a Kratos self-service login flow.
@@ -91,7 +93,7 @@ func (c *KratosClient) InitLoginFlow(ctx context.Context) (*LoginFlow, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer errlog.Close(resp.Body, "kratos response body")
 
 	if resp.StatusCode >= 400 {
 		return nil, c.parseError(resp)
@@ -128,7 +130,7 @@ func (c *KratosClient) SubmitLogin(ctx context.Context, flowID, identifier, pass
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer errlog.Close(resp.Body, "kratos response body")
 
 	if resp.StatusCode >= 400 {
 		return nil, c.parseError(resp)
@@ -159,7 +161,7 @@ func (c *KratosClient) CheckSession(ctx context.Context, token string) (*Identit
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer errlog.Close(resp.Body, "kratos response body")
 
 	if resp.StatusCode >= 400 {
 		return nil, c.parseError(resp)

@@ -183,7 +183,8 @@ func TestLip(t *testing.T) {
 	})
 
 	t.Run("ansi color passes through", func(t *testing.T) {
-		if got := Lip(lipgloss.Color("5")); string(got.(lipgloss.Color)) != "5" {
+		got := Lip(lipgloss.Color("5"))
+		if c, ok := got.(lipgloss.Color); !ok || string(c) != "5" {
 			t.Errorf("Lip(ansi) = %v, want 5", got)
 		}
 	})

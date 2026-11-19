@@ -50,7 +50,7 @@ func TestAppError_ToJSON(t *testing.T) {
 	if parsed["message"] != "json message" {
 		t.Fatalf("expected message=%q, got %v", "json message", parsed["message"])
 	}
-	if int(parsed["status_code"].(float64)) != 400 {
+	if sc, ok := parsed["status_code"].(float64); !ok || int(sc) != 400 {
 		t.Fatalf("expected status_code=400, got %v", parsed["status_code"])
 	}
 	// Where is json:"-" so should not appear

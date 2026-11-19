@@ -47,9 +47,11 @@ func (e *bridgeEnv) fakeKratos(t *testing.T) *atomic.Int32 {
 			http.Error(w, `{"error":{"code":404}}`, http.StatusNotFound)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"id": strings.TrimPrefix(r.URL.Path, "/admin/identities/"), "state": state, "traits": traits,
-		})
+		}); err != nil {
+			t.Errorf("encode identity: %v", err)
+		}
 	}))
 	t.Cleanup(srv.Close)
 	e.a.Config.KratosAdminURL = srv.URL

@@ -37,6 +37,12 @@ type span struct {
 	action Action
 }
 
+// rendered is the drawn bar with the clickable spans in it.
+type rendered struct {
+	text  string
+	spans []span
+}
+
 // Model is the action bar component.
 type Model struct {
 	width      int
@@ -108,7 +114,7 @@ func (m Model) buttons() []button {
 // layout renders the bar and records the clickable spans as it goes. It is
 // the single source of truth for button geometry: View and HitTest both use
 // it so clicks can never drift from what is drawn.
-func (m Model) layout() (string, []span) {
+func (m Model) layout() rendered {
 	base := m.styles.StatusBar.Padding(0, 0)
 
 	var b strings.Builder
@@ -170,19 +176,17 @@ func (m Model) layout() (string, []span) {
 	write(base.Render(strings.Repeat(" ", gap)))
 	write(right)
 
-	return b.String(), spans
+	return rendered{text: b.String(), spans: spans}
 }
 
 // View renders the action bar as a single line.
 func (m Model) View() string {
-	s, _ := m.layout()
-	return s
+	return m.layout().text
 }
 
 // HitTest returns the action under screen column x, or ActionNone.
 func (m Model) HitTest(x int) Action {
-	_, spans := m.layout()
-	for _, sp := range spans {
+	for _, sp := range m.layout().spans {
 		if x >= sp.start && x < sp.end {
 			return sp.action
 		}

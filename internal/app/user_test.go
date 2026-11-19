@@ -21,7 +21,9 @@ func fakeKratos(t *testing.T, f *fixture, traits map[string]string, status int) 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		w.WriteHeader(status)
-		_ = json.NewEncoder(w).Encode(map[string]any{"traits": traits})
+		if err := json.NewEncoder(w).Encode(map[string]any{"traits": traits}); err != nil {
+			t.Errorf("encode identity: %v", err)
+		}
 	}))
 	t.Cleanup(srv.Close)
 	f.app.Config.KratosAdminURL = srv.URL
@@ -70,7 +72,9 @@ func TestProvisionUser(t *testing.T) {
 	t.Run("an inactive Kratos identity is not provisioned", func(t *testing.T) {
 		f := newFixture(t)
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write([]byte(`{"state":"inactive","traits":{"username":"idle","email":"idle@example.com"}}`))
+			if _, err := w.Write([]byte(`{"state":"inactive","traits":{"username":"idle","email":"idle@example.com"}}`)); err != nil {
+				t.Errorf("write: %v", err)
+			}
 		}))
 		t.Cleanup(srv.Close)
 		f.app.Config.KratosAdminURL = srv.URL

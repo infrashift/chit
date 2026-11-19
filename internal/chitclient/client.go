@@ -28,6 +28,7 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 
+	"github.com/infrashift/chit/internal/errlog"
 	"github.com/infrashift/chit/internal/model"
 )
 
@@ -144,10 +145,11 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	if err != nil {
 		return fmt.Errorf("%s %s: %w", method, path, err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() { errlog.Debug(resp.Body.Close(), "close chit API response body") }()
 
 	if resp.StatusCode >= 300 {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		errlog.Debug(readErr, "read chit API error body")
 		return &StatusError{Method: method, Path: path, Status: resp.StatusCode, Body: string(respBody)}
 	}
 
@@ -433,7 +435,7 @@ func (c *Client) Listen(ctx context.Context, handle func(*model.WebSocketEvent))
 
 		conn, resp, err := websocket.DefaultDialer.DialContext(ctx, wsURL, headers)
 		if resp != nil && resp.Body != nil {
-			_ = resp.Body.Close()
+			errlog.Debug(resp.Body.Close(), "close websocket handshake response body")
 		}
 		if err != nil {
 			slog.Info("websocket connect failed, retrying", "error", err, "backoff", backoff)
@@ -455,7 +457,7 @@ func (c *Client) Listen(ctx context.Context, handle func(*model.WebSocketEvent))
 		go func() {
 			select {
 			case <-ctx.Done():
-				_ = conn.Close()
+				errlog.Close(conn, "websocket connection on shutdown")
 			case <-done:
 			}
 		}()
@@ -476,6 +478,6 @@ func (c *Client) Listen(ctx context.Context, handle func(*model.WebSocketEvent))
 			handle(&event)
 		}
 		close(done)
-		_ = conn.Close()
+		errlog.Close(conn, "websocket connection")
 	}
 }

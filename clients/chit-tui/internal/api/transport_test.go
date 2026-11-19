@@ -18,8 +18,11 @@ func TestAuthTransport_InjectsToken(t *testing.T) {
 	recorder := &recordTransport{}
 	transport := newAuthTransport(recorder, func() string { return "my-token" })
 
-	req, _ := http.NewRequest("GET", "http://example.com/api/v1/users/me", nil)
-	_, err := transport.RoundTrip(req)
+	req, err := http.NewRequest("GET", "http://example.com/api/v1/users/me", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	_, err = transport.RoundTrip(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,8 +37,11 @@ func TestAuthTransport_ClonesRequest(t *testing.T) {
 	recorder := &recordTransport{}
 	transport := newAuthTransport(recorder, func() string { return "tok" })
 
-	req, _ := http.NewRequest("GET", "http://example.com/test", nil)
-	_, err := transport.RoundTrip(req)
+	req, err := http.NewRequest("GET", "http://example.com/test", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	_, err = transport.RoundTrip(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,8 +67,11 @@ func TestAuthTransportWithHeader_UsesCustomHeader(t *testing.T) {
 	recorder := &recordTransport{}
 	transport := newAuthTransportWithHeader(recorder, func() string { return "kratos-id" }, "X-User-Id")
 
-	req, _ := http.NewRequest("GET", "http://example.com/api/v1/users/me", nil)
-	_, err := transport.RoundTrip(req)
+	req, err := http.NewRequest("GET", "http://example.com/api/v1/users/me", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	_, err = transport.RoundTrip(req)
 	if err != nil {
 		t.Fatal(err)
 	}

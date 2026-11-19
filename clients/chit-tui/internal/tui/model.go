@@ -213,7 +213,10 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 	// root-side updates are visible without further plumbing.
 	m.palette.SetCounts(m.unread, m.mentions)
 	m.palette.SetDMDisplayNames(m.dmDisplayNames)
-	_ = m.input.Focus()
+	// Focus returns the cursor's first blink. NewModel cannot run a
+	// command and Init has never scheduled this one, so it is not run.
+	firstBlink := m.input.Focus()
+	_ = firstBlink
 	return m
 }
 

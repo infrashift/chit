@@ -36,6 +36,7 @@ const (
 // fakeChit is an httptest-backed stand-in for chitd's REST API and WebSocket,
 // pre-seeded with the same fixtures the MCP tests have always used.
 type fakeChit struct {
+	t      *testing.T
 	server *httptest.Server
 	// wsCh delivers events to any connected WebSocket client.
 	wsCh chan *model.WebSocketEvent
@@ -55,6 +56,7 @@ func newFakeChit(t *testing.T) *fakeChit {
 	t.Helper()
 
 	f := &fakeChit{
+		t:    t,
 		wsCh: make(chan *model.WebSocketEvent, 16),
 		agent: model.User{
 			ID: agentUserID, KratosID: agentKratosID, Username: "agent-bot",
@@ -103,7 +105,7 @@ func newFakeChit(t *testing.T) *fakeChit {
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/users/me", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, f.agent) // own profile keeps its email
+			writeJSON(t, w, f.agent) // own profile keeps its email
 		})
 		r.Get("/users/{id}", func(w http.ResponseWriter, req *http.Request) {
 			u, ok := f.userByID(chi.URLParam(req, "id"))
@@ -111,7 +113,7 @@ func newFakeChit(t *testing.T) *fakeChit {
 				http.NotFound(w, req)
 				return
 			}
-			writeJSON(w, sanitized(&u))
+			writeJSON(t, w, sanitized(&u))
 		})
 		r.Get("/users/username/{username}", func(w http.ResponseWriter, req *http.Request) {
 			u, ok := f.userByUsername(chi.URLParam(req, "username"))
@@ -119,21 +121,21 @@ func newFakeChit(t *testing.T) *fakeChit {
 				http.NotFound(w, req)
 				return
 			}
-			writeJSON(w, sanitized(&u))
+			writeJSON(t, w, sanitized(&u))
 		})
 
 		r.Get("/teams", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, []*model.Team{&f.team})
+			writeJSON(t, w, []*model.Team{&f.team})
 		})
 		r.Get("/teams/{id}", func(w http.ResponseWriter, req *http.Request) {
 			if chi.URLParam(req, "id") != teamID {
 				http.NotFound(w, req)
 				return
 			}
-			writeJSON(w, f.team)
+			writeJSON(t, w, f.team)
 		})
 		r.Get("/teams/{id}/channels", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, []*model.Channel{&f.channel})
+			writeJSON(t, w, []*model.Channel{&f.channel})
 		})
 
 		r.Get("/channels/{id}", func(w http.ResponseWriter, req *http.Request) {
@@ -141,21 +143,21 @@ func newFakeChit(t *testing.T) *fakeChit {
 				http.NotFound(w, req)
 				return
 			}
-			writeJSON(w, f.channel)
+			writeJSON(t, w, f.channel)
 		})
 		r.Get("/channels/{id}/members", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, []*model.ChannelMember{
+			writeJSON(t, w, []*model.ChannelMember{
 				{ChannelID: channelID, UserID: agentUserID, CreateAt: 1000},
 			})
 		})
 		r.Get("/channels/{id}/posts", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, &model.PostList{Order: []*model.Post{&f.reply, &f.root}})
+			writeJSON(t, w, &model.PostList{Order: []*model.Post{&f.reply, &f.root}})
 		})
 		r.Get("/channels/{id}/pinned", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, &model.PostList{Order: []*model.Post{}})
+			writeJSON(t, w, &model.PostList{Order: []*model.Post{}})
 		})
 		r.Post("/channels/{id}/members/me/view", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, map[string]string{"status": "OK"})
+			writeJSON(t, w, map[string]string{"status": "OK"})
 		})
 
 		r.Post("/posts", func(w http.ResponseWriter, req *http.Request) {
@@ -169,7 +171,7 @@ func newFakeChit(t *testing.T) *fakeChit {
 			post.ID = fmt.Sprintf("post-new-%03d", f.postSeq)
 			f.mu.Unlock()
 			post.UserID = agentUserID // chitd stamps the authenticated user
-			writeJSON(w, post)
+			writeJSON(t, w, post)
 		})
 		r.Get("/posts/{id}", func(w http.ResponseWriter, req *http.Request) {
 			p, ok := f.postByID(chi.URLParam(req, "id"))
@@ -177,17 +179,17 @@ func newFakeChit(t *testing.T) *fakeChit {
 				http.NotFound(w, req)
 				return
 			}
-			writeJSON(w, p)
+			writeJSON(t, w, p)
 		})
 		r.Get("/posts/{id}/thread", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, &model.PostList{Order: []*model.Post{&f.root, &f.reply}})
+			writeJSON(t, w, &model.PostList{Order: []*model.Post{&f.root, &f.reply}})
 		})
 		r.Get("/posts/{id}/tags", func(w http.ResponseWriter, req *http.Request) {
 			if chi.URLParam(req, "id") == rootPostID {
-				writeJSON(w, []*model.Tag{&f.tag})
+				writeJSON(t, w, []*model.Tag{&f.tag})
 				return
 			}
-			writeJSON(w, []*model.Tag{})
+			writeJSON(t, w, []*model.Tag{})
 		})
 		r.Post("/posts/{id}/tags", func(w http.ResponseWriter, req *http.Request) {
 			var body struct {
@@ -197,7 +199,7 @@ func newFakeChit(t *testing.T) *fakeChit {
 				http.Error(w, `{"message":"bad request"}`, http.StatusBadRequest)
 				return
 			}
-			writeJSON(w, map[string]string{"status": "OK"})
+			writeJSON(t, w, map[string]string{"status": "OK"})
 		})
 		r.Post("/posts/search", func(w http.ResponseWriter, req *http.Request) {
 			var body struct {
@@ -209,21 +211,21 @@ func newFakeChit(t *testing.T) *fakeChit {
 				return
 			}
 			if strings.Contains(f.root.Content, body.Terms) && body.Terms != "" {
-				writeJSON(w, &model.PostList{Order: []*model.Post{&f.root}})
+				writeJSON(t, w, &model.PostList{Order: []*model.Post{&f.root}})
 				return
 			}
-			writeJSON(w, &model.PostList{Order: []*model.Post{}})
+			writeJSON(t, w, &model.PostList{Order: []*model.Post{}})
 		})
 
 		r.Get("/tags", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, []*model.Tag{&f.tag})
+			writeJSON(t, w, []*model.Tag{&f.tag})
 		})
 
 		r.Get("/users/me/teams/{id}/threads", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, &model.UserThreadList{Threads: []*model.ThreadResponse{}, Total: 0})
+			writeJSON(t, w, &model.UserThreadList{Threads: []*model.ThreadResponse{}, Total: 0})
 		})
 		r.Put("/users/me/teams/{team_id}/threads/{id}/read", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, map[string]string{"status": "OK"})
+			writeJSON(t, w, map[string]string{"status": "OK"})
 		})
 		r.Put("/users/me/teams/{team_id}/threads/{id}/following", func(w http.ResponseWriter, req *http.Request) {
 			var body struct {
@@ -233,7 +235,7 @@ func newFakeChit(t *testing.T) *fakeChit {
 				http.Error(w, `{"message":"bad request"}`, http.StatusBadRequest)
 				return
 			}
-			writeJSON(w, map[string]string{"status": "OK"})
+			writeJSON(t, w, map[string]string{"status": "OK"})
 		})
 
 		r.Get("/websocket", f.handleWS)
@@ -271,7 +273,11 @@ func (f *fakeChit) handleWS(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		return
 	}
-	defer func() { _ = conn.Close() }()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			f.t.Errorf("close websocket: %v", err)
+		}
+	}()
 	f.mu.Lock()
 	ch := f.wsCh
 	f.mu.Unlock()
@@ -321,9 +327,11 @@ func sanitized(u *model.User) *model.User {
 	return &cp
 }
 
-func writeJSON(w http.ResponseWriter, v any) {
+func writeJSON(t *testing.T, w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		t.Errorf("encode: %v", err)
+	}
 }
 
 // ─── Setup helper ────────────────────────────────────────────────
@@ -359,7 +367,9 @@ func setupTestMCP(t *testing.T) (context.Context, *mcpsdk.ClientSession, *ChitMC
 	}
 
 	cleanup := func() {
-		_ = cs.Close()
+		if err := cs.Close(); err != nil {
+			t.Errorf("close client session: %v", err)
+		}
 	}
 
 	return ctx, cs, mcpSrv, cleanup

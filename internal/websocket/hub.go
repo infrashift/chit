@@ -3,6 +3,7 @@ package websocket
 import (
 	"log/slog"
 
+	"github.com/infrashift/chit/internal/errlog"
 	"github.com/infrashift/chit/internal/model"
 )
 
@@ -249,7 +250,7 @@ func (h *Hub) broadcastEvent(req broadcastRequest) {
 		slog.Warn("websocket: slow consumer, disconnecting", "user_id", client.UserID)
 		h.removeClient(client)
 		if client.conn != nil {
-			_ = client.conn.Close()
+			errlog.Close(client.conn, "slow websocket client connection")
 		}
 	}
 }

@@ -2,6 +2,8 @@ package keto
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -20,14 +22,20 @@ func fakeKeto(t *testing.T, status int, reply string, stored ...Tuple) (*Client,
 	var got []recorded
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec := recorded{method: r.Method, path: r.URL.Path, query: r.URL.RawQuery}
-		_ = json.NewDecoder(r.Body).Decode(&rec.body)
+		if err := json.NewDecoder(r.Body).Decode(&rec.body); err != nil && !errors.Is(err, io.EOF) {
+			t.Errorf("decode request body: %v", err)
+		}
 		got = append(got, rec)
 		if r.Method == http.MethodGet && r.URL.Path == "/relation-tuples" {
-			_ = json.NewEncoder(w).Encode(map[string]any{"relation_tuples": stored, "next_page_token": ""})
+			if err := json.NewEncoder(w).Encode(map[string]any{"relation_tuples": stored, "next_page_token": ""}); err != nil {
+				t.Errorf("encode tuples: %v", err)
+			}
 			return
 		}
 		w.WriteHeader(status)
-		_, _ = w.Write([]byte(reply))
+		if _, err := w.Write([]byte(reply)); err != nil {
+			t.Errorf("write: %v", err)
+		}
 	}))
 	t.Cleanup(srv.Close)
 	return New(srv.URL, srv.URL, srv.Client()), &got
@@ -79,7 +87,7 @@ func TestWriteAndDelete(t *testing.T) {
 		l.query != "namespace=ns&object=obj&page_size=1&relation=rel&subject_set.namespace=sns&subject_set.object=sobj&subject_set.relation=srel" {
 		t.Errorf("subject-set lookup = %+v", l)
 	}
-	if set, _ := (*got)[3].body["subject_set"].(map[string]any); set["relation"] != "srel" {
+	if set, ok := (*got)[3].body["subject_set"].(map[string]any); !ok || set["relation"] != "srel" {
 		t.Errorf("subject-set write = %+v", (*got)[3])
 	}
 	del := (*got)[4]
@@ -134,10 +142,12 @@ func TestListRelations_FollowsPages(t *testing.T) {
 		if tok == "p2" {
 			next, subject = "", "b"
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"relation_tuples": []Tuple{{Namespace: "ns", Object: "o", Relation: "r", SubjectID: subject}},
 			"next_page_token": next,
-		})
+		}); err != nil {
+			t.Errorf("encode tuples: %v", err)
+		}
 	}))
 	defer srv.Close()
 

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"github.com/infrashift/chit/internal/errlog"
 )
 
 // AppError represents a structured application error returned to clients.
@@ -20,7 +22,10 @@ func (e *AppError) Error() string {
 }
 
 func (e *AppError) ToJSON() string {
-	b, _ := json.Marshal(e)
+	// An AppError holds only strings and an int, so Marshal cannot fail;
+	// a failure is logged and the result is then "".
+	b, err := json.Marshal(e)
+	errlog.Warn(err, "marshal app error")
 	return string(b)
 }
 

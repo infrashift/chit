@@ -1,11 +1,17 @@
 package ws
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // SetTimings shortens the client's reconnect and liveness timers so tests do
 // not have to wait out production intervals. Call it before Connect.
 func SetTimings(c WSClient, backoffBase, pongWait, pingPeriod time.Duration) {
-	wc := c.(*wsClient)
+	wc, ok := c.(*wsClient)
+	if !ok {
+		panic(fmt.Sprintf("ws.SetTimings: %T is not a client from this package", c))
+	}
 	wc.newBackoff = func() *Backoff {
 		b := NewBackoff()
 		b.Base = backoffBase

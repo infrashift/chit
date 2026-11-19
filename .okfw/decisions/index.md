@@ -13,4 +13,5 @@
 * [ADR-0007: Thin pub/sub envelopes with PG LISTEN/NOTIFY by default](adr-0007-thin-pub-sub-envelopes-with-pg-listen-notify-by-default--01a1f5379e1a.md) - chitd publishes thin event envelopes on chit_events through PG LISTEN/NOTIFY or NATS, and WebSocket fan-out stays in-process.
 * [ADR-0008: chit-tui is a separate Go module](adr-0008-chit-tui-is-a-separate-go-module--01a1f5379e21.md) - clients/chit-tui has its own go.mod so the charmbracelet dependencies stay out of the server build, and make check-deps enforces it.
 * [ADR-0009: Allowlisted machine actors act on behalf of a person](adr-0009-allowlisted-machine-actors-act-on-behalf-of-a-person--01a1f5379e28.md) - X-On-Behalf-Of lets a client in CHIT_ON_BEHALF_OF_CLIENTS act as a person on an allowlisted route, and provisions a Kratos identity that chit has not seen.
+* [ADR-0010: errlog checks the errors that a caller cannot return](adr-0010-errlog-checks-the-errors-that-a-caller-cannot-return--01a1f53e0eaa.md) - Each module has internal/errlog, which logs with slog the errors of deferred closes and best-effort cleanups, so no error goes to the blank identifier.
 

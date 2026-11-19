@@ -76,7 +76,8 @@ func FindMentions(content string) []MentionSpan {
 	matches := mentionRe.FindAllStringSubmatchIndex(content, -1)
 	var spans []MentionSpan
 	for _, m := range matches {
-		if prev, _ := utf8.DecodeLastRuneInString(content[:m[0]]); m[0] > 0 && isNameRune(prev) {
+		// size is 0 only when the mention starts the content.
+		if prev, size := utf8.DecodeLastRuneInString(content[:m[0]]); size > 0 && isNameRune(prev) {
 			continue // an email address
 		}
 		spans = append(spans, MentionSpan{

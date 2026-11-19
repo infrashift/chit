@@ -150,7 +150,10 @@ func TestRouter_EmptyOriginListSendsNoCORSHeaders(t *testing.T) {
 	defer cleanup()
 	a.Config.AllowedOrigins = nil
 
-	r, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/system/ping", http.NoBody)
+	r, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/system/ping", http.NoBody)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
 	r.Header.Set("Origin", "https://elsewhere.example")
 	w := httptest.NewRecorder()
 	New(a).ServeHTTP(w, r)
