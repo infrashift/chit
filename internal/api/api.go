@@ -48,6 +48,7 @@ func New(a *app.App) http.Handler {
 			routePosts(r, a)
 			routeThreads(r, a)
 			routeTags(r, a)
+			routeAttachments(r, a)
 			routeCommandsSearchAndWebSocket(r, a)
 		})
 	})
@@ -81,12 +82,23 @@ func useCORS(r chi.Router, allowedOrigins []string) {
 }
 
 // useAuthenticated installs the middleware of the authenticated group:
-// authentication, rate limiting and, when enabled, OpenAPI validation.
+// the attachment headers, authentication, rate limiting and, when enabled,
+// OpenAPI validation.
 func useAuthenticated(r chi.Router, a *app.App) {
 	assert.That(r != nil, "useAuthenticated: nil router")
 	assert.That(a != nil && a.Config != nil, "useAuthenticated: nil app or config")
+	// First, so that a refusal by AuthExtract on a file route carries the
+	// attachment headers too.
+	r.Use(FileResponseHeaders)
 	r.Use(AuthExtract(a))
-	r.Use(RateLimit(10, 50))
+	// After AuthExtract, which names the person and, on behalf of them,
+	// the client: see ratelimit.go.
+	r.Use(RateLimit(RateLimits{
+		UserPerSecond:   a.Config.RateLimitUserPerSecond,
+		UserBurst:       a.Config.RateLimitUserBurst,
+		ClientPerSecond: a.Config.RateLimitClientPerSecond,
+		ClientBurst:     a.Config.RateLimitClientBurst,
+	}, a.OnBehalfOfAllowed))
 
 	// OpenAPI request validation (optional)
 	if a.Config.EnableOpenAPIValidation {
@@ -205,6 +217,16 @@ func routeTags(r chi.Router, a *app.App) {
 	// the "/posts/{id}" routes, so chi binds id="tags" and answers
 	// 405 for a method those routes do not define.
 	r.Post("/tags/posts", getTagsForPosts(a))
+}
+
+// routeAttachments registers the attachment routes.
+func routeAttachments(r chi.Router, a *app.App) {
+	assert.That(r != nil, "routeAttachments: nil router")
+	assert.That(a != nil, "routeAttachments: nil app")
+	r.Post("/channels/{id}/files", uploadFile(a))
+	r.Get("/files/{id}", downloadFile(a))
+	r.Get("/files/{id}/info", getFileInfo(a))
+	r.Post("/files/search", searchFiles(a))
 }
 
 // routeCommandsSearchAndWebSocket registers the command, search and

@@ -29,8 +29,14 @@ func (a *App) CreatePostAs(ctx context.Context, post *model.Post, actor *model.U
 		return nil, err
 	}
 
-	// Intercept slash commands — they are NOT persisted.
-	if a.CommandRegistry != nil {
+	if err := a.checkAttachable(ctx, post); err != nil {
+		return nil, err
+	}
+
+	// Intercept slash commands — they are NOT persisted. A post with
+	// attachments is a message, whatever its text says: a command would
+	// drop the files.
+	if a.CommandRegistry != nil && len(post.FileIDs) == 0 {
 		resp, handled, err := a.InterceptSlashCommand(ctx, post.UserID, post.ChannelID, post.Content)
 		if err != nil {
 			return nil, err

@@ -9,10 +9,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
-
-	"golang.org/x/time/rate"
 
 	"github.com/infrashift/chit/internal/app"
 	"github.com/infrashift/chit/internal/assert"
@@ -172,10 +169,22 @@ func onBehalfOfRoutes() []onBehalfOfRouteSpec {
 		// Posting, and saying that a reply is being produced.
 		{http.MethodPost, "POST /posts", regexp.MustCompile(`^/api/v1/posts$`)},
 		{http.MethodPost, "POST /channels/{id}/stream_status", regexp.MustCompile(`^/api/v1/channels/[^/]+/stream_status$`)},
-		// Tags: halod creates and applies a person's profile/ Tags for them.
+		// Tags: halod reads, creates, applies and removes a person's Tags for
+		// them, profile/ Tags included, and sees only what the person sees:
+		// their own private Tags and the channel Tags of their channels.
 		{http.MethodPost, "POST /tags", regexp.MustCompile(`^/api/v1/tags$`)},
+		{http.MethodGet, "GET /tags", regexp.MustCompile(`^/api/v1/tags$`)},
 		{http.MethodPost, "POST /posts/{id}/tags", regexp.MustCompile(`^/api/v1/posts/[^/]+/tags$`)},
+		{http.MethodDelete, "DELETE /posts/{id}/tags/{tag_id}", regexp.MustCompile(`^/api/v1/posts/[^/]+/tags/[^/]+$`)},
 		{http.MethodPost, "POST /channels/{id}/tags", regexp.MustCompile(`^/api/v1/channels/[^/]+/tags$`)},
+		{http.MethodGet, "GET /channels/{id}/tags", regexp.MustCompile(`^/api/v1/channels/[^/]+/tags$`)},
+		{http.MethodDelete, "DELETE /channels/{id}/tags/{tag_id}", regexp.MustCompile(`^/api/v1/channels/[^/]+/tags/[^/]+$`)},
+		{http.MethodPost, "POST /tags/posts", regexp.MustCompile(`^/api/v1/tags/posts$`)},
+		{http.MethodPost, "POST /tags/channels", regexp.MustCompile(`^/api/v1/tags/channels$`)},
+		// Attachments: halod uploads a person's image, and fetches an image
+		// for the person it shows it to (halod proxies downloads).
+		{http.MethodPost, "POST /channels/{id}/files", regexp.MustCompile(`^/api/v1/channels/[^/]+/files$`)},
+		{http.MethodGet, "GET /files/{id}", regexp.MustCompile(`^/api/v1/files/[^/]+$`)},
 		// Conversations: halod creates a person's private channel and adds
 		// itself to it, as the person. GET /users/me returns the person, which
 		// is how halod learns the user ID of a kratos: principal.
@@ -248,97 +257,4 @@ func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 		return nil, nil, fmt.Errorf("underlying ResponseWriter does not implement http.Hijacker")
 	}
 	return h.Hijack()
-}
-
-// RateLimit applies per-user rate limiting: requestsPerSecond sustained,
-// with bursts up to burst.
-//
-// semscope: allow(NASA-P10-09) chi's Router.Use requires func(http.Handler) http.Handler.
-func RateLimit(requestsPerSecond float64, burst int) func(http.Handler) http.Handler {
-	assert.That(requestsPerSecond > 0 && burst > 0, "RateLimit: limit and burst must be positive")
-	limiters := newUserLimiters(rate.Limit(requestsPerSecond), burst, systemClock{})
-
-	return func(next http.Handler) http.Handler {
-		assert.That(next != nil, "RateLimit: nil next handler")
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			key := r.RemoteAddr
-			if user := ContextGetUser(r); user != nil {
-				key = user.ID
-			}
-			if !limiters.allow(key) {
-				WriteError(w, model.NewAppError("RateLimit", "rate limit exceeded", "", http.StatusTooManyRequests))
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
-// userLimiters holds one token bucket per caller.
-//
-// Idle buckets are evicted as requests arrive, not by a background goroutine.
-// The old janitor was started once per RateLimit call and never stopped, and
-// it wiped every bucket every ten minutes, which refilled the burst of
-// whoever was busy at that moment. A bucket idle for idleAfter has refilled
-// completely, so evicting it changes nothing.
-type userLimiters struct {
-	mu        sync.Mutex
-	limit     rate.Limit
-	burst     int
-	idleAfter time.Duration
-	clock     clock
-	lastSweep time.Time
-	entries   map[string]*limiterEntry
-}
-
-// clock supplies the current time; tests substitute a fake.
-type clock interface {
-	Now() time.Time
-}
-
-// systemClock is the production clock.
-type systemClock struct{}
-
-// Now returns time.Now().
-func (systemClock) Now() time.Time { return time.Now() }
-
-type limiterEntry struct {
-	limiter  *rate.Limiter
-	lastSeen time.Time
-}
-
-func newUserLimiters(limit rate.Limit, burst int, c clock) *userLimiters {
-	assert.That(c != nil, "newUserLimiters: nil clock")
-	assert.That(limit > 0 && burst > 0, "newUserLimiters: limit and burst must be positive")
-	// Time for an empty bucket to refill, with margin; at least a minute.
-	idle := time.Minute
-	if limit > 0 {
-		idle = max(idle, 2*time.Duration(float64(burst)/float64(limit)*float64(time.Second)))
-	}
-	return &userLimiters{
-		limit: limit, burst: burst, idleAfter: idle, clock: c,
-		lastSweep: c.Now(), entries: map[string]*limiterEntry{},
-	}
-}
-
-func (u *userLimiters) allow(key string) bool {
-	assert.That(u.clock != nil && u.entries != nil, "userLimiters.allow: not built by newUserLimiters")
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	now := u.clock.Now()
-	if now.Sub(u.lastSweep) > u.idleAfter {
-		for k, e := range u.entries {
-			if now.Sub(e.lastSeen) > u.idleAfter {
-				delete(u.entries, k)
-			}
-		}
-		u.lastSweep = now
-	}
-	e, ok := u.entries[key]
-	if !ok {
-		e = &limiterEntry{limiter: rate.NewLimiter(u.limit, u.burst)}
-		u.entries[key] = e
-	}
-	e.lastSeen = now
-	return e.limiter.AllowN(now, 1)
 }

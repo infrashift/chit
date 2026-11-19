@@ -18,10 +18,13 @@ type Post struct {
 	Props     map[string]any `json:"props,omitempty"`
 	Hashtags  string         `json:"hashtags,omitempty"`
 	IsPinned  bool           `json:"is_pinned"`
-	EditAt    int64          `json:"edit_at"`
-	CreateAt  int64          `json:"create_at"`
-	UpdateAt  int64          `json:"update_at"`
-	DeleteAt  int64          `json:"delete_at"`
+	// FileIDs are the attached files, in order. They are set when the post
+	// is created and do not change; deleting the post deletes them.
+	FileIDs  []string `json:"file_ids,omitempty"`
+	EditAt   int64    `json:"edit_at"`
+	CreateAt int64    `json:"create_at"`
+	UpdateAt int64    `json:"update_at"`
+	DeleteAt int64    `json:"delete_at"`
 }
 
 func (p *Post) IsValid() *AppError {
@@ -38,8 +41,17 @@ func (p *Post) IsValid() *AppError {
 	if p.RootID != "" && !IsValidID(p.RootID) {
 		return NewAppError("Post.IsValid", "invalid root_id", "", http.StatusBadRequest)
 	}
-	if p.Content == "" {
+	// A post of attachments alone needs no text.
+	if p.Content == "" && len(p.FileIDs) == 0 {
 		return NewAppError("Post.IsValid", "content is required", "", http.StatusBadRequest)
+	}
+	if len(p.FileIDs) > FileMaxIDsPerPost {
+		return NewAppError("Post.IsValid", "a post has at most 4 file_ids", "", http.StatusBadRequest)
+	}
+	for _, id := range p.FileIDs {
+		if !IsValidID(id) {
+			return NewAppError("Post.IsValid", "invalid file id", "", http.StatusBadRequest)
+		}
 	}
 	if len(p.Content) > PostMaxContentSize {
 		return NewAppError("Post.IsValid", "content exceeds maximum size", "", http.StatusBadRequest)

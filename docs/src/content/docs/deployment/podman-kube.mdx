@@ -14,7 +14,7 @@ for it, runs the migrations and starts everything else.
 
 | Container | Image | Port(s) | Purpose |
 |---|---|---|---|
-| **postgres** | TSC `quarantine/postgres:17-debian-382cdac` | 5432 | Primary data store; also holds the `kratos`, `keto` and `hydra` databases |
+| **postgres** | TSC `postgresql17:17.12-9410cd4` | 5432 | Primary data store; also holds the `kratos`, `keto` and `hydra` databases |
 
 ### `chit-app`
 
@@ -22,10 +22,10 @@ Init containers run in order before the services start:
 
 | Init container | Image | Purpose |
 |---|---|---|
-| **wait-postgres** | TSC `postgres:17-debian` | Waits until PostgreSQL accepts connections |
-| **ensure-databases** | TSC `postgres:17-debian` | Creates the `kratos`, `keto` and `hydra` databases if missing (the hardened postgres image runs no init scripts) |
+| **wait-postgres** | TSC `postgresql17:17.12-9410cd4` | Waits until PostgreSQL accepts connections |
+| **ensure-databases** | TSC `postgresql17:17.12-9410cd4` | Creates the `kratos`, `keto` and `hydra` databases if missing, on every start |
 | **migrate-kratos** | TSC `kratos:v26.2.0` | Kratos schema migrations |
-| **migrate-keto** | `localhost/keto-cue:2a6c583e` | keto-cue schema migrations |
+| **migrate-keto** | TSC `keto-cue:v0.0.0-20261114211924-809351b32b9c-6a44b89` | keto-cue schema migrations |
 | **migrate-hydra** | TSC `hydra:v26.2.0` | Hydra schema migrations |
 | **migrate-chit** | `migrate/migrate:v4.15.0` | Chit schema migrations from `migrations/` (mounted from the checkout) |
 
@@ -34,27 +34,36 @@ Then the services:
 | Container | Image | Port(s) | Purpose |
 |---|---|---|---|
 | **kratos** | TSC `kratos:v26.2.0` | 4433, 4434 | Identity management (people) |
-| **keto** | `localhost/keto-cue:2a6c583e` | 4466, 4467 | Slash-command authorization (keto-cue, CUE schema) |
+| **keto** | TSC `keto-cue:v0.0.0-20261114211924-809351b32b9c-6a44b89` | 4466, 4467 | Slash-command authorization (keto-cue, CUE schema) |
 | **hydra** | TSC `hydra:v26.2.0` | 4444, 4445 | OAuth2 tokens for machine actors (`--dev`: plain HTTP) |
 | **oathkeeper** | TSC `oathkeeper:v26.2.0` | 4455, 4456 | Authentication proxy |
 | **zincsearch** | `zinclabs/zincsearch:0.4.10` | 4080 | Full-text search index |
+| **seaweedfs** | TSC `seaweedfs:4.51-382cdac` | 8333 (S3), 9333, 8380, 8888; gRPC 19333, 18380, 18888, 18334; all on 127.0.0.1 | Attachment store: one `weed server` with master, volume server, filer and S3 gateway. The gateway accepts only the identity in `chit-seaweedfs-config`. chitd creates the `chit-files` bucket. |
+| **memberhook-stub** | `golang:1.26-alpine` (the builder image of `deploy/Containerfile`) | 4490 on 127.0.0.1 | A stub of HALO's membership hook for the stack e2e, `go run` from `tests/e2e/hookstub` in the checkout. It registers chitd's Hydra client `chit-e2e-memberhook` and allows every member until the e2e names one to refuse. Test only. |
 | **chitd** | `localhost/chit:latest` | 8065 | The Chit server |
 
-The manifest gives the chitd container the database URL, the Kratos and Keto
-URLs, and the ZincSearch URL and credentials. Everything else takes chitd's
-defaults. To set more (for example `CHIT_MACHINE_ACTORS` or
-`CHIT_TRUSTED_PROXY_SECRET`), add it to the `chitd` container's `env`. Then run
-`make kube-restart`. As an alternative, run chitd locally with `.env` (see
+The chitd container is configured in the manifest with the database URL, the
+Kratos and Keto URLs, the ZincSearch URL and credentials, and the SeaweedFS
+endpoint and its dev S3 key (`CHIT_S3_*`), the e2e machine actors, and the
+membership hook (`CHIT_MEMBERSHIP_HOOK_*`, pointing at `memberhook-stub`);
+everything else takes chitd's defaults. To set more (for example `CHIT_MACHINE_ACTORS` or
+`CHIT_TRUSTED_PROXY_SECRET`), add it to the `chitd` container's `env` and run
+`make kube-restart`, or run chitd locally with `.env` (see
 [Startup Order](#startup-order)).
 
 Podman names each container `<pod>-<container>`, e.g. `chit-app-chitd`.
 
-The manifest pins every image by digest. "TSC" is
-`ghcr.io/infrashift/trusted-service-containers`. ZincSearch and
-`migrate/migrate` are not in TSC and come from their upstream registries.
-keto-cue waits for a TSC image (P-TSC-2). Until then, `make keto-cue-image`
-builds it locally. `make kube-up` runs that target when the image is not
-present.
+Every image is pinned by digest in the manifest. "TSC" is
+`ghcr.io/infrashift/trusted-service-containers`; SeaweedFS is its
+`trusted/seaweedfs`, built from source on UBI9 Micro. PostgreSQL is its
+`trusted/postgresql17`: the signed PGDG RPMs, contrib included, on UBI9
+Minimal. It runs as UID 26 with primary group 0, refuses to run as root, and
+keeps the `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` contract of
+the Docker images. ZincSearch,
+`migrate/migrate` and the Go builder image are not in TSC and come from
+their upstream registries.
+TSC builds keto-cue from source (commit `809351b3`) on trusted UBI9 Micro,
+the same way it builds the Ory images.
 
 ## ConfigMaps
 
@@ -64,14 +73,59 @@ present.
 | `chit-hydra-config` | Hydra server config (issuer, opaque 1-hour access tokens, placeholder system secret) |
 | `chit-oathkeeper-config` | Oathkeeper access rules and server config |
 | `chit-keto-config` | keto-cue server config, a copy of `deploy/keto/keto.yml` |
+| `chit-seaweedfs-config` | `s3.json`: the S3 identity (dev access and secret key) the gateway accepts, mounted at `/etc/seaweedfs` |
 | `chit-keto-schema` | Chit's file of the keto-cue schema directory, a copy of `deploy/keto/schema/chit.cue`, mounted at `/etc/keto/schema` |
 
 ## Persistent Volumes
 
 | PVC | Mount | Purpose |
 |---|---|---|
-| `chit-pgdata` | `/var/lib/postgresql/17/data` | PostgreSQL data directory |
+| `chit-pgdata` | `/var/lib/pgsql/data` | PostgreSQL data; the cluster is in `userdata/` (`PGDATA=/var/lib/pgsql/data/userdata`), owned by UID 26 |
 | `chit-zincdata` | `/data` | ZincSearch index data |
+| `chit-seaweeddata` | `/data` | SeaweedFS volumes and filer metadata (attachments) |
+
+### Upgrading from the DHI PostgreSQL image
+
+Before the switch to `trusted/postgresql17`, `chit-pgdata` held a cluster of
+the DHI `postgres:17-debian` mirror: owned by UID 70, at
+`/var/lib/postgresql/17/data`, with the glibc `en_US.UTF-8` collation. The new
+image cannot start on that volume, and it has no `en_US.UTF-8` locale, so move
+the data with a dump and a restore:
+
+```bash
+# 1. With the old checkout and the old stack still running:
+podman exec chit-db-postgres pg_dumpall -U chit > chit-pgdumpall.sql
+tail -n 3 chit-pgdumpall.sql   # must end with "PostgreSQL database cluster dump complete"
+
+# 2. Stop the stack and delete only the PostgreSQL volume. make kube-clean
+#    would also delete the search index and the attachments.
+make kube-down
+podman volume rm chit-pgdata
+
+# 3. Pull the new checkout, then restore into a fresh chit-pgdata.
+#    PG_IMAGE is the image the Makefile and the manifests pin.
+PG_IMAGE=ghcr.io/infrashift/trusted-service-containers/trusted/postgresql17:17.12-9410cd4@sha256:6375c284b5aaa6d83096d74ae6b1b7a3340bcd81739e4309465b18a3e781d6e3
+podman run -d --name chit-pg-restore -v chit-pgdata:/var/lib/pgsql/data \
+  -e POSTGRES_USER=chit -e POSTGRES_PASSWORD=chit -e POSTGRES_DB=chit "$PG_IMAGE"
+until podman exec chit-pg-restore pg_isready -U chit -d chit; do sleep 1; done
+for db in kratos keto hydra; do podman exec chit-pg-restore createdb -U chit "$db"; done
+podman exec -i chit-pg-restore psql -U chit -d postgres -q < chit-pgdumpall.sql
+podman stop chit-pg-restore && podman rm chit-pg-restore
+
+# 4. Start the stack on the restored volume.
+make kube-up
+```
+
+The restore prints `ERROR: role "chit" already exists` and one
+`ERROR: invalid LC_COLLATE locale name: "en_US.UTF-8"` for each database. Both
+are expected: the role and the databases already exist, and the rest of the
+dump goes into them. Any other error needs a look before you serve traffic.
+The restored databases use the builtin `C.UTF-8` collation, and every index is
+built again under it.
+
+A volume with nothing to keep must still be created again: run
+`make kube-clean` (or `make uat-clean` for the UAT stack) once, and the next
+`make kube-up` (or `make uat-up`) initialises an empty volume.
 
 ## Networking
 
@@ -123,7 +177,6 @@ See [Manual Acceptance Testing](/chit/getting-started/manual-acceptance-testing/
 | `make check-deps` | Check that client binaries do not link server-side dependencies, and that TUI dependencies stay out of the server module |
 | `make validate-spec` | Validate `api/openapi.yaml` |
 | `make cue-validate` | Evaluate the CUE definitions in `auth/` |
-| `make keto-cue-image` | Build the interim `localhost/keto-cue` image from `../keto-cue` (`KETO_CUE_SRC`), pending trusted-service-containers P-TSC-2 |
 | `make keto-validate` | Compile `deploy/keto/schema/` with keto-cue, as the server does, and again next to a sample HALO file |
 | `make test-keto` | Run the Keto client and reconciler tests against a throwaway keto-cue (`KETO_TEST_IMAGE` runs them against another Keto) |
 

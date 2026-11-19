@@ -250,9 +250,12 @@ func (s *SqlThreadStore) listThreads(ctx context.Context, userID, scope string, 
 			&tr.LastViewedAt, &tr.UnreadMentions,
 			&root.ID, &root.ChannelID, &root.UserID, &root.RootID, &root.Content,
 			&root.Type, &root.Props, &root.Hashtags, &root.IsPinned, &root.EditAt,
-			&root.CreateAt, &root.UpdateAt, &root.DeleteAt,
+			&root.CreateAt, &root.UpdateAt, &root.DeleteAt, &root.FileIDs,
 		); err != nil {
 			return nil, fmt.Errorf("scan thread: %w", err)
+		}
+		if len(root.FileIDs) == 0 {
+			root.FileIDs = nil
 		}
 		tr.Posts = []*model.Post{root}
 		threads = append(threads, tr)

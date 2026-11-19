@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -23,6 +24,7 @@ func createPost(a *app.App) http.HandlerFunc {
 			RootID    string         `json:"root_id"`
 			Content   string         `json:"content"`
 			Props     map[string]any `json:"props"`
+			FileIDs   []string       `json:"file_ids"`
 		}
 		if !decodeBody(w, r, &body, "createPost") {
 			return
@@ -40,6 +42,7 @@ func createPost(a *app.App) http.HandlerFunc {
 			RootID:    body.RootID,
 			Content:   body.Content,
 			Props:     body.Props,
+			FileIDs:   body.FileIDs,
 			UserID:    user.ID,
 		}, ContextGetActor(r))
 		if err != nil {
@@ -196,7 +199,7 @@ const (
 func sendStreamStatus(a *app.App) http.HandlerFunc {
 	assert.That(a != nil, "sendStreamStatus: nil app")
 	assert.That(a.Store != nil, "sendStreamStatus: nil store")
-	limiters := newUserLimiters(streamStatusPerSecond, streamStatusBurst, systemClock{})
+	limiters := newUserLimiters(streamStatusPerSecond, streamStatusBurst, time.Now())
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
 		channelID := chi.URLParam(r, "id")
@@ -208,7 +211,8 @@ func sendStreamStatus(a *app.App) http.HandlerFunc {
 			return
 		}
 		assert.That(user != nil, "sendStreamStatus: no authenticated user")
-		if !limiters.allow(user.ID + " " + channelID) {
+		if refused, wait := take(time.Now(), []bucket{{"stream_status", limiters, user.ID + " " + channelID}}); refused != nil {
+			setRetryAfter(w, wait)
 			WriteError(w, model.NewAppError("sendStreamStatus", "stream_status rate limit exceeded", "", http.StatusTooManyRequests))
 			return
 		}

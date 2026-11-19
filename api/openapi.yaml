@@ -26,6 +26,22 @@ info:
     Channel membership is the access check for everything in a channel.
     Operations a caller may not perform answer 403.
 
+    ## Membership policy hook
+    When `CHIT_MEMBERSHIP_HOOK_URL` is set, chitd asks that URL before it
+    adds any member to a channel: `POST /channels/{id}/members` (a join and an
+    on-behalf-of add included), the team members of a new Open channel, the
+    other members of a new direct or group channel, and `/invite`. The
+    creator of a new channel is not asked about. The request is `POST` with
+    a Hydra client-credentials bearer token and the JSON body
+    `{"channel_id", "user_id", "kratos_identity_id", "actor_type"
+    (human, agent or bot), "added_by", "via_actor_id"}`. Only a 200 with
+    `{"allow": true}` allows the add. A 200 with `{"allow": false, "reason",
+    "detail"}` refuses it, and so does any other status, a timeout, a
+    network error or a body that is not that JSON. A refusal is a 403 with
+    the `id` `channel.membership_refused`, the hook's `reason` and `detail`
+    (`hook_unavailable` when the hook gave no valid answer), and nothing
+    is added: a request that adds several members adds all or none.
+
     ## Pagination
     List endpoints accept `page` (0-indexed) and `per_page` (default 60,
     at most 200). `page * per_page` is capped at 100,000.
@@ -33,8 +49,14 @@ info:
     ## Errors and limits
     Failures return an `AppError`. A 5xx carries no `detailed_error`; the
     cause is logged server-side. Request bodies over 1 MiB are refused with
-    413. Each user may make 10 requests a second, in bursts of up to 50;
-    beyond that requests are refused with 429.
+    413. Each user may make 10 requests a second, in bursts of up to 50
+    (`CHIT_RATE_LIMIT_USER_PER_SECOND` and `CHIT_RATE_LIMIT_USER_BURST`);
+    beyond that requests are refused with 429 and a `Retry-After` header.
+    A request with `X-On-Behalf-Of` counts against the person's limit. An
+    OAuth2 client in `CHIT_ON_BEHALF_OF_CLIENTS` has an aggregate limit
+    instead of a per-user one, 1500 a second in bursts of 3000 by default
+    (`CHIT_RATE_LIMIT_CLIENT_PER_SECOND` and `CHIT_RATE_LIMIT_CLIENT_BURST`),
+    that counts everything it does, as itself and on behalf of anyone.
 
     ## IDs
     All resource IDs are UUIDv7 strings.
@@ -65,6 +87,8 @@ tags:
     description: Thread views, following, and read tracking
   - name: Tags
     description: Tag CRUD and post-tag associations
+  - name: Files
+    description: Image attachments, their bytes and their search
   - name: Search
     description: Post search, by SQL or by ZincSearch when it is configured
   - name: Commands
@@ -573,6 +597,11 @@ paths:
         `channel_created` WebSocket event is broadcast (to the team for an
         Open channel, otherwise to the channel).
 
+        **Membership hook.** When it is on, each team member that an Open
+        channel adds is checked first; one refusal is a 403
+        `channel.membership_refused`, and no channel is created. The creator
+        is not checked, so a Private channel checks nobody.
+
         **On behalf of a person.** With `X-On-Behalf-Of`, an allowlisted
         client creates the channel as the person: the person must be a
         member of the team, and becomes the channel's creator (`creator_id`)
@@ -778,6 +807,8 @@ paths:
         must be the caller. The channel name is the sorted user IDs joined by
         `__`. If the DM already exists (including one created concurrently),
         the existing channel is returned. A DM's membership is fixed.
+        When the membership hook is on, a new DM checks the other user first;
+        a refusal is a 403 `channel.membership_refused`.
       tags: [Channels]
       requestBody:
         required: true
@@ -816,7 +847,9 @@ paths:
         Creates a group message channel with 3-8 distinct members, one of whom
         must be the caller. Repeated IDs count once; every ID must name an
         existing user. If a group with exactly these members exists, it is
-        returned. A group's membership is fixed.
+        returned. A group's membership is fixed. When the membership hook is
+        on, a new group checks each member but the caller; one refusal is a
+        403 `channel.membership_refused`, and no channel is created.
       tags: [Channels]
       requestBody:
         required: true
@@ -854,6 +887,11 @@ paths:
         added must be on the channel's team. Direct and group channels have a
         fixed membership (403). Adding an existing member changes nothing.
         Broadcasts a `user_added` WebSocket event to the channel.
+
+        **Membership hook.** When it is on, the hook is asked before the
+        member is added, a user who joins an Open channel included. A
+        refusal is a 403 with the `id` `channel.membership_refused` and the
+        hook's `reason` and `detail`; nothing is added.
 
         **On behalf of a person.** With `X-On-Behalf-Of`, an allowlisted
         client adds the member as the person, so the person must be allowed
@@ -1043,6 +1081,11 @@ paths:
         **Provenance.** `props.provenance` (see `Provenance`) may be set only
         by an agent or bot, or on a post made on behalf of a person; anyone
         else gets 403, and a malformed value gets 400.
+
+        **Attachments.** `file_ids` attaches uploaded files (see
+        `CreatePostRequest`); the post then needs no `content`. A post with
+        `file_ids` is never run as a slash command. With attachments off
+        (no `CHIT_S3_ENDPOINT`), `file_ids` is a 503.
       tags: [Posts]
       parameters:
         - $ref: "#/components/parameters/OnBehalfOfHeader"
@@ -1065,6 +1108,10 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   /posts/{id}:
     get:
@@ -1552,6 +1599,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/OnBehalfOfHeader"
       responses:
         "200":
           description: Visible tags
@@ -1641,6 +1689,8 @@ paths:
         matches nothing. Each result carries the channel-level tags the
         caller can see.
       tags: [Tags]
+      parameters:
+        - $ref: "#/components/parameters/OnBehalfOfHeader"
       requestBody:
         required: true
         content:
@@ -1721,6 +1771,7 @@ paths:
       tags: [Tags]
       parameters:
         - $ref: "#/components/parameters/ChannelIdParam"
+        - $ref: "#/components/parameters/OnBehalfOfHeader"
       responses:
         "200":
           description: Tags on the channel itself
@@ -1750,6 +1801,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/OnBehalfOfHeader"
       responses:
         "200":
           description: Tag removed from the channel
@@ -1801,6 +1853,8 @@ paths:
         than refused, so one inaccessible ID does not fail the batch. Replaces
         one request per post when opening a channel.
       tags: [Tags]
+      parameters:
+        - $ref: "#/components/parameters/OnBehalfOfHeader"
       requestBody:
         required: true
         content:
@@ -1908,6 +1962,7 @@ paths:
           schema:
             type: string
             format: uuid
+        - $ref: "#/components/parameters/OnBehalfOfHeader"
       responses:
         "200":
           description: Tag removed from post
@@ -1921,6 +1976,195 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  # ──────────────────────────── Files ─────────────────────────────
+  /channels/{id}/files:
+    post:
+      operationId: upload_file
+      summary: Upload an image to a channel
+      description: |
+        Uploads one image for the caller to attach to a post of theirs in
+        the channel (`file_ids` on `POST /posts`). Members of the channel
+        only. Until it is attached, only the uploader can read it; an upload
+        attached to no post after `CHIT_FILE_ORPHAN_GRACE` (24 h) is deleted.
+
+        The `file` part's `Content-Type` is the declared type and its
+        filename the name. Chit then:
+        1. accepts only `image/png`, `image/jpeg`, `image/webp` and
+           `image/gif` (the first frame only), and refuses SVG (415);
+        2. refuses a declared type that is not the type the magic bytes give
+           (415), and a polyglot: bytes after the end of the image, or markup
+           in its metadata (422);
+        3. refuses more than 40,000,000 pixels from the header, before
+           decoding (422);
+        4. decodes and re-encodes the image in pure Go: JPEG as JPEG, the
+           others as PNG. No EXIF, text chunk or trailing byte survives. The
+           name's extension follows the stored type;
+        5. refuses an upload, or a re-encoded image, over 10 MiB (413), and
+           an upload that would take the person's live files over
+           `CHIT_FILE_QUOTA_BYTES` (1 GiB by default; 413, id
+           `file.quota_exceeded`).
+
+        A refusal's `id` says why: `file.too_large`, `file.quota_exceeded`,
+        `file.unsupported_type`, `file.svg`, `file.type_mismatch`,
+        `file.polyglot`, `file.too_many_pixels` or `file.malformed`.
+
+        The same bytes uploaded again to the same channel get a new file
+        that shares the stored object; another channel never shares it.
+
+        With `X-On-Behalf-Of`, the upload is the person's (`uploader_id`),
+        the client is recorded in `via_actor_id`, and a `file_uploaded`
+        audit record names both.
+
+        Every response, refusals included, carries
+        `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox`
+        and `Content-Disposition: attachment`.
+      tags: [Files]
+      parameters:
+        - $ref: "#/components/parameters/ChannelIdParam"
+        - $ref: "#/components/parameters/OnBehalfOfHeader"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              additionalProperties: false
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The image, at most 10 MiB, with its Content-Type and filename.
+                alt_text:
+                  type: string
+                  maxLength: 1000
+                  description: |
+                    Text that describes the image, written by the person: at
+                    most 1000 characters, no control characters but newline
+                    and tab. Searchable.
+      responses:
+        "201":
+          description: The stored file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/File"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /files/{id}:
+    get:
+      operationId: download_file
+      summary: Download a file's bytes
+      description: |
+        The stored image, as `image/png` or `image/jpeg`, with
+        `Content-Disposition: attachment; filename=...`,
+        `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox`,
+        `Cache-Control: private, no-store` and an `ETag` of its SHA-256.
+        Members of the file's channel only (403), and before the file is
+        attached to a post, its uploader only (403). An unknown or deleted
+        file is a 404. There are no public or presigned URLs: halod fetches
+        the bytes with `X-On-Behalf-Of` for the person it shows them to.
+      tags: [Files]
+      parameters:
+        - $ref: "#/components/parameters/FileIdParam"
+        - $ref: "#/components/parameters/OnBehalfOfHeader"
+      responses:
+        "200":
+          description: The image
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /files/{id}/info:
+    get:
+      operationId: get_file_info
+      summary: Get a file's metadata
+      description: The same access rule as `GET /files/{id}`.
+      tags: [Files]
+      parameters:
+        - $ref: "#/components/parameters/FileIdParam"
+      responses:
+        "200":
+          description: The file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/File"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /files/search:
+    post:
+      operationId: search_files
+      summary: Search files by name and alt text
+      description: |
+        A case-insensitive substring match of `terms` against the file name
+        and the alt text, newest first; nothing derived from the image is
+        indexed. Only files in the caller's channels (or in `channel_id`,
+        members only), and of those not yet attached to a post, only the
+        caller's own. Empty `terms` lists them all.
+      tags: [Files]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FileSearchRequest"
+      responses:
+        "200":
+          description: Matching files
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/File"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 
   # ──────────────────────────── Search ────────────────────────────
   /posts/search:
@@ -2133,16 +2377,29 @@ components:
         request, and a `user_provisioned` audit record names the client.
 
         Accepted only from a client_credentials machine actor, and only on
-        `POST /posts`, `POST /channels/{id}/stream_status`, `POST /tags`,
-        `POST /posts/{id}/tags`, `POST /channels/{id}/tags`,
-        `POST /channels`, `POST /channels/{id}/members` and
-        `GET /users/me`; elsewhere it is a 400. A client that is not on the
-        list, or a Kratos session, gets 403. An empty or malformed value, an
-        unknown user or Kratos identity, a deactivated person, and an agent
-        or bot get 400.
+        `POST /posts`, `POST /channels/{id}/stream_status`, `POST /channels`,
+        `POST /channels/{id}/members`, `GET /users/me`, the Tag routes
+        `POST /tags`, `GET /tags`, `POST /posts/{id}/tags`,
+        `DELETE /posts/{id}/tags/{tag_id}`, `POST /channels/{id}/tags`,
+        `GET /channels/{id}/tags`, `DELETE /channels/{id}/tags/{tag_id}`,
+        `POST /tags/posts` and `POST /tags/channels`, and the attachment
+        routes `POST /channels/{id}/files` and `GET /files/{id}`; elsewhere
+        it is a 400. The request is authorized as the person: they see only
+        their own private tags, and only files of their channels. A client
+        that is not on the list, or a Kratos session, gets 403. An empty or
+        malformed value, an unknown user or Kratos identity, a deactivated
+        person, and an agent or bot get 400.
       schema:
         type: string
         pattern: "^(kratos:)?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    FileIdParam:
+      name: id
+      in: path
+      required: true
+      description: File ID (UUIDv7)
+      schema:
+        type: string
+        format: uuid
     TagIdParam:
       name: id
       in: path
@@ -2194,6 +2451,36 @@ components:
             $ref: "#/components/schemas/AppError"
     TooManyRequests:
       description: Rate limit exceeded
+      headers:
+        Retry-After:
+          description: Seconds until the limit that refused the request would allow it, rounded up.
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AppError"
+    PayloadTooLarge:
+      description: The upload, or the person's stored files, would exceed a limit
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AppError"
+    UnsupportedMediaType:
+      description: The image type is not accepted, or is not what was declared
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AppError"
+    UnprocessableEntity:
+      description: The image is malformed, too many pixels, or a polyglot
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AppError"
+    ServiceUnavailable:
+      description: The feature is not enabled on this server
       content:
         application/json:
           schema:
@@ -2224,6 +2511,17 @@ components:
         status_code:
           type: integer
           description: HTTP status code
+        reason:
+          type: string
+          description: |
+            Only on a `channel.membership_refused`: the membership hook's
+            short stable code, or `hook_unavailable` when the hook gave no
+            valid answer. At most 64 bytes.
+        detail:
+          type: string
+          description: |
+            Only on a `channel.membership_refused`: the membership hook's
+            text for a person. At most 1024 bytes.
       example:
         id: createPost
         message: invalid request body
@@ -2571,6 +2869,16 @@ components:
           description: Reserved; not currently populated
         is_pinned:
           type: boolean
+        file_ids:
+          type: array
+          maxItems: 4
+          items:
+            type: string
+            format: uuid
+          description: |
+            The attached files (see `File`), in order. Absent when there are
+            none. Set when the post is created; deleting the post deletes
+            them.
         edit_at:
           type: integer
           format: int64
@@ -2599,9 +2907,84 @@ components:
         update_at: 1700000060000
         delete_at: 0
 
+    File:
+      type: object
+      description: An image uploaded to a channel; see `POST /channels/{id}/files`.
+      properties:
+        id:
+          type: string
+          format: uuid
+        channel_id:
+          type: string
+          format: uuid
+        uploader_id:
+          type: string
+          format: uuid
+          description: The person who owns the upload (with `X-On-Behalf-Of`, the person named there).
+        via_actor_id:
+          type: string
+          format: uuid
+          description: The allowlisted client that uploaded it on their behalf. Absent otherwise.
+        name:
+          type: string
+          maxLength: 255
+          description: The uploaded file name, cleaned, with the extension of the stored type.
+        sha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: SHA-256 of the stored (re-encoded) bytes.
+        content_type:
+          type: string
+          enum: [image/png, image/jpeg]
+        size_bytes:
+          type: integer
+          format: int64
+        width:
+          type: integer
+        height:
+          type: integer
+        alt_text:
+          type: string
+        post_id:
+          type: string
+          format: uuid
+          description: The post it is attached to. Absent until it is.
+        create_at:
+          type: integer
+          format: int64
+      example:
+        id: "0192d4c1-7e2a-7000-8000-000000000050"
+        channel_id: "0192d4c1-7e2a-7000-8000-000000000020"
+        uploader_id: "0192d4c1-7e2a-7000-8000-000000000001"
+        name: "whiteboard.png"
+        sha256: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+        content_type: "image/png"
+        size_bytes: 48211
+        width: 1024
+        height: 768
+        alt_text: "The architecture sketch from Monday"
+        create_at: 1700000060000
+
+    FileSearchRequest:
+      type: object
+      properties:
+        terms:
+          type: string
+          maxLength: 200
+        channel_id:
+          type: string
+          format: uuid
+        page:
+          type: integer
+          minimum: 0
+        per_page:
+          type: integer
+          minimum: 0
+          maximum: 200
+
     CreatePostRequest:
       type: object
-      required: [channel_id, content]
+      required: [channel_id]
       properties:
         channel_id:
           type: string
@@ -2609,7 +2992,19 @@ components:
         content:
           type: string
           maxLength: 65535
-          description: Message content (markdown)
+          description: Message content (markdown). Required unless `file_ids` is set.
+        file_ids:
+          type: array
+          maxItems: 4
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+          description: |
+            Files to attach, at most 4. Each must have been uploaded to this
+            channel (`POST /channels/{id}/files`) by the post's author (with
+            `X-On-Behalf-Of`, the person), and not be attached to another
+            post. Otherwise 400; a file attached meanwhile is a 409.
         root_id:
           type: string
           format: uuid

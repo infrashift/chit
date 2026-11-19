@@ -43,6 +43,16 @@ type Config struct {
 	// X-On-Behalf-Of. Each must be a machine actor in MachineActors, that is a
 	// Hydra client_credentials client. Empty: no client may.
 	OnBehalfOfClients []string `koanf:"on_behalf_of_clients"`
+	// Rate limits (P-CHIT-8). Each user has a bucket of RateLimitUserPerSecond
+	// requests a second, in bursts of RateLimitUserBurst. A client in
+	// OnBehalfOfClients acts for many people, so it has a bucket of its own
+	// instead, RateLimitClientPerSecond in bursts of RateLimitClientBurst,
+	// that counts everything it does: as itself and on behalf of anyone. A
+	// request on behalf of a person also counts against that person's bucket.
+	RateLimitUserPerSecond   float64 `koanf:"rate_limit_user_per_second"`
+	RateLimitUserBurst       int     `koanf:"rate_limit_user_burst"`
+	RateLimitClientPerSecond float64 `koanf:"rate_limit_client_per_second"`
+	RateLimitClientBurst     int     `koanf:"rate_limit_client_burst"`
 	// AllowedOrigins is the CORS / WebSocket origin allowlist
 	// (comma-separated in CHIT_ALLOWED_ORIGINS). "*" allows any origin.
 	AllowedOrigins []string `koanf:"allowed_origins"`
@@ -64,6 +74,38 @@ type Config struct {
 	LogFormat string `koanf:"log_format"`
 
 	EnableOpenAPIValidation bool `koanf:"enable_openapi_validation"`
+
+	// Attachments (P-CHIT-5). With S3Endpoint empty, attachments are off:
+	// the file routes answer 503 and a post with file_ids is a 400.
+	// S3Endpoint is an S3-compatible endpoint (SeaweedFS), addressed
+	// path-style; chitd creates S3Bucket at start when it is missing.
+	S3Endpoint        string `koanf:"s3_endpoint"`
+	S3Bucket          string `koanf:"s3_bucket"`
+	S3Region          string `koanf:"s3_region"`
+	S3AccessKeyID     string `koanf:"s3_access_key_id"`
+	S3SecretAccessKey string `koanf:"s3_secret_access_key"`
+	// FileQuotaBytes bounds the live attachment bytes of one person.
+	FileQuotaBytes int64 `koanf:"file_quota_bytes"`
+	// FileOrphanGrace is how long an upload may wait for a post before the
+	// sweep deletes it, and how long a deleted file's object is kept.
+	FileOrphanGrace time.Duration `koanf:"file_orphan_grace"`
+	// FileSweepInterval and FileSweepBatch bound the sweep: at most
+	// FileSweepBatch files each FileSweepInterval.
+	FileSweepInterval time.Duration `koanf:"file_sweep_interval"`
+	FileSweepBatch    int           `koanf:"file_sweep_batch"`
+
+	// Membership policy hook (P-CHIT-2). With MembershipHookURL empty the
+	// hook is off and members are added as before. With it set, chitd POSTs
+	// each new member to the URL before it adds them, and refuses the add
+	// unless the answer is {"allow":true}. It authenticates with a Hydra
+	// client_credentials token of its own OAuth2 client.
+	MembershipHookURL          string        `koanf:"membership_hook_url"`
+	MembershipHookTimeout      time.Duration `koanf:"membership_hook_timeout"`
+	MembershipHookTokenURL     string        `koanf:"membership_hook_token_url"`
+	MembershipHookClientID     string        `koanf:"membership_hook_client_id"`
+	MembershipHookClientSecret string        `koanf:"membership_hook_client_secret"`
+	// MembershipHookScope is optional: space-separated OAuth2 scopes.
+	MembershipHookScope string `koanf:"membership_hook_scope"`
 
 	// Slash Commands
 	CommandsCUEDir     string `koanf:"commands_cue_dir"`
@@ -87,9 +129,18 @@ func Defaults() *Config {
 		TrustedProxyHeader:  "X-User-Id",
 		TrustedClientHeader: "X-Client-Id",
 		AllowedOrigins:      []string{"*"},
-		KratosAdminURL:      "http://localhost:4434",
-		KetoReadURL:         "http://localhost:4466",
-		KetoWriteURL:        "http://localhost:4467",
+		// The per-user limit chitd has always had.
+		RateLimitUserPerSecond: 10,
+		RateLimitUserBurst:     50,
+		// Sized for HALO's halod with about 2000 Subjects at about one
+		// Message a minute each, with streamed replies: about 1000 requests
+		// a second, so 1500 leaves half again as much. The burst is two
+		// seconds of it. See the configuration reference for the arithmetic.
+		RateLimitClientPerSecond: 1500,
+		RateLimitClientBurst:     3000,
+		KratosAdminURL:           "http://localhost:4434",
+		KetoReadURL:              "http://localhost:4466",
+		KetoWriteURL:             "http://localhost:4467",
 		// Empty: ZincSearch is opt-in. Search then uses SQL, and no indexer
 		// runs. The deploy manifests set it.
 		ZincSearchURL:           "",
@@ -106,6 +157,13 @@ func Defaults() *Config {
 		WebhookWorkerCount:      4,
 		WebhookQueueSize:        1024,
 		WebhookTimeoutSec:       10,
+		S3Bucket:                "chit-files",
+		S3Region:                "us-east-1",
+		FileQuotaBytes:          1 << 30,
+		FileOrphanGrace:         24 * time.Hour,
+		FileSweepInterval:       10 * time.Minute,
+		FileSweepBatch:          100,
+		MembershipHookTimeout:   5 * time.Second,
 	}
 	assert.That(cfg.validate() == nil, "Defaults: the defaults do not validate")
 	assert.That(cfg.DBMaxIdleConn <= cfg.DBMaxOpenConn, "Defaults: more idle than open connections")
@@ -180,6 +238,15 @@ func load() (*Config, error) {
 	return cfg, nil
 }
 
+// Bounds of the rate limits. A limit of 0 would refuse every request, and
+// there is no setting that turns the limit off: a limit above these is a
+// typo, not a deployment (one chitd serves well under 100,000 requests a
+// second).
+const (
+	MaxRateLimitPerSecond = 100_000
+	MaxRateLimitBurst     = 1_000_000
+)
+
 // validate refuses settings that would fail later and less legibly: a zero
 // ping interval panics on the first WebSocket connection (time.NewTicker), a
 // zero cache TTL expires every entry at once, and a misspelt pubsub backend
@@ -213,6 +280,19 @@ func (c *Config) validate() error {
 		errs = append(errs, fmt.Errorf("CHIT_PUBSUB_BACKEND must be pgnotify or nats, got %q", c.PubSubBackend))
 	}
 
+	rateLimit := func(name string, perSecond float64, burstName string, burst int) {
+		// Written so that NaN fails too: every comparison with NaN is false.
+		if !(perSecond > 0 && perSecond <= MaxRateLimitPerSecond) {
+			errs = append(errs, fmt.Errorf("%s must be more than 0 and at most %d, got %v",
+				name, MaxRateLimitPerSecond, perSecond))
+		}
+		if burst < 1 || burst > MaxRateLimitBurst {
+			errs = append(errs, fmt.Errorf("%s must be between 1 and %d, got %d", burstName, MaxRateLimitBurst, burst))
+		}
+	}
+	rateLimit("CHIT_RATE_LIMIT_USER_PER_SECOND", c.RateLimitUserPerSecond, "CHIT_RATE_LIMIT_USER_BURST", c.RateLimitUserBurst)
+	rateLimit("CHIT_RATE_LIMIT_CLIENT_PER_SECOND", c.RateLimitClientPerSecond, "CHIT_RATE_LIMIT_CLIENT_BURST", c.RateLimitClientBurst)
+
 	if c.TrustedProxyHeader == "" {
 		errs = append(errs, errors.New("CHIT_TRUSTED_PROXY_HEADER must not be empty"))
 	}
@@ -225,6 +305,25 @@ func (c *Config) validate() error {
 	case "json", "text":
 	default:
 		errs = append(errs, fmt.Errorf("CHIT_LOG_FORMAT must be json or text, got %q", c.LogFormat))
+	}
+
+	if c.S3Endpoint != "" {
+		if c.S3Bucket == "" || c.S3Region == "" || c.S3AccessKeyID == "" || c.S3SecretAccessKey == "" {
+			errs = append(errs, errors.New("CHIT_S3_BUCKET, CHIT_S3_REGION, CHIT_S3_ACCESS_KEY_ID and "+
+				"CHIT_S3_SECRET_ACCESS_KEY are required when CHIT_S3_ENDPOINT is set"))
+		}
+		positive("CHIT_FILE_QUOTA_BYTES", c.FileQuotaBytes)
+		positive("CHIT_FILE_ORPHAN_GRACE", int64(c.FileOrphanGrace))
+		positive("CHIT_FILE_SWEEP_INTERVAL", int64(c.FileSweepInterval))
+		positive("CHIT_FILE_SWEEP_BATCH", int64(c.FileSweepBatch))
+	}
+
+	if c.MembershipHookURL != "" {
+		if c.MembershipHookTokenURL == "" || c.MembershipHookClientID == "" || c.MembershipHookClientSecret == "" {
+			errs = append(errs, errors.New("CHIT_MEMBERSHIP_HOOK_TOKEN_URL, CHIT_MEMBERSHIP_HOOK_CLIENT_ID and "+
+				"CHIT_MEMBERSHIP_HOOK_CLIENT_SECRET are required when CHIT_MEMBERSHIP_HOOK_URL is set"))
+		}
+		positive("CHIT_MEMBERSHIP_HOOK_TIMEOUT", int64(c.MembershipHookTimeout))
 	}
 
 	if c.WebhookEnabled {

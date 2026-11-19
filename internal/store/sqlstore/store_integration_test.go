@@ -26,7 +26,7 @@ func testStore(t *testing.T) *SqlStore {
 
 	// Truncate all tables for per-test isolation (order respects FK constraints).
 	_, err = ss.pool.Exec(ctx, `
-		TRUNCATE channel_tags, message_tags, thread_memberships, threads, posts,
+		TRUNCATE post_files, files, channel_tags, message_tags, thread_memberships, threads, posts,
 		         channel_members, channels, team_members, teams, tags, users
 		CASCADE
 	`)

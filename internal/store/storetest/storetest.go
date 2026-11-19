@@ -31,6 +31,7 @@ type Store struct {
 	Posts    *PostStore
 	Threads  *ThreadStore
 	Tags     *TagStore
+	Files    *FileStore
 }
 
 var _ store.Store = (*Store)(nil)
@@ -45,6 +46,7 @@ func New() *Store {
 		Threads:  &ThreadStore{threads: map[string]*model.Thread{}, memberships: map[string]*model.ThreadMembership{}},
 		Tags: &TagStore{tags: map[string]*model.Tag{}, postTags: map[string]map[string]string{},
 			channelTags: map[string]map[string]string{}},
+		Files: &FileStore{byID: map[string]*model.File{}, postOf: map[string]string{}},
 	}
 	s.Tags.postChannel = func(postID string) (string, bool) {
 		s.Posts.mu.RLock()
@@ -57,6 +59,7 @@ func New() *Store {
 	}
 	s.Posts.channels = s.Channels
 	s.Posts.tags = s.Tags
+	s.Posts.files = s.Files
 	s.Channels.teamMembers = func(teamID string) ([]string, error) {
 		members, err := s.Teams.GetMembers(context.Background(), teamID, 0, 0)
 		ids := make([]string, 0, len(members))
@@ -81,6 +84,7 @@ func (s *Store) Channel() store.ChannelStore { return s.Channels }
 func (s *Store) Post() store.PostStore       { return s.Posts }
 func (s *Store) Thread() store.ThreadStore   { return s.Threads }
 func (s *Store) Tag() store.TagStore         { return s.Tags }
+func (s *Store) File() store.FileStore       { return s.Files }
 func (s *Store) Close()                      {}
 
 func notFound(where, id string) error { return model.NewNotFoundError("storetest."+where, id) }
@@ -361,6 +365,16 @@ func (s *TeamStore) GetMembers(_ context.Context, teamID string, page, perPage i
 	return paginate(out, page, perPage), nil
 }
 
+func (s *TeamStore) GetMemberIDs(_ context.Context, teamID string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ids := make([]string, 0, len(s.members[teamID]))
+	for _, m := range s.members[teamID] {
+		ids = append(ids, m.UserID)
+	}
+	return ids, nil
+}
+
 func (s *TeamStore) GetMember(_ context.Context, teamID, userID string) (*model.TeamMember, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -630,6 +644,25 @@ func (s *ChannelStore) AddTeamMembers(_ context.Context, channelID, teamID strin
 	return added, nil
 }
 
+func (s *ChannelStore) AddTeamMembersAmong(_ context.Context, channelID, teamID string, userIDs []string) ([]string, error) {
+	members, err := s.teamMembers(teamID)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var added []string
+	for _, uid := range userIDs {
+		if slices.Contains(members, uid) && !s.isMember(channelID, uid) {
+			s.members[channelID] = append(s.members[channelID], &model.ChannelMember{
+				ChannelID: channelID, UserID: uid, Roles: "channel_user", CreateAt: model.GetMillis(),
+			})
+			added = append(added, uid)
+		}
+	}
+	return added, nil
+}
+
 func (s *ChannelStore) DeleteForTeam(_ context.Context, teamID string, deleteAt int64) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -708,6 +741,7 @@ type PostStore struct {
 	byID     map[string]*model.Post
 	channels *ChannelStore
 	tags     *TagStore
+	files    *FileStore
 }
 
 func (s *PostStore) Seed(p *model.Post) {
@@ -723,6 +757,9 @@ func (s *PostStore) Save(_ context.Context, p *model.Post) (*model.Post, error) 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.files.attach(p); err != nil {
+		return nil, err
+	}
 	s.byID[p.ID] = cp(p)
 	return p, nil
 }
@@ -765,6 +802,8 @@ func (s *PostStore) Delete(_ context.Context, id string, deleteAt int64) error {
 		return notFound("PostStore.Delete", id)
 	}
 	p.DeleteAt, p.UpdateAt = deleteAt, deleteAt
+	s.files.deleteForPost(id, deleteAt)
+	p.FileIDs = nil
 	return nil
 }
 
@@ -865,6 +904,198 @@ func (s *PostStore) Search(_ context.Context, q *model.PostSearch) ([]*model.Pos
 			s.tags.hasAll(p.ID, q.TagIDs)
 	})
 	return paginate(posts, q.Page, q.PerPage), nil
+}
+
+// ─── Files ───────────────────────────────────────────────────────
+
+type FileStore struct {
+	mu     sync.RWMutex
+	byID   map[string]*model.File
+	postOf map[string]string // file ID → post ID
+}
+
+// Seed stores f as given.
+func (s *FileStore) Seed(f *model.File) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.byID[f.ID] = cp(f)
+}
+
+func (s *FileStore) out(f *model.File) *model.File {
+	c := cp(f)
+	c.PostID = s.postOf[f.ID]
+	return c
+}
+
+func (s *FileStore) live(id string) (*model.File, bool) {
+	f, ok := s.byID[id]
+	return f, ok && f.DeleteAt == 0
+}
+
+// attach links p.FileIDs to p under the SQL INSERT's conditions.
+func (s *FileStore) attach(p *model.Post) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seen := map[string]bool{}
+	for _, id := range p.FileIDs {
+		f, ok := s.live(id)
+		if !ok || seen[id] || f.ChannelID != p.ChannelID || f.UploaderID != p.UserID || s.postOf[id] != "" {
+			return model.NewConflictError("storetest.PostStore.Save",
+				"a file is gone, attached to another post, or not yours to attach in this channel")
+		}
+		seen[id] = true
+	}
+	for _, id := range p.FileIDs {
+		s.postOf[id] = p.ID
+	}
+	return nil
+}
+
+func (s *FileStore) deleteForPost(postID string, deleteAt int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for fileID, pid := range s.postOf {
+		if pid != postID {
+			continue
+		}
+		delete(s.postOf, fileID)
+		if f, ok := s.live(fileID); ok {
+			f.DeleteAt = deleteAt
+		}
+	}
+}
+
+func (s *FileStore) Save(_ context.Context, f *model.File) (*model.File, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.byID[f.ID] = cp(f)
+	return f, nil
+}
+
+func (s *FileStore) Get(_ context.Context, id string) (*model.File, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if f, ok := s.live(id); ok {
+		return s.out(f), nil
+	}
+	return nil, notFound("FileStore.Get", id)
+}
+
+func (s *FileStore) GetByIDs(_ context.Context, ids []string) ([]*model.File, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []*model.File
+	for _, id := range ids {
+		if f, ok := s.live(id); ok {
+			out = append(out, s.out(f))
+		}
+	}
+	return out, nil
+}
+
+func (s *FileStore) GetBySHA256(_ context.Context, channelID, sum string) (*model.File, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var best *model.File
+	for _, f := range s.byID {
+		if f.DeleteAt == 0 && f.ChannelID == channelID && f.SHA256 == sum &&
+			(best == nil || f.CreateAt < best.CreateAt || (f.CreateAt == best.CreateAt && f.ID < best.ID)) {
+			best = f
+		}
+	}
+	if best == nil {
+		return nil, notFound("FileStore.GetBySHA256", sum)
+	}
+	return s.out(best), nil
+}
+
+func (s *FileStore) UsageBytes(_ context.Context, uploaderID string) (int64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var n int64
+	for _, f := range s.byID {
+		if f.DeleteAt == 0 && f.UploaderID == uploaderID {
+			n += f.SizeBytes
+		}
+	}
+	return n, nil
+}
+
+func (s *FileStore) Search(_ context.Context, q *model.FileSearch) ([]*model.File, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	terms := strings.ToLower(q.Terms)
+	var out []*model.File
+	for _, f := range s.byID {
+		if f.DeleteAt == 0 && slices.Contains(q.ChannelIDs, f.ChannelID) &&
+			(strings.Contains(strings.ToLower(f.Name), terms) || strings.Contains(strings.ToLower(f.AltText), terms)) &&
+			(f.UploaderID == q.ReaderID || s.postOf[f.ID] != "") {
+			out = append(out, s.out(f))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreateAt != out[j].CreateAt {
+			return out[i].CreateAt > out[j].CreateAt
+		}
+		return out[i].ID > out[j].ID
+	})
+	return paginate(out, q.Page, q.PerPage), nil
+}
+
+func (s *FileStore) ExpireUnattached(_ context.Context, createdBefore, deleteAt int64, limit int) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var cand []*model.File
+	for _, f := range s.byID {
+		if f.DeleteAt == 0 && f.CreateAt < createdBefore && s.postOf[f.ID] == "" {
+			cand = append(cand, f)
+		}
+	}
+	sort.Slice(cand, func(i, j int) bool { return cand[i].CreateAt < cand[j].CreateAt })
+	if len(cand) > limit {
+		cand = cand[:limit]
+	}
+	for _, f := range cand {
+		f.DeleteAt = deleteAt
+	}
+	return len(cand), nil
+}
+
+func (s *FileStore) Deleted(_ context.Context, deletedBefore int64, limit int) ([]*model.File, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []*model.File
+	for _, f := range s.byID {
+		if f.DeleteAt > 0 && f.DeleteAt < deletedBefore {
+			out = append(out, s.out(f))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].DeleteAt < out[j].DeleteAt })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (s *FileStore) ObjectInUse(_ context.Context, key string) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, f := range s.byID {
+		if f.DeleteAt == 0 && f.S3Key == key {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (s *FileStore) Purge(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if f, ok := s.byID[id]; ok && f.DeleteAt > 0 {
+		delete(s.byID, id)
+		delete(s.postOf, id)
+	}
+	return nil
 }
 
 // ─── Threads ─────────────────────────────────────────────────────

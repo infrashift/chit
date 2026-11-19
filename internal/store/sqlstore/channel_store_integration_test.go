@@ -5,6 +5,7 @@ package sqlstore
 import (
 	"errors"
 	"net/http"
+	"slices"
 	"testing"
 
 	"github.com/infrashift/chit/internal/model"
@@ -307,6 +308,73 @@ func TestChannelStoreIntegration_AddTeamMembers(t *testing.T) {
 	}
 	if _, err = ss.Channel().GetMember(t.Context(), channel.ID, other.ID); err != nil {
 		t.Errorf("teammate is not a member: %v", err)
+	}
+}
+
+// AddTeamMembersAmong adds only the listed users, and of them only those who
+// are still live members of the team: the membership hook checked exactly
+// those, so nobody else may slip in. TeamStore.GetMemberIDs lists the live
+// members the hook is asked about.
+func TestChannelStoreIntegration_AddTeamMembersAmong(t *testing.T) {
+	ss := testStore(t)
+	user, channel := newTestChannelFixture(t, ss)
+	var ids []string
+	for _, name := range []string{"checked", "unchecked", "departed", "outsider", "softgone"} {
+		u, err := ss.User().Save(t.Context(), newTestUser(name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, u.ID)
+	}
+	checked, unchecked, departed, outsider, softgone := ids[0], ids[1], ids[2], ids[3], ids[4]
+	for _, id := range []string{user.ID, checked, unchecked, departed, softgone} {
+		if _, err := ss.Team().SaveMember(t.Context(), &model.TeamMember{TeamID: channel.TeamID, UserID: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ss.Team().RemoveMember(t.Context(), channel.TeamID, departed); err != nil {
+		t.Fatal(err)
+	}
+	// A soft-deleted team member row is not a live member either.
+	if _, err := ss.pool.Exec(t.Context(),
+		`UPDATE team_members SET delete_at = 1 WHERE team_id = $1 AND user_id = $2`, channel.TeamID, softgone); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ss.Channel().SaveMember(t.Context(), &model.ChannelMember{ChannelID: channel.ID, UserID: user.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	live, err := ss.Team().GetMemberIDs(t.Context(), channel.TeamID)
+	if err != nil {
+		t.Fatalf("GetMemberIDs: %v", err)
+	}
+	slices.Sort(live)
+	want := []string{user.ID, checked, unchecked}
+	slices.Sort(want)
+	if !slices.Equal(live, want) {
+		t.Fatalf("team members %v, want %v (not the departed or soft-deleted ones)", live, want)
+	}
+
+	added, err := ss.Channel().AddTeamMembersAmong(t.Context(), channel.ID, channel.TeamID,
+		[]string{user.ID, checked, departed, outsider, softgone})
+	if err != nil {
+		t.Fatalf("AddTeamMembersAmong: %v", err)
+	}
+	if len(added) != 1 || added[0] != checked {
+		t.Fatalf("added %v, want only %s", added, checked)
+	}
+	members, err := ss.Channel().GetMemberIDs(t.Context(), channel.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(members)
+	want = []string{user.ID, checked}
+	slices.Sort(want)
+	if !slices.Equal(members, want) {
+		t.Fatalf("members %v, want %v", members, want)
+	}
+	if added, err = ss.Channel().AddTeamMembersAmong(t.Context(), channel.ID, channel.TeamID, nil); err != nil || len(added) != 0 {
+		t.Fatalf("an empty list: %v, %v", added, err)
 	}
 }
 

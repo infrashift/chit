@@ -397,6 +397,27 @@ data:
     	}
     }
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chit-seaweedfs-config
+# The S3 identity chitd uses for attachments (CHIT_S3_ACCESS_KEY_ID and
+# CHIT_S3_SECRET_ACCESS_KEY). With an identity file the gateway refuses
+# anonymous requests. Dev credentials: never copy them into a deployment.
+data:
+  s3.json: |
+    {
+      "identities": [
+        {
+          "name": "chitd",
+          "credentials": [
+            {"accessKey": "chit-dev-access-key", "secretKey": "chit-dev-secret-key"}
+          ],
+          "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+        }
+      ]
+    }
+---
 # Pod 1: Database — starts PostgreSQL immediately
 apiVersion: v1
 kind: Pod
@@ -409,7 +430,7 @@ spec:
   restartPolicy: Always
   containers:
     - name: postgres
-      image: ghcr.io/infrashift/trusted-service-containers/quarantine/postgres:17-debian-382cdac@sha256:66dcbc496311685361b6a56e261e6694454daea3e297604dfd79590275f03910
+      image: ghcr.io/infrashift/trusted-service-containers/trusted/postgresql17:17.12-9410cd4@sha256:6375c284b5aaa6d83096d74ae6b1b7a3340bcd81739e4309465b18a3e781d6e3
       env:
         - name: POSTGRES_USER
           value: chit
@@ -417,15 +438,17 @@ spec:
           value: chit
         - name: POSTGRES_DB
           value: chit
-      # The TSC image is the Debian-based Docker Hardened Image: PGDATA is
-      # /var/lib/postgresql/17/data, and it runs as UID 70 like the Alpine
-      # image did, so a volume from 17-alpine mounts here unchanged. Its
-      # entrypoint does not run /docker-entrypoint-initdb.d; the app pod's
-      # ensure-databases init container creates the Ory databases. Text
-      # indexes built under Alpine's musl need a REINDEX: see the upgrade notes.
+      # The TSC postgresql17 image: the signed PGDG RPMs on UBI9 Minimal. It
+      # runs as UID 26 with primary group 0 and refuses root. The volume
+      # mounts at /var/lib/pgsql/data and the cluster lives one level down,
+      # PGDATA=/var/lib/pgsql/data/userdata; the entrypoint creates it on an
+      # empty volume. A volume from the DHI image (UID 70,
+      # /var/lib/postgresql/17/data) does not mount here: dump and restore it,
+      # see the upgrade notes. The app pod's ensure-databases init container
+      # creates the Ory databases on every start.
       volumeMounts:
         - name: pgdata
-          mountPath: /var/lib/postgresql/17/data
+          mountPath: /var/lib/pgsql/data
 
   volumes:
     - name: pgdata
@@ -445,7 +468,7 @@ spec:
 
   initContainers:
     - name: wait-postgres
-      image: ghcr.io/infrashift/trusted-service-containers/quarantine/postgres:17-debian-382cdac@sha256:66dcbc496311685361b6a56e261e6694454daea3e297604dfd79590275f03910
+      image: ghcr.io/infrashift/trusted-service-containers/trusted/postgresql17:17.12-9410cd4@sha256:6375c284b5aaa6d83096d74ae6b1b7a3340bcd81739e4309465b18a3e781d6e3
       command:
         - sh
         - -c
@@ -457,13 +480,13 @@ spec:
           done
           echo "PostgreSQL is ready."
 
-    # The only place the Ory databases are created. The postgres entrypoint
-    # runs no init scripts, and an init script would only have run on a
-    # *fresh* data directory anyway. Creating them idempotently here also
+    # The only place the Ory databases are created. An init script in
+    # /docker-entrypoint-initdb.d would run only on a *fresh* data
+    # directory. Creating them idempotently here also
     # upgrades an existing chit-pgdata volume that lacks one (for example
     # 'database "hydra" does not exist').
     - name: ensure-databases
-      image: ghcr.io/infrashift/trusted-service-containers/quarantine/postgres:17-debian-382cdac@sha256:66dcbc496311685361b6a56e261e6694454daea3e297604dfd79590275f03910
+      image: ghcr.io/infrashift/trusted-service-containers/trusted/postgresql17:17.12-9410cd4@sha256:6375c284b5aaa6d83096d74ae6b1b7a3340bcd81739e4309465b18a3e781d6e3
       env:
         - name: PGPASSWORD
           value: chit
@@ -473,7 +496,6 @@ spec:
         - |
           set -e
           for db in kratos keto hydra; do
-            # No grep: the hardened postgres image does not ship it.
             if [ "$(psql -h localhost -U chit -d postgres -tAc \
                  "SELECT 1 FROM pg_database WHERE datname='$db'")" = 1 ]; then
               echo "database $db already exists"
@@ -493,10 +515,7 @@ spec:
         - --yes
 
     - name: migrate-keto
-      # PENDING trusted-service-containers P-TSC-2: keto-cue has no trusted
-      # image yet. `make keto-cue-image` builds this local one; replace it
-      # with the TSC image pinned by digest when P-TSC-2 publishes it.
-      image: localhost/keto-cue:2a6c583e
+      image: ghcr.io/infrashift/trusted-service-containers/trusted/keto-cue:v0.0.0-20261114211924-809351b32b9c-6a44b89@sha256:db55bf1db0721e03d6ea8fc250ded0271087a889a013f5dc36dbb5addeac0e9b
       command:
         - keto
         - migrate
@@ -556,10 +575,7 @@ spec:
           mountPath: /etc/kratos
 
     - name: keto
-      # PENDING trusted-service-containers P-TSC-2: keto-cue has no trusted
-      # image yet. `make keto-cue-image` builds this local one; replace it
-      # with the TSC image pinned by digest when P-TSC-2 publishes it.
-      image: localhost/keto-cue:2a6c583e
+      image: ghcr.io/infrashift/trusted-service-containers/trusted/keto-cue:v0.0.0-20261114211924-809351b32b9c-6a44b89@sha256:db55bf1db0721e03d6ea8fc250ded0271087a889a013f5dc36dbb5addeac0e9b
       args:
         - serve
         - -c
@@ -613,6 +629,67 @@ spec:
         - name: zincdata
           mountPath: /data
 
+    - name: seaweedfs
+      # The attachment store (CHIT_S3_*): trusted-service-containers
+      # SeaweedFS 4.51, built from source on ubi9-micro, pinned by digest.
+      # One weed process runs the master, a volume server, the filer and the
+      # S3 gateway, all on 127.0.0.1. The ports avoid 8080 (the volume
+      # server's default) and the gateway's default gRPC port 18333.
+      # chitd creates the chit-files bucket at start.
+      image: ghcr.io/infrashift/trusted-service-containers/trusted/seaweedfs:4.51-382cdac@sha256:7c6682e56006764282eb70a6a96703aafa6d808cd0c13ff6b8b1514b680985b7
+      args:
+        - server
+        - -dir=/data
+        - -ip=127.0.0.1
+        - -ip.bind=127.0.0.1
+        - -master.port=9333
+        - -master.port.grpc=19333
+        - -master.volumeSizeLimitMB=1024
+        - -volume.port=8380
+        - -volume.port.grpc=18380
+        - -filer.port=8888
+        - -filer.port.grpc=18888
+        - -s3
+        - -s3.port=8333
+        - -s3.port.grpc=18334
+        - -s3.port.iceberg=0
+        - -s3.port.lance=0
+        - -s3.config=/etc/seaweedfs/s3.json
+      volumeMounts:
+        - name: seaweedfs-config
+          mountPath: /etc/seaweedfs
+        - name: seaweeddata
+          mountPath: /data
+
+    # The membership policy hook for tests/e2e/test_e2e.sh scenario 12: a
+    # stub of HALO's halod (tests/e2e/hookstub), built from this checkout on
+    # 127.0.0.1:4490. At start it registers chitd's Hydra client
+    # chit-e2e-memberhook. It allows every member until the e2e names one
+    # to refuse. Never copy it, or chitd's CHIT_MEMBERSHIP_HOOK_* below, into
+    # a real deployment. The Go builder image is the one deploy/Containerfile
+    # pins.
+    - name: memberhook-stub
+      image: docker.io/library/golang:1.26-alpine@sha256:30b1e546a9c7fa3b747c2bdba3a0c7bdf3a02ebb4c5b8405d2f948d7e8aac4ec
+      workingDir: /src
+      command: ["go", "run", "./tests/e2e/hookstub"]
+      env:
+        - name: GOWORK
+          value: "off"
+        - name: GOFLAGS
+          value: -buildvcs=false
+        - name: HOOKSTUB_LISTEN
+          value: 127.0.0.1:4490
+        - name: HOOKSTUB_HYDRA_ADMIN_URL
+          value: http://127.0.0.1:4445
+        - name: HOOKSTUB_CLIENT_ID
+          value: chit-e2e-memberhook
+        - name: HOOKSTUB_CLIENT_SECRET
+          value: chit-e2e-memberhook-secret
+      volumeMounts:
+        - name: chit-src
+          mountPath: /src
+          readOnly: true
+
     - name: chitd
       image: localhost/chit:latest
       env:
@@ -630,13 +707,30 @@ spec:
           value: admin
         - name: CHIT_ZINCSEARCH_PASSWORD
           value: admin
+        - name: CHIT_S3_ENDPOINT
+          value: http://127.0.0.1:8333
+        - name: CHIT_S3_ACCESS_KEY_ID
+          value: chit-dev-access-key
+        - name: CHIT_S3_SECRET_ACCESS_KEY
+          value: chit-dev-secret-key
         # A HALO-like machine actor for tests/e2e/test_e2e.sh scenario 10,
         # which creates the Hydra client chit-e2e-halod. It may act on
         # behalf of any person: never copy it into a real deployment.
+        # chit-e2e-bot (scenario 11) is a machine actor that may not.
         - name: CHIT_MACHINE_ACTORS
-          value: '[{"client_id":"chit-e2e-halod","username":"halod-e2e","display_name":"halod (e2e)","roles":"system_user","actor_type":"agent"}]'
+          value: '[{"client_id":"chit-e2e-halod","username":"halod-e2e","display_name":"halod (e2e)","roles":"system_user","actor_type":"agent"},{"client_id":"chit-e2e-bot","username":"bot-e2e","display_name":"bot (e2e)","roles":"system_user","actor_type":"bot"}]'
         - name: CHIT_ON_BEHALF_OF_CLIENTS
           value: chit-e2e-halod
+        # The membership hook: the memberhook-stub container above, with the
+        # Hydra client it registers. Every channel add asks it first.
+        - name: CHIT_MEMBERSHIP_HOOK_URL
+          value: http://127.0.0.1:4490/membership-check
+        - name: CHIT_MEMBERSHIP_HOOK_TOKEN_URL
+          value: http://127.0.0.1:4444/oauth2/token
+        - name: CHIT_MEMBERSHIP_HOOK_CLIENT_ID
+          value: chit-e2e-memberhook
+        - name: CHIT_MEMBERSHIP_HOOK_CLIENT_SECRET
+          value: chit-e2e-memberhook-secret
 
   volumes:
     - name: kratos-config
@@ -654,10 +748,20 @@ spec:
     - name: hydra-config
       configMap:
         name: chit-hydra-config
+    - name: seaweedfs-config
+      configMap:
+        name: chit-seaweedfs-config
+    - name: seaweeddata
+      persistentVolumeClaim:
+        claimName: chit-seaweeddata
     - name: zincdata
       persistentVolumeClaim:
         claimName: chit-zincdata
     - name: chit-migrations
       hostPath:
         path: __PROJECT_ROOT__/migrations
+        type: Directory
+    - name: chit-src
+      hostPath:
+        path: __PROJECT_ROOT__
         type: Directory

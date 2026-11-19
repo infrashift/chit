@@ -589,7 +589,7 @@ The `make test-e2e` target automates the entire pipeline. Under the hood it:
 1. **Builds the e2e test image** (`chit-tui-e2e:latest`) from `Containerfiles/Containerfile.e2e`
 2. **Builds the Chit server image** (`chit-e2e:latest`) from `Containerfiles/Containerfile.e2e` at the root of the repository (`CHIT_SRC`)
 3. **Creates a Podman pod** (`chit-tui-e2e`) with a shared network namespace
-4. **Starts PostgreSQL** — the trusted-service-containers `postgres:17-debian` image with database `chit`
+4. **Starts PostgreSQL** — the trusted-service-containers `postgresql17` image (PostgreSQL 17 on UBI) with database `chit`
 5. **Starts the Chit server** — waits for Postgres, runs migrations, seeds UAT data, starts `chitd`
 6. **Runs the e2e tests** — waits for `chitd` to respond to `/api/v1/system/ping`, then executes all tests
 7. **Tears down the pod** regardless of pass or fail

@@ -15,7 +15,12 @@ type AppError struct {
 	Message       string `json:"message"`
 	DetailedError string `json:"detailed_error,omitempty"`
 	StatusCode    int    `json:"status_code"`
-	Where         string `json:"-"`
+	// Reason and Detail carry a policy's own refusal: a short stable code
+	// and a text for a person. Only a membership refusal
+	// (channel.membership_refused) sets them.
+	Reason string `json:"reason,omitempty"`
+	Detail string `json:"detail,omitempty"`
+	Where  string `json:"-"`
 }
 
 func (e *AppError) Error() string {

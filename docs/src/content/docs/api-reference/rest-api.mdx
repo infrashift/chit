@@ -55,19 +55,24 @@ gives a `400`:
 | POST | `/posts` | Post; `props.on_behalf_of.actor_id` names the client |
 | POST | `/channels/{id}/stream_status` | Send a stream status |
 | POST | `/tags`, `/posts/{id}/tags`, `/channels/{id}/tags` | Create and apply tags |
+| GET | `/tags`, `/channels/{id}/tags` | List the person's tags: their private tags and the channel tags of their channels, never another person's private tag |
+| POST | `/tags/posts`, `/tags/channels` | Read tags of many posts, and filter the person's channels by tags |
+| DELETE | `/posts/{id}/tags/{tag_id}`, `/channels/{id}/tags/{tag_id}` | Remove a tag; another person's private tag is a `404` |
+| POST | `/channels/{id}/files` | Upload an image; the person is `uploader_id`, the client `via_actor_id`, and a `file_uploaded` audit record names both |
+| GET | `/files/{id}` | Download an image the person may read (halod proxies downloads) |
 | POST | `/channels` | Create a channel; the person must be on the team, and is its creator |
 | POST | `/channels/{id}/members` | Add a member; the person must be allowed to add one |
 | GET | `/users/me` | Return the person: how a client learns a `kratos:` person's user ID |
 
-chitd refuses the header with `403` from a client that is not on the list,
-and from a person's session. It refuses these values with `400`:
+A request on behalf of a person counts against the person's per-user rate
+limit and the client's aggregate one; what the client does as itself counts
+against its aggregate limit only (see
+[Rate limits](/chit/reference/configuration/#rate-limits)).
 
-- an empty or malformed value;
-- an unknown user or Kratos identity;
-- a deactivated person (in Chit, or inactive in Kratos);
-- an agent or bot.
-
-A machine actor gets its own user ID with `GET /users/me` and no
+Refused: a client not on the list, or a person's session, with the header
+(`403`); an empty or malformed value, an unknown user or Kratos identity, a
+deactivated person (in Chit, or inactive in Kratos), and an agent or bot
+(`400`). A machine actor learns its own user ID with `GET /users/me` and no
 `X-On-Behalf-Of`.
 
 HALO creates a Conversation with these requests:
@@ -79,15 +84,40 @@ HALO creates a Conversation with these requests:
 5. `POST /posts` for the person.
 6. `GET /channels/{id}/posts` as halod, which is now a member.
 
+### Membership hook
+
+When `CHIT_MEMBERSHIP_HOOK_URL` is set, chitd asks the hook before it adds a
+member to a channel: `POST /channels/{id}/members` (a join and an
+on-behalf-of add included), the team members of a new Open channel, the
+other members of a new direct or group channel, and `/invite`. The creator of
+a new channel is not asked about. Any answer but `{"allow": true}` refuses
+the add, a failed or slow hook included. A refused request adds nobody,
+however many members it adds, and answers `403`:
+
+```json
+{"id": "channel.membership_refused", "status_code": 403,
+ "message": "the membership policy refused to add user <user ID> to this channel",
+ "reason": "<the hook's code, or hook_unavailable>",
+ "detail": "<the hook's text for a person>"}
+```
+
+[Configuration](/chit/reference/configuration/#membership-hook) gives the
+hook's request and answer.
+
 ## Limits
 
 | Limit | Value | Response |
 |---|---|---|
-| Rate limit | 10 requests/s per authenticated user, burst 50 | `429` |
+| Rate limit, per user | `CHIT_RATE_LIMIT_USER_PER_SECOND` (10) requests/s, burst `CHIT_RATE_LIMIT_USER_BURST` (50); on behalf of a person, the person's | `429`, `Retry-After` |
+| Rate limit, per on-behalf-of client | `CHIT_RATE_LIMIT_CLIENT_PER_SECOND` (1500) requests/s, burst `CHIT_RATE_LIMIT_CLIENT_BURST` (3000), for all it does | `429`, `Retry-After` |
 | Request body | 1 MiB | `413` |
 | Malformed JSON body | | `400` |
 | Post content | 65,535 bytes | `400` |
 | `POST /users/ids`, `POST /tags/posts` | 200 IDs per request | `400` |
+| Upload (`POST /channels/{id}/files`) | 10 MiB, before and after re-encoding | `413` |
+| Image size | 40,000,000 pixels, from the header | `422` |
+| Attachments per post | 4 | `400` |
+| Stored attachments per person | `CHIT_FILE_QUOTA_BYTES` (1 GiB) | `413` |
 
 By default, chitd validates each request against the OpenAPI spec
 (`CHIT_ENABLE_OPENAPI_VALIDATION`). chitd refuses a request that the spec does
@@ -184,7 +214,7 @@ channels. Their membership cannot change.
 
 | Method | Path | Summary | Who may call |
 |---|---|---|---|
-| POST | `/posts` | Create a post or reply (`channel_id`, `content`, optional `root_id`, `props`). Slash commands are intercepted here. | Channel members |
+| POST | `/posts` | Create a post or reply (`channel_id`, `content`, optional `root_id`, `props`, `file_ids`). Slash commands are intercepted here. | Channel members |
 | GET | `/posts/{id}` | Get a post | Channel members |
 | PUT | `/posts/{id}` | Edit `content` and/or merge `props` (a `null` value deletes a key); returns the whole post | The author, or `system_admin` |
 | DELETE | `/posts/{id}` | Soft-delete a post | The author, or `system_admin` |
@@ -201,8 +231,14 @@ content, and ignores a value from the client.
 milliseconds). With `since`, it returns the posts created after that time,
 oldest first. A client uses it to poll for new posts.
 
-chitd runs a slash command (content that matches `^/[a-z0-9-]+`) and does not
-store it. The response is a stand-in post that chitd does not store. See
+`file_ids` attaches up to 4 files the author uploaded to the same channel
+and has not attached elsewhere (otherwise `400`; `409` if one was attached
+meanwhile). A post with files needs no `content`, and is never run as a slash
+command. Posts read back with `file_ids` in order. Deleting a post deletes its
+files.
+
+A slash command (content matching `^/[a-z0-9-]+`) is executed rather than
+stored; the response is a stand-in post that is not persisted. See
 [MCP and Slash Commands](/chit/reference/mcp-and-commands/#slash-commands).
 
 ### Threads
@@ -254,6 +290,59 @@ owner owns at most 1024 tags. Each application records `applied_by`.
 rename or apply such a tag (403). An OAuth2 client in
 `CHIT_ON_BEHALF_OF_CLIENTS` may create one and apply it with
 `X-On-Behalf-Of`, only as the person's private tag.
+
+### Files
+
+Image attachments (HALO P-CHIT-5). Off unless `CHIT_S3_ENDPOINT` is set: then
+every file route, and `file_ids` on a post, answer `503`.
+
+| Method | Path | Summary | Who may call |
+|---|---|---|---|
+| POST | `/channels/{id}/files` | Upload one image (multipart: `file`, optional `alt_text`); returns the `File` (`201`) | Channel members |
+| GET | `/files/{id}` | The image's bytes | Channel members once it is attached; before, its uploader only |
+| GET | `/files/{id}/info` | The `File` | As `GET /files/{id}` |
+| POST | `/files/search` | Files whose name or alt text contains `terms` (`{"terms", "channel_id", "page", "per_page"}`), newest first | Any user, over their channels |
+
+**Validation.** The `file` part's `Content-Type` is the declared type and its
+filename the name. Chit accepts only `image/png`, `image/jpeg`, `image/webp`
+and `image/gif` (the first frame only); refuses SVG; refuses a declared type
+that is not the type of the magic bytes, and a polyglot (bytes after the end
+of the image, or markup in its metadata); reads the size with
+`image.DecodeConfig` and refuses more than 40,000,000 pixels before decoding;
+then decodes and re-encodes the image in pure Go, JPEG as JPEG and the others
+as PNG, so no EXIF, text chunk or trailing byte is stored. The rules are in
+the package `github.com/infrashift/chit/pkg/imagecheck`, which has no Chit
+dependencies, so HALO applies the same ones to generated images.
+
+| Refusal | Status | `id` |
+|---|---|---|
+| Over 10 MiB, before or after re-encoding | `413` | `file.too_large` |
+| The person's stored files would pass `CHIT_FILE_QUOTA_BYTES` | `413` | `file.quota_exceeded` |
+| SVG, by type or by content | `415` | `file.svg` |
+| Not one of the four types | `415` | `file.unsupported_type` |
+| Declared and sniffed types differ | `415` | `file.type_mismatch` |
+| Trailing bytes, or markup in metadata | `422` | `file.polyglot` |
+| More than 40,000,000 pixels | `422` | `file.too_many_pixels` |
+| Does not decode | `422` | `file.malformed` |
+
+**Storage.** The bytes are stored in the S3 bucket `CHIT_S3_BUCKET`
+(`chit-files`) under `<channel_id>/<file_id>`. An upload with the bytes of a
+live file in the same channel gets its own file (its own ID, uploader and alt
+text) that shares that object; another channel never shares it. An upload
+attached to no post after `CHIT_FILE_ORPHAN_GRACE` (24 h) is deleted, and a
+deleted file's object is removed that long after, unless a live file still
+uses it, by a sweep of at most `CHIT_FILE_SWEEP_BATCH` files every
+`CHIT_FILE_SWEEP_INTERVAL`.
+
+**Headers.** Every response of these routes, refusals included, carries
+`X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox` and
+`Content-Disposition: attachment` (with the file name on a download). A
+download also has `Cache-Control: private, no-store` and the SHA-256 as its
+`ETag`. There are no public or presigned URLs.
+
+**Search** matches the file name and the alt text the person wrote, never the
+image or anything derived from it. A file not yet attached is found only by
+its uploader.
 
 ### Search
 

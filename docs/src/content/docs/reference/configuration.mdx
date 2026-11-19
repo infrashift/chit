@@ -25,20 +25,39 @@ exists.
 | `CHIT_TRUSTED_CLIENT_HEADER` | string | `X-Client-Id` | Header carrying a machine actor's OAuth2 `client_id`, set by Oathkeeper after introspecting a Hydra token. Checked before `CHIT_TRUSTED_PROXY_HEADER`. The client must be bound to a user (see `CHIT_MACHINE_ACTORS`); an unknown client gets 401 and is never auto-created. |
 | `CHIT_TRUSTED_PROXY_SECRET` | string | _(empty)_ | When set, every authenticated request must carry a matching `X-Proxy-Secret` header before either identity header is trusted; recommended in production |
 | `CHIT_MACHINE_ACTORS` | JSON | _(empty)_ | Machine actors (agents and bots) to create or update at boot. See [Machine actors](#machine-actors). |
-| `CHIT_ON_BEHALF_OF_CLIENTS` | list | _(empty)_ | Comma-separated OAuth2 client IDs of machine actors that may act as a person by naming the person's user ID, or `kratos:` and their Kratos identity ID, in `X-On-Behalf-Of`: post, send `stream_status`, create and apply tags, create a channel, add a channel member, and read the person with `GET /users/me`. A `kratos:` person who has no user yet is provisioned as on their first browser request. The request is authorized as that person, and `props.on_behalf_of.actor_id` and the audit log record the client. Each must be in `CHIT_MACHINE_ACTORS`, or chitd does not start. A person's session can never use the header. |
+| `CHIT_ON_BEHALF_OF_CLIENTS` | list | _(empty)_ | Comma-separated OAuth2 client IDs of machine actors that may act as a person by naming the person's user ID, or `kratos:` and their Kratos identity ID, in `X-On-Behalf-Of`: post, send `stream_status`, create, read, apply and remove tags, create a channel, add a channel member, upload and download attachments, and read the person with `GET /users/me`. A `kratos:` person who has no user yet is provisioned as on their first browser request. The request is authorized as that person, and `props.on_behalf_of.actor_id` and the audit log record the client. Each must be in `CHIT_MACHINE_ACTORS`, or chitd does not start. A person's session can never use the header. |
+| `CHIT_RATE_LIMIT_USER_PER_SECOND` | float | `10` | Requests a second each user may make, sustained: a person, a machine actor not in `CHIT_ON_BEHALF_OF_CLIENTS`, and each person a client acts for. See [Rate limits](#rate-limits). |
+| `CHIT_RATE_LIMIT_USER_BURST` | int | `50` | Requests each user may make at once, beyond the sustained rate |
+| `CHIT_RATE_LIMIT_CLIENT_PER_SECOND` | float | `1500` | Requests a second, sustained, of each client in `CHIT_ON_BEHALF_OF_CLIENTS`: everything it does, as itself and on behalf of anyone. See [Rate limits](#rate-limits). |
+| `CHIT_RATE_LIMIT_CLIENT_BURST` | int | `3000` | Requests each such client may make at once, beyond the sustained rate |
 | `CHIT_KRATOS_ADMIN_URL` | string | `http://localhost:4434` | Ory Kratos admin API base URL |
 | `CHIT_KETO_READ_URL` | string | `http://localhost:4466` | Ory Keto read API base URL |
 | `CHIT_KETO_WRITE_URL` | string | `http://localhost:4467` | Ory Keto write API base URL |
 | `CHIT_ZINCSEARCH_URL` | string | _(empty)_ | ZincSearch server URL. Empty disables ZincSearch: search runs as SQL and no indexer runs. When set, a background indexer syncs posts every 5 seconds and term searches go to ZincSearch, falling back to SQL if it errors. |
 | `CHIT_ZINCSEARCH_USER` | string | `admin` | ZincSearch username |
 | `CHIT_ZINCSEARCH_PASSWORD` | string | _(empty)_ | ZincSearch password |
+| `CHIT_S3_ENDPOINT` | string | _(empty)_ | S3-compatible endpoint for attachments (SeaweedFS in the deploy files), addressed path-style, such as `http://127.0.0.1:8333`. Empty turns attachments off: the file routes and `file_ids` answer 503. When set, chitd creates the bucket at start if it is missing, retrying for 60 seconds while the store starts. |
+| `CHIT_S3_BUCKET` | string | `chit-files` | The attachment bucket |
+| `CHIT_S3_REGION` | string | `us-east-1` | Region in the request signatures (SeaweedFS ignores it) |
+| `CHIT_S3_ACCESS_KEY_ID` | string | _(empty)_ | S3 access key; required with `CHIT_S3_ENDPOINT` |
+| `CHIT_S3_SECRET_ACCESS_KEY` | string | _(empty)_ | S3 secret key; required with `CHIT_S3_ENDPOINT` |
+| `CHIT_FILE_QUOTA_BYTES` | int | `1073741824` | Most bytes of live attachments one person may have; an upload past it is a 413 |
+| `CHIT_FILE_ORPHAN_GRACE` | duration | `24h` | How long an upload may wait for its post, and how long a deleted file's object is kept |
+| `CHIT_FILE_SWEEP_INTERVAL` | duration | `10m` | How often the attachment sweep runs |
+| `CHIT_FILE_SWEEP_BATCH` | int | `100` | Most files the sweep expires, and most it purges, per run |
+| `CHIT_MEMBERSHIP_HOOK_URL` | string | _(empty)_ | The membership policy hook, such as HALO's `http://halod:8080/internal/chit/membership-check`. Empty turns it off. When set, chitd asks it before it adds any member to a channel, and refuses the add unless it answers `{"allow":true}`. See [Membership hook](#membership-hook). |
+| `CHIT_MEMBERSHIP_HOOK_TIMEOUT` | duration | `5s` | Bounds one check, the token request and the retry after a 401 included. A check that runs out of time refuses the add. |
+| `CHIT_MEMBERSHIP_HOOK_TOKEN_URL` | string | _(empty)_ | Hydra token endpoint for chitd's own `client_credentials` client; required with `CHIT_MEMBERSHIP_HOOK_URL` |
+| `CHIT_MEMBERSHIP_HOOK_CLIENT_ID` | string | _(empty)_ | chitd's Hydra client ID; required with `CHIT_MEMBERSHIP_HOOK_URL` |
+| `CHIT_MEMBERSHIP_HOOK_CLIENT_SECRET` | string | _(empty)_ | chitd's Hydra client secret; required with `CHIT_MEMBERSHIP_HOOK_URL` |
+| `CHIT_MEMBERSHIP_HOOK_SCOPE` | string | _(empty)_ | Space-separated scopes to request with the token; empty requests none |
 | `CHIT_WS_PING_INTERVAL` | duration | `30s` | Interval between WebSocket ping frames |
 | `CHIT_WS_WRITE_TIMEOUT` | duration | `10s` | Write deadline for WebSocket messages |
 | `CHIT_CACHE_SIZE` | int | `20000` | Maximum entries in the user LRU cache |
 | `CHIT_CACHE_TTL` | duration | `5m` | Time-to-live for cache entries |
 | `CHIT_ENABLE_OPENAPI_VALIDATION` | bool | `true` | Validate requests against the OpenAPI spec |
 | `CHIT_COMMANDS_CUE_DIR` | string | `auth` | Directory containing the CUE definitions for slash commands, roles and actors. The container image sets `/etc/chit/auth`. |
-| `CHIT_AUDIT_LOG_PATH` | string | `/var/log/chit/audit.log` | Slash-command audit log file. Empty or `-` logs to stderr; so does a path chitd cannot create or open (with a warning). |
+| `CHIT_AUDIT_LOG_PATH` | string | `/var/log/chit/audit.log` | Audit log file: slash commands, on-behalf-of acts and membership hook answers. Empty or `-` logs to stderr; so does a path chitd cannot create or open (with a warning). |
 | `CHIT_WEBHOOK_ENABLED` | bool | `false` | Enable the CloudEvents webhook dispatcher for slash commands |
 | `CHIT_WEBHOOK_URL` | string | _(empty)_ | Destination URL for webhook deliveries |
 | `CHIT_WEBHOOK_SECRET` | string | _(empty)_ | Shared secret used to sign webhook deliveries |
@@ -62,8 +81,115 @@ wrong, chitd lists all the problems at one time and exits. It refuses to start w
   `CHIT_LOG_FORMAT` is not `json` or `text`;
 - `CHIT_WEBHOOK_ENABLED=true` and `CHIT_WEBHOOK_URL` is empty, or the webhook
   worker count, queue size or timeout is not positive;
-- `CHIT_MACHINE_ACTORS` is not valid JSON or declares an invalid actor (chitd checks
-  this immediately after the database connects).
+- `CHIT_MEMBERSHIP_HOOK_URL` is set and the token URL, client ID or client
+  secret is empty, or `CHIT_MEMBERSHIP_HOOK_TIMEOUT` is not positive; or the
+  URL is not an absolute `http` or `https` URL (checked at start);
+- a `CHIT_RATE_LIMIT_*_PER_SECOND` is not more than 0 and at most 100,000, or
+  a `CHIT_RATE_LIMIT_*_BURST` is not between 1 and 1,000,000. No value turns
+  a limit off;
+- `CHIT_MACHINE_ACTORS` is not valid JSON or declares an invalid actor (checked
+  just after the database connects).
+
+### Rate limits
+
+chitd keeps a token bucket for each caller and refuses a request over the
+limit with `429`, a `Retry-After` header (seconds, rounded up), and a
+`rate limit exceeded` warning in its log.
+
+- **Per user.** A person, and a machine actor that is not in
+  `CHIT_ON_BEHALF_OF_CLIENTS`, has one bucket keyed by their user ID:
+  `CHIT_RATE_LIMIT_USER_PER_SECOND` (10) requests a second, in bursts of
+  `CHIT_RATE_LIMIT_USER_BURST` (50).
+- **Per on-behalf-of client.** A client in `CHIT_ON_BEHALF_OF_CLIENTS` is one
+  caller for many people, so it has an aggregate bucket instead:
+  `CHIT_RATE_LIMIT_CLIENT_PER_SECOND` (1500) in bursts of
+  `CHIT_RATE_LIMIT_CLIENT_BURST` (3000). Everything the client does counts
+  against it: as itself, and on behalf of anyone.
+- **On behalf of a person.** A request with `X-On-Behalf-Of` also counts
+  against the person's own per-user bucket, the one their browser requests
+  use. Each person a client acts for has the normal per-user budget, and no
+  more: the client cannot be used to give anyone a larger one.
+
+A request needs a token from each of its buckets; one that a bucket refuses
+takes nothing from the other. The log line names the bucket (`user` or
+`client`), the method and path, and who: `user_id` for a person,
+`actor_id` and `client_id` for a client as itself, and `actor_id`,
+`client_id` and `principal_id` for a request on behalf of a person.
+`POST /channels/{id}/stream_status` has its own limit as well (two events a
+second per sender and channel, in bursts of five).
+
+The client defaults are sized for HALO's `halod` with about 2000 Subjects,
+each sending about one Message a minute, with streamed replies. halod
+sends, per Message (a turn):
+
+| Request | As | Per turn |
+|---|---|---|
+| `POST /posts`, the Subject's Message | the Subject | 1 |
+| `GET /channels/{id}/posts`, the history | itself | 1 |
+| `GET /channels/{id}/members` and `POST /users/ids`, the members | itself | 2 |
+| `stream_status` `started` and `finished` | itself | 2 |
+| `stream_status` `progress`, at most one a second, for a 20 s reply | itself | 20 |
+| `POST /posts`, the reply | itself | 1 |
+| **Total** | | **27, call it 30** |
+
+2000 Subjects at one Message a minute are 2000 / 60 = 33.3 turns a second,
+and 33.3 × 30 = 1000 requests a second. The default rate of 1500 is half
+again as much, room for replies of about 35 s on average or for Messages
+arriving half again as fast; the burst of 3000 is two seconds of it. Each
+Subject spends one or two requests a minute of their own per-user budget.
+Scale the client limit with the number of people a client serves, and keep
+it a limit: it is what stops a compromised or faulty client from flooding
+chitd.
+
+### Membership hook
+
+HALO records the Tools and OKF namespaces behind each Profile message, so a
+person added to a channel later could read output made with somebody else's
+access. The membership hook lets HALO's `halod` refuse such an add. When
+`CHIT_MEMBERSHIP_HOOK_URL` is set, chitd asks the hook before it adds a member
+on every path that adds one:
+
+| Path | Who is checked |
+|---|---|
+| `POST /channels/{id}/members`, also on behalf of a person and when a user joins an Open channel | The user added |
+| `POST /channels` for an Open channel | Each team member it adds; the creator is not checked |
+| `POST /channels` for a Private channel | Nobody: the creator is its only member |
+| `POST /channels/direct` and `POST /channels/group` (a new channel only) | Each member but the caller |
+| `/invite` | The user invited |
+
+Joining a team adds no channel memberships, so it asks nothing. An existing
+member, an existing direct or group channel, and an add that its own checks
+refuse ask nothing either.
+
+The request is `POST <CHIT_MEMBERSHIP_HOOK_URL>` with
+`Authorization: Bearer <token>` (chitd's Hydra `client_credentials` token,
+kept until 30 seconds before it expires and fetched again once after a 401)
+and `Content-Type: application/json`:
+
+```json
+{"channel_id": "<channel ID>", "user_id": "<user ID of the new member>",
+ "kratos_identity_id": "<their Kratos identity ID, or empty>",
+ "actor_type": "human | agent | bot",
+ "added_by": "<user ID of the actor; on behalf of, the person>",
+ "via_actor_id": "<user ID of the on-behalf-of client, or empty>"}
+```
+
+A 200 with `{"allow": true}` allows the add. A 200 with
+`{"allow": false, "reason": "<code>", "detail": "<text>"}` refuses it. Any
+other status, a timeout, a network error or another body refuses it too: the
+hook fails closed. A refusal adds nothing and answers 403:
+
+```json
+{"id": "channel.membership_refused", "status_code": 403,
+ "message": "the membership policy refused to add user <user ID> to this channel",
+ "reason": "<the hook's code, or hook_unavailable>", "detail": "<the hook's text>"}
+```
+
+A request that adds several members (an Open channel, a group) asks about
+each one, at most 8 at a time, and adds all or none: one refusal refuses the
+request. `/invite` answers with the reason and detail as its text. Each
+answer is a `membership_check` record in the audit log, with the channel,
+the member, `added_by`, `via_actor_id`, `allowed` and `reason`.
 
 ### Machine actors
 
@@ -186,6 +312,6 @@ stops the bridge at startup.
   the `chit_events` topic. Nothing subscribes to that topic yet: WebSocket
   fan-out is single-node and in-process, and `chit-mcp` gets its events from
   chitd's WebSocket.
-- Some limits are not configurable. Each authenticated user may make 10
-  requests a second with bursts of 50 (more gets 429). chitd refuses request
-  bodies over 1 MiB with 413.
+- A limit that is not configurable: request bodies over 1 MiB are refused
+  with 413. The request rate limits are configurable; see
+  [Rate limits](#rate-limits).

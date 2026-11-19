@@ -1,4 +1,4 @@
-.PHONY: semscope docs-lexis wiki check keto-cue-image keto-cue-image-present keto-validate test-keto build build-mcp build-reconcile build-claude build-tui build-all run test test-integration test-tui test-all test-container test-e2e test-e2e-tui test-e2e-clean lint vuln lint-tui check-deps validate-spec cue-validate reconcile migrate-up migrate-down kube-migrate kube-build kube-up kube-down kube-restart kube-logs kube-clean uat-up uat-seed-kratos uat-down uat-clean docs-dev clean
+.PHONY: semscope docs-lexis wiki check keto-validate test-keto build build-mcp build-reconcile build-claude build-tui build-all run test test-integration test-tui test-all test-container test-e2e test-e2e-tui test-e2e-clean lint vuln lint-tui check-deps validate-spec cue-validate reconcile migrate-up migrate-down kube-migrate kube-build kube-up kube-down kube-restart kube-logs kube-clean uat-up uat-seed-kratos uat-down uat-clean docs-dev clean
 
 BINARY=bin/chitd
 MCP_BINARY=bin/chit-mcp
@@ -12,22 +12,18 @@ CHIT_IMAGE?=localhost/chit:latest
 E2E_POD=chit-e2e
 E2E_IMAGE=chit-e2e:latest
 
-# Third-party images, pinned by digest. docs/.../upgrade-keto-cue.mdx lists
-# where each one comes from; keep the deploy/*.kube.yml copies the same.
-# PostgreSQL 17 is the trusted-service-containers mirror of the Docker
-# Hardened Image. It is in quarantine, so only its immutable -<shortsha> tag
-# exists.
-PG_IMAGE=ghcr.io/infrashift/trusted-service-containers/quarantine/postgres:17-debian-382cdac@sha256:66dcbc496311685361b6a56e261e6694454daea3e297604dfd79590275f03910
+# Third-party images, pinned by digest. docs/.../deployment/podman-kube.mdx
+# lists where each one comes from; keep the deploy/*.kube.yml copies the same.
+# PostgreSQL 17 is the trusted-service-containers postgresql17 image: the
+# signed PGDG RPMs on trusted UBI9 Minimal, UID 26, PGDATA
+# /var/lib/pgsql/data/userdata.
+PG_IMAGE=ghcr.io/infrashift/trusted-service-containers/trusted/postgresql17:17.12-9410cd4@sha256:6375c284b5aaa6d83096d74ae6b1b7a3340bcd81739e4309465b18a3e781d6e3
 # Not in trusted-service-containers: upstream, pinned by digest.
 MIGRATE_IMAGE=docker.io/migrate/migrate:v4.15.0@sha256:f613168b682b4c17033a1d5b381e0cb474c05715b843f4b160fb7bab9cead0c5
 
-# keto-cue, the Keto fork that reads CUE permission schemas. PENDING
-# trusted-service-containers P-TSC-2: until it publishes a trusted image,
-# keto-cue-image builds this local one from a keto-cue checkout at
-# KETO_CUE_REV. The deploy/*.kube.yml files name the same tag.
-KETO_CUE_SRC?=../keto-cue
-KETO_CUE_REV=2a6c583e
-KETO_CUE_IMAGE=localhost/keto-cue:$(KETO_CUE_REV)
+# keto-cue, the Keto fork that reads CUE permission schemas, built by
+# trusted-service-containers from keto-cue 809351b3 on trusted ubi9-micro.
+KETO_CUE_IMAGE=ghcr.io/infrashift/trusted-service-containers/trusted/keto-cue:v0.0.0-20261114211924-809351b32b9c-6a44b89@sha256:db55bf1db0721e03d6ea8fc250ded0271087a889a013f5dc36dbb5addeac0e9b
 # The schema directory keto-cue loads: one CUE package, one file per service.
 KETO_SCHEMA=deploy/keto/schema
 
@@ -210,30 +206,10 @@ kube-migrate:
 
 ## --- Keto (keto-cue) ---
 
-# Builds the interim keto-cue image (see deploy/keto/Containerfile.keto-cue)
-# from KETO_CUE_SRC, which must be checked out at KETO_CUE_REV. The binary is
-# compiled the way trusted-service-containers compiles Keto: static, json1.
-KETO_CUE_CTX=bin/keto-cue-image
-keto-cue-image:
-	@test "$$(git -C $(KETO_CUE_SRC) rev-parse --short=8 HEAD)" = "$(KETO_CUE_REV)" \
-		|| (echo "FAIL: $(KETO_CUE_SRC) is not at keto-cue $(KETO_CUE_REV)" && exit 1)
-	mkdir -p $(KETO_CUE_CTX)
-	cd $(KETO_CUE_SRC) && CGO_ENABLED=0 go build -tags json1 -ldflags "-s -w \
-		-X github.com/ory/keto/internal/driver/config.Version=keto-cue-$(KETO_CUE_REV) \
-		-X github.com/ory/keto/internal/driver/config.Commit=$$(git rev-parse HEAD) \
-		-X github.com/ory/keto/internal/driver/config.Date=$$(git log -1 --format=%cI)" \
-		-o $(CURDIR)/$(KETO_CUE_CTX)/keto .
-	podman build -t $(KETO_CUE_IMAGE) --build-arg KETO_CUE_REVISION=$(KETO_CUE_REV) \
-		-f deploy/keto/Containerfile.keto-cue $(KETO_CUE_CTX)
-
-# Builds the image only when it is missing.
-keto-cue-image-present:
-	@podman image exists $(KETO_CUE_IMAGE) || $(MAKE) keto-cue-image
-
 # Compiles Chit's schema directory as the keto-cue server does, then the
 # same file next to a sample HALO file, as one package in one directory: the
 # shared keto-cue that HALO and Chit will use.
-keto-validate: keto-cue-image-present
+keto-validate:
 	podman run --rm -v $(CURDIR)/$(KETO_SCHEMA):/schema:ro,Z $(KETO_CUE_IMAGE) \
 		namespace validate /schema
 	podman run --rm -v $(CURDIR)/$(KETO_SCHEMA)/chit.cue:/shared/chit.cue:ro,Z \
@@ -246,7 +222,7 @@ keto-validate: keto-cue-image-present
 KETO_TEST_IMAGE?=$(KETO_CUE_IMAGE)
 KETO_TEST_READ_PORT?=54466
 KETO_TEST_WRITE_PORT?=54467
-test-keto: keto-cue-image-present
+test-keto:
 	-podman rm -f chit-ktest 2>/dev/null
 	podman run -d --rm --name chit-ktest \
 		-p $(KETO_TEST_READ_PORT):4466 -p $(KETO_TEST_WRITE_PORT):4467 \
@@ -262,7 +238,7 @@ test-keto: keto-cue-image-present
 
 ## --- Podman Kube ---
 
-kube-build: keto-cue-image-present
+kube-build:
 	podman build -t $(CHIT_IMAGE) -f deploy/Containerfile .
 
 kube-up: kube-build
@@ -280,7 +256,7 @@ kube-log-%:
 	podman logs -f chit-app-$*
 
 kube-clean: kube-down
-	-podman volume rm chit-pgdata chit-zincdata 2>/dev/null
+	-podman volume rm chit-pgdata chit-zincdata chit-seaweeddata 2>/dev/null
 
 ## --- UAT (Manual Acceptance Testing) ---
 
@@ -305,7 +281,7 @@ uat-down:
 	sed "s|__PROJECT_ROOT__|$(CURDIR)|g" $(UAT_KUBE_FILE) | podman kube down -
 
 uat-clean: uat-down
-	-podman volume rm chit-uat-pgdata chit-uat-zincdata 2>/dev/null
+	-podman volume rm chit-uat-pgdata chit-uat-zincdata chit-uat-seaweeddata 2>/dev/null
 
 ## --- Docs ---
 

@@ -20,6 +20,7 @@ type SqlStore struct {
 	post    store.PostStore
 	thread  store.ThreadStore
 	tag     store.TagStore
+	file    store.FileStore
 }
 
 // New creates a new SqlStore and connects to the database.
@@ -55,6 +56,7 @@ func New(ctx context.Context, databaseURL string, maxOpen, maxIdle int) (*SqlSto
 	ss.thread = &SqlThreadStore{sqlStore: ss}
 	ss.tag = &SqlTagStore{sqlStore: ss}
 	assert.That(ss.pool != nil, "sqlstore.New: nil pool after connect")
+	ss.file = &SqlFileStore{sqlStore: ss}
 
 	return ss, nil
 }
@@ -87,6 +89,11 @@ func (ss *SqlStore) Thread() store.ThreadStore {
 func (ss *SqlStore) Tag() store.TagStore {
 	assert.That(ss.tag != nil, "SqlStore.Tag: nil sub-store")
 	return ss.tag
+}
+
+func (ss *SqlStore) File() store.FileStore {
+	assert.That(ss.file != nil, "SqlStore.File: nil sub-store")
+	return ss.file
 }
 
 func (ss *SqlStore) Close() {

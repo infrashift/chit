@@ -14,6 +14,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Behaviour changes an operator must act on or know about:
 
+- **Rate limits are configurable, and an on-behalf-of client has an
+  aggregate limit of its own (P-CHIT-8 for HALO).** A person, and a machine
+  actor not in `CHIT_ON_BEHALF_OF_CLIENTS`, keeps 10 requests a second in
+  bursts of 50, now `CHIT_RATE_LIMIT_USER_PER_SECOND` and
+  `CHIT_RATE_LIMIT_USER_BURST`. A client in `CHIT_ON_BEHALF_OF_CLIENTS` is
+  no longer held to the per-user limit for what it does as itself: it has
+  an aggregate limit, `CHIT_RATE_LIMIT_CLIENT_PER_SECOND` (1500) in bursts
+  of `CHIT_RATE_LIMIT_CLIENT_BURST` (3000), that counts everything it does,
+  on behalf of anyone included. A request on behalf of a person still
+  counts against that person's own limit too. chitd refuses to start with a
+  rate of 0 or less or above 100,000, or a burst below 1 or above
+  1,000,000.
+- **The membership policy hook, and a stub of it in the dev stack.** With
+  `CHIT_MEMBERSHIP_HOOK_URL` unset nothing changes. With it set, chitd asks
+  that URL before it adds any member to a channel and refuses the add (403
+  `channel.membership_refused`) unless the answer is `{"allow":true}`; a
+  failed or slow hook refuses too. It needs `CHIT_MEMBERSHIP_HOOK_TOKEN_URL`,
+  `_CLIENT_ID` and `_CLIENT_SECRET` for its own Hydra client, or chitd does
+  not start. `deploy/chit.kube.yml` turns it on: a new `memberhook-stub`
+  container (the pinned `golang:1.26-alpine` builder image, running
+  `tests/e2e/hookstub` from the checkout on 127.0.0.1:4490) registers the
+  Hydra client `chit-e2e-memberhook` and allows every member unless the
+  e2e names one to refuse. The UAT stack keeps the hook off, and
+  `scripts/seed-uat`, which writes members straight to the database, will
+  not run with the URL set.
+- **Attachments (migration `000009`) and a SeaweedFS container.** The
+  migration adds `files` and `post_files`; its down migration drops them
+  and leaves the objects in the bucket. Attachments are off until
+  `CHIT_S3_ENDPOINT` is set, with `CHIT_S3_ACCESS_KEY_ID` and
+  `CHIT_S3_SECRET_ACCESS_KEY` (chitd will not start with the endpoint and
+  no keys). The deploy files add a `seaweedfs` container
+  (trusted-service-containers `trusted/seaweedfs:4.51-382cdac`, by digest)
+  on 127.0.0.1 ports 8333 (S3), 9333, 8380 and 8888 and gRPC 19333, 18380,
+  18888 and 18334, a `chit-seaweedfs-config` ConfigMap with the dev S3 key,
+  and a `chit-seaweeddata` volume (`chit-uat-seaweeddata` for UAT), which
+  `make kube-clean` and `make uat-clean` now remove. chitd creates the
+  `chit-files` bucket at start, waiting up to 60 seconds for the store.
+  `CreatePostRequest.content` is no longer required: a post of attachments
+  alone has none.
 - **Tags have an owner and a scope (migration `000008`).** A tag is now
   `private` (its owner's alone, on anything they can read) or `channel`
   (shared by one channel's members, usable only there), and names are unique
@@ -54,11 +93,12 @@ Behaviour changes an operator must act on or know about:
   when it is absent, which also means a write needs the Keto read API
   (`CHIT_KETO_READ_URL`). Duplicates already stored stay, harmlessly; a
   narrow race between two writers can still add one.
-- **keto-cue runs from a local image for now.** It has no
-  trusted-service-containers image yet (P-TSC-2), so the deploy files name
-  `localhost/keto-cue:2a6c583e`, which `make keto-cue-image` builds from a
-  `../keto-cue` checkout at that commit (`KETO_CUE_SRC` overrides the path).
-  `make kube-up` and `make uat-up` build it when it is missing.
+- **keto-cue comes from trusted-service-containers.** The deploy files,
+  `make keto-validate` and `make test-keto` pull
+  `trusted/keto-cue:v0.0.0-20261114211924-809351b32b9c-6a44b89`, pinned by
+  digest: keto-cue `809351b3`, built from source on UBI9 Micro. Like the Ory
+  images it runs as UID 1001 with `HOME=/home/ory`, and its entrypoint is
+  `keto`. There is no local keto-cue build to run first.
 - **Ory images moved to trusted-service-containers v26.2.0**: Kratos (from
   v1.3), Hydra (from v2.2) and Oathkeeper (from v0.40), built from source on
   UBI9 Micro and pinned by digest. Every image in the deploy files and
@@ -66,28 +106,44 @@ Behaviour changes an operator must act on or know about:
   needs is the `version:` key (`v26.2.0`); the init containers migrate the
   Kratos and Hydra databases. The images run as UID 1001 with
   `HOME=/home/ory`.
-- **PostgreSQL 17 is the hardened Debian image, and text indexes need a
-  `REINDEX`.** The deploy files, `make test-integration`, `make test-e2e` and
-  CI use the trusted-service-containers mirror of Docker's hardened
-  `postgres:17-debian`, pinned by its immutable quarantine tag
-  (`17-debian-382cdac`) because the mirror has not cleared policy yet. Its
-  `PGDATA` is `/var/lib/postgresql/17/data`, where the manifests now mount
-  `chit-pgdata`; it runs as UID 70 like the Alpine image, so an existing
-  volume mounts unchanged. Alpine sorts text with musl, Debian with glibc, so
-  every index on a collatable column built under Alpine is out of order on
-  Debian, and lookups through it miss rows (a test volume found 0 of 200
-  matching rows by index until the `REINDEX`). PostgreSQL does not warn:
-  Alpine records no collation version. Before you serve traffic from an
-  existing volume, run `REINDEX DATABASE <db>;` in each database (`chit`,
-  `kratos`, `keto`, `hydra`), for example `podman exec chit-db-postgres psql
-  -U chit -d chit -c 'REINDEX DATABASE chit;'`. Do not run `ALTER DATABASE
-  ... REFRESH COLLATION VERSION`: with no recorded version it fails. A fresh
-  volume needs nothing.
-- **The postgres entrypoint runs no init scripts.** The hardened image ignores
-  `/docker-entrypoint-initdb.d`, so the `chit-postgres-init` ConfigMap is
-  gone; the `ensure-databases` init container (now in the UAT manifest too)
-  creates the Ory databases. The image has `sh`, `psql` and `pg_isready` but
-  no `grep`.
+- **PostgreSQL 17 is the trusted-service-containers postgresql17 image on
+  UBI, and an existing `chit-pgdata` volume must be dumped and restored.**
+  The deploy files, `make test-integration`, `make test-e2e`, the chit-tui
+  `make test-e2e` and CI use
+  `trusted/postgresql17:17.12-9410cd4`, pinned by digest: the signed PGDG
+  RPMs (contrib included, for `pgcrypto`) on trusted UBI9 Minimal. It
+  replaces the quarantined mirror of Docker's hardened `postgres:17-debian`.
+  The `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` contract and
+  port 5432 do not change. The image runs as UID 26 with primary group 0
+  and refuses to run as root. The volume now mounts at
+  `/var/lib/pgsql/data`, and the cluster lives in
+  `PGDATA=/var/lib/pgsql/data/userdata`. New databases use the PostgreSQL
+  builtin `C.UTF-8` collation, so text sorts by code point (for example,
+  channel and team lists by `display_name` put capitals first).
+  A volume from the old image (UID 70, `/var/lib/postgresql/17/data`,
+  glibc `en_US.UTF-8`) **does not mount** in the new one, and the new image
+  has no `en_US.UTF-8` locale. Before you pull this change, dump the
+  cluster with the old image: `podman exec chit-db-postgres pg_dumpall -U
+  chit > chit-pgdumpall.sql`, and check that the file ends with
+  `PostgreSQL database cluster dump complete`. Then run `make kube-down` and
+  `podman volume rm chit-pgdata` (only that volume: `make kube-clean` also
+  deletes the search index and the attachments). After the pull, restore
+  into a fresh volume on the new image before `make kube-up`. Create the
+  `kratos`, `keto` and `hydra` databases first, because `pg_dumpall` names
+  the old locale in each `CREATE DATABASE` and those statements fail. The
+  restore then prints `role "chit" already exists` and one
+  `invalid LC_COLLATE locale name: "en_US.UTF-8"` per database, which are
+  expected. "Upgrading from the DHI PostgreSQL image" in
+  `docs/.../deployment/podman-kube.mdx` lists the commands. A restore
+  rebuilds every index under the new collation, so the `REINDEX` that an
+  Alpine volume needed is done too. A volume with nothing to keep, such as
+  the UAT stack's `chit-uat-pgdata` or a throwaway dev stack's, must still
+  be created again, because the old one does not start: run `make uat-clean` or `make kube-clean` once, and the next
+  `make uat-up` or `make kube-up` initialises an empty volume.
+- **The `chit-postgres-init` ConfigMap is gone.** The `ensure-databases`
+  init container (now in the UAT manifest too) creates the Ory databases on
+  every start, which also mends a volume that lacks one. An init script in
+  `/docker-entrypoint-initdb.d` would run only on a fresh data directory.
 - **`chit-reconcile` now revokes, and needs the Keto read API.** It makes
   the `chit/command` namespace match the CUE, deleting any tuple there the CUE
   does not declare (including grants added to Keto by hand). It lists through
@@ -148,6 +204,65 @@ Behaviour changes an operator must act on or know about:
 
 ### Added
 
+- Configurable rate limits, and an aggregate limit for each on-behalf-of
+  client (P-CHIT-8 for HALO). halod acts for every Subject through one
+  machine actor, and its own requests (history and member reads,
+  `stream_status`, replies) shared one per-user bucket of 10 a second:
+  HALO's load test was stable at 60 Subjects, of the 2000 it targets. The
+  client's aggregate bucket (`CHIT_RATE_LIMIT_CLIENT_*`, 1500 a second in
+  bursts of 3000, sized in the configuration reference for 2000 Subjects
+  at one Message a minute) now bounds everything it does instead; each
+  Subject it acts for keeps their own per-user budget. A request takes a
+  token from each of its buckets or from none. Every `429` from a rate
+  limit, `stream_status`'s included, carries `Retry-After`, and each
+  refusal of the request limit logs a `rate limit exceeded` warning with
+  the bucket, method, path and who: `user_id`, or `actor_id`, `client_id`
+  and, on behalf of a person, `principal_id`.
+- The membership policy hook (P-CHIT-2 for HALO). When
+  `CHIT_MEMBERSHIP_HOOK_URL` is set, chitd POSTs
+  `{"channel_id", "user_id", "kratos_identity_id", "actor_type", "added_by",
+  "via_actor_id"}` to it, with a Hydra `client_credentials` bearer token
+  (kept until 30 s before expiry, fetched again once after a 401), before
+  every channel add: `POST /channels/{id}/members` (a join and an
+  on-behalf-of add included), each team member of a new Open channel, each
+  other member of a new direct or group channel, and `/invite`. The creator
+  of a new channel is not checked. Only `{"allow":true}` allows; a refusal,
+  any other status, a timeout (`CHIT_MEMBERSHIP_HOOK_TIMEOUT`, 5 s), a
+  network error or bad JSON is a 403 `channel.membership_refused` with the
+  hook's `reason` and `detail` (`hook_unavailable` when it gave none), and
+  nothing is added: a request that adds several members adds all or none.
+  `AppError` gains the optional `reason` and `detail`. Each answer is a
+  `membership_check` audit record.
+- Attachments (P-CHIT-5 for HALO): `POST /channels/{id}/files` uploads an
+  image (multipart `file` and `alt_text`), `GET /files/{id}` serves its
+  bytes, `GET /files/{id}/info` its metadata, and `POST /files/search`
+  finds files by name and alt text only, in the caller's channels.
+  `file_ids` on `POST /posts` attaches up to 4 of the author's uploads in
+  that channel; posts read back with `file_ids`, and deleting a post
+  deletes its files. Uploads are checked by the new package
+  `pkg/imagecheck` (no Chit dependencies, for HALO to reuse): PNG, JPEG,
+  WebP and GIF (first frame) only, SVG refused, declared and sniffed types
+  must agree, polyglots (trailing bytes, markup in metadata) refused,
+  `image.DecodeConfig` refuses more than 40 MP before decoding, then a pure
+  Go re-encode (JPEG to JPEG, the rest to PNG) drops EXIF and anything
+  else; 10 MiB in and out, and `CHIT_FILE_QUOTA_BYTES` (1 GiB) per person.
+  Refusals carry an `id` (`file.svg`, `file.polyglot`, ...). Bytes go to
+  the S3 bucket `chit-files` under `<channel_id>/<file_id>` through a small
+  SigV4 client; identical bytes share one object within a channel, never
+  across channels. Before it is attached only the uploader reads a file,
+  then every member; a non-member gets 403. Every file response carries
+  `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox`
+  and `Content-Disposition`. A sweep, at most `CHIT_FILE_SWEEP_BATCH` files
+  each `CHIT_FILE_SWEEP_INTERVAL`, deletes uploads never attached and the
+  objects of deleted files after `CHIT_FILE_ORPHAN_GRACE` (24 h).
+- `X-On-Behalf-Of` on more routes, so halod can manage a person's tags and
+  attachments as the person: `GET /tags`, `GET /channels/{id}/tags`,
+  `POST /tags/posts`, `POST /tags/channels`,
+  `DELETE /posts/{id}/tags/{tag_id}`, `DELETE /channels/{id}/tags/{tag_id}`,
+  `POST /channels/{id}/files` (a `file_uploaded` audit record names the
+  client) and `GET /files/{id}`. The person sees only their own private
+  tags. A test now holds the route list and the spec's header declarations
+  to the same set.
 - On-behalf-of provisioning and Conversations (P-CHIT-8 for HALO):
   `X-On-Behalf-Of` also takes `kratos:<Kratos identity ID>` (a canonical
   UUID). A person who has never opened Chit gets the user their first

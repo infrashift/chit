@@ -29,6 +29,14 @@ HYDRA_ADMIN="http://localhost:4445"     # Hydra admin API (clients)
 # system_admin, which no API grants to a person. Point it at the UAT pod with
 # E2E_PSQL="podman exec -i chit-uat-db-postgres psql -U chit -d chit -tAc".
 E2E_PSQL="${E2E_PSQL:-podman exec -i chit-db-postgres psql -U chit -d chit -tAc}"
+# The membership hook stub (deploy/chit.kube.yml memberhook-stub) and the
+# command that prints chitd's audit log, for scenario 12. Point the latter at
+# another pod with E2E_AUDIT="podman exec <pod>-chitd cat /var/log/chit/audit.log".
+HOOK_STUB="${HOOK_STUB:-http://127.0.0.1:4490}"
+E2E_AUDIT="${E2E_AUDIT:-podman exec chit-app-chitd cat /var/log/chit/audit.log}"
+# chitd's own log (stderr), for scenario 13; for another pod,
+# E2E_CHITD_LOG="podman logs <pod>-chitd".
+E2E_CHITD_LOG="${E2E_CHITD_LOG:-podman logs chit-app-chitd}"
 
 # ---------------------------------------------------------------------------
 # Counters
@@ -282,6 +290,15 @@ check_service "Kratos Admin"          "${KRATOS_ADMIN}/admin/identities" "200"
 check_service "Oathkeeper Proxy"      "${PROXY}/api/v1/system/ping" "401"
 check_service "Keto Read"             "${KETO_READ}/health/alive"
 check_service "Keto Write"            "${KETO_WRITE}/health/alive"
+# The membership hook stub compiles at start (go run), then registers chitd's
+# Hydra client; every channel add asks it, so nothing runs before it is up.
+HOOK_STUB_STATUS="000"
+for _ in $(seq 1 90); do
+  HOOK_STUB_STATUS=$(curl -s -o /dev/null -w '%{http_code}' "${HOOK_STUB}/healthz" 2>/dev/null || echo "000")
+  [[ "$HOOK_STUB_STATUS" == "200" ]] && break
+  sleep 2
+done
+check_service "Membership hook stub"  "${HOOK_STUB}/healthz"
 # ZincSearch may return 200 or other codes on root
 ZINC_STATUS=$(curl -s -o /dev/null -w '%{http_code}' "${ZINC_URL}/version" 2>/dev/null || echo "000")
 if [[ "$ZINC_STATUS" == "200" ]]; then
@@ -1450,6 +1467,329 @@ assert_status "10.12 halod adds Frank to its team" 201 "$LAST_STATUS" "$LAST_BOD
 halod_api POST "/channels" "{\"team_id\":\"${HALO_TEAM_ID}\",\"name\":\"conversation-frank\",\"display_name\":\"Conversation\",\"type\":\"P\"}" "kratos:${FRANK_KRATOS_ID}"
 assert_status "10.12 create a channel on behalf of Frank" 201 "$LAST_STATUS" "$LAST_BODY"
 assert_json "10.12 Frank is the creator" ".creator_id" "$FRANK_ID" "$LAST_BODY"
+
+# ============================================================================
+# SCENARIO 11: Attachments (HALO P-CHIT-5)
+# ============================================================================
+# halod uploads an image for Erin into her Conversation, fetches it for her,
+# and posts it as her. chitd stores the bytes in SeaweedFS (the seaweedfs
+# container of deploy/chit.kube.yml) through its S3 gateway, which refuses
+# anonymous requests. chit-e2e-bot is a machine actor that is not on
+# CHIT_ON_BEHALF_OF_CLIENTS.
+section "Scenario 11: Attachments"
+
+E2E_TMP=$(mktemp -d)
+# A 1×1 PNG.
+echo 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==' \
+  | base64 -d > "${E2E_TMP}/dot.png"
+# The same PNG with an HTML page after IEND: a polyglot.
+cat "${E2E_TMP}/dot.png" > "${E2E_TMP}/polyglot.png"
+printf '<html><script>alert(1)</script></html>' >> "${E2E_TMP}/polyglot.png"
+printf '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>' > "${E2E_TMP}/x.svg"
+
+# upload_file TOKEN CHANNEL FILE CONTENT_TYPE ALT [ON_BEHALF_OF] — a
+# multipart upload with a bearer token; sets LAST_STATUS, LAST_BODY and
+# LAST_HEADERS (lowercased names).
+upload_file() {
+  local token="$1" channel="$2" file="$3" ctype="$4" alt="$5" obo="${6:-}"
+  local body hdr
+  body=$(mktemp); hdr=$(mktemp)
+  local args=(-s -w '%{http_code}' -o "$body" -D "$hdr" -X POST -H "Authorization: Bearer ${token}"
+    -F "file=@${file};type=${ctype}" -F "alt_text=${alt}")
+  [[ -n "$obo" ]] && args+=(-H "X-On-Behalf-Of: ${obo}")
+  LAST_STATUS=$(curl "${args[@]}" "${API}/channels/${channel}/files")
+  LAST_BODY=$(cat "$body")
+  LAST_HEADERS=$(tr 'A-Z' 'a-z' < "$hdr" | tr -d '\r')
+  rm -f "$body" "$hdr"
+}
+
+# get_file TOKEN FILE_ID OUT [ON_BEHALF_OF] — downloads to OUT; sets
+# LAST_STATUS and LAST_HEADERS.
+get_file() {
+  local token="$1" id="$2" out="$3" obo="${4:-}"
+  local hdr
+  hdr=$(mktemp)
+  local args=(-s -w '%{http_code}' -o "$out" -D "$hdr" -H "Authorization: Bearer ${token}")
+  [[ -n "$obo" ]] && args+=(-H "X-On-Behalf-Of: ${obo}")
+  LAST_STATUS=$(curl "${args[@]}" "${API}/files/${id}")
+  LAST_HEADERS=$(tr 'A-Z' 'a-z' < "$hdr" | tr -d '\r')
+  rm -f "$hdr"
+}
+
+# assert_header LABEL "name: value" — LAST_HEADERS has that line.
+assert_header() {
+  if grep -qxF "$2" <<< "$LAST_HEADERS"; then
+    echo -e "  ${GREEN}PASS${NC} $1 ($2)"
+    PASS_COUNT=$((PASS_COUNT + 1))
+  else
+    echo -e "  ${RED}FAIL${NC} $1 — no \"$2\" in the response headers"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+  fi
+}
+
+# 11.1 SeaweedFS refuses anonymous S3 requests: only chitd's identity works.
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8333/chit-files/")
+assert_status "11.1 the S3 gateway refuses an anonymous request" 403 "$STATUS"
+
+# 11.2 halod uploads for Erin, into her Conversation.
+upload_file "$HALOD_TOKEN" "$CONV_ID" "${E2E_TMP}/dot.png" image/png "A single dot" "kratos:${ERIN_KRATOS_ID}"
+assert_status "11.2 upload on behalf of Erin" 201 "$LAST_STATUS" "$LAST_BODY"
+assert_json "11.2 Erin is the uploader" ".uploader_id" "$ERIN_ID" "$LAST_BODY"
+assert_json "11.2 halod is recorded" ".via_actor_id" "$HALOD_USER_ID" "$LAST_BODY"
+assert_json "11.2 stored as PNG" ".content_type" "image/png" "$LAST_BODY"
+assert_json "11.2 1×1" '"\(.width)x\(.height)"' "1x1" "$LAST_BODY"
+assert_header "11.2 nosniff" "x-content-type-options: nosniff"
+assert_header "11.2 sandbox CSP" "content-security-policy: sandbox"
+FILE_ID=$(echo "$LAST_BODY" | jq -r '.id')
+FILE_SHA=$(echo "$LAST_BODY" | jq -r '.sha256')
+
+# 11.3 Before it is attached, halod reads it only as Erin.
+get_file "$HALOD_TOKEN" "$FILE_ID" "${E2E_TMP}/got.png"
+assert_status "11.3 halod as itself, before the post" 403 "$LAST_STATUS"
+get_file "$HALOD_TOKEN" "$FILE_ID" "${E2E_TMP}/got.png" "kratos:${ERIN_KRATOS_ID}"
+assert_status "11.3 halod fetches it for Erin" 200 "$LAST_STATUS"
+assert_header "11.3 image/png" "content-type: image/png"
+assert_header "11.3 nosniff" "x-content-type-options: nosniff"
+assert_header "11.3 sandbox CSP" "content-security-policy: sandbox"
+assert_header "11.3 attachment" "content-disposition: attachment; filename=dot.png"
+assert_json "11.3 the bytes are what was stored" "." "$FILE_SHA" "\"$(sha256sum "${E2E_TMP}/got.png" | cut -d' ' -f1)\""
+
+# 11.4 halod posts it as Erin; then any member reads it, and Bob may not.
+halod_api POST "/posts" "{\"channel_id\":\"${CONV_ID}\",\"content\":\"\",\"file_ids\":[\"${FILE_ID}\"]}" "kratos:${ERIN_KRATOS_ID}"
+assert_status "11.4 a post of the image alone" 201 "$LAST_STATUS" "$LAST_BODY"
+assert_json "11.4 the post carries the file" ".file_ids[0]" "$FILE_ID" "$LAST_BODY"
+FILE_POST_ID=$(echo "$LAST_BODY" | jq -r '.id')
+get_file "$HALOD_TOKEN" "$FILE_ID" "${E2E_TMP}/got.png"
+assert_status "11.4 halod, a member, reads the attached file" 200 "$LAST_STATUS"
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Session-Token: ${BOB_TOKEN}" "${API}/files/${FILE_ID}")
+assert_status "11.4 Bob, not a member, may not" 403 "$STATUS"
+
+# 11.5 Search finds it by alt text, for a member only.
+halod_api POST "/files/search" '{"terms":"single DOT"}'
+assert_json "11.5 found by alt text" ".[0].id" "$FILE_ID" "$LAST_BODY"
+CURRENT_TOKEN="$BOB_TOKEN"
+curl_api_full POST "/files/search" '{"terms":"single dot"}'
+assert_json "11.5 not for a non-member" "length" "0" "$LAST_BODY"
+
+# 11.6 The validation pipeline refuses SVG, a polyglot and a mismatch.
+upload_file "$HALOD_TOKEN" "$CONV_ID" "${E2E_TMP}/x.svg" image/svg+xml "" "kratos:${ERIN_KRATOS_ID}"
+assert_status "11.6 SVG" 415 "$LAST_STATUS" "$LAST_BODY"
+assert_json "11.6 SVG reason" ".id" "file.svg" "$LAST_BODY"
+upload_file "$HALOD_TOKEN" "$CONV_ID" "${E2E_TMP}/polyglot.png" image/png "" "kratos:${ERIN_KRATOS_ID}"
+assert_status "11.6 PNG/HTML polyglot" 422 "$LAST_STATUS" "$LAST_BODY"
+assert_json "11.6 polyglot reason" ".id" "file.polyglot" "$LAST_BODY"
+upload_file "$HALOD_TOKEN" "$CONV_ID" "${E2E_TMP}/dot.png" image/jpeg "" "kratos:${ERIN_KRATOS_ID}"
+assert_status "11.6 declared JPEG, sniffed PNG" 415 "$LAST_STATUS" "$LAST_BODY"
+assert_header "11.6 refusals carry nosniff" "x-content-type-options: nosniff"
+
+# 11.7 On behalf of: a person's session, and a machine actor that is not on
+# the allowlist, are refused.
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "X-Session-Token: ${ALICE_TOKEN}" \
+  -H "X-On-Behalf-Of: ${ERIN_ID}" -F "file=@${E2E_TMP}/dot.png;type=image/png" "${API}/channels/${CONV_ID}/files")
+assert_status "11.7 a person's session with X-On-Behalf-Of" 403 "$STATUS"
+BOT_CLIENT_ID="chit-e2e-bot"
+BOT_CLIENT_SECRET="chit-e2e-bot-secret"
+curl -s -o /dev/null -X POST "${HYDRA_ADMIN}/admin/clients" -H "Content-Type: application/json" \
+  -d "$(jq -n --arg id "$BOT_CLIENT_ID" --arg secret "$BOT_CLIENT_SECRET" '{
+    client_id: $id, client_secret: $secret, grant_types: ["client_credentials"],
+    scope: "chit:read chit:write", audience: ["chit"],
+    token_endpoint_auth_method: "client_secret_basic" }')"
+BOT_TOKEN=$(curl -s -u "${BOT_CLIENT_ID}:${BOT_CLIENT_SECRET}" -X POST "${HYDRA_PUBLIC}/oauth2/token" \
+  -d grant_type=client_credentials -d "scope=chit:read chit:write" -d audience=chit | jq -r '.access_token')
+upload_file "$BOT_TOKEN" "$CONV_ID" "${E2E_TMP}/dot.png" image/png "" "kratos:${ERIN_KRATOS_ID}"
+assert_status "11.7 a machine actor not on the allowlist" 403 "$LAST_STATUS" "$LAST_BODY"
+get_file "$BOT_TOKEN" "$FILE_ID" "${E2E_TMP}/got.png" "kratos:${ERIN_KRATOS_ID}"
+assert_status "11.7 nor may it download on behalf" 403 "$LAST_STATUS"
+
+# 11.8 The same bytes in another channel get their own object; in the same
+# channel they share one.
+upload_file "$HALOD_TOKEN" "$CONV_ID" "${E2E_TMP}/dot.png" image/png "again" "kratos:${ERIN_KRATOS_ID}"
+assert_status "11.8 the same image again, same channel" 201 "$LAST_STATUS" "$LAST_BODY"
+FRANK_CONV_ID=$($E2E_PSQL "SELECT id FROM channels WHERE name = 'conversation-frank'" | tr -d '[:space:]')
+upload_file "$HALOD_TOKEN" "$FRANK_CONV_ID" "${E2E_TMP}/dot.png" image/png "" "kratos:${FRANK_KRATOS_ID}"
+assert_status "11.8 the same image in Frank's channel" 201 "$LAST_STATUS" "$LAST_BODY"
+OBJECTS=$($E2E_PSQL "SELECT channel_id || ':' || count(DISTINCT s3_key) || ':' || bool_and(s3_key LIKE channel_id || '/%') FROM files WHERE sha256 = '${FILE_SHA}' GROUP BY channel_id ORDER BY channel_id = '${CONV_ID}' DESC" | tr -d ' ' | tr '\n' ' ')
+assert_json "11.8 one object per channel, each under its own channel" "." "${CONV_ID}:1:true ${FRANK_CONV_ID}:1:true " "\"${OBJECTS}\""
+
+# 11.9 Deleting the post deletes its file.
+kratos_login "erin@test.local" "TestPass1234"
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "X-Session-Token: ${SESSION_TOKEN}" "${API}/posts/${FILE_POST_ID}")
+assert_status "11.9 Erin deletes her post" 200 "$STATUS"
+get_file "$HALOD_TOKEN" "$FILE_ID" "${E2E_TMP}/got.png" "kratos:${ERIN_KRATOS_ID}"
+assert_status "11.9 its file is gone" 404 "$LAST_STATUS"
+
+rm -rf "$E2E_TMP"
+
+# ============================================================================
+# SCENARIO 12: Membership policy hook (HALO P-CHIT-2)
+# ============================================================================
+# chitd asks the hook (the memberhook-stub container, a stand-in for halod)
+# before every channel add, with its own Hydra client_credentials token, which
+# the stub checks by introspection. The stub allows everybody until it is told
+# to refuse one user (Charlie), or to fail.
+section "Scenario 12: Membership Policy Hook"
+
+# hook_control JSON — sets the stub's policy.
+hook_control() {
+  curl -s -o /dev/null -X PUT "${HOOK_STUB}/control" -H "Content-Type: application/json" -d "$1"
+}
+# hook_calls — the requests the stub has answered, as a JSON array.
+hook_calls() {
+  curl -s "${HOOK_STUB}/control/calls"
+}
+# is_member CHANNEL_ID USER_ID — "1" when the user is in channel_members.
+is_member() {
+  $E2E_PSQL "SELECT count(*) FROM channel_members WHERE channel_id = '$1' AND user_id = '$2'" | tr -d '[:space:]'
+}
+
+# 12.1 The stub refuses a request without a valid token, so every call it
+# records came with chitd's Hydra token.
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "${HOOK_STUB}/membership-check" \
+  -H "Authorization: Bearer not-a-token" -H "Content-Type: application/json" -d '{}')
+assert_status "12.1 the stub refuses a token Hydra did not issue to chitd" 401 "$STATUS"
+
+# 12.2 Scenario 10 added halod to Erin's Conversation on her behalf: the hook
+# was asked about halod (an agent, no Kratos identity), added by Erin, via
+# halod. Creating the Conversation asked nothing about Erin, its creator.
+CALLS=$(hook_calls)
+assert_json "12.2 the on-behalf-of add asked the hook" \
+  "[.[] | select(.channel_id == \"${CONV_ID}\" and .user_id == \"${HALOD_USER_ID}\" and .added_by == \"${ERIN_ID}\" and .via_actor_id == \"${HALOD_USER_ID}\" and .actor_type == \"agent\" and .kratos_identity_id == \"\")] | length" \
+  "1" "$CALLS"
+assert_json "12.2 the creator of the Conversation was not asked about" \
+  "[.[] | select(.channel_id == \"${CONV_ID}\" and .user_id == \"${ERIN_ID}\")] | length" "0" "$CALLS"
+
+# 12.3 A private channel: its creator is not asked about.
+CURRENT_TOKEN="$ALICE_TOKEN"
+curl_api_full POST "/channels" "{\"team_id\":\"${TEAM_ID}\",\"name\":\"hook-e2e\",\"display_name\":\"Hook e2e\",\"type\":\"P\"}"
+assert_status "12.3 Alice creates a private channel" 201 "$LAST_STATUS" "$LAST_BODY"
+HOOK_CHANNEL_ID=$(echo "$LAST_BODY" | jq -r '.id')
+assert_json "12.3 nobody was asked about" "[.[] | select(.channel_id == \"${HOOK_CHANNEL_ID}\")] | length" "0" "$(hook_calls)"
+
+# 12.4 Alice adds Bob: the hook is asked, with the contract's body.
+curl_api_full POST "/channels/${HOOK_CHANNEL_ID}/members" "{\"user_id\":\"${BOB_ID}\"}"
+assert_status "12.4 the hook allows Bob" 201 "$LAST_STATUS" "$LAST_BODY"
+LAST_CALL=$(hook_calls | jq -c '.[-1]')
+assert_json "12.4 the hook's request" \
+  '[.channel_id, .user_id, .kratos_identity_id, .actor_type, .added_by, .via_actor_id] | join(",")' \
+  "${HOOK_CHANNEL_ID},${BOB_ID},${BOB_KRATOS_ID},human,${ALICE_ID}," "$LAST_CALL"
+
+# 12.5 The stub refuses Charlie: 403 channel.membership_refused, with the
+# hook's reason and detail, and Charlie is not added.
+hook_control "{\"refuse_user_id\":\"${CHARLIE_ID}\"}"
+curl_api_full POST "/channels/${HOOK_CHANNEL_ID}/members" "{\"user_id\":\"${CHARLIE_ID}\"}"
+assert_status "12.5 the hook refuses Charlie" 403 "$LAST_STATUS" "$LAST_BODY"
+assert_json "12.5 error id" ".id" "channel.membership_refused" "$LAST_BODY"
+assert_json "12.5 the hook's reason" ".reason" "e2e_refused" "$LAST_BODY"
+assert_json "12.5 the hook's detail" ".detail" "The e2e stub hook refuses this user." "$LAST_BODY"
+assert_json "12.5 Charlie is not a member" "." "0" "$(is_member "$HOOK_CHANNEL_ID" "$CHARLIE_ID")"
+
+# 12.6 /invite asks the hook too, and says why it did not add him. The test
+# grants Alice /invite in Keto for the command (chit-reconcile does not run
+# in this stack), and takes the grant back after.
+keto_put() {
+  curl -s -o /dev/null -w '%{http_code}' -X PUT "${KETO_WRITE}/admin/relation-tuples" -H "Content-Type: application/json" -d "$1"
+}
+GRANT_STATUS=$(keto_put "{\"namespace\":\"chit/command\",\"object\":\"Role:e2e-hook\",\"relation\":\"member\",\"subject_id\":\"Actor:${ALICE_ID}\"}")
+GRANT_STATUS+=$(keto_put '{"namespace":"chit/command","object":"Command:invite","relation":"execute","subject_set":{"namespace":"chit/command","object":"Role:e2e-hook","relation":"member"}}')
+assert_json "12.6 grant /invite to Alice in Keto" "." "201201" "\"${GRANT_STATUS}\""
+curl_api_full POST "/posts" "{\"channel_id\":\"${HOOK_CHANNEL_ID}\",\"content\":\"/invite charlie\"}"
+assert_status "12.6 /invite charlie" 201 "$LAST_STATUS" "$LAST_BODY"
+assert_json "12.6 the answer is a command response" ".type" "command_response" "$LAST_BODY"
+assert_json "12.6 it gives the hook's reason" '.content | test("membership policy refused \\(e2e_refused\\)")' "true" "$LAST_BODY"
+assert_json "12.6 Charlie is still not a member" "." "0" "$(is_member "$HOOK_CHANNEL_ID" "$CHARLIE_ID")"
+curl -s -o /dev/null -X DELETE "${KETO_WRITE}/admin/relation-tuples?namespace=chit/command&object=Command:invite&relation=execute&subject_set.namespace=chit/command&subject_set.object=Role:e2e-hook&subject_set.relation=member"
+curl -s -o /dev/null -X DELETE "${KETO_WRITE}/admin/relation-tuples?namespace=chit/command&object=Role:e2e-hook&relation=member&subject_id=Actor:${ALICE_ID}"
+
+# 12.7 An Open channel adds the whole team, Charlie included: one refusal
+# refuses the request, and no channel is created.
+curl_api_full POST "/channels" "{\"team_id\":\"${TEAM_ID}\",\"name\":\"hook-open\",\"display_name\":\"Hook open\",\"type\":\"O\"}"
+assert_status "12.7 an Open channel with a refused team member" 403 "$LAST_STATUS" "$LAST_BODY"
+assert_json "12.7 error id" ".id" "channel.membership_refused" "$LAST_BODY"
+assert_json "12.7 no channel was created" "." "0" \
+  "$($E2E_PSQL "SELECT count(*) FROM channels WHERE name = 'hook-open'" | tr -d '[:space:]')"
+
+# 12.8 Joining an Open channel asks the hook: Charlie leaves general, and
+# may not join it again.
+CURRENT_TOKEN="$CHARLIE_TOKEN"
+curl_api_full DELETE "/channels/${PUBLIC_CHANNEL_ID}/members/${CHARLIE_ID}"
+assert_json "12.8 Charlie has left general" "." "0" "$(is_member "$PUBLIC_CHANNEL_ID" "$CHARLIE_ID")"
+curl_api_full POST "/channels/${PUBLIC_CHANNEL_ID}/members" "{\"user_id\":\"${CHARLIE_ID}\"}"
+assert_status "12.8 Charlie may not join general" 403 "$LAST_STATUS" "$LAST_BODY"
+assert_json "12.8 error id" ".id" "channel.membership_refused" "$LAST_BODY"
+assert_json "12.8 Charlie is not a member" "." "0" "$(is_member "$PUBLIC_CHANNEL_ID" "$CHARLIE_ID")"
+
+# 12.9 A new direct or group channel asks about each member but its creator.
+CURRENT_TOKEN="$DAVE_TOKEN"
+curl_api_full POST "/channels/direct" "[\"${DAVE_ID}\",\"${CHARLIE_ID}\"]"
+assert_status "12.9 a DM with Charlie" 403 "$LAST_STATUS" "$LAST_BODY"
+curl_api_full POST "/channels/group" "[\"${DAVE_ID}\",\"${BOB_ID}\",\"${CHARLIE_ID}\"]"
+assert_status "12.9 a group with Charlie" 403 "$LAST_STATUS" "$LAST_BODY"
+assert_json "12.9 neither channel was created" "." "0" \
+  "$($E2E_PSQL "SELECT count(*) FROM channels WHERE type IN ('D','G') AND name LIKE '%${DAVE_ID}%'" | tr -d '[:space:]')"
+
+# 12.10 The hook fails: Chit refuses (fails closed), with hook_unavailable.
+hook_control '{"fail":true}'
+CURRENT_TOKEN="$ALICE_TOKEN"
+curl_api_full POST "/channels/${HOOK_CHANNEL_ID}/members" "{\"user_id\":\"${CHARLIE_ID}\"}"
+assert_status "12.10 a failing hook refuses the add" 403 "$LAST_STATUS" "$LAST_BODY"
+assert_json "12.10 reason" ".reason" "hook_unavailable" "$LAST_BODY"
+assert_json "12.10 Charlie is not a member" "." "0" "$(is_member "$HOOK_CHANNEL_ID" "$CHARLIE_ID")"
+
+# 12.11 The hook allows Charlie again: the add goes through.
+hook_control '{}'
+curl_api_full POST "/channels/${HOOK_CHANNEL_ID}/members" "{\"user_id\":\"${CHARLIE_ID}\"}"
+assert_status "12.11 the hook allows Charlie now" 201 "$LAST_STATUS" "$LAST_BODY"
+assert_json "12.11 Charlie is a member" "." "1" "$(is_member "$HOOK_CHANNEL_ID" "$CHARLIE_ID")"
+
+# 12.12 The audit log records the answers, allowed and refused.
+AUDIT=$($E2E_AUDIT 2>/dev/null | jq -s -c '[.[] | select(.msg == "membership_check" and .channel_id == "'"${HOOK_CHANNEL_ID}"'")]' 2>/dev/null || echo '[]')
+assert_json "12.12 audit: Bob allowed" "[.[] | select(.user_id == \"${BOB_ID}\" and .allowed == true and .added_by == \"${ALICE_ID}\")] | length" "1" "$AUDIT"
+assert_json "12.12 audit: Charlie refused by the hook" "[.[] | select(.user_id == \"${CHARLIE_ID}\" and .allowed == false and .reason == \"e2e_refused\")] | length" "2" "$AUDIT"
+assert_json "12.12 audit: Charlie refused, the hook failing" "[.[] | select(.user_id == \"${CHARLIE_ID}\" and .allowed == false and .reason == \"hook_unavailable\")] | length" "1" "$AUDIT"
+
+section "Scenario 13: Rate Limits"
+
+# burst TOKEN N [ON_BEHALF_OF] — N GET /users/me at once, 16 in parallel;
+# prints each response's status and Retry-After header, one per line.
+burst() {
+  local token="$1" n="$2" obo="${3:-}"
+  local args=(-s -o /dev/null -D - -H "Authorization: Bearer ${token}")
+  [[ -n "$obo" ]] && args+=(-H "X-On-Behalf-Of: ${obo}")
+  seq "$n" | xargs -P 16 -I{} curl "${args[@]}" "${API}/users/me" \
+    | tr -d '\r' | awk 'tolower($1) ~ /^http\// {print $2} tolower($1) == "retry-after:" {print "retry-after " $2}'
+}
+
+# 13.1 halod as itself, past the per-user burst of 50: what an allowlisted
+# client does as itself counts against its aggregate limit (1500 a second,
+# bursts of 3000), not a per-user one.
+OUT=$(burst "$HALOD_TOKEN" 120)
+assert_json "13.1 halod as itself: 120 at once, all served" "." "120" "$(grep -cx 200 <<< "$OUT")"
+
+# 13.2 On behalf of Erin, halod spends Erin's per-user budget: some of 120
+# at once are refused, each with Retry-After.
+OUT=$(burst "$HALOD_TOKEN" 120 "kratos:${ERIN_KRATOS_ID}")
+REFUSED=$(grep -cx 429 <<< "$OUT")
+assert_json_gte "13.2 on behalf of Erin: refused past her burst" "." 1 "$REFUSED"
+assert_json "13.2 each refusal has Retry-After: 1" "." "$REFUSED" "$(grep -cx 'retry-after 1' <<< "$OUT")"
+assert_json "13.2 the rest are served" "." "$((120 - REFUSED))" "$(grep -cx 200 <<< "$OUT")"
+
+# 13.3 Erin's budget is hers: halod as itself, and another person, are served.
+halod_api GET "/users/me"
+assert_status "13.3 halod as itself is still served" 200 "$LAST_STATUS" "$LAST_BODY"
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Session-Token: ${ALICE_TOKEN}" "${API}/users/me")
+assert_status "13.3 Alice is still served" 200 "$STATUS"
+
+# 13.4 A machine actor that is not on CHIT_ON_BEHALF_OF_CLIENTS keeps the
+# per-user limit.
+OUT=$(burst "$BOT_TOKEN" 120)
+assert_json_gte "13.4 chit-e2e-bot: refused past the per-user burst" "." 1 "$(grep -cx 429 <<< "$OUT")"
+
+# 13.5 chitd logs each refusal with the actor and the principal.
+LOG=$($E2E_CHITD_LOG 2>&1 | jq -c -R 'fromjson? | select(.msg == "rate limit exceeded")' | jq -s -c '.' 2>/dev/null || echo '[]')
+assert_json_gte "13.5 log: on behalf of Erin, her bucket, actor and principal" \
+  "[.[] | select(.bucket == \"user\" and .principal_id == \"${ERIN_ID}\" and .actor_id == \"${HALOD_USER_ID}\" and .client_id == \"${HALOD_CLIENT_ID}\")] | length" 1 "$LOG"
+assert_json_gte "13.5 log: chit-e2e-bot, its own bucket" \
+  "[.[] | select(.bucket == \"user\" and .client_id == \"${BOT_CLIENT_ID}\" and .path == \"/api/v1/users/me\")] | length" 1 "$LOG"
 
 # ============================================================================
 # SUMMARY

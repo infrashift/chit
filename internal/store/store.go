@@ -14,6 +14,7 @@ type Store interface {
 	Post() PostStore
 	Thread() ThreadStore
 	Tag() TagStore
+	File() FileStore
 	Close()
 }
 
@@ -48,6 +49,8 @@ type TeamStore interface {
 	RemoveMember(ctx context.Context, teamID, userID string) error
 	GetMembers(ctx context.Context, teamID string, page, perPage int) ([]*model.TeamMember, error)
 	GetMember(ctx context.Context, teamID, userID string) (*model.TeamMember, error)
+	// GetMemberIDs returns the user ID of every live member of teamID.
+	GetMemberIDs(ctx context.Context, teamID string) ([]string, error)
 }
 
 // ChannelStore handles persistence for channels and channel membership.
@@ -82,6 +85,10 @@ type ChannelStore interface {
 	// AddTeamMembers adds every member of the channel's team to it, returning
 	// the user IDs added.
 	AddTeamMembers(ctx context.Context, channelID, teamID string) ([]string, error)
+	// AddTeamMembersAmong is AddTeamMembers limited to userIDs: it adds
+	// each of them that is still a member of teamID, and returns the user
+	// IDs added. The membership hook checks userIDs first.
+	AddTeamMembersAmong(ctx context.Context, channelID, teamID string, userIDs []string) ([]string, error)
 	// DeleteForTeam soft-deletes every channel on a team, returning their IDs.
 	DeleteForTeam(ctx context.Context, teamID string, deleteAt int64) ([]string, error)
 	// RemoveMemberFromTeam removes a user from every channel on a team,
@@ -91,9 +98,14 @@ type ChannelStore interface {
 
 // PostStore handles persistence for posts (messages).
 type PostStore interface {
+	// Save inserts a post. With post.FileIDs it attaches those files in the
+	// same transaction, and fails (409) unless each one is live, in the
+	// post's channel, uploaded by the post's author and not yet attached.
 	Save(ctx context.Context, post *model.Post) (*model.Post, error)
 	Get(ctx context.Context, id string) (*model.Post, error)
 	Update(ctx context.Context, post *model.Post) (*model.Post, error)
+	// Delete soft-deletes a post. Its files are unlinked and soft-deleted
+	// with it; the sweep removes their objects later.
 	Delete(ctx context.Context, id string, deleteAt int64) error
 	GetPostsForChannel(ctx context.Context, channelID string, opts model.GetPostsOptions) (*model.PostList, error)
 	GetPostsForThread(ctx context.Context, rootID string) (*model.PostList, error)
@@ -168,4 +180,31 @@ type TagStore interface {
 	// FilterChannelIDsByTags keeps the channels that have every tag, on the
 	// channel or on one of its live posts.
 	FilterChannelIDsByTags(ctx context.Context, channelIDs, tagIDs []string) ([]string, error)
+}
+
+// FileStore handles persistence for attachments (model.File). Reads return
+// live files only (delete_at 0), with PostID set when they are attached.
+type FileStore interface {
+	Save(ctx context.Context, file *model.File) (*model.File, error)
+	Get(ctx context.Context, id string) (*model.File, error)
+	// GetByIDs returns the live files among ids, in no particular order.
+	GetByIDs(ctx context.Context, ids []string) ([]*model.File, error)
+	// GetBySHA256 returns a live file in channelID with these bytes: the
+	// one deduplication reuses. Never one of another channel.
+	GetBySHA256(ctx context.Context, channelID, sha256 string) (*model.File, error)
+	// UsageBytes is the size of the uploader's live files: their quota use.
+	UsageBytes(ctx context.Context, uploaderID string) (int64, error)
+	// Search finds files by name or alt text (see model.FileSearch), newest
+	// first.
+	Search(ctx context.Context, q *model.FileSearch) ([]*model.File, error)
+
+	// The sweep. ExpireUnattached soft-deletes up to limit live files that
+	// were created before createdBefore and are attached to no post,
+	// returning how many. Deleted returns up to limit soft-deleted files
+	// deleted before deletedBefore. ObjectInUse reports whether a live file
+	// still uses an object. Purge removes a soft-deleted file's row.
+	ExpireUnattached(ctx context.Context, createdBefore, deleteAt int64, limit int) (int, error)
+	Deleted(ctx context.Context, deletedBefore int64, limit int) ([]*model.File, error)
+	ObjectInUse(ctx context.Context, s3Key string) (bool, error)
+	Purge(ctx context.Context, id string) error
 }
