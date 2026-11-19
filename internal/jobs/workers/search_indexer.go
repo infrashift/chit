@@ -49,8 +49,19 @@ type SearchIndexer struct {
 	posts    PostSource
 	cursor   model.PostCursor // the last post synced
 	failures map[string]int   // post ID → consecutive failed attempts
-	now      func() time.Time
+	clock    clock
 }
+
+// clock supplies the current time; tests substitute a fake.
+type clock interface {
+	Now() time.Time
+}
+
+// systemClock is the production clock.
+type systemClock struct{}
+
+// Now returns time.Now().
+func (systemClock) Now() time.Time { return time.Now() }
 
 // NewSearchIndexer creates a new search indexer worker.
 func NewSearchIndexer(zincURL, zincUser, zincPass string) *SearchIndexer {
@@ -61,7 +72,7 @@ func NewSearchIndexer(zincURL, zincUser, zincPass string) *SearchIndexer {
 		client:   &http.Client{Timeout: 10 * time.Second},
 		stop:     make(chan struct{}),
 		failures: map[string]int{},
-		now:      time.Now,
+		clock:    systemClock{},
 	}
 }
 
@@ -101,7 +112,7 @@ func (si *SearchIndexer) Start(ctx context.Context) error {
 // runOnce syncs every settled post after the cursor. A post that fails is
 // retried on the next tick; after indexMaxAttempts it is logged and skipped.
 func (si *SearchIndexer) runOnce(ctx context.Context) {
-	until := si.now().Add(-indexSettleLag).UnixMilli()
+	until := si.clock.Now().Add(-indexSettleLag).UnixMilli()
 	for range indexMaxBatchesPerTick {
 		posts, err := si.posts.GetPostsSince(ctx, si.cursor, until, indexBatchSize)
 		if err != nil {

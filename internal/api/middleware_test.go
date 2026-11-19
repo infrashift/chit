@@ -295,9 +295,8 @@ func TestAuthExtract_ProxySecretRequired(t *testing.T) {
 // caller's bucket is never reset (the old janitor wiped every bucket every
 // ten minutes, refilling the burst of whoever was active).
 func TestUserLimiters_EvictsOnlyIdleBuckets(t *testing.T) {
-	now := time.Unix(0, 0)
-	clock := func() time.Time { return now }
-	u := newUserLimiters(1, 2, clock)
+	clk := &fakeClock{now: time.Unix(0, 0)}
+	u := newUserLimiters(1, 2, clk)
 
 	for i := range 2 {
 		if !u.allow("busy") {
@@ -313,7 +312,7 @@ func TestUserLimiters_EvictsOnlyIdleBuckets(t *testing.T) {
 
 	// Long enough for "idle" to be evicted; "busy" keeps calling.
 	for range 3 {
-		now = now.Add(u.idleAfter / 2)
+		clk.now = clk.now.Add(u.idleAfter / 2)
 		u.allow("busy")
 	}
 	u.mu.Lock()
@@ -324,3 +323,8 @@ func TestUserLimiters_EvictsOnlyIdleBuckets(t *testing.T) {
 		t.Fatalf("idle kept=%v busy kept=%v, want only the busy bucket", idleKept, busyKept)
 	}
 }
+
+// fakeClock is a clock the test advances by hand.
+type fakeClock struct{ now time.Time }
+
+func (c *fakeClock) Now() time.Time { return c.now }

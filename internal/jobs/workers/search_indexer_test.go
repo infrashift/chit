@@ -188,7 +188,7 @@ func (f *fakePostStore) GetPostsSince(_ context.Context, after model.PostCursor,
 // settled.
 func newTestIndexer(zincURL string, ps PostSource) *SearchIndexer {
 	si := NewSearchIndexer(zincURL, "admin", "secret").WithPostStore(ps)
-	si.now = func() time.Time { return time.UnixMilli(1 << 50) }
+	si.clock = fixedClock{t: time.UnixMilli(1 << 50)}
 	return si
 }
 
@@ -335,7 +335,7 @@ func TestSearchIndexer_RecentPostsWait(t *testing.T) {
 		{ID: "old", Content: "x", UpdateAt: now.Add(-time.Minute).UnixMilli()},
 		{ID: "fresh", Content: "x", UpdateAt: now.UnixMilli()},
 	}})
-	si.now = func() time.Time { return now }
+	si.clock = fixedClock{t: now}
 	si.runOnce(context.Background())
 	if si.cursor.ID != "old" {
 		t.Fatalf("cursor = %+v, want it stopped before the unsettled post", si.cursor)
@@ -374,3 +374,8 @@ func TestSearchIndexer_GivesUpOnAPoisonPost(t *testing.T) {
 		t.Fatalf("synced %v, want the post after the poison one", synced)
 	}
 }
+
+// fixedClock is a clock stopped at t.
+type fixedClock struct{ t time.Time }
+
+func (c fixedClock) Now() time.Time { return c.t }

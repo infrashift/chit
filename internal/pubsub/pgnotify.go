@@ -31,7 +31,7 @@ const waitInterval = time.Second
 type PGNotify struct {
 	pool     *pgxpool.Pool
 	mu       sync.RWMutex
-	handlers map[string][]func(data []byte)
+	handlers map[string][]Handler
 	pending  chan string
 	cancel   context.CancelFunc
 	done     chan struct{}
@@ -41,7 +41,7 @@ type PGNotify struct {
 func NewPGNotify(pool *pgxpool.Pool) (*PGNotify, error) {
 	pg := &PGNotify{
 		pool:     pool,
-		handlers: make(map[string][]func(data []byte)),
+		handlers: make(map[string][]Handler),
 		pending:  make(chan string, 16),
 		done:     make(chan struct{}),
 	}
@@ -136,7 +136,7 @@ func (pg *PGNotify) listenOnce(ctx context.Context) error {
 						slog.Error("pgnotify: handler panicked", "topic", notification.Channel, "panic", r)
 					}
 				}()
-				handler([]byte(notification.Payload))
+				handler.Handle([]byte(notification.Payload))
 			}()
 		}
 	}
@@ -169,7 +169,7 @@ func (pg *PGNotify) Publish(ctx context.Context, topic string, data []byte) erro
 
 // Subscribe registers a handler for the topic. The LISTEN itself is executed
 // by the listener goroutine on its dedicated connection.
-func (pg *PGNotify) Subscribe(ctx context.Context, topic string, handler func(data []byte)) error {
+func (pg *PGNotify) Subscribe(ctx context.Context, topic string, handler Handler) error {
 	if !validTopicRe.MatchString(topic) {
 		return fmt.Errorf("pgnotify subscribe: invalid topic %q", topic)
 	}

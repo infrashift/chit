@@ -24,7 +24,7 @@ golangci-lint does not check recursion, loop bounds or assertion density. semsco
 ## Decision
 - `make semscope` runs `semscope scan -r nasa-p10 -r .semscope.cue --fail-level warning . clients/chit-tui` when `semscope` is on the `PATH`. Otherwise it prints a note and passes.
 - The variable `SEMSCOPE` names the command.
-- `.semscope.cue` turns off NASA-P10-03 (the R3 deviation), excludes `scripts`, and sets `NASA-P10-07.go_types: true`.
+- `.semscope.cue` turns off NASA-P10-03 (the R3 deviation) and sets `NASA-P10-07.go_types: true`. It excludes `scripts`, `docs` and the two packages of test doubles. The file gives the reason for each path.
 - During the refactor, `.semscope.cue` also omits each rule that still has findings. Each phase removes one omission. At the end, the list is empty.
 - `make check` runs `semscope`.
 

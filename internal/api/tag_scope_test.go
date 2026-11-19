@@ -14,6 +14,7 @@ import (
 	gws "github.com/gorilla/websocket"
 
 	"github.com/infrashift/chit/internal/model"
+	"github.com/infrashift/chit/internal/pubsub"
 )
 
 // Scoped Tags (P-CHIT-7). The privacy tests are the point: a private Tag
@@ -358,8 +359,8 @@ func (p *recordingPubSub) Publish(_ context.Context, _ string, data []byte) erro
 	p.msgs = append(p.msgs, string(data))
 	return nil
 }
-func (p *recordingPubSub) Subscribe(_ context.Context, _ string, _ func([]byte)) error { return nil }
-func (p *recordingPubSub) Close() error                                                { return nil }
+func (p *recordingPubSub) Subscribe(_ context.Context, _ string, _ pubsub.Handler) error { return nil }
+func (p *recordingPubSub) Close() error                                                  { return nil }
 
 func TestTagPrivacy_PrivateTagChangesAreNotPublished(t *testing.T) {
 	e := newTagEnv(t)

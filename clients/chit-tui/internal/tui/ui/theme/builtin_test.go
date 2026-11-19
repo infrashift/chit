@@ -2,6 +2,7 @@ package theme
 
 import (
 	"image/color"
+	"slices"
 	"sort"
 	"testing"
 )
@@ -108,9 +109,12 @@ func TestLegacyThemesAreUnchanged(t *testing.T) {
 }
 
 func TestEveryBuiltinPopulatesEverySlot(t *testing.T) {
-	for name, ctor := range builtinThemes {
+	for _, name := range builtinNames {
 		t.Run(name, func(t *testing.T) {
-			th := ctor()
+			th, ok := builtinTheme(name)
+			if !ok {
+				t.Fatalf("builtinTheme(%q) not found", name)
+			}
 			for slot, hex := range slots(th) {
 				if hex == "" {
 					t.Errorf("%s is unset", slot)
@@ -158,16 +162,25 @@ func TestLookupReturnsFreshInstance(t *testing.T) {
 
 func TestBuiltinNamesIsSortedAndComplete(t *testing.T) {
 	names := BuiltinNames()
-	if len(names) != len(builtinThemes) {
-		t.Fatalf("BuiltinNames returned %d names, want %d", len(names), len(builtinThemes))
+	want := []string{
+		"catppuccin", "catppuccin-latte", "dayfox", "kanagawa",
+		"kanagawa-lotus", "nightfox", "tokyo-night", "tokyo-night-day",
+	}
+	if !slices.Equal(names, want) {
+		t.Fatalf("BuiltinNames = %v, want %v", names, want)
 	}
 	if !sort.StringsAreSorted(names) {
 		t.Errorf("BuiltinNames is not sorted: %v", names)
 	}
 	for _, n := range names {
-		if _, ok := builtinThemes[n]; !ok {
+		if _, ok := builtinTheme(n); !ok {
 			t.Errorf("BuiltinNames returned %q, which is not a builtin", n)
 		}
+	}
+	// The result is a copy: changing it must not change the bundled list.
+	names[0] = "mutated"
+	if BuiltinNames()[0] != want[0] {
+		t.Error("BuiltinNames returned the package's own slice")
 	}
 }
 

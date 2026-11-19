@@ -69,10 +69,17 @@ type Request struct {
 	// ThemesDir holds user theme files.
 	ThemesDir string
 
-	// SystemIsDark reports whether the terminal is dark. It is injected so
-	// resolution stays testable and never probes a terminal on its own; nil
-	// is treated as dark.
-	SystemIsDark func() bool
+	// System reports whether the terminal is dark. It is injected so
+	// resolution stays testable and never probes a terminal on its own; it is
+	// asked only when no appearance was set, and nil is treated as dark.
+	System DarkDetector
+}
+
+// DarkDetector reports whether the terminal has a dark background. Asking may
+// query the terminal, so Request calls IsDark only when no appearance setting
+// decides the answer first.
+type DarkDetector interface {
+	IsDark() bool
 }
 
 // Resolve turns a request into a theme, plus any advisory warnings.
@@ -147,7 +154,7 @@ func (req Request) Dark() bool {
 	if appearance == AppearanceUnset {
 		appearance = AppearanceSystem
 	}
-	return appearanceIsDark(appearance, req.SystemIsDark)
+	return appearanceIsDark(appearance, req.System)
 }
 
 // pickByAppearance returns the configured theme name for the resolved
@@ -159,17 +166,17 @@ func pickByAppearance(req Request, dark bool) string {
 	return req.ConfigThemeLight
 }
 
-func appearanceIsDark(a Appearance, systemIsDark func() bool) bool {
+func appearanceIsDark(a Appearance, system DarkDetector) bool {
 	switch a {
 	case AppearanceDark:
 		return true
 	case AppearanceLight:
 		return false
 	default:
-		if systemIsDark == nil {
+		if system == nil {
 			return true
 		}
-		return systemIsDark()
+		return system.IsDark()
 	}
 }
 

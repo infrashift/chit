@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -165,7 +164,7 @@ const (
 )
 
 func sendStreamStatus(a *app.App) http.HandlerFunc {
-	limiters := newUserLimiters(streamStatusPerSecond, streamStatusBurst, time.Now)
+	limiters := newUserLimiters(streamStatusPerSecond, streamStatusBurst, systemClock{})
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
 		channelID := chi.URLParam(r, "id")

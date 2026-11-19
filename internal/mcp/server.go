@@ -54,10 +54,18 @@ func (s *ChitMCPServer) Run(ctx context.Context) error {
 // Ephemeral command_response events are dropped: they answer someone else's
 // slash command and were never part of the agent feed.
 func (s *ChitMCPServer) StartEventFeed(ctx context.Context) {
-	go s.client.Listen(ctx, func(event *model.WebSocketEvent) {
-		if event.Event == model.WebSocketEventCommandResponse {
-			return
-		}
-		s.eventBuffer.Push(event)
-	})
+	go s.client.Listen(ctx, eventFeed{buffer: s.eventBuffer})
+}
+
+// eventFeed buffers the events of chitd's WebSocket for get_new_events.
+type eventFeed struct {
+	buffer *EventBuffer
+}
+
+// HandleEvent buffers event, dropping ephemeral command_response events.
+func (f eventFeed) HandleEvent(event *model.WebSocketEvent) {
+	if event.Event == model.WebSocketEventCommandResponse {
+		return
+	}
+	f.buffer.Push(event)
 }

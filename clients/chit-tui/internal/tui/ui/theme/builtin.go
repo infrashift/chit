@@ -2,7 +2,7 @@ package theme
 
 import (
 	"image/color"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -150,36 +150,52 @@ func Dayfox() Theme {
 	})
 }
 
-// builtinThemes maps names to built-in theme constructors. Each call builds a
-// fresh Theme so callers can mutate what they get back.
-var builtinThemes = map[string]func() Theme{
-	"tokyo-night":      TokyoNight,
-	"tokyo-night-day":  TokyoNightDay,
-	"catppuccin":       Catppuccin,
-	"catppuccin-latte": CatppuccinLatte,
-	"kanagawa":         Kanagawa,
-	"kanagawa-lotus":   KanagawaLotus,
-	"nightfox":         Nightfox,
-	"dayfox":           Dayfox,
+// builtinNames lists the bundled themes in sorted order. builtinTheme must
+// build every one of them.
+var builtinNames = []string{
+	"catppuccin",
+	"catppuccin-latte",
+	"dayfox",
+	"kanagawa",
+	"kanagawa-lotus",
+	"nightfox",
+	"tokyo-night",
+	"tokyo-night-day",
+}
+
+// builtinTheme builds the bundled theme with the exact name given. Each call
+// builds a fresh Theme so callers can mutate what they get back.
+func builtinTheme(name string) (Theme, bool) {
+	switch name {
+	case "tokyo-night":
+		return TokyoNight(), true
+	case "tokyo-night-day":
+		return TokyoNightDay(), true
+	case "catppuccin":
+		return Catppuccin(), true
+	case "catppuccin-latte":
+		return CatppuccinLatte(), true
+	case "kanagawa":
+		return Kanagawa(), true
+	case "kanagawa-lotus":
+		return KanagawaLotus(), true
+	case "nightfox":
+		return Nightfox(), true
+	case "dayfox":
+		return Dayfox(), true
+	default:
+		return Theme{}, false
+	}
 }
 
 // Lookup resolves a bundled theme by name, ignoring case and surrounding
 // whitespace so a value typed on the command line or pasted into a config file
 // behaves the same way.
 func Lookup(name string) (Theme, bool) {
-	ctor, ok := builtinThemes[strings.ToLower(strings.TrimSpace(name))]
-	if !ok {
-		return Theme{}, false
-	}
-	return ctor(), true
+	return builtinTheme(strings.ToLower(strings.TrimSpace(name)))
 }
 
 // BuiltinNames returns the bundled theme names in sorted order.
 func BuiltinNames() []string {
-	names := make([]string, 0, len(builtinThemes))
-	for name := range builtinThemes {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
+	return slices.Clone(builtinNames)
 }

@@ -166,6 +166,9 @@ func TestDetectSystemDarkWithoutTerminal(t *testing.T) {
 	if !detectSystemDark() {
 		t.Error("want dark when stdin/stdout are not terminals")
 	}
+	if !(terminalBackground{}).IsDark() {
+		t.Error("terminalBackground: want dark when stdin/stdout are not terminals")
+	}
 }
 
 // With themes configured per appearance, a theme picked in the client is

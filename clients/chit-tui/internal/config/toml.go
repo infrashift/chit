@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 
 	"github.com/BurntSushi/toml"
@@ -26,17 +27,46 @@ type FileSettings struct {
 	Appearance  string
 }
 
-// fileKeys maps TOML keys to where they land in FileSettings. It is also the
-// set of recognized keys, so anything absent from it is reported and dropped.
-var fileKeys = map[string]func(*FileSettings, string){
-	"server_url":   func(s *FileSettings, v string) { s.ServerURL = v },
-	"ws_scheme":    func(s *FileSettings, v string) { s.WSScheme = v },
-	"auth_header":  func(s *FileSettings, v string) { s.AuthHeader = v },
-	"session_file": func(s *FileSettings, v string) { s.SessionFile = v },
-	"theme":        func(s *FileSettings, v string) { s.Theme = v },
-	"theme_dark":   func(s *FileSettings, v string) { s.ThemeDark = v },
-	"theme_light":  func(s *FileSettings, v string) { s.ThemeLight = v },
-	"appearance":   func(s *FileSettings, v string) { s.Appearance = v },
+// fileKeys is the set of recognized TOML keys; anything absent from it is
+// reported and dropped. setFileKey must handle every one of them.
+var fileKeys = []string{
+	"server_url",
+	"ws_scheme",
+	"auth_header",
+	"session_file",
+	"theme",
+	"theme_dark",
+	"theme_light",
+	"appearance",
+}
+
+// isFileKey reports whether key is a recognized setting.
+func isFileKey(key string) bool { return slices.Contains(fileKeys, key) }
+
+// setFileKey stores v in the FileSettings field key names. It reports false
+// for a key that is not a recognized setting and leaves s unchanged.
+func setFileKey(s *FileSettings, key, v string) bool {
+	switch key {
+	case "server_url":
+		s.ServerURL = v
+	case "ws_scheme":
+		s.WSScheme = v
+	case "auth_header":
+		s.AuthHeader = v
+	case "session_file":
+		s.SessionFile = v
+	case "theme":
+		s.Theme = v
+	case "theme_dark":
+		s.ThemeDark = v
+	case "theme_light":
+		s.ThemeLight = v
+	case "appearance":
+		s.Appearance = v
+	default:
+		return false
+	}
+	return true
 }
 
 // Dir returns the chit configuration directory, $XDG_CONFIG_HOME/chit.
@@ -90,7 +120,7 @@ func LoadFile(path string) (FileSettings, []string) {
 func stripUnknownKeys(raw map[string]any, warnings *[]string) {
 	unknown := make([]string, 0)
 	for k := range raw {
-		if _, ok := fileKeys[k]; !ok {
+		if !isFileKey(k) {
 			unknown = append(unknown, k)
 		}
 	}
@@ -106,13 +136,13 @@ func stripUnknownKeys(raw map[string]any, warnings *[]string) {
 // apply copies validated values onto settings. Anything that survived vetting
 // is known to be a string, so a non-string here is simply skipped.
 func apply(raw map[string]any, settings *FileSettings) {
-	for key, set := range fileKeys {
+	for _, key := range fileKeys {
 		v, ok := raw[key]
 		if !ok {
 			continue
 		}
 		if s, ok := v.(string); ok {
-			set(settings, s)
+			setFileKey(settings, key, s)
 		}
 	}
 }

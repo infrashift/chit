@@ -38,9 +38,9 @@ Tracking: [ISSUE-005](.okfw/issues/issue-005-r2-loops-with-a-bound--01a1f5379e4d
 ## Phase 6: R9, no function types
 Tracking: [ISSUE-006](.okfw/issues/issue-006-r9-no-function-types-in-chit-code--01a1f5379e55.md)
 
-- [ ] Replace the fields of function type and the dispatch tables.
-- [ ] Suppress the function types that a framework requires.
-- [ ] Remove the NASA-P10-09 omission.
+- [x] Replace the fields of function type and the dispatch tables.
+- [x] Suppress the function types that a framework requires.
+- [x] Remove the NASA-P10-09 omission.
 
 ## Phase 7: R6, no mutable package variables
 Tracking: [ISSUE-007](.okfw/issues/issue-007-r6-no-mutable-package-variables--01a1f5379e5d.md)

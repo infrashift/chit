@@ -117,9 +117,15 @@ func themeRequest(opts options, cfg *config.Config) (theme.Request, error) {
 		FlagAppearance:   flagAppearance,
 		ConfigAppearance: cfgAppearance,
 		ThemesDir:        config.ThemesDir(),
-		SystemIsDark:     detectSystemDark,
+		System:           terminalBackground{},
 	}, nil
 }
+
+// terminalBackground is the theme.DarkDetector for the real terminal.
+type terminalBackground struct{}
+
+// IsDark reports whether the terminal has a dark background.
+func (terminalBackground) IsDark() bool { return detectSystemDark() }
 
 // detectSystemDark asks the terminal whether it has a dark background.
 //

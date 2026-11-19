@@ -16,7 +16,7 @@ func (rt *recordTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 
 func TestAuthTransport_InjectsToken(t *testing.T) {
 	recorder := &recordTransport{}
-	transport := newAuthTransport(recorder, func() string { return "my-token" })
+	transport := newAuthTransport(recorder, staticToken("my-token"))
 
 	req, err := http.NewRequest("GET", "http://example.com/api/v1/users/me", nil)
 	if err != nil {
@@ -35,7 +35,7 @@ func TestAuthTransport_InjectsToken(t *testing.T) {
 
 func TestAuthTransport_ClonesRequest(t *testing.T) {
 	recorder := &recordTransport{}
-	transport := newAuthTransport(recorder, func() string { return "tok" })
+	transport := newAuthTransport(recorder, staticToken("tok"))
 
 	req, err := http.NewRequest("GET", "http://example.com/test", nil)
 	if err != nil {
@@ -57,7 +57,7 @@ func TestAuthTransport_ClonesRequest(t *testing.T) {
 }
 
 func TestNewAuthTransport_DefaultBase(t *testing.T) {
-	transport := newAuthTransport(nil, func() string { return "tok" })
+	transport := newAuthTransport(nil, staticToken("tok"))
 	if transport.base != http.DefaultTransport {
 		t.Error("expected http.DefaultTransport as base")
 	}
@@ -65,7 +65,7 @@ func TestNewAuthTransport_DefaultBase(t *testing.T) {
 
 func TestAuthTransportWithHeader_UsesCustomHeader(t *testing.T) {
 	recorder := &recordTransport{}
-	transport := newAuthTransportWithHeader(recorder, func() string { return "kratos-id" }, "X-User-Id")
+	transport := newAuthTransportWithHeader(recorder, staticToken("kratos-id"), "X-User-Id")
 
 	req, err := http.NewRequest("GET", "http://example.com/api/v1/users/me", nil)
 	if err != nil {

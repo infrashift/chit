@@ -14,6 +14,15 @@ linters:
     errcheck:
       check-blank: true
       check-type-assertions: true
+    # R4 and R1 (ADR-0002, ADR-0004): Phase 8 enables these linters.
+    funlen:
+      lines: 60
+      statements: -1
+      ignore-comments: false
+    gocognit:
+      min-complexity: 20
+    nestif:
+      min-complexity: 4
     gocritic:
       enabled-tags:
         - diagnostic

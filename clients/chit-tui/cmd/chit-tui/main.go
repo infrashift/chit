@@ -70,13 +70,10 @@ func main() {
 		// Env-sourced tokens skip validation.
 		tokenStore.Set(cfg.SessionToken)
 	} else {
-		tokenStore.Set(storedToken(sessionStore.Load, func(token string) error {
-			_, err := kratosClient.CheckSession(context.Background(), token)
-			return err
-		}))
+		tokenStore.Set(storedToken(context.Background(), sessionStore, kratosClient))
 	}
 
-	client := api.NewClientWithTokenFn(cfg.ServerURL, tokenStore.Get, cfg.AuthHeader)
+	client := api.NewClientWithTokenSource(cfg.ServerURL, tokenStore, cfg.AuthHeader)
 	wsClient := ws.NewWSClientWithHeader(cfg.WSURL(), tokenStore.Get(), 256, cfg.AuthHeader)
 
 	s := styles.New(activeTheme)
@@ -90,16 +87,27 @@ func main() {
 	}
 }
 
+// sessionLoader reads the saved session; *auth.SessionStore is one.
+type sessionLoader interface {
+	Load() (*auth.StoredSession, error)
+}
+
+// sessionChecker asks Kratos whether a token is still a live session;
+// *auth.KratosClient is one.
+type sessionChecker interface {
+	CheckSession(ctx context.Context, token string) (*auth.Identity, error)
+}
+
 // storedToken returns the saved session's token unless Kratos rejects it;
 // "" sends the user to the sign-in screen. Only a rejection discards it: if
 // Kratos cannot be reached, the session may well be fine, and the server
 // will ask for sign-in itself if it is not.
-func storedToken(load func() (*auth.StoredSession, error), check func(token string) error) string {
-	stored, err := load()
+func storedToken(ctx context.Context, store sessionLoader, checker sessionChecker) string {
+	stored, err := store.Load()
 	if err != nil || stored.Token == "" {
 		return ""
 	}
-	if err := check(stored.Token); err != nil && auth.IsSessionRejected(err) {
+	if _, err := checker.CheckSession(ctx, stored.Token); err != nil && auth.IsSessionRejected(err) {
 		return ""
 	}
 	return stored.Token

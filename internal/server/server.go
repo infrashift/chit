@@ -174,26 +174,10 @@ func (s *Server) initCommands() {
 
 	// Register built-in handlers.
 	handlers := make(map[string]command.Handler)
-	handlers["help"] = command.HandlerFunc(func(ctx context.Context, actorID, channelID, args string) (*command.CommandResult, error) {
-		var text string
-		for _, c := range reg.All() {
-			text += fmt.Sprintf("- `/%s` — %s\n", c.Slug, c.Description)
-		}
-		if text == "" {
-			text = "No commands available."
-		}
-		return &command.CommandResult{ResponseText: text}, nil
-	})
-	handlers["invite"] = command.HandlerFunc(func(ctx context.Context, actorID, channelID, args string) (*command.CommandResult, error) {
-		return s.app.HandleInvite(ctx, actorID, channelID, args)
-	})
-	handlers["kick"] = command.HandlerFunc(func(ctx context.Context, actorID, channelID, args string) (*command.CommandResult, error) {
-		return s.app.HandleKick(ctx, actorID, channelID, args)
-	})
-
-	handlers["topic"] = command.HandlerFunc(func(ctx context.Context, actorID, channelID, args string) (*command.CommandResult, error) {
-		return s.app.HandleTopic(ctx, actorID, channelID, args)
-	})
+	handlers["help"] = helpCommand{reg: reg}
+	handlers["invite"] = inviteCommand{app: s.app}
+	handlers["kick"] = kickCommand{app: s.app}
+	handlers["topic"] = topicCommand{app: s.app}
 
 	s.app.CommandHandlers = handlers
 

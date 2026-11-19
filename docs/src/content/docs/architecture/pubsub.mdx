@@ -25,13 +25,18 @@ backend can be swapped without changing application code:
 ```go
 type PubSub interface {
     Publish(ctx context.Context, topic string, data []byte) error
-    Subscribe(ctx context.Context, topic string, handler func(data []byte)) error
+    Subscribe(ctx context.Context, topic string, handler Handler) error
     Close() error
+}
+
+// Handler receives the messages published on a subscribed topic.
+type Handler interface {
+    Handle(data []byte)
 }
 ```
 
-`Subscribe` registers a callback that is invoked for each message on the
-topic. There is no `Unsubscribe`; subscriptions end when the backend is
+`Subscribe` registers a handler whose `Handle` method is called for each
+message on the topic. There is no `Unsubscribe`; subscriptions end when the backend is
 closed.
 
 ## Backends

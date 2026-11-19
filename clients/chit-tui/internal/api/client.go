@@ -80,7 +80,7 @@ func NewClient(baseURL, token string) ChitClient {
 		baseURL: baseURL + "/api/v1",
 		http: &http.Client{
 			Timeout:   DefaultTimeout,
-			Transport: newAuthTransport(nil, func() string { return token }),
+			Transport: newAuthTransport(nil, staticToken(token)),
 		},
 	}
 }
@@ -91,18 +91,19 @@ func NewClientWithHeader(baseURL, token, headerName string) ChitClient {
 		baseURL: baseURL + "/api/v1",
 		http: &http.Client{
 			Timeout:   DefaultTimeout,
-			Transport: newAuthTransportWithHeader(nil, func() string { return token }, headerName),
+			Transport: newAuthTransportWithHeader(nil, staticToken(token), headerName),
 		},
 	}
 }
 
-// NewClientWithTokenFn creates a ChitClient that reads the token dynamically via tokenFn.
-func NewClientWithTokenFn(baseURL string, tokenFn func() string, headerName string) ChitClient {
+// NewClientWithTokenSource creates a ChitClient that reads the token from
+// tokens on every request, so a token set after sign-in takes effect at once.
+func NewClientWithTokenSource(baseURL string, tokens TokenSource, headerName string) ChitClient {
 	return &httpClient{
 		baseURL: baseURL + "/api/v1",
 		http: &http.Client{
 			Timeout:   DefaultTimeout,
-			Transport: newAuthTransportWithHeader(nil, tokenFn, headerName),
+			Transport: newAuthTransportWithHeader(nil, tokens, headerName),
 		},
 	}
 }

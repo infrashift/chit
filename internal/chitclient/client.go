@@ -406,9 +406,14 @@ func (c *Client) GetTagsForPost(ctx context.Context, postID string) ([]*model.Ta
 
 // ─── WebSocket ───────────────────────────────────────────────────
 
-// Listen connects to chitd's WebSocket and invokes handle for every event
-// until ctx is cancelled, reconnecting with backoff on connection loss.
-func (c *Client) Listen(ctx context.Context, handle func(*model.WebSocketEvent)) {
+// EventHandler receives the events Listen reads from chitd's WebSocket.
+type EventHandler interface {
+	HandleEvent(event *model.WebSocketEvent)
+}
+
+// Listen connects to chitd's WebSocket and passes every event to h until ctx
+// is cancelled, reconnecting with backoff on connection loss.
+func (c *Client) Listen(ctx context.Context, h EventHandler) {
 	wsURL := strings.Replace(c.baseURL, "http", "ws", 1) + "/api/v1/websocket"
 	backoff := time.Second
 
@@ -467,7 +472,7 @@ func (c *Client) Listen(ctx context.Context, handle func(*model.WebSocketEvent))
 				slog.Info("invalid websocket event", "error", decodeErr)
 				continue
 			}
-			handle(&event)
+			h.HandleEvent(&event)
 		}
 		if ctx.Err() == nil {
 			slog.Info("websocket read failed, reconnecting", "error", err)

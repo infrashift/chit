@@ -17,9 +17,13 @@ exclude: scripts: "UAT seed tools; not shipped in a chit binary"
 // The docs site has no Go code. Its node_modules is large.
 exclude: docs: "the Astro docs site; no Go code"
 
+// Test doubles in packages of their own. Only _test.go files import them,
+// and semscope already skips the _test.go files (ADR-0002, Scope).
+exclude: "internal/store/storetest": "in-memory Store fake; only tests import it"
+exclude: "clients/chit-tui/internal/testutil": "TUI test helpers; only tests import them"
+
 // Refactor omissions. Each phase of PLAN.md fixes one rule and removes its
 // line. At the end of Phase 9 this list is empty.
 rules: "NASA-P10-04": enabled: false // Phase 8
 rules: "NASA-P10-05": enabled: false // Phase 9
 rules: "NASA-P10-06": enabled: false // Phase 7
-rules: "NASA-P10-09": enabled: false // Phase 6

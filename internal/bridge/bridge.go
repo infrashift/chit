@@ -173,9 +173,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 	// cancelled when the grace period is up.
 	workCtx, stopWork := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopWork()
-	b.client.Listen(ctx, func(event *model.WebSocketEvent) {
-		b.handleEvent(workCtx, event)
-	})
+	b.client.Listen(ctx, eventListener{b: b, ctx: workCtx})
 
 	close(b.stopping)
 	done := make(chan struct{})
@@ -239,6 +237,18 @@ func (b *Bridge) isMember(ctx context.Context, channelID string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// eventListener hands the WebSocket's events to the bridge under the work
+// context, which outlives the listening context.
+type eventListener struct {
+	b   *Bridge
+	ctx context.Context
+}
+
+// HandleEvent passes event to the bridge.
+func (l eventListener) HandleEvent(event *model.WebSocketEvent) {
+	l.b.handleEvent(l.ctx, event)
 }
 
 // handleEvent filters incoming events down to posts the bridge should answer
@@ -621,8 +631,8 @@ func (b *Bridge) processPost(ctx context.Context, root string, post *model.Post)
 	b.mu.Lock()
 	b.running[root] = runState{cancel: cancelRun, started: time.Now()}
 	b.mu.Unlock()
-	progressDone := b.showProgress(ctx, post.ChannelID, root, hops)
-	defer progressDone()
+	progress := b.showProgress(ctx, post.ChannelID, root, hops)
+	defer progress.Stop(ctx)
 	result, notice, err := b.runClaude(runCtx, root, post, sessionID, seed)
 	b.mu.Lock()
 	delete(b.running, root)

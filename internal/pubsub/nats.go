@@ -41,14 +41,14 @@ func (n *NatsPubSub) Publish(_ context.Context, topic string, data []byte) error
 	return nil
 }
 
-func (n *NatsPubSub) Subscribe(_ context.Context, topic string, handler func(data []byte)) error {
+func (n *NatsPubSub) Subscribe(_ context.Context, topic string, handler Handler) error {
 	sub, err := n.conn.Subscribe(topic, func(msg *nats.Msg) {
 		defer func() {
 			if r := recover(); r != nil {
 				slog.Error("nats: handler panicked", "topic", topic, "panic", r)
 			}
 		}()
-		handler(msg.Data)
+		handler.Handle(msg.Data)
 	})
 	if err != nil {
 		return fmt.Errorf("nats subscribe: %w", err)

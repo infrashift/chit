@@ -49,8 +49,10 @@ type wsClient struct {
 	events     chan model.WebSocketEvent
 	state      chan ConnState
 
-	// newBackoff builds the delay schedule for one session's redials.
-	newBackoff func() *Backoff
+	// backoffBase and backoffMax set the delay schedule for one session's
+	// redials; newBackoff builds it.
+	backoffBase time.Duration
+	backoffMax  time.Duration
 	// pongWait is how long the link may stay silent before it is declared
 	// dead; pingPeriod is how often a ping is sent to break that silence.
 	pongWait   time.Duration
@@ -89,11 +91,17 @@ func NewWSClientWithHeader(url, token string, bufSize int, headerName string) WS
 		events:     make(chan model.WebSocketEvent, bufSize),
 		// Small buffer: transitions are rare and only the latest matters, so
 		// dropping one under contention is preferable to blocking the reader.
-		state:      make(chan ConnState, 8),
-		newBackoff: NewBackoff,
-		pongWait:   defaultPongWait,
-		pingPeriod: defaultPingPeriod,
+		state:       make(chan ConnState, 8),
+		backoffBase: defaultBackoffBase,
+		backoffMax:  defaultBackoffMax,
+		pongWait:    defaultPongWait,
+		pingPeriod:  defaultPingPeriod,
 	}
+}
+
+// newBackoff builds a fresh delay schedule for one session's redials.
+func (c *wsClient) newBackoff() *Backoff {
+	return &Backoff{Base: c.backoffBase, Max: c.backoffMax}
 }
 
 // Connect starts a session. A failed first dial is returned so the caller

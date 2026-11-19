@@ -10,6 +10,7 @@ import (
 	"github.com/infrashift/chit/internal/app"
 	"github.com/infrashift/chit/internal/config"
 	"github.com/infrashift/chit/internal/model"
+	"github.com/infrashift/chit/internal/pubsub"
 	"github.com/infrashift/chit/internal/store/storetest"
 	"github.com/infrashift/chit/internal/websocket"
 )
@@ -33,9 +34,9 @@ const (
 
 type noopPubSub struct{}
 
-func (noopPubSub) Publish(_ context.Context, _ string, _ []byte) error              { return nil }
-func (noopPubSub) Subscribe(_ context.Context, _ string, _ func(data []byte)) error { return nil }
-func (noopPubSub) Close() error                                                     { return nil }
+func (noopPubSub) Publish(_ context.Context, _ string, _ []byte) error           { return nil }
+func (noopPubSub) Subscribe(_ context.Context, _ string, _ pubsub.Handler) error { return nil }
+func (noopPubSub) Close() error                                                  { return nil }
 
 // mockStore is the shared in-memory store; see package storetest.
 type mockStore = storetest.Store

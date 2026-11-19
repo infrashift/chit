@@ -16,6 +16,8 @@ import (
 // NewValidationMiddleware parses the OpenAPI spec and returns a chi-compatible
 // middleware that validates incoming requests against it. Authentication
 // validation is skipped because Oathkeeper handles auth externally.
+//
+// semscope: allow(NASA-P10-09) chi's Router.Use requires func(http.Handler) http.Handler.
 func NewValidationMiddleware(specBytes []byte) (func(http.Handler) http.Handler, error) {
 	loader := openapi3.NewLoader()
 	doc, err := loader.LoadFromData(specBytes)

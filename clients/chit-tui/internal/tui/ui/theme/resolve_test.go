@@ -5,8 +5,47 @@ import (
 	"testing"
 )
 
-func alwaysDark() bool  { return true }
-func alwaysLight() bool { return false }
+// fixedDark is a DarkDetector with a fixed answer.
+type fixedDark bool
+
+func (f fixedDark) IsDark() bool { return bool(f) }
+
+const (
+	alwaysDark  = fixedDark(true)
+	alwaysLight = fixedDark(false)
+)
+
+// countingDark counts how often the terminal would have been queried.
+type countingDark struct{ calls *int }
+
+func (c countingDark) IsDark() bool {
+	*c.calls++
+	return true
+}
+
+// Asking the terminal is a side effect, so an explicit appearance must settle
+// the question without it, and an unset one must ask exactly once.
+func TestDarkAsksTheTerminalOnlyWhenNeeded(t *testing.T) {
+	var calls int
+	req := Request{FlagAppearance: AppearanceLight, ConfigAppearance: AppearanceDark, System: countingDark{&calls}}
+	if req.Dark() {
+		t.Error("Dark() = true, want false from the flag")
+	}
+	req = Request{ConfigAppearance: AppearanceDark, System: countingDark{&calls}}
+	if !req.Dark() {
+		t.Error("Dark() = false, want true from the config")
+	}
+	if calls != 0 {
+		t.Fatalf("terminal queried %d times with an explicit appearance, want 0", calls)
+	}
+	req = Request{System: countingDark{&calls}}
+	if !req.Dark() {
+		t.Error("Dark() = false, want true from the terminal")
+	}
+	if calls != 1 {
+		t.Errorf("terminal queried %d times with no appearance set, want 1", calls)
+	}
+}
 
 func TestParseAppearance(t *testing.T) {
 	tests := []struct {
@@ -72,7 +111,7 @@ func TestResolvePrecedence(t *testing.T) {
 			name: "flag wins over everything",
 			req: Request{
 				FlagTheme: "nightfox", ConfigTheme: "kanagawa",
-				ConfigThemeDark: "catppuccin", SystemIsDark: alwaysDark,
+				ConfigThemeDark: "catppuccin", System: alwaysDark,
 			},
 			wantBg: "#192330",
 		},
@@ -80,7 +119,7 @@ func TestResolvePrecedence(t *testing.T) {
 			name: "config theme wins over the appearance pair",
 			req: Request{
 				ConfigTheme: "kanagawa", ConfigThemeDark: "catppuccin",
-				SystemIsDark: alwaysDark,
+				System: alwaysDark,
 			},
 			wantBg: "#1f1f28",
 		},
@@ -102,12 +141,12 @@ func TestResolvePrecedence(t *testing.T) {
 		},
 		{
 			name:   "default dark theme when nothing is configured",
-			req:    Request{SystemIsDark: alwaysDark},
+			req:    Request{System: alwaysDark},
 			wantBg: "#1a1b26",
 		},
 		{
 			name:   "default light theme when the terminal is light",
-			req:    Request{SystemIsDark: alwaysLight},
+			req:    Request{System: alwaysLight},
 			wantBg: "#e1e2e7",
 		},
 		{
@@ -117,7 +156,7 @@ func TestResolvePrecedence(t *testing.T) {
 		},
 		{
 			name:   "system detection used when appearance is unset",
-			req:    Request{SystemIsDark: alwaysLight},
+			req:    Request{System: alwaysLight},
 			wantBg: "#e1e2e7",
 		},
 		{
@@ -166,9 +205,9 @@ func TestResolveUnknownFlagThemeListsBuiltins(t *testing.T) {
 
 func TestResolveUnknownConfigThemeWarnsAndFallsThrough(t *testing.T) {
 	got, warnings, err := Resolve(Request{
-		ConfigTheme:  "bogus",
-		SystemIsDark: alwaysDark,
-		ThemesDir:    t.TempDir(),
+		ConfigTheme: "bogus",
+		System:      alwaysDark,
+		ThemesDir:   t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("an unknown config theme should not be fatal: %v", err)
@@ -185,9 +224,9 @@ func TestResolveBrokenConfigThemeWarnsAndFallsThrough(t *testing.T) {
 	dir := writeTheme(t, "broken", "name = \"Broken\"\n")
 
 	got, warnings, err := Resolve(Request{
-		ConfigTheme:  "broken",
-		SystemIsDark: alwaysDark,
-		ThemesDir:    dir,
+		ConfigTheme: "broken",
+		System:      alwaysDark,
+		ThemesDir:   dir,
 	})
 	if err != nil {
 		t.Fatalf("a broken config theme should not be fatal: %v", err)

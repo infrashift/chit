@@ -3,7 +3,8 @@ package auth
 import "sync"
 
 // TokenStore is a thread-safe mutable token holder.
-// It bridges the gap between authTransport's tokenFn closure and dynamic token updates.
+// It is the api.TokenSource the HTTP client reads on every request, so a
+// token set after sign-in takes effect without rebuilding the client.
 type TokenStore struct {
 	mu    sync.RWMutex
 	token string

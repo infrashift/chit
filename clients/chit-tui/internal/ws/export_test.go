@@ -12,12 +12,8 @@ func SetTimings(c WSClient, backoffBase, pongWait, pingPeriod time.Duration) {
 	if !ok {
 		panic(fmt.Sprintf("ws.SetTimings: %T is not a client from this package", c))
 	}
-	wc.newBackoff = func() *Backoff {
-		b := NewBackoff()
-		b.Base = backoffBase
-		b.Max = 4 * backoffBase
-		return b
-	}
+	wc.backoffBase = backoffBase
+	wc.backoffMax = 4 * backoffBase
 	wc.pongWait = pongWait
 	wc.pingPeriod = pingPeriod
 }

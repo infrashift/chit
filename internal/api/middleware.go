@@ -23,6 +23,8 @@ import (
 // When CHIT_TRUSTED_PROXY_SECRET is set, the proxy must also present it in
 // X-Proxy-Secret; this prevents header spoofing if the backend is reachable
 // without going through the proxy.
+//
+// semscope: allow(NASA-P10-09) chi's Router.Use requires func(http.Handler) http.Handler.
 func AuthExtract(a *app.App) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -194,8 +196,10 @@ func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 
 // RateLimit applies per-user rate limiting: requestsPerSecond sustained,
 // with bursts up to burst.
+//
+// semscope: allow(NASA-P10-09) chi's Router.Use requires func(http.Handler) http.Handler.
 func RateLimit(requestsPerSecond float64, burst int) func(http.Handler) http.Handler {
-	limiters := newUserLimiters(rate.Limit(requestsPerSecond), burst, time.Now)
+	limiters := newUserLimiters(rate.Limit(requestsPerSecond), burst, systemClock{})
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -224,32 +228,43 @@ type userLimiters struct {
 	limit     rate.Limit
 	burst     int
 	idleAfter time.Duration
-	now       func() time.Time
+	clock     clock
 	lastSweep time.Time
 	entries   map[string]*limiterEntry
 }
+
+// clock supplies the current time; tests substitute a fake.
+type clock interface {
+	Now() time.Time
+}
+
+// systemClock is the production clock.
+type systemClock struct{}
+
+// Now returns time.Now().
+func (systemClock) Now() time.Time { return time.Now() }
 
 type limiterEntry struct {
 	limiter  *rate.Limiter
 	lastSeen time.Time
 }
 
-func newUserLimiters(limit rate.Limit, burst int, now func() time.Time) *userLimiters {
+func newUserLimiters(limit rate.Limit, burst int, c clock) *userLimiters {
 	// Time for an empty bucket to refill, with margin; at least a minute.
 	idle := time.Minute
 	if limit > 0 {
 		idle = max(idle, 2*time.Duration(float64(burst)/float64(limit)*float64(time.Second)))
 	}
 	return &userLimiters{
-		limit: limit, burst: burst, idleAfter: idle, now: now,
-		lastSweep: now(), entries: map[string]*limiterEntry{},
+		limit: limit, burst: burst, idleAfter: idle, clock: c,
+		lastSweep: c.Now(), entries: map[string]*limiterEntry{},
 	}
 }
 
 func (u *userLimiters) allow(key string) bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	now := u.now()
+	now := u.clock.Now()
 	if now.Sub(u.lastSweep) > u.idleAfter {
 		for k, e := range u.entries {
 			if now.Sub(e.lastSeen) > u.idleAfter {

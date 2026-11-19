@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/infrashift/chit/clients/chit-tui/internal/api"
+	"github.com/infrashift/chit/clients/chit-tui/internal/auth"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 )
 
@@ -492,8 +493,8 @@ func TestAddChannelMember(t *testing.T) {
 	}
 }
 
-func TestNewClientWithTokenFn_DynamicToken(t *testing.T) {
-	token := "initial-token"
+func TestNewClientWithTokenSource_DynamicToken(t *testing.T) {
+	tokens := auth.NewTokenStore("initial-token")
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/users/me", func(w http.ResponseWriter, r *http.Request) {
 		got := r.Header.Get("X-Session-Token")
@@ -502,7 +503,7 @@ func TestNewClientWithTokenFn_DynamicToken(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	client := api.NewClientWithTokenFn(srv.URL, func() string { return token }, "X-Session-Token")
+	client := api.NewClientWithTokenSource(srv.URL, tokens, "X-Session-Token")
 
 	u, err := client.GetMe(context.Background())
 	if err != nil {
@@ -513,7 +514,7 @@ func TestNewClientWithTokenFn_DynamicToken(t *testing.T) {
 	}
 
 	// Update token
-	token = "updated-token"
+	tokens.Set("updated-token")
 	u, err = client.GetMe(context.Background())
 	if err != nil {
 		t.Fatal(err)

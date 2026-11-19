@@ -40,7 +40,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !o.visible() {
 			continue
 		}
-		cmd := o.update(msg)
+		cmd := m.updateOverlay(o.id, msg)
 		if !o.visible() {
 			if o.closeFocus != focusKeep {
 				return m, tea.Batch(cmd, m.setFocus(o.closeFocus))

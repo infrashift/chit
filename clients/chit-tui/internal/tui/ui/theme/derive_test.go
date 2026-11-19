@@ -6,9 +6,12 @@ import (
 )
 
 func TestBuiltinsPopulateDerivedSlots(t *testing.T) {
-	for name, ctor := range builtinThemes {
+	for _, name := range builtinNames {
 		t.Run(name, func(t *testing.T) {
-			th := ctor()
+			th, ok := builtinTheme(name)
+			if !ok {
+				t.Fatalf("builtinTheme(%q) not found", name)
+			}
 			slots := map[string]color.Color{
 				"Selection":         th.Selection,
 				"SearchMatch":       th.SearchMatch,
@@ -26,9 +29,12 @@ func TestBuiltinsPopulateDerivedSlots(t *testing.T) {
 // The active match must be visually distinct from an inactive one, otherwise
 // "next match" navigation gives the user no feedback.
 func TestSearchMatchActiveDiffersFromSearchMatch(t *testing.T) {
-	for name, ctor := range builtinThemes {
+	for _, name := range builtinNames {
 		t.Run(name, func(t *testing.T) {
-			th := ctor()
+			th, ok := builtinTheme(name)
+			if !ok {
+				t.Fatalf("builtinTheme(%q) not found", name)
+			}
 			if colorToHex(th.SearchMatch) == colorToHex(th.SearchMatchActive) {
 				t.Errorf("SearchMatch and SearchMatchActive are both %s",
 					colorToHex(th.SearchMatch))

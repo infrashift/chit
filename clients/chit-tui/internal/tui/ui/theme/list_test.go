@@ -60,16 +60,21 @@ func countOf(names []string, want string) int {
 	return n
 }
 
+// lightTerminal is a terminal with a light background.
+type lightTerminal struct{}
+
+func (lightTerminal) IsDark() bool { return false }
+
 func TestRequest_Dark(t *testing.T) {
-	light := func() bool { return false }
+	var light lightTerminal
 	tests := []struct {
 		name string
 		req  theme.Request
 		want bool
 	}{
 		{"flag beats config", theme.Request{FlagAppearance: theme.AppearanceLight, ConfigAppearance: theme.AppearanceDark}, false},
-		{"config beats system", theme.Request{ConfigAppearance: theme.AppearanceDark, SystemIsDark: light}, true},
-		{"system when unset", theme.Request{SystemIsDark: light}, false},
+		{"config beats system", theme.Request{ConfigAppearance: theme.AppearanceDark, System: light}, true},
+		{"system when unset", theme.Request{System: light}, false},
 		{"dark when nothing can tell", theme.Request{}, true},
 	}
 	for _, tc := range tests {

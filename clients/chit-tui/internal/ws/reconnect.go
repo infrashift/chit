@@ -21,11 +21,18 @@ type Backoff struct {
 	Max     time.Duration
 }
 
+// The default redial schedule: the first retry comes after about half a
+// second, and no wait is longer than half a minute.
+const (
+	defaultBackoffBase = 500 * time.Millisecond
+	defaultBackoffMax  = 30 * time.Second
+)
+
 // NewBackoff creates a Backoff with sensible defaults.
 func NewBackoff() *Backoff {
 	return &Backoff{
-		Base: 500 * time.Millisecond,
-		Max:  30 * time.Second,
+		Base: defaultBackoffBase,
+		Max:  defaultBackoffMax,
 	}
 }
 

@@ -66,18 +66,58 @@ const overlayY = 2
 // the overlay closes (for overlays that never take focus, like help).
 const focusKeep FocusArea = -1
 
-// overlayRef is one floating overlay's hooks: visibility, key routing,
-// rendering, and lifecycle plumbing. Every overlay consumer (key intercepts,
-// View compositing, blur/resize/restyle, mouse hit-testing) iterates the
-// single overlays() table, so adding an overlay means adding one entry here.
+// overlayID names one floating overlay. It selects the overlay's Update in
+// updateOverlay, the one hook that cannot go through overlayModel because each
+// sub-model's Update returns its own concrete type.
+type overlayID int
+
+const (
+	overlayDMPicker overlayID = iota
+	overlayThreadInbox
+	overlaySkinPicker
+	overlayChannelCreator
+	overlayTagPicker
+	overlayPalette
+	overlayHelp
+)
+
+// overlayModel is what every floating overlay's sub-model provides. The
+// overlays() table holds pointers to the Model's own fields, so calls through
+// it read and change the Model in place.
+type overlayModel interface {
+	Visible() bool
+	View() string
+	SetSize(w, h int)
+	SetStyles(s styles.Styles)
+}
+
+// blurrer is an overlay that can hold focus; overlays without Blur (help)
+// never take focus and have nothing to release.
+type blurrer interface {
+	Blur()
+}
+
+// overlayRef is one floating overlay: its sub-model, the ID that routes keys
+// to it, and where focus goes when it closes. Every overlay consumer (key
+// intercepts, View compositing, blur/resize/restyle, mouse hit-testing)
+// iterates the single overlays() table, so adding an overlay means adding one
+// entry there and one case in updateOverlay.
 type overlayRef struct {
-	visible    func() bool
-	update     func(tea.KeyMsg) tea.Cmd
-	view       func() string
-	blur       func()
-	setSize    func(w, h int)
-	setStyles  func(styles.Styles)
+	id         overlayID
+	model      overlayModel
 	closeFocus FocusArea // focus target after the overlay self-closes
+}
+
+func (o overlayRef) visible() bool                     { return o.model.Visible() }
+func (o overlayRef) view() string                      { return o.model.View() }
+func (o overlayRef) setSize(w, h int)                  { o.model.SetSize(w, h) }
+func (o overlayRef) setStyles(newStyles styles.Styles) { o.model.SetStyles(newStyles) }
+
+// blur releases the overlay's focus, if it is one that can hold focus.
+func (o overlayRef) blur() {
+	if b, ok := o.model.(blurrer); ok {
+		b.Blur()
+	}
 }
 
 // overlays lists the centered floating overlays in z-order (later entries
@@ -93,98 +133,37 @@ func (m *Model) overlays() []overlayRef {
 		tagPickerReturn = FocusThread
 	}
 	return []overlayRef{
-		{
-			visible: func() bool { return m.dmPicker.Visible() },
-			update: func(msg tea.KeyMsg) tea.Cmd {
-				var cmd tea.Cmd
-				m.dmPicker, cmd = m.dmPicker.Update(msg)
-				return cmd
-			},
-			view:       func() string { return m.dmPicker.View() },
-			blur:       m.dmPicker.Blur,
-			setSize:    m.dmPicker.SetSize,
-			setStyles:  m.dmPicker.SetStyles,
-			closeFocus: FocusInput,
-		},
-		{
-			visible: func() bool { return m.threadInbox.Visible() },
-			update: func(msg tea.KeyMsg) tea.Cmd {
-				var cmd tea.Cmd
-				m.threadInbox, cmd = m.threadInbox.Update(msg)
-				return cmd
-			},
-			view:       func() string { return m.threadInbox.View() },
-			blur:       m.threadInbox.Blur,
-			setSize:    m.threadInbox.SetSize,
-			setStyles:  m.threadInbox.SetStyles,
-			closeFocus: FocusInput,
-		},
-		{
-			visible: func() bool { return m.skinPicker.Visible() },
-			update: func(msg tea.KeyMsg) tea.Cmd {
-				var cmd tea.Cmd
-				m.skinPicker, cmd = m.skinPicker.Update(msg)
-				return cmd
-			},
-			view:       func() string { return m.skinPicker.View() },
-			blur:       m.skinPicker.Blur,
-			setSize:    m.skinPicker.SetSize,
-			setStyles:  m.skinPicker.SetStyles,
-			closeFocus: FocusInput,
-		},
-		{
-			visible: func() bool { return m.chCreator.Visible() },
-			update: func(msg tea.KeyMsg) tea.Cmd {
-				var cmd tea.Cmd
-				m.chCreator, cmd = m.chCreator.Update(msg)
-				return cmd
-			},
-			view:       func() string { return m.chCreator.View() },
-			blur:       m.chCreator.Blur,
-			setSize:    m.chCreator.SetSize,
-			setStyles:  m.chCreator.SetStyles,
-			closeFocus: FocusInput,
-		},
-		{
-			visible: func() bool { return m.tagPicker.Visible() },
-			update: func(msg tea.KeyMsg) tea.Cmd {
-				var cmd tea.Cmd
-				m.tagPicker, cmd = m.tagPicker.Update(msg)
-				return cmd
-			},
-			view:       func() string { return m.tagPicker.View() },
-			blur:       m.tagPicker.Blur,
-			setSize:    m.tagPicker.SetSize,
-			setStyles:  m.tagPicker.SetStyles,
-			closeFocus: tagPickerReturn,
-		},
-		{
-			visible: func() bool { return m.palette.Visible() },
-			update: func(msg tea.KeyMsg) tea.Cmd {
-				var cmd tea.Cmd
-				m.palette, cmd = m.palette.Update(msg)
-				return cmd
-			},
-			view:       func() string { return m.palette.View() },
-			blur:       m.palette.Blur,
-			setSize:    m.palette.SetSize,
-			setStyles:  m.palette.SetStyles,
-			closeFocus: FocusInput,
-		},
-		{
-			visible: func() bool { return m.help.Visible() },
-			update: func(msg tea.KeyMsg) tea.Cmd {
-				var cmd tea.Cmd
-				m.help, cmd = m.help.Update(msg)
-				return cmd
-			},
-			view:       func() string { return m.help.View() },
-			blur:       func() {},
-			setSize:    m.help.SetSize,
-			setStyles:  m.help.SetStyles,
-			closeFocus: focusKeep, // help never takes focus
-		},
+		{id: overlayDMPicker, model: &m.dmPicker, closeFocus: FocusInput},
+		{id: overlayThreadInbox, model: &m.threadInbox, closeFocus: FocusInput},
+		{id: overlaySkinPicker, model: &m.skinPicker, closeFocus: FocusInput},
+		{id: overlayChannelCreator, model: &m.chCreator, closeFocus: FocusInput},
+		{id: overlayTagPicker, model: &m.tagPicker, closeFocus: tagPickerReturn},
+		{id: overlayPalette, model: &m.palette, closeFocus: FocusInput},
+		{id: overlayHelp, model: &m.help, closeFocus: focusKeep}, // help never takes focus
 	}
+}
+
+// updateOverlay routes a key to the overlay id names and stores its new state
+// in the Model.
+func (m *Model) updateOverlay(id overlayID, msg tea.KeyMsg) tea.Cmd {
+	var cmd tea.Cmd
+	switch id {
+	case overlayDMPicker:
+		m.dmPicker, cmd = m.dmPicker.Update(msg)
+	case overlayThreadInbox:
+		m.threadInbox, cmd = m.threadInbox.Update(msg)
+	case overlaySkinPicker:
+		m.skinPicker, cmd = m.skinPicker.Update(msg)
+	case overlayChannelCreator:
+		m.chCreator, cmd = m.chCreator.Update(msg)
+	case overlayTagPicker:
+		m.tagPicker, cmd = m.tagPicker.Update(msg)
+	case overlayPalette:
+		m.palette, cmd = m.palette.Update(msg)
+	case overlayHelp:
+		m.help, cmd = m.help.Update(msg)
+	}
+	return cmd
 }
 
 // syncActionBar pushes the current model state into the action bar before it
