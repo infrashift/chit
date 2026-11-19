@@ -131,57 +131,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	keyMsg, ok := msg.(tea.KeyMsg)
-	if ok {
-		switch keyMsg.Type {
-		case tea.KeyEscape:
-			m.Close()
-			return m, nil
-		case tea.KeyUp:
-			if m.cursor > 0 {
-				m.cursor--
-			}
-			return m, nil
-		case tea.KeyDown:
-			if m.cursor < len(m.filtered)-1 {
-				m.cursor++
-			}
-			return m, nil
-		case tea.KeyEnter:
-			if len(m.filtered) > 0 && m.cursor < len(m.filtered) {
-				tag := m.filtered[m.cursor]
-				applied := m.postTags[tag.ID]
-				// Toggle
-				if applied {
-					m.postTags[tag.ID] = false
-				} else {
-					m.postTags[tag.ID] = true
-				}
-				postID := m.postID
-				return m, func() tea.Msg {
-					return TagToggledMsg{
-						PostID:  postID,
-						TagID:   tag.ID,
-						TagName: tag.Name,
-						Applied: !applied,
-					}
-				}
-			}
-			return m, nil
-		case tea.KeyCtrlT:
-			m.private = !m.private
-			return m, nil
-		case tea.KeyCtrlN:
-			name := strings.TrimSpace(m.input.Value())
-			if name != "" {
-				postID, private := m.postID, m.private
-				m.input.Reset()
-				m.filter()
-				return m, func() tea.Msg {
-					return TagCreateRequestMsg{Name: name, PostID: postID, Private: private}
-				}
-			}
-			return m, nil
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		if next, cmd, handled := m.handleKey(keyMsg); handled {
+			return next, cmd
 		}
 	}
 
@@ -189,6 +141,72 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	m.input, cmd = m.input.Update(msg)
 	m.filter()
 	return m, cmd
+}
+
+// handleKey handles the keys the picker itself uses, and reports whether
+// msg was one of them; the rest go to the filter input.
+func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	switch msg.Type {
+	case tea.KeyEscape:
+		m.Close()
+		return m, nil, true
+	case tea.KeyUp:
+		if m.cursor > 0 {
+			m.cursor--
+		}
+		return m, nil, true
+	case tea.KeyDown:
+		if m.cursor < len(m.filtered)-1 {
+			m.cursor++
+		}
+		return m, nil, true
+	case tea.KeyEnter:
+		return m, m.toggleCursor(), true
+	case tea.KeyCtrlT:
+		m.private = !m.private
+		return m, nil, true
+	case tea.KeyCtrlN:
+		return m, m.requestCreate(), true
+	}
+	return m, nil, false
+}
+
+// toggleCursor applies or removes the tag under the cursor.
+func (m *Model) toggleCursor() tea.Cmd {
+	if len(m.filtered) == 0 || m.cursor >= len(m.filtered) {
+		return nil
+	}
+	tag := m.filtered[m.cursor]
+	applied := m.postTags[tag.ID]
+	// Toggle
+	if applied {
+		m.postTags[tag.ID] = false
+	} else {
+		m.postTags[tag.ID] = true
+	}
+	postID := m.postID
+	return func() tea.Msg {
+		return TagToggledMsg{
+			PostID:  postID,
+			TagID:   tag.ID,
+			TagName: tag.Name,
+			Applied: !applied,
+		}
+	}
+}
+
+// requestCreate asks for a new tag named by the input.
+func (m *Model) requestCreate() tea.Cmd {
+	name := strings.TrimSpace(m.input.Value())
+	if name == "" {
+		return nil
+	}
+	postID, private := m.postID, m.private
+	m.input.Reset()
+	m.filter()
+	return func() tea.Msg {
+		return TagCreateRequestMsg{Name: name, PostID: postID, Private: private}
+	}
 }
 
 // View renders the tag picker overlay.

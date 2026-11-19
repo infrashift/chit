@@ -68,90 +68,89 @@ type Styles struct {
 
 // New creates Styles from a Theme.
 func New(t theme.Theme) Styles {
+	var s Styles
+	s.setPanes(t)
+	s.setText(t)
+	s.setBadges(t)
+	s.setHighlights(t)
+	s.MarkdownStyleConfig = markdown.StyleConfig(t)
+	return s
+}
+
+// setPanes styles the bordered panes and overlays and the bar.
+func (s *Styles) setPanes(t theme.Theme) {
 	base := lipgloss.NewStyle()
 	rounded := base.BorderStyle(lipgloss.RoundedBorder())
 	double := base.BorderStyle(lipgloss.DoubleBorder())
 
-	return Styles{
-		ListItem: fg(base, t.Foreground).
-			Padding(0, 1),
+	s.Viewport = border(rounded, t.Border).
+		Padding(0, 1)
+	s.Input = border(rounded, t.Border).
+		Padding(0, 1)
+	s.ThreadPanel = border(rounded, t.Border).
+		Padding(0, 1)
+	s.CmdPalette = border(double, t.Accent).
+		Padding(1, 2)
+	s.StatusBar = fg(bg(base, t.Highlight), t.Subtle).
+		Padding(0, 1)
+	s.BarButton = fg(bg(base, t.Highlight), t.Accent).
+		Bold(true)
+	s.ActiveBorder = border(rounded, t.ActiveBorder)
+	s.AutocompletePanel = border(double, t.Accent).
+		Padding(0, 1)
+	s.ReplyIndent = border(base.
+		BorderStyle(lipgloss.ThickBorder()).
+		BorderLeft(true).
+		BorderTop(false).
+		BorderRight(false).
+		BorderBottom(false), t.Subtle).
+		PaddingLeft(1)
+}
 
-		ListItemActive: fg(base, t.ChannelActive).
-			Bold(true).
-			Padding(0, 1),
+// setText styles list items, names and other text.
+func (s *Styles) setText(t theme.Theme) {
+	base := lipgloss.NewStyle()
 
-		Viewport: border(rounded, t.Border).
-			Padding(0, 1),
+	s.ListItem = fg(base, t.Foreground).
+		Padding(0, 1)
+	s.ListItemActive = fg(base, t.ChannelActive).
+		Bold(true).
+		Padding(0, 1)
+	s.Username = fg(base, t.Username).
+		Bold(true)
+	s.Timestamp = fg(base, t.Timestamp)
+	s.ErrorText = fg(base, t.Error)
+	s.AutocompleteItem = fg(base, t.Foreground)
+	s.AutocompleteActive = fg(base, t.ChannelActive).
+		Bold(true)
+	s.DaySeparator = fg(base, t.Muted)
+}
 
-		Input: border(rounded, t.Border).
-			Padding(0, 1),
+// setBadges styles the badges and mention markers.
+func (s *Styles) setBadges(t theme.Theme) {
+	base := lipgloss.NewStyle()
 
-		ThreadPanel: border(rounded, t.Border).
-			Padding(0, 1),
+	s.UnreadBadge = fg(base, t.UnreadBadge).
+		Bold(true)
+	s.PinBadge = fg(base, t.PinBadge)
+	s.MentionBadge = fg(base, t.MentionBadge).
+		Bold(true)
+	s.MentionText = fg(base, t.MentionText).
+		Bold(true)
+	s.MentionSelfHighlight = fg(bg(base, t.MentionSelfBg), t.Foreground).
+		Bold(true)
+	s.TagBadge = fg(base, t.TagBadge).
+		Bold(true)
+}
 
-		CmdPalette: border(double, t.Accent).
-			Padding(1, 2),
+// setHighlights styles selections and search matches.
+func (s *Styles) setHighlights(t theme.Theme) {
+	base := lipgloss.NewStyle()
 
-		StatusBar: fg(bg(base, t.Highlight), t.Subtle).
-			Padding(0, 1),
-
-		BarButton: fg(bg(base, t.Highlight), t.Accent).
-			Bold(true),
-
-		Username: fg(base, t.Username).
-			Bold(true),
-
-		Timestamp: fg(base, t.Timestamp),
-
-		UnreadBadge: fg(base, t.UnreadBadge).
-			Bold(true),
-
-		PinBadge: fg(base, t.PinBadge),
-
-		ErrorText: fg(base, t.Error),
-
-		ActiveBorder: border(rounded, t.ActiveBorder),
-
-		MentionBadge: fg(base, t.MentionBadge).
-			Bold(true),
-
-		MentionText: fg(base, t.MentionText).
-			Bold(true),
-
-		MentionSelfHighlight: fg(bg(base, t.MentionSelfBg), t.Foreground).
-			Bold(true),
-
-		AutocompletePanel: border(double, t.Accent).
-			Padding(0, 1),
-
-		AutocompleteItem: fg(base, t.Foreground),
-
-		AutocompleteActive: fg(base, t.ChannelActive).
-			Bold(true),
-
-		SelectedPost: bg(base, t.Highlight).
-			Padding(0, 1),
-
-		ReplyIndent: border(base.
-			BorderStyle(lipgloss.ThickBorder()).
-			BorderLeft(true).
-			BorderTop(false).
-			BorderRight(false).
-			BorderBottom(false), t.Subtle).
-			PaddingLeft(1),
-
-		TagBadge: fg(base, t.TagBadge).
-			Bold(true),
-
-		DaySeparator: fg(base, t.Muted),
-
-		Selection: bg(base, t.Selection),
-
-		SearchMatch: bg(base, t.SearchMatch),
-
-		SearchMatchActive: fg(bg(base, t.SearchMatchActive), t.Foreground).
-			Bold(true),
-
-		MarkdownStyleConfig: markdown.StyleConfig(t),
-	}
+	s.SelectedPost = bg(base, t.Highlight).
+		Padding(0, 1)
+	s.Selection = bg(base, t.Selection)
+	s.SearchMatch = bg(base, t.SearchMatch)
+	s.SearchMatchActive = fg(bg(base, t.SearchMatchActive), t.Foreground).
+		Bold(true)
 }

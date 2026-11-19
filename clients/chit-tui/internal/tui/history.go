@@ -290,26 +290,33 @@ func (m Model) handleSearchHit(msg palette.PostChosenMsg) (tea.Model, tea.Cmd) {
 	// Jumping to the hit is the point of searching; previously this only
 	// moved focus and left the reader wherever they already were.
 	cmd := m.setFocus(FocusViewport)
-	if msg.Post != nil {
-		// A result from another channel needs that channel opened first;
-		// the post is not in the loaded history until it is.
-		if msg.Post.ChannelID != "" &&
-			(m.activeChan == nil || msg.Post.ChannelID != m.activeChan.ID) {
-			if ch := m.channelByID(msg.Post.ChannelID); ch != nil {
-				open := m.selectChannel(ch)
-				// The hit is selected once the channel's history arrives.
-				m.pendingJumpID = msg.Post.ID
-				return m, tea.Batch(cmd, open, m.setError(errSearchHitElsewhere()))
-			}
-		}
-		m.viewport.SetSearchTerm(m.searchTerm)
-		if !m.viewport.ScrollToPost(msg.Post.ID) {
-			// The hit is older than the posts held in memory. Say so
-			// rather than silently doing nothing.
-			return m, tea.Batch(cmd, m.setError(errSearchHitNotLoaded()))
-		}
+	if msg.Post == nil {
+		return m, cmd
+	}
+	// A result from another channel needs that channel opened first;
+	// the post is not in the loaded history until it is.
+	if ch := m.hitChannelToOpen(msg.Post); ch != nil {
+		open := m.selectChannel(ch)
+		// The hit is selected once the channel's history arrives.
+		m.pendingJumpID = msg.Post.ID
+		return m, tea.Batch(cmd, open, m.setError(errSearchHitElsewhere()))
+	}
+	m.viewport.SetSearchTerm(m.searchTerm)
+	if !m.viewport.ScrollToPost(msg.Post.ID) {
+		// The hit is older than the posts held in memory. Say so
+		// rather than silently doing nothing.
+		return m, tea.Batch(cmd, m.setError(errSearchHitNotLoaded()))
 	}
 	return m, cmd
+}
+
+// hitChannelToOpen is the known channel a search hit is in, when that is
+// not the open one; nil otherwise.
+func (m Model) hitChannelToOpen(p *model.Post) *model.Channel {
+	if p.ChannelID == "" || (m.activeChan != nil && p.ChannelID == m.activeChan.ID) {
+		return nil
+	}
+	return m.channelByID(p.ChannelID)
 }
 
 // handleSearchSubmit runs a message search, in this channel or everywhere.
@@ -332,4 +339,48 @@ func (m Model) handleSearchSubmit(msg palette.SearchSubmitMsg) (tea.Model, tea.C
 		cmds = append(cmds, SearchPosts(m.reqCtx(), m.client, m.activeChan.ID, term, tagIDs))
 	}
 	return m, tea.Batch(cmds...)
+}
+
+func (m Model) handleSearchResults(msg SearchResultsMsg) (tea.Model, tea.Cmd) {
+	if msg.Term != m.searchTerm {
+		return m, nil // superseded by a later search
+	}
+	if msg.Err != nil {
+		return m, m.setError(msg.Err)
+	}
+	if msg.Posts != nil {
+		m.palette.SetUsernames(m.usernameMap())
+		m.palette.SetSearchResults(msg.Posts.Order)
+	}
+	return m, nil
+}
+
+func (m Model) handlePostPinned(msg PostPinnedMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		return m, m.setError(msg.Err)
+	}
+	// Shown now rather than on the WebSocket echo, which never comes
+	// with the socket down; the echo then changes nothing.
+	m.viewport.SetPinned(msg.PostID, msg.Pinned)
+	return m, nil
+}
+
+func (m Model) handlePostEdited(msg PostEditedMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		return m, m.setError(msg.Err)
+	}
+	if msg.Post != nil {
+		m.viewport.UpdatePost(msg.Post)
+		m.thread.UpdatePost(msg.Post)
+	}
+	return m, nil
+}
+
+func (m Model) handlePostDeleted(msg PostDeletedMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		return m, m.setError(msg.Err)
+	}
+	m.viewport.RemovePost(msg.PostID)
+	m.thread.RemoveReply(msg.PostID)
+	return m, nil
 }

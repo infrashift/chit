@@ -31,12 +31,8 @@ func AuthExtract(a *app.App) func(http.Handler) http.Handler {
 	routeList := onBehalfOfRouteList(routes)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if secret := a.Config.TrustedProxySecret; secret != "" {
-				presented := r.Header.Get("X-Proxy-Secret")
-				if subtle.ConstantTimeCompare([]byte(presented), []byte(secret)) != 1 {
-					WriteError(w, model.NewUnauthorizedError("AuthExtract", "invalid proxy credentials"))
-					return
-				}
+			if !checkProxySecret(a, w, r) {
+				return
 			}
 
 			// A machine actor authenticated by client-credentials wins over
@@ -44,61 +40,91 @@ func AuthExtract(a *app.App) func(http.Handler) http.Handler {
 			// request and blanks the other, so honouring the client header
 			// first means a forged X-User-Id cannot ride along with a
 			// legitimately introspected token.
+			var ok bool
 			if clientID := r.Header.Get(a.Config.TrustedClientHeader); clientID != "" {
-				user, err := a.ResolveOAuthClient(r.Context(), clientID)
-				if err != nil {
-					slog.Warn("auth: unknown oauth client", "client_id", clientID, "error", err)
-					WriteError(w, model.NewUnauthorizedError("AuthExtract", "unknown oauth client"))
-					return
-				}
-				if principalID, ok := onBehalfOf(r); ok {
-					if !onBehalfOfRoute(routes, r) {
-						WriteError(w, model.NewBadRequestError("AuthExtract",
-							OnBehalfOfHeader+" is accepted only on "+routeList))
-						return
-					}
-					principal, err := a.ResolvePrincipal(r.Context(), user, principalID)
-					if err != nil {
-						slog.Warn("auth: on-behalf-of refused", "client_id", clientID, "principal_id", principalID, "error", err)
-						WriteAppError(w, "AuthExtract", err)
-						return
-					}
-					// Authorized as the person from here on; the client is
-					// kept beside them for the record.
-					r = ContextSetActor(ContextSetUser(r, principal), user)
-					next.ServeHTTP(w, r)
-					return
-				}
-				r = ContextSetUser(r, user)
+				r, ok = authenticateClient(a, routes, routeList, w, r, clientID)
+			} else {
+				r, ok = authenticatePerson(a, w, r)
+			}
+			if ok {
 				next.ServeHTTP(w, r)
-				return
 			}
-
-			// A person's session never acts for somebody else. Refused rather
-			// than ignored, so a caller that meant it learns it did not happen.
-			if _, ok := onBehalfOf(r); ok {
-				WriteError(w, model.NewForbiddenError("AuthExtract",
-					OnBehalfOfHeader+" is only for allowlisted OAuth2 clients"))
-				return
-			}
-
-			kratosID := r.Header.Get(a.Config.TrustedProxyHeader)
-			if kratosID == "" {
-				WriteError(w, model.NewUnauthorizedError("AuthExtract", "missing authentication header"))
-				return
-			}
-
-			user, err := a.ProvisionUser(r.Context(), kratosID)
-			if err != nil {
-				slog.Error("auth: failed to provision user", "kratos_id", kratosID, "error", err)
-				WriteAppError(w, "AuthExtract", err)
-				return
-			}
-
-			r = ContextSetUser(r, user)
-			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// checkProxySecret answers 401 and returns false when
+// CHIT_TRUSTED_PROXY_SECRET is set and the request does not present it.
+func checkProxySecret(a *app.App, w http.ResponseWriter, r *http.Request) bool {
+	secret := a.Config.TrustedProxySecret
+	if secret == "" {
+		return true
+	}
+	presented := r.Header.Get("X-Proxy-Secret")
+	if subtle.ConstantTimeCompare([]byte(presented), []byte(secret)) != 1 {
+		WriteError(w, model.NewUnauthorizedError("AuthExtract", "invalid proxy credentials"))
+		return false
+	}
+	return true
+}
+
+// authenticateClient resolves the machine actor behind an OAuth2 client ID,
+// and the person it acts for when X-On-Behalf-Of is present. It returns the
+// request carrying them, or false once it has written the error response.
+func authenticateClient(a *app.App, routes []onBehalfOfRouteSpec, routeList string,
+	w http.ResponseWriter, r *http.Request, clientID string,
+) (*http.Request, bool) {
+	user, err := a.ResolveOAuthClient(r.Context(), clientID)
+	if err != nil {
+		slog.Warn("auth: unknown oauth client", "client_id", clientID, "error", err)
+		WriteError(w, model.NewUnauthorizedError("AuthExtract", "unknown oauth client"))
+		return r, false
+	}
+	principalID, ok := onBehalfOf(r)
+	if !ok {
+		return ContextSetUser(r, user), true
+	}
+	if !onBehalfOfRoute(routes, r) {
+		WriteError(w, model.NewBadRequestError("AuthExtract",
+			OnBehalfOfHeader+" is accepted only on "+routeList))
+		return r, false
+	}
+	principal, err := a.ResolvePrincipal(r.Context(), user, principalID)
+	if err != nil {
+		slog.Warn("auth: on-behalf-of refused", "client_id", clientID, "principal_id", principalID, "error", err)
+		WriteAppError(w, "AuthExtract", err)
+		return r, false
+	}
+	// Authorized as the person from here on; the client is
+	// kept beside them for the record.
+	return ContextSetActor(ContextSetUser(r, principal), user), true
+}
+
+// authenticatePerson provisions or retrieves the local user named by the
+// Kratos header. It returns the request carrying the user, or false once it
+// has written the error response.
+func authenticatePerson(a *app.App, w http.ResponseWriter, r *http.Request) (*http.Request, bool) {
+	// A person's session never acts for somebody else. Refused rather
+	// than ignored, so a caller that meant it learns it did not happen.
+	if _, ok := onBehalfOf(r); ok {
+		WriteError(w, model.NewForbiddenError("AuthExtract",
+			OnBehalfOfHeader+" is only for allowlisted OAuth2 clients"))
+		return r, false
+	}
+
+	kratosID := r.Header.Get(a.Config.TrustedProxyHeader)
+	if kratosID == "" {
+		WriteError(w, model.NewUnauthorizedError("AuthExtract", "missing authentication header"))
+		return r, false
+	}
+
+	user, err := a.ProvisionUser(r.Context(), kratosID)
+	if err != nil {
+		slog.Error("auth: failed to provision user", "kratos_id", kratosID, "error", err)
+		WriteAppError(w, "AuthExtract", err)
+		return r, false
+	}
+	return ContextSetUser(r, user), true
 }
 
 // OnBehalfOfHeader names the person an allowlisted OAuth2 client acts for.

@@ -87,6 +87,21 @@ func TestRoutes_MatchTheOpenAPISpec(t *testing.T) {
 	a, _, cleanup := setupTestApp(t)
 	defer cleanup()
 
+	declared := declaredOperations(t)
+	served := servedOperations(t, New(a), declared)
+
+	// And the other way: an operation the spec documents must exist.
+	for op := range declared {
+		if !served[op] {
+			t.Errorf("api/openapi.yaml documents %s, which the router does not serve", op)
+		}
+	}
+}
+
+// declaredOperations returns the method+path pairs the spec declares,
+// normalized for comparison.
+func declaredOperations(t *testing.T) map[string]bool {
+	t.Helper()
 	var spec struct {
 		Paths map[string]map[string]any `yaml:"paths"`
 	}
@@ -94,7 +109,6 @@ func TestRoutes_MatchTheOpenAPISpec(t *testing.T) {
 		t.Fatalf("parse openapi.yaml: %v", err)
 	}
 
-	// method+path pairs the spec declares, normalized for comparison.
 	declared := map[string]bool{}
 	httpMethods := map[string]bool{"get": true, "put": true, "post": true, "delete": true, "patch": true, "head": true, "options": true}
 	for path, ops := range spec.Paths {
@@ -105,7 +119,13 @@ func TestRoutes_MatchTheOpenAPISpec(t *testing.T) {
 			}
 		}
 	}
+	return declared
+}
 
+// servedOperations returns the normalized method+path pairs the router
+// serves, and reports each one absent from declared.
+func servedOperations(t *testing.T, router http.Handler, declared map[string]bool) map[string]bool {
+	t.Helper()
 	// Routes that exist to serve the docs and the spec itself are not part of
 	// the described API and are not expected to appear in it.
 	skip := map[string]bool{
@@ -115,7 +135,7 @@ func TestRoutes_MatchTheOpenAPISpec(t *testing.T) {
 	}
 
 	served := map[string]bool{}
-	for _, r := range registeredRoutes(t, New(a)) {
+	for _, r := range registeredRoutes(t, router) {
 		method, route, ok := strings.Cut(r, " ")
 		if !ok {
 			continue
@@ -134,13 +154,7 @@ func TestRoutes_MatchTheOpenAPISpec(t *testing.T) {
 				"so the request validator will reject it", method, p)
 		}
 	}
-
-	// And the other way: an operation the spec documents must exist.
-	for op := range declared {
-		if !served[op] {
-			t.Errorf("api/openapi.yaml documents %s, which the router does not serve", op)
-		}
-	}
+	return served
 }
 
 // An empty origin allowlist admits no browser origin. CORS used to fall back

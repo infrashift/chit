@@ -10,7 +10,7 @@ import (
 // StyleConfig builds a glamour ansi.StyleConfig derived from the active theme
 // so that all markdown elements render in colors matching the selected theme.
 func StyleConfig(t theme.Theme) ansi.StyleConfig {
-	return ansi.StyleConfig{
+	cfg := ansi.StyleConfig{
 		Document: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
 				BlockPrefix: "\n",
@@ -25,95 +25,6 @@ func StyleConfig(t theme.Theme) ansi.StyleConfig {
 		},
 		List: ansi.StyleList{
 			LevelIndent: 2,
-		},
-		Heading: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				BlockSuffix: "\n",
-				Color:       colorStr(t.Username),
-				Bold:        boolPtr(true),
-			},
-		},
-		H1: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				Prefix: "# ",
-				Color:  colorStr(t.Username),
-				Bold:   boolPtr(true),
-			},
-		},
-		H2: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				Prefix: "## ",
-				Color:  colorStr(t.Warning),
-				Bold:   boolPtr(true),
-			},
-		},
-		H3: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				Prefix: "### ",
-				Color:  colorStr(t.Success),
-				Bold:   boolPtr(true),
-			},
-		},
-		H4: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				Prefix: "#### ",
-				Color:  colorStr(t.Accent),
-				Bold:   boolPtr(true),
-			},
-		},
-		H5: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				Prefix: "##### ",
-				Color:  colorStr(t.Subtle),
-				Bold:   boolPtr(true),
-			},
-		},
-		H6: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{
-				Prefix: "###### ",
-				Color:  colorStr(t.Muted),
-				Bold:   boolPtr(false),
-			},
-		},
-		Strikethrough: ansi.StylePrimitive{
-			CrossedOut: boolPtr(true),
-		},
-		Emph: ansi.StylePrimitive{
-			Italic: boolPtr(true),
-		},
-		Strong: ansi.StylePrimitive{
-			Bold: boolPtr(true),
-		},
-		HorizontalRule: ansi.StylePrimitive{
-			Color:  colorStr(t.Subtle),
-			Format: "\n--------\n",
-		},
-		Item: ansi.StylePrimitive{
-			BlockPrefix: "• ",
-		},
-		Enumeration: ansi.StylePrimitive{
-			BlockPrefix: ". ",
-			Color:       colorStr(t.Accent),
-		},
-		Task: ansi.StyleTask{
-			Ticked:   "[✓] ",
-			Unticked: "[ ] ",
-		},
-		Link: ansi.StylePrimitive{
-			Color:     colorStr(t.Accent),
-			Underline: boolPtr(true),
-		},
-		LinkText: ansi.StylePrimitive{
-			Color: colorStr(t.Accent),
-			Bold:  boolPtr(true),
-		},
-		Image: ansi.StylePrimitive{
-			Color:     colorStr(t.Accent),
-			Underline: boolPtr(true),
-		},
-		ImageText: ansi.StylePrimitive{
-			Color:  colorStr(t.Subtle),
-			Format: "Image: {{.text}} →",
 		},
 		Code: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
@@ -130,94 +41,151 @@ func StyleConfig(t theme.Theme) ansi.StyleConfig {
 				},
 				Margin: uintPtr(2),
 			},
-			Chroma: &ansi.Chroma{
-				Text: ansi.StylePrimitive{
-					Color: colorStr(t.Foreground),
-				},
-				Error: ansi.StylePrimitive{
-					Color: colorStr(t.Error),
-				},
-				Comment: ansi.StylePrimitive{
-					Color: colorStr(t.Subtle),
-				},
-				CommentPreproc: ansi.StylePrimitive{
-					Color: colorStr(t.Warning),
-				},
-				Keyword: ansi.StylePrimitive{
-					Color: colorStr(t.Accent),
-				},
-				KeywordReserved: ansi.StylePrimitive{
-					Color: colorStr(t.Accent),
-				},
-				KeywordNamespace: ansi.StylePrimitive{
-					Color: colorStr(t.Accent),
-				},
-				KeywordType: ansi.StylePrimitive{
-					Color: colorStr(t.Username),
-				},
-				Operator: ansi.StylePrimitive{
-					Color: colorStr(t.Error),
-				},
-				Punctuation: ansi.StylePrimitive{
-					Color: colorStr(t.Foreground),
-				},
-				Name: ansi.StylePrimitive{
-					Color: colorStr(t.Foreground),
-				},
-				NameBuiltin: ansi.StylePrimitive{
-					Color: colorStr(t.Accent),
-				},
-				NameTag: ansi.StylePrimitive{
-					Color: colorStr(t.Username),
-				},
-				NameAttribute: ansi.StylePrimitive{
-					Color: colorStr(t.Accent),
-				},
-				NameClass: ansi.StylePrimitive{
-					Color:     colorStr(t.Username),
-					Underline: boolPtr(true),
-					Bold:      boolPtr(true),
-				},
-				NameDecorator: ansi.StylePrimitive{
-					Color: colorStr(t.Warning),
-				},
-				NameFunction: ansi.StylePrimitive{
-					Color: colorStr(t.Success),
-				},
-				LiteralNumber: ansi.StylePrimitive{
-					Color: colorStr(t.Success),
-				},
-				LiteralString: ansi.StylePrimitive{
-					Color: colorStr(t.Warning),
-				},
-				LiteralStringEscape: ansi.StylePrimitive{
-					Color: colorStr(t.Success),
-				},
-				GenericDeleted: ansi.StylePrimitive{
-					Color: colorStr(t.Error),
-				},
-				GenericEmph: ansi.StylePrimitive{
-					Italic: boolPtr(true),
-				},
-				GenericInserted: ansi.StylePrimitive{
-					Color: colorStr(t.Success),
-				},
-				GenericStrong: ansi.StylePrimitive{
-					Bold: boolPtr(true),
-				},
-				GenericSubheading: ansi.StylePrimitive{
-					Color: colorStr(t.Subtle),
-				},
-				Background: ansi.StylePrimitive{
-					BackgroundColor: colorStr(t.Background),
-				},
-			},
+			Chroma: chroma(t),
 		},
 		Table: ansi.StyleTable{},
 		DefinitionDescription: ansi.StylePrimitive{
 			BlockPrefix: "\n🠶 ",
 		},
 	}
+	setHeadings(&cfg, t)
+	setInlines(&cfg, t)
+	setLists(&cfg, t)
+	return cfg
+}
+
+// heading styles a heading level: its marker, color and weight.
+func heading(prefix string, c color.Color, bold bool) ansi.StyleBlock {
+	return ansi.StyleBlock{
+		StylePrimitive: ansi.StylePrimitive{
+			Prefix: prefix,
+			Color:  colorStr(c),
+			Bold:   boolPtr(bold),
+		},
+	}
+}
+
+// setHeadings styles the headings, each level in its own color.
+func setHeadings(cfg *ansi.StyleConfig, t theme.Theme) {
+	cfg.Heading = ansi.StyleBlock{
+		StylePrimitive: ansi.StylePrimitive{
+			BlockSuffix: "\n",
+			Color:       colorStr(t.Username),
+			Bold:        boolPtr(true),
+		},
+	}
+	cfg.H1 = heading("# ", t.Username, true)
+	cfg.H2 = heading("## ", t.Warning, true)
+	cfg.H3 = heading("### ", t.Success, true)
+	cfg.H4 = heading("#### ", t.Accent, true)
+	cfg.H5 = heading("##### ", t.Subtle, true)
+	cfg.H6 = heading("###### ", t.Muted, false)
+}
+
+// setInlines styles emphasis, rules, links and images.
+func setInlines(cfg *ansi.StyleConfig, t theme.Theme) {
+	cfg.Strikethrough = ansi.StylePrimitive{
+		CrossedOut: boolPtr(true),
+	}
+	cfg.Emph = ansi.StylePrimitive{
+		Italic: boolPtr(true),
+	}
+	cfg.Strong = ansi.StylePrimitive{
+		Bold: boolPtr(true),
+	}
+	cfg.HorizontalRule = ansi.StylePrimitive{
+		Color:  colorStr(t.Subtle),
+		Format: "\n--------\n",
+	}
+	cfg.Link = ansi.StylePrimitive{
+		Color:     colorStr(t.Accent),
+		Underline: boolPtr(true),
+	}
+	cfg.LinkText = ansi.StylePrimitive{
+		Color: colorStr(t.Accent),
+		Bold:  boolPtr(true),
+	}
+	cfg.Image = ansi.StylePrimitive{
+		Color:     colorStr(t.Accent),
+		Underline: boolPtr(true),
+	}
+	cfg.ImageText = ansi.StylePrimitive{
+		Color:  colorStr(t.Subtle),
+		Format: "Image: {{.text}} →",
+	}
+}
+
+// setLists styles list items, numbering and task boxes.
+func setLists(cfg *ansi.StyleConfig, t theme.Theme) {
+	cfg.Item = ansi.StylePrimitive{
+		BlockPrefix: "• ",
+	}
+	cfg.Enumeration = ansi.StylePrimitive{
+		BlockPrefix: ". ",
+		Color:       colorStr(t.Accent),
+	}
+	cfg.Task = ansi.StyleTask{
+		Ticked:   "[✓] ",
+		Unticked: "[ ] ",
+	}
+}
+
+// fgColor is a primitive that sets only the foreground color.
+func fgColor(c color.Color) ansi.StylePrimitive {
+	return ansi.StylePrimitive{Color: colorStr(c)}
+}
+
+// chroma styles syntax highlighting in code blocks.
+func chroma(t theme.Theme) *ansi.Chroma {
+	c := &ansi.Chroma{
+		Text:             fgColor(t.Foreground),
+		Error:            fgColor(t.Error),
+		Comment:          fgColor(t.Subtle),
+		CommentPreproc:   fgColor(t.Warning),
+		Keyword:          fgColor(t.Accent),
+		KeywordReserved:  fgColor(t.Accent),
+		KeywordNamespace: fgColor(t.Accent),
+		KeywordType:      fgColor(t.Username),
+		Operator:         fgColor(t.Error),
+		Punctuation:      fgColor(t.Foreground),
+		Background: ansi.StylePrimitive{
+			BackgroundColor: colorStr(t.Background),
+		},
+	}
+	setChromaNames(c, t)
+	setChromaLiterals(c, t)
+	return c
+}
+
+// setChromaNames styles identifiers: names, tags, classes and functions.
+func setChromaNames(c *ansi.Chroma, t theme.Theme) {
+	c.Name = fgColor(t.Foreground)
+	c.NameBuiltin = fgColor(t.Accent)
+	c.NameTag = fgColor(t.Username)
+	c.NameAttribute = fgColor(t.Accent)
+	c.NameClass = ansi.StylePrimitive{
+		Color:     colorStr(t.Username),
+		Underline: boolPtr(true),
+		Bold:      boolPtr(true),
+	}
+	c.NameDecorator = fgColor(t.Warning)
+	c.NameFunction = fgColor(t.Success)
+}
+
+// setChromaLiterals styles literals and diff-style generic tokens.
+func setChromaLiterals(c *ansi.Chroma, t theme.Theme) {
+	c.LiteralNumber = fgColor(t.Success)
+	c.LiteralString = fgColor(t.Warning)
+	c.LiteralStringEscape = fgColor(t.Success)
+	c.GenericDeleted = fgColor(t.Error)
+	c.GenericEmph = ansi.StylePrimitive{
+		Italic: boolPtr(true),
+	}
+	c.GenericInserted = fgColor(t.Success)
+	c.GenericStrong = ansi.StylePrimitive{
+		Bold: boolPtr(true),
+	}
+	c.GenericSubheading = fgColor(t.Subtle)
 }
 
 // colorStr renders a theme color as the hex string glamour expects. Colors with

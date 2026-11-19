@@ -418,28 +418,8 @@ func (c *Client) Listen(ctx context.Context, h EventHandler) {
 	backoff := time.Second
 
 	for ctx.Err() == nil {
-		headers, err := c.authHeaders()
+		conn, err := c.dialWebsocket(ctx, wsURL, backoff)
 		if err != nil {
-			// A token fetch failure is usually transient (Hydra restarting,
-			// clock skew); back off and retry rather than exiting the loop.
-			slog.Info("websocket auth failed, retrying", "error", err, "backoff", backoff)
-			select {
-			case <-time.After(backoff):
-			case <-ctx.Done():
-				return
-			}
-			if backoff < 30*time.Second {
-				backoff *= 2
-			}
-			continue
-		}
-
-		conn, resp, err := websocket.DefaultDialer.DialContext(ctx, wsURL, headers)
-		if resp != nil && resp.Body != nil {
-			errlog.Debug(resp.Body.Close(), "close websocket handshake response body")
-		}
-		if err != nil {
-			slog.Info("websocket connect failed, retrying", "error", err, "backoff", backoff)
 			select {
 			case <-time.After(backoff):
 			case <-ctx.Done():
@@ -452,32 +432,59 @@ func (c *Client) Listen(ctx context.Context, h EventHandler) {
 		}
 		backoff = time.Second
 		slog.Info("websocket connected", "url", wsURL)
-
-		// Close the connection when ctx is cancelled so ReadMessage unblocks.
-		done := make(chan struct{})
-		go func() {
-			select {
-			case <-ctx.Done():
-				errlog.Close(conn, "websocket connection on shutdown")
-			case <-done:
-			}
-		}()
-
-		// The loop ends when a read fails: on a lost connection, or when
-		// the goroutine above closes conn on shutdown (Power of 10 rule 2).
-		_, message, err := conn.ReadMessage()
-		for ; err == nil; _, message, err = conn.ReadMessage() {
-			var event model.WebSocketEvent
-			if decodeErr := json.Unmarshal(message, &event); decodeErr != nil {
-				slog.Info("invalid websocket event", "error", decodeErr)
-				continue
-			}
-			h.HandleEvent(&event)
-		}
-		if ctx.Err() == nil {
-			slog.Info("websocket read failed, reconnecting", "error", err)
-		}
-		close(done)
-		errlog.Close(conn, "websocket connection")
+		readEvents(ctx, conn, h)
 	}
+}
+
+// dialWebsocket opens the WebSocket at wsURL, logging a failure along with
+// the backoff before the next attempt.
+func (c *Client) dialWebsocket(ctx context.Context, wsURL string, backoff time.Duration) (*websocket.Conn, error) {
+	headers, err := c.authHeaders()
+	if err != nil {
+		// A token fetch failure is usually transient (Hydra restarting,
+		// clock skew); back off and retry rather than exiting the loop.
+		slog.Info("websocket auth failed, retrying", "error", err, "backoff", backoff)
+		return nil, err
+	}
+
+	conn, resp, err := websocket.DefaultDialer.DialContext(ctx, wsURL, headers)
+	if resp != nil && resp.Body != nil {
+		errlog.Debug(resp.Body.Close(), "close websocket handshake response body")
+	}
+	if err != nil {
+		slog.Info("websocket connect failed, retrying", "error", err, "backoff", backoff)
+		return nil, err
+	}
+	return conn, nil
+}
+
+// readEvents passes each event read from conn to h until a read fails, then
+// closes conn.
+func readEvents(ctx context.Context, conn *websocket.Conn, h EventHandler) {
+	// Close the connection when ctx is cancelled so ReadMessage unblocks.
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			errlog.Close(conn, "websocket connection on shutdown")
+		case <-done:
+		}
+	}()
+
+	// The loop ends when a read fails: on a lost connection, or when
+	// the goroutine above closes conn on shutdown (Power of 10 rule 2).
+	_, message, err := conn.ReadMessage()
+	for ; err == nil; _, message, err = conn.ReadMessage() {
+		var event model.WebSocketEvent
+		if decodeErr := json.Unmarshal(message, &event); decodeErr != nil {
+			slog.Info("invalid websocket event", "error", decodeErr)
+			continue
+		}
+		h.HandleEvent(&event)
+	}
+	if ctx.Err() == nil {
+		slog.Info("websocket read failed, reconnecting", "error", err)
+	}
+	close(done)
+	errlog.Close(conn, "websocket connection")
 }

@@ -646,16 +646,18 @@ func TestClient_GivesUpOnAServerThatNeverAnswers(t *testing.T) {
 	}
 }
 
-// Each call reaches the endpoint the server serves it on, with the body the
-// server expects. These had no test at all.
-func TestClient_Endpoints(t *testing.T) {
-	tests := []struct {
-		name     string
-		route    string // "METHOD path", as http.ServeMux patterns write it
-		reply    any
-		call     func(api.ChitClient) error
-		wantBody string // JSON the request must carry; "" for none
-	}{
+// endpointCase is a client call, the route it must reach and what it sends.
+type endpointCase struct {
+	name     string
+	route    string // "METHOD path", as http.ServeMux patterns write it
+	reply    any
+	call     func(api.ChitClient) error
+	wantBody string // JSON the request must carry; "" for none
+}
+
+// threadAndPostEndpointCases cover the thread, search and post calls.
+func threadAndPostEndpointCases() []endpointCase {
+	return []endpointCase{
 		{
 			name:  "threads",
 			route: "GET /api/v1/users/me/teams/t1/threads",
@@ -706,6 +708,12 @@ func TestClient_Endpoints(t *testing.T) {
 			route: "DELETE /api/v1/posts/p1",
 			call:  func(c api.ChitClient) error { return c.DeletePost(context.Background(), "p1") },
 		},
+	}
+}
+
+// tagAndMemberEndpointCases cover the tag and channel-member calls.
+func tagAndMemberEndpointCases() []endpointCase {
+	return []endpointCase{
 		{
 			name:  "tags for posts",
 			route: "POST /api/v1/tags/posts",
@@ -737,6 +745,12 @@ func TestClient_Endpoints(t *testing.T) {
 			call:  func(c api.ChitClient) error { return c.RemoveChannelMember(context.Background(), "c1", "u1") },
 		},
 	}
+}
+
+// Each call reaches the endpoint the server serves it on, with the body the
+// server expects. These had no test at all.
+func TestClient_Endpoints(t *testing.T) {
+	tests := append(threadAndPostEndpointCases(), tagAndMemberEndpointCases()...)
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var body string

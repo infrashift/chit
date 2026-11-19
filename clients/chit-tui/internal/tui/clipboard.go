@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"io"
 
 	"github.com/aymanbagabas/go-osc52/v2"
@@ -45,4 +46,16 @@ func countLines(s string) int {
 		}
 	}
 	return n
+}
+
+func (m Model) handleClipboardCopied(msg clipboardCopiedMsg) (tea.Model, tea.Cmd) {
+	// OSC 52 gives no delivery confirmation, and several terminals ignore
+	// it outright, so say what was sent rather than leaving the user to
+	// guess whether anything happened.
+	noun := "lines"
+	if msg.lines == 1 {
+		noun = "line"
+	}
+	m.viewport.ClearSelection()
+	return m, m.setError(fmt.Errorf("copied %d %s to the clipboard", msg.lines, noun))
 }

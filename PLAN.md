@@ -51,8 +51,8 @@ Tracking: [ISSUE-007](.okfw/issues/issue-007-r6-no-mutable-package-variables--01
 ## Phase 8: R4, functions of 60 lines or fewer
 Tracking: [ISSUE-008](.okfw/issues/issue-008-r4-functions-of-60-lines-or-fewer--01a1f5379e65.md)
 
-- [ ] Split each long function.
-- [ ] Remove the NASA-P10-04 omission. Turn on `funlen`, `gocognit` and `nestif`.
+- [x] Split each long function.
+- [x] Remove the NASA-P10-04 omission. Turn on `funlen`, `gocognit` and `nestif`.
 
 ## Phase 9: R5, assertion density
 Tracking: [ISSUE-009](.okfw/issues/issue-009-r5-assertion-density--01a1f5379e6c.md)

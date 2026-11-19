@@ -146,54 +146,34 @@ var ErrKratosIdentityNotFound = errors.New("kratos identity not found")
 // semscope: allow(NASA-P10-06) sentinel error: errors.Is needs one identity
 var ErrKratosIdentityInactive = errors.New("kratos identity is not active")
 
+// TWO SCHEMAS, ONE READER. chit's own deploy/kratos/identity.schema.json
+// calls the human-readable name `display_name`; the shared cluster schema
+// this deployment authenticates against
+// (terraform/live/ory-identity/config/kratos/identity.schema.json.tftpl)
+// calls it `name` and additionally carries `role` and `kind`.
+//
+// Both are decoded and display_name wins, so neither deployment needs a
+// build flag. Getting this wrong is not a visible error: an identity that
+// authenticates perfectly would be provisioned with an EMPTY display name,
+// and the first thing anyone would notice is a blank author on a post.
+type kratosIdentity struct {
+	// active or inactive. Older Kratos versions leave it out, which
+	// is read as active.
+	State  string `json:"state"`
+	Traits struct {
+		Username    string `json:"username"`
+		DisplayName string `json:"display_name"`
+		Name        string `json:"name"`
+		Email       string `json:"email"`
+		Kind        string `json:"kind"`
+	} `json:"traits"`
+}
+
 // FetchKratosIdentity retrieves identity traits from Kratos Admin API.
 func (a *App) FetchKratosIdentity(ctx context.Context, kratosID string) (username, displayName, email string, err error) {
-	url := fmt.Sprintf("%s/admin/identities/%s", a.Config.KratosAdminURL, neturl.PathEscape(kratosID))
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	identity, err := a.getKratosIdentity(ctx, kratosID)
 	if err != nil {
-		return "", "", "", fmt.Errorf("create kratos request: %w", err)
-	}
-
-	resp, err := a.httpClient.Do(req)
-	if err != nil {
-		return "", "", "", fmt.Errorf("fetch kratos identity: %w", err)
-	}
-	defer func() { errlog.Debug(resp.Body.Close(), "close kratos identity response body") }()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return "", "", "", fmt.Errorf("%w: %s", ErrKratosIdentityNotFound, kratosID)
-	}
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, readErr := io.ReadAll(resp.Body)
-		errlog.Debug(readErr, "read kratos identity error body")
-		return "", "", "", fmt.Errorf("kratos identity fetch failed: status %d, body: %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	// TWO SCHEMAS, ONE READER. chit's own deploy/kratos/identity.schema.json
-	// calls the human-readable name `display_name`; the shared cluster schema
-	// this deployment authenticates against
-	// (terraform/live/ory-identity/config/kratos/identity.schema.json.tftpl)
-	// calls it `name` and additionally carries `role` and `kind`.
-	//
-	// Both are decoded and display_name wins, so neither deployment needs a
-	// build flag. Getting this wrong is not a visible error: an identity that
-	// authenticates perfectly would be provisioned with an EMPTY display name,
-	// and the first thing anyone would notice is a blank author on a post.
-	var identity struct {
-		// active or inactive. Older Kratos versions leave it out, which
-		// is read as active.
-		State  string `json:"state"`
-		Traits struct {
-			Username    string `json:"username"`
-			DisplayName string `json:"display_name"`
-			Name        string `json:"name"`
-			Email       string `json:"email"`
-			Kind        string `json:"kind"`
-		} `json:"traits"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&identity); err != nil {
-		return "", "", "", fmt.Errorf("decode kratos identity: %w", err)
+		return "", "", "", err
 	}
 	if identity.State != "" && identity.State != "active" {
 		return "", "", "", fmt.Errorf("%w: %s is %s", ErrKratosIdentityInactive, kratosID, identity.State)
@@ -212,4 +192,35 @@ func (a *App) FetchKratosIdentity(ctx context.Context, kratosID string) (usernam
 	slog.Info("fetched kratos identity", "kratos_id", kratosID, "username", identity.Traits.Username)
 
 	return identity.Traits.Username, displayName, identity.Traits.Email, nil
+}
+
+// getKratosIdentity GETs one identity from the Kratos Admin API and decodes it.
+func (a *App) getKratosIdentity(ctx context.Context, kratosID string) (kratosIdentity, error) {
+	var identity kratosIdentity
+	url := fmt.Sprintf("%s/admin/identities/%s", a.Config.KratosAdminURL, neturl.PathEscape(kratosID))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return identity, fmt.Errorf("create kratos request: %w", err)
+	}
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return identity, fmt.Errorf("fetch kratos identity: %w", err)
+	}
+	defer func() { errlog.Debug(resp.Body.Close(), "close kratos identity response body") }()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return identity, fmt.Errorf("%w: %s", ErrKratosIdentityNotFound, kratosID)
+	}
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		errlog.Debug(readErr, "read kratos identity error body")
+		return identity, fmt.Errorf("kratos identity fetch failed: status %d, body: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&identity); err != nil {
+		return identity, fmt.Errorf("decode kratos identity: %w", err)
+	}
+	return identity, nil
 }

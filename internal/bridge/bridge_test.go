@@ -93,6 +93,18 @@ type fakeChitd struct {
 func (f *fakeChitd) server(t *testing.T) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
+	f.routeUsers(t, mux)
+	f.routePosts(t, mux)
+	f.routeChannels(t, mux)
+	mux.HandleFunc("GET /api/v1/websocket", func(w http.ResponseWriter, r *http.Request) {
+		f.serveWebsocket(t, w, r)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func (f *fakeChitd) routeUsers(t *testing.T, mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/users/me", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.lastAuth = r.Header.Get("X-User-Id")
@@ -119,6 +131,9 @@ func (f *fakeChitd) server(t *testing.T) *httptest.Server {
 			t.Errorf("encode: %v", err)
 		}
 	})
+}
+
+func (f *fakeChitd) routePosts(t *testing.T, mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/posts", func(w http.ResponseWriter, r *http.Request) {
 		var post model.Post
 		if err := json.NewDecoder(r.Body).Decode(&post); err != nil {
@@ -151,6 +166,9 @@ func (f *fakeChitd) server(t *testing.T) *httptest.Server {
 			t.Errorf("encode: %v", err)
 		}
 	})
+}
+
+func (f *fakeChitd) routeChannels(t *testing.T, mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/channels/{id}", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		channel, ok := f.channels[r.PathValue("id")]
@@ -178,42 +196,42 @@ func (f *fakeChitd) server(t *testing.T) *httptest.Server {
 			t.Errorf("encode: %v", err)
 		}
 	})
-	mux.HandleFunc("GET /api/v1/websocket", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
-		if err != nil {
-			return
+}
+
+// serveWebsocket upgrades the request and sends f.events until the client
+// goes away.
+func (f *fakeChitd) serveWebsocket(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer func() {
+		if err := conn.Close(); err != nil {
+			t.Errorf("close websocket: %v", err)
 		}
-		defer func() {
-			if err := conn.Close(); err != nil {
-				t.Errorf("close websocket: %v", err)
-			}
-		}()
-		f.mu.Lock()
-		f.wsConnects++
-		f.mu.Unlock()
-		closed := make(chan struct{})
-		go func() {
-			defer close(closed)
-			for {
-				if _, _, err := conn.ReadMessage(); err != nil {
-					return
-				}
-			}
-		}()
+	}()
+	f.mu.Lock()
+	f.wsConnects++
+	f.mu.Unlock()
+	closed := make(chan struct{})
+	go func() {
+		defer close(closed)
 		for {
-			select {
-			case ev := <-f.events:
-				if err := conn.WriteJSON(ev); err != nil {
-					return
-				}
-			case <-closed:
+			if _, _, err := conn.ReadMessage(); err != nil {
 				return
 			}
 		}
-	})
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-	return srv
+	}()
+	for {
+		select {
+		case ev := <-f.events:
+			if err := conn.WriteJSON(ev); err != nil {
+				return
+			}
+		case <-closed:
+			return
+		}
+	}
 }
 
 func (f *fakeChitd) createdPosts() []*model.Post {
@@ -652,16 +670,18 @@ func TestBridge_WarnsOncePerOffAllowlistChannel(t *testing.T) {
 
 // ─── Multi-agent gating ──────────────────────────────────────────
 
-func TestShouldRun(t *testing.T) {
-	tests := []struct {
-		name          string
-		authorID      string
-		replyToAgents bool
-		maxHops       int
-		content       string
-		props         map[string]any
-		want          bool
-	}{
+type shouldRunCase struct {
+	name          string
+	authorID      string
+	replyToAgents bool
+	maxHops       int
+	content       string
+	props         map[string]any
+	want          bool
+}
+
+func shouldRunCases() []shouldRunCase {
+	return []shouldRunCase{
 		{name: "human author always runs", authorID: testOtherUser, want: true},
 		{name: "agent author dropped by default", authorID: testAgentID2, want: false},
 		{name: "bot author dropped by default", authorID: "bot-user-1", want: false},
@@ -691,6 +711,10 @@ func TestShouldRun(t *testing.T) {
 			replyToAgents: true, maxHops: 2, content: "@chit-agent again?",
 			props: map[string]any{hopsProp: float64(1)}, want: true},
 	}
+}
+
+func TestShouldRun(t *testing.T) {
+	tests := shouldRunCases()
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

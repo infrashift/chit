@@ -141,16 +141,7 @@ func TestKetoIntegration_ReconcileCommands(t *testing.T) {
 		assertCheck(t, c, ns, "Command:"+cmd, model.KetoRelationExecute, "Actor:"+actor, want)
 	}
 
-	cfg := &command.CUEConfig{
-		Roles: []command.CUERole{
-			{Name: "admin", AllowedCommands: []string{"help", "kick"}},
-			{Name: "user", AllowedCommands: []string{"help"}},
-		},
-		Actors: []command.CUEActor{
-			{ID: admin, Roles: []string{"admin"}},
-			{ID: user, Roles: []string{"user"}},
-		},
-	}
+	cfg := reconcileTestConfig(admin, user)
 	if err := rec.Reconcile(t.Context(), cfg); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -193,6 +184,21 @@ func TestKetoIntegration_ReconcileCommands(t *testing.T) {
 	}
 	exec("help", admin, false)
 	assertTuples(t, c, ns, nil)
+}
+
+// reconcileTestConfig grants admin help and kick through the admin role, and
+// user help through the user role.
+func reconcileTestConfig(admin, user string) *command.CUEConfig {
+	return &command.CUEConfig{
+		Roles: []command.CUERole{
+			{Name: "admin", AllowedCommands: []string{"help", "kick"}},
+			{Name: "user", AllowedCommands: []string{"help"}},
+		},
+		Actors: []command.CUEActor{
+			{ID: admin, Roles: []string{"admin"}},
+			{ID: user, Roles: []string{"user"}},
+		},
+	}
 }
 
 func assertTuples(t *testing.T, c *keto.Client, ns string, want []string) {

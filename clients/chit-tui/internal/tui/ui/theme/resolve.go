@@ -82,6 +82,26 @@ type DarkDetector interface {
 	IsDark() bool
 }
 
+// resolveFlagTheme resolves the theme named on the command line, which must
+// exist.
+func resolveFlagTheme(req Request) (Theme, []string, error) {
+	t, w, err := ResolveNamed(req.FlagTheme, req.ThemesDir)
+	warnings := append([]string(nil), w...)
+	if err != nil {
+		if errors.Is(err, ErrLocalThemeNotFound) {
+			return Theme{}, warnings, fmt.Errorf(
+				"unknown theme %q. Bundled themes: %s. Local themes are read from %s",
+				req.FlagTheme, strings.Join(BuiltinNames(), ", "), req.ThemesDir)
+		}
+		return Theme{}, warnings, err
+	}
+	if req.FlagAppearance != AppearanceUnset || req.ConfigAppearance != AppearanceUnset {
+		warnings = append(warnings,
+			"appearance is ignored because a theme was named explicitly")
+	}
+	return t, warnings, nil
+}
+
 // Resolve turns a request into a theme, plus any advisory warnings.
 //
 // Precedence: FlagTheme, then ConfigTheme, then ConfigThemeDark or
@@ -95,21 +115,7 @@ func Resolve(req Request) (Theme, []string, error) {
 	var warnings []string
 
 	if req.FlagTheme != "" {
-		t, w, err := ResolveNamed(req.FlagTheme, req.ThemesDir)
-		warnings = append(warnings, w...)
-		if err != nil {
-			if errors.Is(err, ErrLocalThemeNotFound) {
-				return Theme{}, warnings, fmt.Errorf(
-					"unknown theme %q. Bundled themes: %s. Local themes are read from %s",
-					req.FlagTheme, strings.Join(BuiltinNames(), ", "), req.ThemesDir)
-			}
-			return Theme{}, warnings, err
-		}
-		if req.FlagAppearance != AppearanceUnset || req.ConfigAppearance != AppearanceUnset {
-			warnings = append(warnings,
-				"appearance is ignored because a theme was named explicitly")
-		}
-		return t, warnings, nil
+		return resolveFlagTheme(req)
 	}
 
 	if req.ConfigTheme != "" {

@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/input"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/mention"
 )
 
@@ -182,4 +183,30 @@ func (m Model) applyLoadedUser(u *model.User) (Model, tea.Cmd) {
 		}
 	}
 	return m, m.fetchMissingUsers()
+}
+
+func (m Model) handleProfileUpdated(msg ProfileUpdatedMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		return m, m.setError(msg.Err)
+	}
+	var cmds []tea.Cmd
+	if msg.User != nil {
+		m.applyMe(msg.User)
+		cmds = append(cmds, m.setError(errProfileSaved))
+	}
+	return m, tea.Batch(cmds...)
+}
+
+// searchUsers looks up the people matching term, for the palette or the
+// DM picker.
+func (m Model) searchUsers(term string) (tea.Model, tea.Cmd) {
+	m.userQuery = term
+	return m, tea.Batch(SearchUsersCmd(m.reqCtx(), m.client, term))
+}
+
+func (m Model) handleAtTrigger(msg input.AtTriggerMsg) (tea.Model, tea.Cmd) {
+	entries := m.buildMentionEntries()
+	m.mention.SetEntries(entries)
+	m.mention.Show(msg.Prefix, msg.StartCol)
+	return m, nil
 }

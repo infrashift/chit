@@ -4,6 +4,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/threadinbox"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/viewport"
 )
 
 // handleThreadLoaded shows a thread, if it is still the one open.
@@ -50,4 +51,32 @@ func (m Model) handleThreadChosen(msg threadinbox.ThreadChosenMsg) (tea.Model, t
 	m.resizeComponents()
 	cmds = append(cmds, MarkThreadRead(m.reqCtx(), m.client, msg.RootID))
 	return m, tea.Batch(cmds...)
+}
+
+// handlePostSelected opens the thread of the post picked in the history.
+func (m Model) handlePostSelected(msg viewport.PostSelectedMsg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+	m.cancelEdit()
+	// Replies are listed in the channel too. Opening one opens its
+	// root's thread: a thread rooted at a reply is not one the server
+	// recognizes, and it refuses replies to a reply.
+	root := msg.Post.ID
+	if msg.Post.RootID != "" {
+		root = msg.Post.RootID
+	}
+	cmds = append(cmds, FetchThread(m.reqCtx(), m.client, root))
+	m.mainPane = paneThread
+	m.threadRootID = root
+	cmds = append(cmds, m.setFocus(FocusInput))
+	m.resizeComponents()
+	return m, tea.Batch(cmds...)
+}
+
+func (m Model) handleThreadsLoaded(msg ThreadsLoadedMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		m.threadInbox.SetThreads(nil, nil)
+		return m, m.setError(msg.Err)
+	}
+	m.threadInbox.SetThreads(msg.Threads, msg.Direct)
+	return m, nil
 }

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"time"
@@ -175,43 +176,34 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 	}
 
 	m := Model{
-		scope:          newRequestScope(),
-		cfg:            cfg,
-		client:         client,
-		wsClient:       wsClient,
-		viewport:       viewport.New(s),
-		input:          input.New(s),
-		actionBar:      actionbar.New(s),
-		thread:         thread.New(s),
-		palette:        palette.New(s),
-		threadInbox:    threadinbox.New(s),
-		help:           help.New(s),
-		mention:        mention.New(s),
-		dmPicker:       dmpicker.New(s),
-		skinPicker:     skinpicker.New(s),
-		chCreator:      chcreator.New(s),
-		tagPicker:      tagpicker.New(s),
-		loginModel:     login.New(s, kratosClient),
-		users:          make(map[string]*model.User),
-		channelsByTeam: make(map[string][]*model.Channel),
-		unread:         make(map[string]int64),
-		mentions:       make(map[string]int64),
-		dmDisplayNames: make(map[string]string),
-		channelMembers: make(map[string][]*model.ChannelMember),
-		threadCounts:   make(map[string]int),
-		postTags:       make(map[string][]*model.Tag),
-		commandAuthors: make(map[string]string),
-		usersRequested: make(map[string]bool),
-		themeSetting:   "theme",
-		clipboardOut:   os.Stdout,
-		appState:       state,
-		tokenStore:     tokenStore,
-		kratosClient:   kratosClient,
-		sessionStore:   sessionStore,
-		focus:          FocusInput,
-		keys:           DefaultKeyMap(),
-		styles:         s,
+		scope:        newRequestScope(),
+		cfg:          cfg,
+		client:       client,
+		wsClient:     wsClient,
+		viewport:     viewport.New(s),
+		input:        input.New(s),
+		actionBar:    actionbar.New(s),
+		thread:       thread.New(s),
+		palette:      palette.New(s),
+		threadInbox:  threadinbox.New(s),
+		help:         help.New(s),
+		mention:      mention.New(s),
+		dmPicker:     dmpicker.New(s),
+		skinPicker:   skinpicker.New(s),
+		chCreator:    chcreator.New(s),
+		tagPicker:    tagpicker.New(s),
+		loginModel:   login.New(s, kratosClient),
+		themeSetting: "theme",
+		clipboardOut: os.Stdout,
+		appState:     state,
+		tokenStore:   tokenStore,
+		kratosClient: kratosClient,
+		sessionStore: sessionStore,
+		focus:        FocusInput,
+		keys:         DefaultKeyMap(),
+		styles:       s,
 	}
+	m.makeCaches()
 	// Seed the client-local commands rather than waiting for the server
 	// registry, which never contains them and may never arrive at all.
 	m.palette.SetCommands(clientCommands())
@@ -225,6 +217,20 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 	firstBlink := m.input.Focus()
 	_ = firstBlink
 	return m
+}
+
+// makeCaches gives a new model the empty maps its session fills in.
+func (m *Model) makeCaches() {
+	m.users = make(map[string]*model.User)
+	m.channelsByTeam = make(map[string][]*model.Channel)
+	m.unread = make(map[string]int64)
+	m.mentions = make(map[string]int64)
+	m.dmDisplayNames = make(map[string]string)
+	m.channelMembers = make(map[string][]*model.ChannelMember)
+	m.threadCounts = make(map[string]int)
+	m.postTags = make(map[string][]*model.Tag)
+	m.commandAuthors = make(map[string]string)
+	m.usersRequested = make(map[string]bool)
 }
 
 // SetThemeSetting sets the config key a theme picked with /theme is saved
@@ -295,4 +301,11 @@ func (m Model) reqCtx() context.Context { return m.scope.ctx }
 func (m *Model) endRequests() {
 	m.scope.cancel()
 	m.scope = newRequestScope()
+}
+
+func (m Model) handleErr(msg ErrMsg) (tea.Model, tea.Cmd) {
+	if errors.Is(msg.Err, ws.ErrNotConnected) {
+		m.wsConnected = false
+	}
+	return m, m.setError(msg.Err)
 }

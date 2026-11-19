@@ -8,7 +8,17 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// registerTools registers every tool the server offers.
 func (s *ChitMCPServer) registerTools() {
+	s.registerDiscoveryTools()
+	s.registerPostTools()
+	s.registerThreadTools()
+	s.registerSearchAndTagTools()
+	s.registerUserAndEventTools()
+}
+
+// registerDiscoveryTools registers the team and channel discovery tools.
+func (s *ChitMCPServer) registerDiscoveryTools() {
 	// Team Discovery
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "list_teams",
@@ -35,7 +45,10 @@ func (s *ChitMCPServer) registerTools() {
 		Name:        "get_channel_members",
 		Description: "Get the list of members in a channel",
 	}, s.handleGetChannelMembers)
+}
 
+// registerPostTools registers the tools that read and write messages.
+func (s *ChitMCPServer) registerPostTools() {
 	// Reading Messages
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "get_channel_posts",
@@ -62,7 +75,10 @@ func (s *ChitMCPServer) registerTools() {
 		Name:        "reply_to_thread",
 		Description: "Reply to an existing thread. Provide the root_id of the thread and the channel_id.",
 	}, s.handleReplyToThread)
+}
 
+// registerThreadTools registers the threading tools.
+func (s *ChitMCPServer) registerThreadTools() {
 	// Threading
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "get_thread",
@@ -83,7 +99,10 @@ func (s *ChitMCPServer) registerTools() {
 		Name:        "follow_thread",
 		Description: "Follow or unfollow a thread",
 	}, s.handleFollowThread)
+}
 
+// registerSearchAndTagTools registers the search and tag tools.
+func (s *ChitMCPServer) registerSearchAndTagTools() {
 	// Search
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "search_posts",
@@ -105,7 +124,10 @@ func (s *ChitMCPServer) registerTools() {
 		Name:        "get_tags_for_post",
 		Description: "Get the tags on a post that you can see",
 	}, s.handleGetTagsForPost)
+}
 
+// registerUserAndEventTools registers the user, channel management and event tools.
+func (s *ChitMCPServer) registerUserAndEventTools() {
 	// Users
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "get_user",

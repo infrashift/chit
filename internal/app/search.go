@@ -68,31 +68,19 @@ func (a *App) SearchPosts(ctx context.Context, req *SearchRequest) (*model.PostL
 		Page: req.Page, PerPage: req.PerPage,
 	}
 	if req.From != "" {
-		author, lookupErr := a.Store.User().GetByUsername(ctx, strings.ToLower(strings.TrimPrefix(req.From, "@")))
+		authorID, found, lookupErr := a.searchAuthorID(ctx, req.From)
 		if lookupErr != nil {
-			if isNotFound(lookupErr) {
-				// An unknown author matches nothing, which is more useful than
-				// silently returning everything.
-				return empty, nil
-			}
 			return nil, lookupErr
 		}
-		q.AuthorID = author.ID
+		if !found {
+			// An unknown author matches nothing, which is more useful than
+			// silently returning everything.
+			return empty, nil
+		}
+		q.AuthorID = authorID
 	}
 
-	var posts []*model.Post
-	if req.Terms != "" && a.Config.ZincSearchURL != "" {
-		posts, err = a.searchZinc(ctx, q)
-		if err != nil {
-			// Zinc being down is not a reason to fail the search. Zinc
-			// answering with no hits is an answer, and is not second-guessed
-			// with a full-table ILIKE.
-			slog.Warn("search: ZincSearch failed, falling back to SQL", "error", err)
-			posts, err = a.Store.Post().Search(ctx, q)
-		}
-	} else {
-		posts, err = a.Store.Post().Search(ctx, q)
-	}
+	posts, err := a.runPostSearch(ctx, q)
 	if err != nil {
 		return nil, err
 	}
@@ -100,6 +88,36 @@ func (a *App) SearchPosts(ctx context.Context, req *SearchRequest) (*model.PostL
 		posts = []*model.Post{}
 	}
 	return &model.PostList{Order: posts}, nil
+}
+
+// searchAuthorID resolves a search's author filter, a username with an
+// optional leading @, to a user ID. found is false for an unknown username.
+func (a *App) searchAuthorID(ctx context.Context, from string) (id string, found bool, err error) {
+	author, err := a.Store.User().GetByUsername(ctx, strings.ToLower(strings.TrimPrefix(from, "@")))
+	if err != nil {
+		if isNotFound(err) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return author.ID, true, nil
+}
+
+// runPostSearch runs q through ZincSearch when it has terms and Zinc is
+// configured, and through SQL otherwise.
+func (a *App) runPostSearch(ctx context.Context, q *model.PostSearch) ([]*model.Post, error) {
+	if q.Terms == "" || a.Config.ZincSearchURL == "" {
+		return a.Store.Post().Search(ctx, q)
+	}
+	posts, err := a.searchZinc(ctx, q)
+	if err != nil {
+		// Zinc being down is not a reason to fail the search. Zinc
+		// answering with no hits is an answer, and is not second-guessed
+		// with a full-table ILIKE.
+		slog.Warn("search: ZincSearch failed, falling back to SQL", "error", err)
+		return a.Store.Post().Search(ctx, q)
+	}
+	return posts, nil
 }
 
 // searchScope returns the channels req may search, after checking the caller
@@ -148,33 +166,11 @@ func (a *App) searchZinc(ctx context.Context, q *model.PostSearch) ([]*model.Pos
 			break
 		}
 
-		posts, err := a.Store.Post().GetByIDs(ctx, ids)
+		matches, err := a.zincBatchMatches(ctx, q, ids, inScope)
 		if err != nil {
 			return nil, err
 		}
-		byID := make(map[string]*model.Post, len(posts))
-		for _, p := range posts {
-			byID[p.ID] = p
-		}
-		tagged := map[string]bool{}
-		if len(q.TagIDs) > 0 {
-			matches, err := a.Store.Tag().FilterPostIDsByTags(ctx, ids, q.TagIDs)
-			if err != nil {
-				return nil, err
-			}
-			for _, id := range matches {
-				tagged[id] = true
-			}
-		}
-
-		// Walk in hit order, which is Zinc's relevance order.
-		for _, id := range ids {
-			p := byID[id]
-			if p == nil || !inScope[p.ChannelID] ||
-				(q.AuthorID != "" && p.UserID != q.AuthorID) ||
-				(len(q.TagIDs) > 0 && !tagged[id]) {
-				continue
-			}
+		for _, p := range matches {
 			if skip > 0 {
 				skip--
 				continue
@@ -187,6 +183,42 @@ func (a *App) searchZinc(ctx context.Context, q *model.PostSearch) ([]*model.Pos
 		if len(ids) < zincScanBatch {
 			break
 		}
+	}
+	return out, nil
+}
+
+// zincBatchMatches loads one batch of Zinc hits and returns, in hit order
+// (Zinc's relevance order), the posts that fall in q's scope: an allowed
+// channel, q's author if set, and every one of q's tags if set.
+func (a *App) zincBatchMatches(ctx context.Context, q *model.PostSearch, ids []string, inScope map[string]bool) ([]*model.Post, error) {
+	posts, err := a.Store.Post().GetByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]*model.Post, len(posts))
+	for _, p := range posts {
+		byID[p.ID] = p
+	}
+	tagged := map[string]bool{}
+	if len(q.TagIDs) > 0 {
+		matches, err := a.Store.Tag().FilterPostIDsByTags(ctx, ids, q.TagIDs)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range matches {
+			tagged[id] = true
+		}
+	}
+
+	out := make([]*model.Post, 0, len(ids))
+	for _, id := range ids {
+		p := byID[id]
+		if p == nil || !inScope[p.ChannelID] ||
+			(q.AuthorID != "" && p.UserID != q.AuthorID) ||
+			(len(q.TagIDs) > 0 && !tagged[id]) {
+			continue
+		}
+		out = append(out, p)
 	}
 	return out, nil
 }

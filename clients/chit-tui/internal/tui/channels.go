@@ -6,7 +6,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/chcreator"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/dmpicker"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/palette"
 )
 
 // minGroupChannelMembers matches the server's lower bound. Below it the
@@ -397,4 +399,71 @@ func (m Model) handleChannelsLoaded(msg ChannelsLoadedMsg) (tea.Model, tea.Cmd) 
 		}
 	}
 	return m, tea.Batch(cmds...)
+}
+
+func (m Model) handleTeamsLoaded(msg TeamsLoadedMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		return m, m.setError(msg.Err)
+	}
+	m.teams = msg.Teams
+	m.palette.SetTeams(msg.Teams)
+	if len(msg.Teams) > 0 {
+		m.activeTeam = msg.Teams[0]
+	}
+	var cmds []tea.Cmd
+	for _, t := range msg.Teams {
+		cmds = append(cmds, FetchChannels(m.reqCtx(), m.client, t.ID))
+	}
+	return m, tea.Batch(cmds...)
+}
+
+func (m Model) handleChannelChosen(msg palette.ChannelChosenMsg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+	cmds = append(cmds, m.selectChannel(msg.Channel))
+	cmds = append(cmds, m.setFocus(FocusInput))
+	return m, tea.Batch(cmds...)
+}
+
+// handleUserChosen opens a DM with the person picked in the palette.
+func (m Model) handleUserChosen(msg palette.UserChosenMsg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+	if m.me != nil {
+		cmds = append(cmds, CreateDMChannel(m.reqCtx(), m.client, m.me.ID, msg.User.ID))
+	}
+	return m, tea.Batch(cmds...)
+}
+
+func (m Model) handleDMCreated(msg DMCreatedMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		return m, m.setError(msg.Err)
+	}
+	var cmds []tea.Cmd
+	if msg.Channel != nil {
+		m.addDMChannel(msg.Channel)
+		cmds = append(cmds, m.selectChannel(msg.Channel))
+		cmds = append(cmds, FetchDMChannels(m.reqCtx(), m.client))
+	}
+	return m, tea.Batch(cmds...)
+}
+
+// handleChannelSubmitted creates the channel the creator dialog describes. A
+// private channel first asks for its members.
+func (m Model) handleChannelSubmitted(msg chcreator.ChannelSubmittedMsg) (tea.Model, tea.Cmd) {
+	if msg.Channel.Type == model.ChannelPrivate {
+		m.pendingPrivateChannel = msg.Channel
+		m.pendingMembers = nil
+		cmd := m.setFocus(FocusDMPicker)
+		m.dmPicker.OpenForMembers()
+		return m, cmd
+	}
+	return m, tea.Batch(CreateChannel(m.reqCtx(), m.client, msg.Channel))
+}
+
+func (m Model) handleChannelLeft(msg ChannelLeftMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		return m, m.setError(msg.Err)
+	}
+	// The server also broadcasts user_removed, but that arrives only if
+	// the socket is up; removing it here keeps leaving reliable.
+	return m, tea.Batch(m.removeChannel(msg.ChannelID)...)
 }

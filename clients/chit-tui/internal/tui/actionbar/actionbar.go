@@ -145,25 +145,7 @@ func (m Model) layout() rendered {
 	}
 	right := dot + base.Render(" "+m.user+" ")
 
-	// What is left between the buttons and the connection dot holds the
-	// team and channel, then any status message. A message that will not
-	// fit beside them takes their room: the channel is on screen already,
-	// the message is news. Whatever still does not fit is cut short, so the
-	// bar never runs past the edge and pushes the dot and name off it.
-	room := max(m.width-x-ansi.StringWidth(right), 0)
-	ctx := " │ " + m.team
-	if m.channel != "" {
-		ctx += " > " + m.channel
-	}
-	status := ""
-	if m.err != "" {
-		status = " " + m.err
-		if ansi.StringWidth(ctx)+ansi.StringWidth(status) > room {
-			ctx = ""
-		}
-	}
-	ctx = ansi.Truncate(ctx, room, "…")
-	status = ansi.Truncate(status, room-ansi.StringWidth(ctx), "…")
+	ctx, status := m.contextAndStatus(max(m.width-x-ansi.StringWidth(right), 0))
 	write(base.Render(ctx))
 	if status != "" {
 		write(m.styles.ErrorText.Render(status))
@@ -177,6 +159,29 @@ func (m Model) layout() rendered {
 	write(right)
 
 	return rendered{text: b.String(), spans: spans}
+}
+
+// contextAndStatus fits the team, channel and status message into room
+// columns. What is left between the buttons and the connection dot holds the
+// team and channel, then any status message. A message that will not
+// fit beside them takes their room: the channel is on screen already,
+// the message is news. Whatever still does not fit is cut short, so the
+// bar never runs past the edge and pushes the dot and name off it.
+func (m Model) contextAndStatus(room int) (string, string) {
+	ctx := " │ " + m.team
+	if m.channel != "" {
+		ctx += " > " + m.channel
+	}
+	status := ""
+	if m.err != "" {
+		status = " " + m.err
+		if ansi.StringWidth(ctx)+ansi.StringWidth(status) > room {
+			ctx = ""
+		}
+	}
+	ctx = ansi.Truncate(ctx, room, "…")
+	status = ansi.Truncate(status, room-ansi.StringWidth(ctx), "…")
+	return ctx, status
 }
 
 // View renders the action bar as a single line.

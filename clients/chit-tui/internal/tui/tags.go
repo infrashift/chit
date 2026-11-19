@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/tagpicker"
 )
 
 // activeChannelID is the channel being read, or "" before one is open.
@@ -118,4 +119,47 @@ func (m Model) handlePostTagsLoaded(msg PostTagsLoadedMsg) (tea.Model, tea.Cmd) 
 	// moment it is opened as a thread.
 	m.thread.SetPostTags(m.postTags)
 	return m, nil
+}
+
+func (m Model) handleAllTagsLoaded(msg AllTagsLoadedMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		return m, m.setError(msg.Err)
+	}
+	m.allTags = msg.Tags
+	return m, nil
+}
+
+func (m Model) handleTagToggled(msg tagpicker.TagToggledMsg) (tea.Model, tea.Cmd) {
+	if msg.Applied {
+		return m, tea.Batch(AddTagToPostCmd(m.reqCtx(), m.client, msg.PostID, msg.TagID))
+	}
+	return m, tea.Batch(RemoveTagFromPostCmd(m.reqCtx(), m.client, msg.PostID, msg.TagID))
+}
+
+func (m Model) handleTagCreated(msg TagCreatedMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		return m, m.setError(msg.Err)
+	}
+	if msg.Tag != nil {
+		m.allTags = append(m.allTags, msg.Tag)
+	}
+	return m, nil
+}
+
+func (m Model) handleTagAddedToPost(msg TagAddedToPostMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		return m, m.setError(msg.Err)
+	}
+	if msg.NewTag != nil && !m.knownTag(msg.NewTag.ID) {
+		m.allTags = append(m.allTags, msg.NewTag)
+	}
+	m.tagPicker.AddApplied(msg.PostID, msg.NewTag)
+	return m, tea.Batch(FetchPostTags(m.reqCtx(), m.client, msg.PostID))
+}
+
+func (m Model) handleTagRemovedFromPost(msg TagRemovedFromPostMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		return m, m.setError(msg.Err)
+	}
+	return m, tea.Batch(FetchPostTags(m.reqCtx(), m.client, msg.PostID))
 }

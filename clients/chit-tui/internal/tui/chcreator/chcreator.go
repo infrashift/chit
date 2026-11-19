@@ -212,19 +212,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyTab:
-		m.activeField = (m.activeField + 1) % fieldCount
-		if m.activeField == fieldName {
-			m.autoSlug = false
-		}
-		m.focusActiveField()
+		m.moveField(1)
 		return m, nil
 
 	case tea.KeyShiftTab:
-		m.activeField = (m.activeField - 1 + fieldCount) % fieldCount
-		if m.activeField == fieldName {
-			m.autoSlug = false
-		}
-		m.focusActiveField()
+		m.moveField(-1)
 		return m, nil
 
 	case tea.KeyLeft:
@@ -240,22 +232,40 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 
 	case tea.KeyEnter:
-		if errMsg := m.validate(); errMsg != "" {
-			m.validErr = errMsg
-			return m, nil
-		}
-		ch := &model.Channel{
-			TeamID:      m.teamID,
-			Name:        m.name.Value(),
-			DisplayName: strings.TrimSpace(m.displayName.Value()),
-			Purpose:     strings.TrimSpace(m.purpose.Value()),
-			Type:        m.channelType,
-		}
-		m.Close()
-		return m, func() tea.Msg { return ChannelSubmittedMsg{Channel: ch} }
+		return m.submit()
 	}
 
-	// Update the active text input
+	return m.updateField(msg)
+}
+
+// moveField moves focus delta fields along, wrapping at either end.
+func (m *Model) moveField(delta int) {
+	m.activeField = (m.activeField + delta + fieldCount) % fieldCount
+	if m.activeField == fieldName {
+		m.autoSlug = false
+	}
+	m.focusActiveField()
+}
+
+// submit sends the channel described, unless it is invalid.
+func (m Model) submit() (Model, tea.Cmd) {
+	if errMsg := m.validate(); errMsg != "" {
+		m.validErr = errMsg
+		return m, nil
+	}
+	ch := &model.Channel{
+		TeamID:      m.teamID,
+		Name:        m.name.Value(),
+		DisplayName: strings.TrimSpace(m.displayName.Value()),
+		Purpose:     strings.TrimSpace(m.purpose.Value()),
+		Type:        m.channelType,
+	}
+	m.Close()
+	return m, func() tea.Msg { return ChannelSubmittedMsg{Channel: ch} }
+}
+
+// updateField gives msg to the active text input.
+func (m Model) updateField(msg tea.Msg) (Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch m.activeField {
 	case fieldDisplayName:
@@ -273,67 +283,44 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, cmd
 }
 
+// fieldLabel renders a field's label, marked when the field is active.
+func (m Model) fieldLabel(label string, field int) string {
+	if m.activeField == field {
+		return m.styles.ListItemActive.Render("> " + label)
+	}
+	return m.styles.ListItem.Render("  " + label)
+}
+
+// typeToggle renders the Open / Private choice with the current one marked.
+func (m Model) typeToggle() string {
+	if m.channelType == model.ChannelOpen {
+		return m.styles.ListItemActive.Render("[Open]") + "  " + m.styles.ListItem.Render(" Private ")
+	}
+	return m.styles.ListItem.Render(" Open ") + "  " + m.styles.ListItemActive.Render("[Private]")
+}
+
 // View renders the channel creator overlay.
 func (m Model) View() string {
 	if !m.visible {
 		return ""
 	}
 
-	var items []string
-	items = append(items, m.styles.ListItemActive.Render("Create Channel"))
-	items = append(items, "")
-
-	// Display Name
-	label := "Display Name"
-	if m.activeField == fieldDisplayName {
-		label = m.styles.ListItemActive.Render("> " + label)
-	} else {
-		label = m.styles.ListItem.Render("  " + label)
+	items := []string{
+		m.styles.ListItemActive.Render("Create Channel"),
+		"",
+		m.fieldLabel("Display Name", fieldDisplayName),
+		"  " + m.displayName.View(),
+		"",
+		m.fieldLabel("Channel Name", fieldName),
+		"  " + m.name.View(),
+		"",
+		m.fieldLabel("Type", fieldType),
+		"  " + m.typeToggle(),
+		"",
+		m.fieldLabel("Purpose", fieldPurpose),
+		"  " + m.purpose.View(),
+		"",
 	}
-	items = append(items, label)
-	items = append(items, "  "+m.displayName.View())
-	items = append(items, "")
-
-	// Channel Name
-	label = "Channel Name"
-	if m.activeField == fieldName {
-		label = m.styles.ListItemActive.Render("> " + label)
-	} else {
-		label = m.styles.ListItem.Render("  " + label)
-	}
-	items = append(items, label)
-	items = append(items, "  "+m.name.View())
-	items = append(items, "")
-
-	// Type toggle
-	label = "Type"
-	if m.activeField == fieldType {
-		label = m.styles.ListItemActive.Render("> " + label)
-	} else {
-		label = m.styles.ListItem.Render("  " + label)
-	}
-	var openLabel, privateLabel string
-	if m.channelType == model.ChannelOpen {
-		openLabel = m.styles.ListItemActive.Render("[Open]")
-		privateLabel = m.styles.ListItem.Render(" Private ")
-	} else {
-		openLabel = m.styles.ListItem.Render(" Open ")
-		privateLabel = m.styles.ListItemActive.Render("[Private]")
-	}
-	items = append(items, label)
-	items = append(items, "  "+openLabel+"  "+privateLabel)
-	items = append(items, "")
-
-	// Purpose
-	label = "Purpose"
-	if m.activeField == fieldPurpose {
-		label = m.styles.ListItemActive.Render("> " + label)
-	} else {
-		label = m.styles.ListItem.Render("  " + label)
-	}
-	items = append(items, label)
-	items = append(items, "  "+m.purpose.View())
-	items = append(items, "")
 
 	// Validation error
 	if m.validErr != "" {

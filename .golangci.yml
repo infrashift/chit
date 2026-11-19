@@ -4,6 +4,9 @@ linters:
     - bodyclose
     - errorlint # R7: wrap and compare errors correctly (ADR-0004)
     - gochecknoglobals # R6: no mutable package state (ADR-0004)
+    - funlen # R4: 60 lines for each function (ADR-0004)
+    - gocognit # R1: simple control flow (ADR-0004)
+    - nestif # R1: shallow nesting (ADR-0004)
     - gocritic
     - misspell
     - noctx
@@ -15,7 +18,7 @@ linters:
     errcheck:
       check-blank: true
       check-type-assertions: true
-    # R4 and R1 (ADR-0002, ADR-0004): Phase 8 enables these linters.
+    # R4 and R1 (ADR-0002, ADR-0004).
     funlen:
       lines: 60
       statements: -1

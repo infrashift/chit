@@ -1336,34 +1336,11 @@ func (s *TagStore) FilterChannelIDsByTags(_ context.Context, channelIDs, tagIDs 
 	}
 	// Copy under the tag lock, then resolve posts without it: PostStore.Search
 	// takes the post lock before the tag lock.
-	s.mu.RLock()
-	has := map[string]map[string]bool{}
-	note := func(channelID, tagID string) {
-		if has[channelID] == nil {
-			has[channelID] = map[string]bool{}
-		}
-		has[channelID][tagID] = true
-	}
-	for channelID, m := range s.channelTags {
-		for tagID := range m {
-			if want[tagID] {
-				note(channelID, tagID)
-			}
-		}
-	}
-	postHits := map[string][]string{}
-	for postID, m := range s.postTags {
-		for tagID := range m {
-			if want[tagID] {
-				postHits[postID] = append(postHits[postID], tagID)
-			}
-		}
-	}
-	s.mu.RUnlock()
+	has, postHits := s.wantedTagHits(want)
 	for postID, tags := range postHits {
 		if channelID, live := s.postChannel(postID); live {
 			for _, tagID := range tags {
-				note(channelID, tagID)
+				has.note(channelID, tagID)
 			}
 		}
 	}
@@ -1374,6 +1351,40 @@ func (s *TagStore) FilterChannelIDsByTags(_ context.Context, channelIDs, tagIDs 
 		}
 	}
 	return ids, nil
+}
+
+// channelTagSet records, per channel ID, the wanted tag IDs found there.
+type channelTagSet map[string]map[string]bool
+
+func (has channelTagSet) note(channelID, tagID string) {
+	if has[channelID] == nil {
+		has[channelID] = map[string]bool{}
+	}
+	has[channelID][tagID] = true
+}
+
+// wantedTagHits copies, under the tag lock, the wanted channel tags of each
+// channel and the wanted tags applied to each post.
+func (s *TagStore) wantedTagHits(want map[string]bool) (has channelTagSet, postHits map[string][]string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	has = channelTagSet{}
+	for channelID, m := range s.channelTags {
+		for tagID := range m {
+			if want[tagID] {
+				has.note(channelID, tagID)
+			}
+		}
+	}
+	postHits = map[string][]string{}
+	for postID, m := range s.postTags {
+		for tagID := range m {
+			if want[tagID] {
+				postHits[postID] = append(postHits[postID], tagID)
+			}
+		}
+	}
+	return has, postHits
 }
 
 // paginate returns page (zero-based) of items. A perPage of 0 or less returns

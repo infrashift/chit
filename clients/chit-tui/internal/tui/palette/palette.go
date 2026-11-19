@@ -255,37 +255,16 @@ func modeFor(value string) Mode {
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	if deb, ok := msg.(DebounceMsg); ok {
-		// Fire the user search only if no newer keystroke restarted the timer.
-		if m.visible && deb.Gen == m.debounceGen && m.mode == ModeUsers {
-			if term := strings.TrimSpace(m.query()); term != "" {
-				return m, func() tea.Msg { return UserQueryMsg{Term: term} }
-			}
-		}
-		return m, nil
+		return m, m.debounced(deb)
 	}
 
 	if !m.visible || !m.focused {
 		return m, nil
 	}
 
-	keyMsg, ok := msg.(tea.KeyMsg)
-	if ok {
-		switch keyMsg.Type {
-		case tea.KeyEscape:
-			m.Close()
-			return m, nil
-		case tea.KeyEnter:
-			return m.choose(m.cursor)
-		case tea.KeyUp:
-			if m.cursor > 0 {
-				m.cursor--
-			}
-			return m, nil
-		case tea.KeyDown:
-			if m.cursor < len(m.rows)-1 {
-				m.cursor++
-			}
-			return m, nil
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		if next, cmd, handled := m.handleKey(keyMsg); handled {
+			return next, cmd
 		}
 	}
 
@@ -293,29 +272,72 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	if m.input.Value() != prevValue {
-		prevMode := m.mode
-		// A new filter re-ranks the rows, so the best match is at the top;
-		// keeping the old index would point Enter at whatever landed there.
-		m.cursor = 0
-		m.refresh()
-		// Editing a submitted search invalidates its results.
-		if m.mode == ModeSearch {
-			m.posts = nil
-			m.rows = nil
-		}
-		if m.mode == ModeUsers {
-			if prevMode != ModeUsers {
-				m.users = nil
-				m.rows = nil
-			}
-			m.debounceGen++
-			gen := m.debounceGen
-			return m, tea.Batch(cmd, tea.Tick(debounceDelay, func(time.Time) tea.Msg {
-				return DebounceMsg{Gen: gen}
-			}))
-		}
+		return m, m.queryChanged(cmd)
 	}
 	return m, cmd
+}
+
+// debounced fires the user search only if no newer keystroke restarted the
+// timer.
+func (m Model) debounced(deb DebounceMsg) tea.Cmd {
+	if !m.visible || deb.Gen != m.debounceGen || m.mode != ModeUsers {
+		return nil
+	}
+	if term := strings.TrimSpace(m.query()); term != "" {
+		return func() tea.Msg { return UserQueryMsg{Term: term} }
+	}
+	return nil
+}
+
+// handleKey handles the keys the palette itself uses, and reports whether
+// msg was one of them; the rest go to the input.
+func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	switch msg.Type {
+	case tea.KeyEscape:
+		m.Close()
+		return m, nil, true
+	case tea.KeyEnter:
+		next, cmd := m.choose(m.cursor)
+		return next, cmd, true
+	case tea.KeyUp:
+		if m.cursor > 0 {
+			m.cursor--
+		}
+		return m, nil, true
+	case tea.KeyDown:
+		if m.cursor < len(m.rows)-1 {
+			m.cursor++
+		}
+		return m, nil, true
+	}
+	return m, nil, false
+}
+
+// queryChanged refilters after an edit to the input, whose own command is
+// cmd, and starts the user-search timer in user mode.
+func (m *Model) queryChanged(cmd tea.Cmd) tea.Cmd {
+	prevMode := m.mode
+	// A new filter re-ranks the rows, so the best match is at the top;
+	// keeping the old index would point Enter at whatever landed there.
+	m.cursor = 0
+	m.refresh()
+	// Editing a submitted search invalidates its results.
+	if m.mode == ModeSearch {
+		m.posts = nil
+		m.rows = nil
+	}
+	if m.mode != ModeUsers {
+		return cmd
+	}
+	if prevMode != ModeUsers {
+		m.users = nil
+		m.rows = nil
+	}
+	m.debounceGen++
+	gen := m.debounceGen
+	return tea.Batch(cmd, tea.Tick(debounceDelay, func(time.Time) tea.Msg {
+		return DebounceMsg{Gen: gen}
+	}))
 }
 
 // choose activates the row at idx (Enter or mouse click).

@@ -48,32 +48,12 @@ func main() {
 // on every exit path, including failures.
 func run(ctx context.Context) error {
 	identities := seedIdentities()
-	kratosAdminURL := os.Getenv("KRATOS_ADMIN_URL")
-	if kratosAdminURL == "" {
-		kratosAdminURL = "http://localhost:4434"
-	}
+	kratosAdminURL := envOr("KRATOS_ADMIN_URL", "http://localhost:4434")
+	dbURL := envOr("CHIT_DATABASE_URL", "postgres://chit:chit@localhost:5432/chit?sslmode=disable")
 
-	dbURL := os.Getenv("CHIT_DATABASE_URL")
-	if dbURL == "" {
-		dbURL = "postgres://chit:chit@localhost:5432/chit?sslmode=disable"
-	}
-
-	// Wait for Kratos admin API to be ready.
-	fmt.Println("Waiting for Kratos admin API...")
 	client := &http.Client{Timeout: 5 * time.Second}
-	for i := range 30 {
-		resp, err := httpDo(ctx, client, http.MethodGet, kratosAdminURL+"/health/ready", nil)
-		if err == nil {
-			errlog.Debug(resp.Body.Close(), "close kratos health response body")
-			if resp.StatusCode == 200 {
-				fmt.Printf("Kratos admin is ready (%ds).\n", i)
-				break
-			}
-		}
-		if i == 29 {
-			return errors.New("kratos admin API not ready after 30s")
-		}
-		time.Sleep(1 * time.Second)
+	if err := waitForKratos(ctx, client, kratosAdminURL); err != nil {
+		return err
 	}
 
 	// Connect to Chit database to sync kratos_id values.
@@ -97,22 +77,65 @@ func run(ctx context.Context) error {
 		}
 		fmt.Printf("  %-8s  kratos_id=%s\n", id.Username, kratosID)
 
-		// Sync kratos_id into the Chit database users table.
-		result, err := db.ExecContext(ctx,
-			"UPDATE users SET kratos_id = $1 WHERE email = $2 AND delete_at = 0",
-			kratosID, id.Email,
-		)
-		if err != nil {
-			return fmt.Errorf("update kratos_id for %s: %w", id.Username, err)
-		}
-		rows, err := result.RowsAffected()
-		if err != nil {
-			fmt.Printf("  WARNING: rows affected for %s: %v\n", id.Username, err)
-		} else if rows == 0 {
-			fmt.Printf("  WARNING: no Chit user found with email %s\n", id.Email)
+		if err := syncKratosID(ctx, db, kratosID, id); err != nil {
+			return err
 		}
 	}
 
+	printCredentials(identities)
+	return nil
+}
+
+// envOr returns the environment variable key, or def when it is unset.
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+// waitForKratos polls the Kratos admin API's readiness for up to 30 seconds.
+func waitForKratos(ctx context.Context, client *http.Client, kratosAdminURL string) error {
+	// Wait for Kratos admin API to be ready.
+	fmt.Println("Waiting for Kratos admin API...")
+	for i := range 30 {
+		resp, err := httpDo(ctx, client, http.MethodGet, kratosAdminURL+"/health/ready", nil)
+		if err == nil {
+			errlog.Debug(resp.Body.Close(), "close kratos health response body")
+			if resp.StatusCode == 200 {
+				fmt.Printf("Kratos admin is ready (%ds).\n", i)
+				return nil
+			}
+		}
+		if i == 29 {
+			return errors.New("kratos admin API not ready after 30s")
+		}
+		time.Sleep(1 * time.Second)
+	}
+	return nil
+}
+
+// syncKratosID writes kratosID onto the Chit user with id's email.
+func syncKratosID(ctx context.Context, db *sql.DB, kratosID string, id seedIdentity) error {
+	// Sync kratos_id into the Chit database users table.
+	result, err := db.ExecContext(ctx,
+		"UPDATE users SET kratos_id = $1 WHERE email = $2 AND delete_at = 0",
+		kratosID, id.Email,
+	)
+	if err != nil {
+		return fmt.Errorf("update kratos_id for %s: %w", id.Username, err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		fmt.Printf("  WARNING: rows affected for %s: %v\n", id.Username, err)
+	} else if rows == 0 {
+		fmt.Printf("  WARNING: no Chit user found with email %s\n", id.Email)
+	}
+	return nil
+}
+
+// printCredentials prints the login of each seeded identity.
+func printCredentials(identities []seedIdentity) {
 	fmt.Println()
 	fmt.Println("=== UAT Login Credentials ===")
 	fmt.Println()
@@ -124,7 +147,6 @@ func run(ctx context.Context) error {
 	fmt.Println()
 	fmt.Println("All users can log in via chit-tui using their email and password.")
 	fmt.Println()
-	return nil
 }
 
 // httpDo sends a request bound to ctx. body may be nil.

@@ -142,69 +142,90 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	keyMsg, ok := msg.(tea.KeyMsg)
-	if ok {
-		switch keyMsg.Type {
-		case tea.KeyEscape:
-			m.Close()
-			return m, func() tea.Msg { return CancelledMsg{} }
-		case tea.KeyTab:
-			if len(m.results) > 0 && m.cursor < len(m.results) {
-				if m.toggleSelected(m.results[m.cursor]) {
-					// The picked name is a chip now, so the box belongs to
-					// the next one. Leaving it filled makes the following
-					// term concatenate onto it and match nobody.
-					//
-					// The results stay: several people often come back from
-					// one search, and Tab down the list must keep working.
-					m.input.Reset()
-					m.lastSearched = ""
-				}
-			}
-			return m, nil
-		case tea.KeyEnter:
-			// A fresh term searches, even with people already selected.
-			// Confirming instead would make a second search impossible and
-			// cap every pick at whatever one query happened to return —
-			// which no group of three can rely on.
-			if term := m.input.Value(); term != "" && term != m.lastSearched {
-				m.lastSearched = term
-				return m, func() tea.Msg { return SearchTriggeredMsg{Term: term} }
-			}
-			if len(m.selected) > 0 {
-				users := make([]*model.User, len(m.selected))
-				copy(users, m.selected)
-				m.Close()
-				return m, func() tea.Msg { return MembersPickedMsg{Users: users} }
-			}
-			if len(m.results) > 0 && m.cursor < len(m.results) {
-				user := m.results[m.cursor]
-				users := []*model.User{user}
-				m.Close()
-				return m, func() tea.Msg { return MembersPickedMsg{Users: users} }
-			}
-			return m, nil
-		case tea.KeyBackspace:
-			if m.input.Value() == "" && len(m.selected) > 0 {
-				m.selected = m.selected[:len(m.selected)-1]
-				return m, nil
-			}
-		case tea.KeyUp:
-			if m.cursor > 0 {
-				m.cursor--
-			}
-			return m, nil
-		case tea.KeyDown:
-			if m.cursor < len(m.results)-1 {
-				m.cursor++
-			}
-			return m, nil
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		if next, cmd, handled := m.handleKey(keyMsg); handled {
+			return next, cmd
 		}
 	}
 
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
+}
+
+// handleKey handles the keys the picker itself uses, and reports whether
+// msg was one of them; the rest go to the search box.
+func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	switch msg.Type {
+	case tea.KeyEscape:
+		m.Close()
+		return m, func() tea.Msg { return CancelledMsg{} }, true
+	case tea.KeyTab:
+		m.toggleCursor()
+		return m, nil, true
+	case tea.KeyEnter:
+		next, cmd := m.confirm()
+		return next, cmd, true
+	case tea.KeyBackspace:
+		if m.input.Value() == "" && len(m.selected) > 0 {
+			m.selected = m.selected[:len(m.selected)-1]
+			return m, nil, true
+		}
+	case tea.KeyUp:
+		if m.cursor > 0 {
+			m.cursor--
+		}
+		return m, nil, true
+	case tea.KeyDown:
+		if m.cursor < len(m.results)-1 {
+			m.cursor++
+		}
+		return m, nil, true
+	}
+	return m, nil, false
+}
+
+// toggleCursor selects or deselects the person under the cursor.
+func (m *Model) toggleCursor() {
+	if len(m.results) == 0 || m.cursor >= len(m.results) {
+		return
+	}
+	if m.toggleSelected(m.results[m.cursor]) {
+		// The picked name is a chip now, so the box belongs to
+		// the next one. Leaving it filled makes the following
+		// term concatenate onto it and match nobody.
+		//
+		// The results stay: several people often come back from
+		// one search, and Tab down the list must keep working.
+		m.input.Reset()
+		m.lastSearched = ""
+	}
+}
+
+// confirm searches for a new term, or else picks the selected people, or
+// else the one under the cursor.
+func (m Model) confirm() (Model, tea.Cmd) {
+	// A fresh term searches, even with people already selected.
+	// Confirming instead would make a second search impossible and
+	// cap every pick at whatever one query happened to return —
+	// which no group of three can rely on.
+	if term := m.input.Value(); term != "" && term != m.lastSearched {
+		m.lastSearched = term
+		return m, func() tea.Msg { return SearchTriggeredMsg{Term: term} }
+	}
+	if len(m.selected) > 0 {
+		users := make([]*model.User, len(m.selected))
+		copy(users, m.selected)
+		m.Close()
+		return m, func() tea.Msg { return MembersPickedMsg{Users: users} }
+	}
+	if len(m.results) > 0 && m.cursor < len(m.results) {
+		user := m.results[m.cursor]
+		users := []*model.User{user}
+		m.Close()
+		return m, func() tea.Msg { return MembersPickedMsg{Users: users} }
+	}
+	return m, nil
 }
 
 // View renders the member picker overlay.

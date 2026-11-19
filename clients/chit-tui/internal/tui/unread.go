@@ -1,6 +1,11 @@
 package tui
 
-import "github.com/infrashift/chit/clients/chit-tui/internal/model"
+import (
+	"fmt"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/infrashift/chit/clients/chit-tui/internal/model"
+)
 
 // UnreadCount returns the unread count for a channel.
 func (m Model) UnreadCount(channelID string) int64 { return m.unread[channelID] }
@@ -48,4 +53,35 @@ func (m *Model) applyMyMembership(mem *model.ChannelMember) {
 	}
 	m.setUnread(mem.ChannelID, max(ch.TotalMsgCount-mem.MsgCount, 0))
 	m.setMention(mem.ChannelID, mem.MentionCount)
+}
+
+func (m Model) handleChannelMembersLoaded(msg ChannelMembersLoadedMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		return m, m.setError(msg.Err)
+	}
+	m.channelMembers[msg.ChannelID] = msg.Members
+	m.applyMembers(msg.ChannelID, msg.Members)
+	return m, nil
+}
+
+func (m Model) handleMyChannelMembersLoaded(msg MyChannelMembersLoadedMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		return m, m.setError(msg.Err)
+	}
+	for _, mem := range msg.Members {
+		m.applyMyMembership(mem)
+	}
+	return m, nil
+}
+
+func (m Model) handleChannelViewed(msg ChannelViewedMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		// Marking read failed, so the badge is about to disagree with
+		// what the reader just did. Saying so beats leaving them to
+		// wonder why the channel still looks unread.
+		return m, m.setError(fmt.Errorf("could not mark the channel read: %w", msg.Err))
+	}
+	m.setUnread(msg.ChannelID, 0)
+	m.setMention(msg.ChannelID, 0)
+	return m, nil
 }

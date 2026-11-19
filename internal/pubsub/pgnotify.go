@@ -86,30 +86,13 @@ func (pg *PGNotify) listenOnce(ctx context.Context) error {
 	}
 	defer conn.Release()
 
-	// Re-LISTEN all existing topics (fresh connection after a reconnect).
-	pg.mu.RLock()
-	topics := make([]string, 0, len(pg.handlers))
-	for topic := range pg.handlers {
-		topics = append(topics, topic)
-	}
-	pg.mu.RUnlock()
-	for _, topic := range topics {
-		if err := execListen(ctx, conn, topic); err != nil {
-			return err
-		}
+	if err := pg.relistenAll(ctx, conn); err != nil {
+		return err
 	}
 
 	for ctx.Err() == nil {
-		// Pick up newly requested subscriptions. This goroutine is the only
-		// receiver, so a receive after len > 0 does not block, and the
-		// capacity bounds the loop (Power of 10 rule 2).
-		for range cap(pg.pending) {
-			if len(pg.pending) == 0 {
-				break
-			}
-			if err := execListen(ctx, conn, <-pg.pending); err != nil {
-				return err
-			}
+		if err := pg.listenPending(ctx, conn); err != nil {
+			return err
 		}
 
 		waitCtx, cancel := context.WithTimeout(ctx, waitInterval)
@@ -125,24 +108,64 @@ func (pg *PGNotify) listenOnce(ctx context.Context) error {
 			return fmt.Errorf("wait for notification: %w", err)
 		}
 
-		pg.mu.RLock()
-		handlers := pg.handlers[notification.Channel]
-		pg.mu.RUnlock()
+		pg.dispatch(notification.Channel, []byte(notification.Payload))
+	}
+	return nil
+}
 
-		// Dispatch synchronously: handlers are expected to be fast, and this
-		// keeps notification handling bounded (no goroutine-per-message).
-		for _, handler := range handlers {
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						slog.Error("pgnotify: handler panicked", "topic", notification.Channel, "panic", r)
-					}
-				}()
-				handler.Handle([]byte(notification.Payload))
-			}()
+// relistenAll re-LISTENs all existing topics (fresh connection after a
+// reconnect).
+func (pg *PGNotify) relistenAll(ctx context.Context, conn *pgxpool.Conn) error {
+	pg.mu.RLock()
+	topics := make([]string, 0, len(pg.handlers))
+	for topic := range pg.handlers {
+		topics = append(topics, topic)
+	}
+	pg.mu.RUnlock()
+	for _, topic := range topics {
+		if err := execListen(ctx, conn, topic); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// listenPending picks up newly requested subscriptions. This goroutine is the
+// only receiver, so a receive after len > 0 does not block, and the capacity
+// bounds the loop (Power of 10 rule 2).
+func (pg *PGNotify) listenPending(ctx context.Context, conn *pgxpool.Conn) error {
+	for range cap(pg.pending) {
+		if len(pg.pending) == 0 {
+			break
+		}
+		if err := execListen(ctx, conn, <-pg.pending); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// dispatch hands a notification's payload to every handler of its topic.
+// Dispatch is synchronous: handlers are expected to be fast, and this keeps
+// notification handling bounded (no goroutine-per-message).
+func (pg *PGNotify) dispatch(topic string, payload []byte) {
+	pg.mu.RLock()
+	handlers := pg.handlers[topic]
+	pg.mu.RUnlock()
+
+	for _, handler := range handlers {
+		handleRecovered(topic, handler, payload)
+	}
+}
+
+// handleRecovered runs one handler, logging rather than propagating a panic.
+func handleRecovered(topic string, handler Handler, payload []byte) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("pgnotify: handler panicked", "topic", topic, "panic", r)
+		}
+	}()
+	handler.Handle(payload)
 }
 
 func execListen(ctx context.Context, conn *pgxpool.Conn, topic string) error {

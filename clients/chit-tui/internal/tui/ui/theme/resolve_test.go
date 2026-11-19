@@ -98,15 +98,19 @@ func TestAppearanceString(t *testing.T) {
 	}
 }
 
-// The precedence matrix: flag beats config theme, which beats the
-// appearance-selected pair, which beats the appearance default.
-func TestResolvePrecedence(t *testing.T) {
-	tests := []struct {
-		name    string
-		req     Request
-		wantBg  string
-		wantErr bool
-	}{
+// resolvePrecedenceCase is a request and the background its theme must have.
+type resolvePrecedenceCase struct {
+	name    string
+	req     Request
+	wantBg  string
+	wantErr bool
+}
+
+// resolvePrecedenceCases is the precedence matrix: flag beats config theme,
+// which beats the appearance-selected pair, which beats the appearance
+// default.
+func resolvePrecedenceCases() []resolvePrecedenceCase {
+	return []resolvePrecedenceCase{
 		{
 			name: "flag wins over everything",
 			req: Request{
@@ -165,8 +169,10 @@ func TestResolvePrecedence(t *testing.T) {
 			wantErr: true,
 		},
 	}
+}
 
-	for _, tc := range tests {
+func TestResolvePrecedence(t *testing.T) {
+	for _, tc := range resolvePrecedenceCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.req.ThemesDir = t.TempDir()
 

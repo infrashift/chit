@@ -112,31 +112,8 @@ func (a *App) CreateTag(ctx context.Context, req TagCreate, userID string, actor
 	if req.Scope == "" {
 		req.Scope = model.TagScopePrivate
 	}
-	if err := model.ValidateTagName(req.Name); err != nil {
+	if err := a.validateTagCreate(ctx, &req, userID, actor); err != nil {
 		return nil, err
-	}
-	switch req.Scope {
-	case model.TagScopePrivate:
-		if req.ChannelID != "" {
-			return nil, model.NewBadRequestError(where, "a private tag names no channel")
-		}
-	case model.TagScopeChannel:
-		if !model.IsValidID(req.ChannelID) {
-			return nil, model.NewBadRequestError(where, "a channel tag needs a channel_id")
-		}
-		if err := a.requireChannelMember(ctx, req.ChannelID, userID); err != nil {
-			return nil, err
-		}
-	default:
-		return nil, model.NewBadRequestError(where, "scope must be private or channel")
-	}
-	if model.IsReservedTagName(req.Name) {
-		if !a.onBehalf(actor) {
-			return nil, reservedRefusal()
-		}
-		if req.Scope != model.TagScopePrivate {
-			return nil, model.NewBadRequestError(where, "a profile/ tag is always the owner's private tag")
-		}
 	}
 
 	key := model.TagNameKey(req.Name)
@@ -162,6 +139,39 @@ func (a *App) CreateTag(ctx context.Context, req TagCreate, userID string, actor
 		return nil, err
 	}
 	return saved, nil
+}
+
+// validateTagCreate checks a CreateTag request: the name, the scope and its
+// channel, and the reservation of profile/ names to allowlisted clients.
+func (a *App) validateTagCreate(ctx context.Context, req *TagCreate, userID string, actor *model.User) error {
+	const where = "App.CreateTag"
+	if err := model.ValidateTagName(req.Name); err != nil {
+		return err
+	}
+	switch req.Scope {
+	case model.TagScopePrivate:
+		if req.ChannelID != "" {
+			return model.NewBadRequestError(where, "a private tag names no channel")
+		}
+	case model.TagScopeChannel:
+		if !model.IsValidID(req.ChannelID) {
+			return model.NewBadRequestError(where, "a channel tag needs a channel_id")
+		}
+		if err := a.requireChannelMember(ctx, req.ChannelID, userID); err != nil {
+			return err
+		}
+	default:
+		return model.NewBadRequestError(where, "scope must be private or channel")
+	}
+	if model.IsReservedTagName(req.Name) {
+		if !a.onBehalf(actor) {
+			return reservedRefusal()
+		}
+		if req.Scope != model.TagScopePrivate {
+			return model.NewBadRequestError(where, "a profile/ tag is always the owner's private tag")
+		}
+	}
+	return nil
 }
 
 // GetVisibleTags lists the Tags userID can see: their private Tags and the
@@ -475,25 +485,9 @@ func (a *App) FilterChannelsByTags(ctx context.Context, userID, teamID string, t
 	if !ok {
 		return out, nil
 	}
-	var channels []*model.Channel
-	if teamID != "" {
-		if authErr := a.requireTeamMember(ctx, teamID, userID); authErr != nil {
-			return nil, authErr
-		}
-		channels, err = a.Store.Channel().GetChannelsForUser(ctx, userID, teamID)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		chIDs, idsErr := a.Store.Channel().GetChannelIDsForUser(ctx, userID)
-		if idsErr != nil {
-			return nil, idsErr
-		}
-		for _, id := range chIDs {
-			if c, getErr := a.Store.Channel().Get(ctx, id); getErr == nil {
-				channels = append(channels, c)
-			}
-		}
+	channels, err := a.tagFilterChannels(ctx, userID, teamID)
+	if err != nil {
+		return nil, err
 	}
 	byID := map[string]*model.Channel{}
 	candidates := make([]string, 0, len(channels))
@@ -517,6 +511,29 @@ func (a *App) FilterChannelsByTags(ctx context.Context, userID, teamID string, t
 		out = append(out, &model.TaggedChannel{Channel: byID[id], Tags: filterTags(tags, userID)})
 	}
 	return out, nil
+}
+
+// tagFilterChannels returns the channels FilterChannelsByTags considers:
+// userID's channels in teamID (which needs team membership), or all of
+// userID's channels when teamID is empty.
+func (a *App) tagFilterChannels(ctx context.Context, userID, teamID string) ([]*model.Channel, error) {
+	if teamID != "" {
+		if authErr := a.requireTeamMember(ctx, teamID, userID); authErr != nil {
+			return nil, authErr
+		}
+		return a.Store.Channel().GetChannelsForUser(ctx, userID, teamID)
+	}
+	chIDs, err := a.Store.Channel().GetChannelIDsForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	var channels []*model.Channel
+	for _, id := range chIDs {
+		if c, getErr := a.Store.Channel().Get(ctx, id); getErr == nil {
+			channels = append(channels, c)
+		}
+	}
+	return channels, nil
 }
 
 // requirePostChannelMember resolves a post to its channel and checks

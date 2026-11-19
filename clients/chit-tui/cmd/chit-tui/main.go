@@ -65,6 +65,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	m := newModel(cfg, styles.New(activeTheme))
+	m.SetThemeSetting(themeSetting(opts, cfg, background))
+
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg { return filterInput(msg) }))
+	if _, err := p.Run(); err != nil {
+		stderr.Printf("error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// newModel connects the clients and stores the configuration names and
+// builds the root model on them.
+func newModel(cfg *config.Config, s styles.Styles) tui.Model {
 	kratosClient := auth.NewKratosClient(cfg.KratosBaseURL())
 	tokenStore := auth.NewTokenStore("")
 	sessionStore := auth.NewSessionStore(cfg.SessionFile)
@@ -80,15 +93,7 @@ func main() {
 	client := api.NewClientWithTokenSource(cfg.ServerURL, tokenStore, cfg.AuthHeader)
 	wsClient := ws.NewWSClientWithHeader(cfg.WSURL(), tokenStore.Get(), 256, cfg.AuthHeader)
 
-	s := styles.New(activeTheme)
-	m := tui.NewModel(cfg, client, wsClient, s, tokenStore, kratosClient, sessionStore)
-	m.SetThemeSetting(themeSetting(opts, cfg, background))
-
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg { return filterInput(msg) }))
-	if _, err := p.Run(); err != nil {
-		stderr.Printf("error: %v\n", err)
-		os.Exit(1)
-	}
+	return tui.NewModel(cfg, client, wsClient, s, tokenStore, kratosClient, sessionStore)
 }
 
 // sessionLoader reads the saved session; *auth.SessionStore is one.

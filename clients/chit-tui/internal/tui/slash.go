@@ -8,6 +8,7 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/config"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/input"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/palette"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
 
@@ -64,61 +65,8 @@ func (m Model) handleSlash(msg input.SlashTriggerMsg) (tea.Model, tea.Cmd) {
 		args = strings.TrimSpace(args)
 	}
 
-	// These act on this client alone; the server knows nothing about them.
-	switch verb {
-	case "/skin", "/theme":
-		m.skinPicker.SetSkins(theme.ListAvailable(config.ThemesDir()))
-		cmd := m.setFocus(FocusSkinPicker)
-		m.skinPicker.Open()
-		return m, cmd
-	case "/logout":
-		return m.handleLogout()
-	case "/group":
-		// Client-local for the same reason as /leave: the server has no
-		// group command, only the REST endpoint the picker's result calls.
-		m.pendingGroupChannel = true
-		m.pendingPrivateChannel = nil
-		cmd := m.setFocus(FocusDMPicker)
-		m.dmPicker.OpenForMembers()
-		return m, cmd
-	case "/threads":
-		// No team is no reason to refuse: DM and group threads belong
-		// to none, and are listed regardless.
-		teamID, teamName := "", ""
-		if m.activeTeam != nil {
-			teamID, teamName = m.activeTeam.ID, m.activeTeam.DisplayName
-		}
-		cmd := m.setFocus(FocusThreadInbox)
-		m.threadInbox.SetChannelNames(m.channelDisplayNames())
-		m.threadInbox.SetTeamName(teamName)
-		m.threadInbox.Open()
-		return m, tea.Batch(cmd, FetchMyThreads(m.reqCtx(), m.client, teamID))
-	case "/leave":
-		// Handled here rather than server-side: there is no leave command
-		// in the registry, and the REST endpoint already permits a member
-		// to remove themselves.
-		if m.activeChan == nil || m.me == nil {
-			return m, nil
-		}
-		return m, LeaveChannel(m.reqCtx(), m.client, m.activeChan.ID, m.me.ID)
-	case "/nick":
-		// Display name only. The handle is /username, kept separate
-		// because renaming it breaks every @mention already written.
-		if args == "" {
-			return m, m.setError(errNickUsage)
-		}
-		return m, UpdateProfile(m.reqCtx(), m.client, &model.User{DisplayName: args})
-	case "/username":
-		if args == "" {
-			return m, m.setError(errUsernameUsage)
-		}
-		if strings.ContainsAny(args, " \t") {
-			return m, m.setError(errUsernameSpaces)
-		}
-		return m, UpdateProfile(m.reqCtx(), m.client, &model.User{Username: args})
-	case "/":
-		// A bare slash is a request to browse, not to send.
-		return m, m.openPalette("/")
+	if next, cmd, ok := m.runClientCommand(verb, args); ok {
+		return next, cmd
 	}
 
 	// Everything else goes to the server, which owns the command
@@ -133,4 +81,98 @@ func (m Model) handleSlash(msg input.SlashTriggerMsg) (tea.Model, tea.Cmd) {
 		UserID:    m.me.ID,
 		Content:   trimmed,
 	})
+}
+
+// runClientCommand runs verb if this client implements it, and reports
+// whether it did.
+func (m Model) runClientCommand(verb, args string) (tea.Model, tea.Cmd, bool) {
+	// These act on this client alone; the server knows nothing about them.
+	switch verb {
+	case "/skin", "/theme":
+		m.skinPicker.SetSkins(theme.ListAvailable(config.ThemesDir()))
+		cmd := m.setFocus(FocusSkinPicker)
+		m.skinPicker.Open()
+		return m, cmd, true
+	case "/logout":
+		return handled(m.handleLogout())
+	case "/group":
+		// Client-local for the same reason as /leave: the server has no
+		// group command, only the REST endpoint the picker's result calls.
+		m.pendingGroupChannel = true
+		m.pendingPrivateChannel = nil
+		cmd := m.setFocus(FocusDMPicker)
+		m.dmPicker.OpenForMembers()
+		return m, cmd, true
+	case "/threads":
+		return handled(m.openThreadInbox())
+	case "/leave":
+		// Handled here rather than server-side: there is no leave command
+		// in the registry, and the REST endpoint already permits a member
+		// to remove themselves.
+		if m.activeChan == nil || m.me == nil {
+			return m, nil, true
+		}
+		return m, LeaveChannel(m.reqCtx(), m.client, m.activeChan.ID, m.me.ID), true
+	case "/nick":
+		return handled(m.setNick(args))
+	case "/username":
+		return handled(m.setUsername(args))
+	case "/":
+		// A bare slash is a request to browse, not to send.
+		return m, m.openPalette("/"), true
+	}
+	return m, nil, false
+}
+
+// openThreadInbox opens the list of threads the user follows.
+func (m Model) openThreadInbox() (tea.Model, tea.Cmd) {
+	// No team is no reason to refuse: DM and group threads belong
+	// to none, and are listed regardless.
+	teamID, teamName := "", ""
+	if m.activeTeam != nil {
+		teamID, teamName = m.activeTeam.ID, m.activeTeam.DisplayName
+	}
+	cmd := m.setFocus(FocusThreadInbox)
+	m.threadInbox.SetChannelNames(m.channelDisplayNames())
+	m.threadInbox.SetTeamName(teamName)
+	m.threadInbox.Open()
+	return m, tea.Batch(cmd, FetchMyThreads(m.reqCtx(), m.client, teamID))
+}
+
+// setNick changes the display name only. The handle is /username, kept
+// separate because renaming it breaks every @mention already written.
+func (m Model) setNick(args string) (tea.Model, tea.Cmd) {
+	if args == "" {
+		return m, m.setError(errNickUsage)
+	}
+	return m, UpdateProfile(m.reqCtx(), m.client, &model.User{DisplayName: args})
+}
+
+// setUsername changes the handle others @mention.
+func (m Model) setUsername(args string) (tea.Model, tea.Cmd) {
+	if args == "" {
+		return m, m.setError(errUsernameUsage)
+	}
+	if strings.ContainsAny(args, " \t") {
+		return m, m.setError(errUsernameSpaces)
+	}
+	return m, UpdateProfile(m.reqCtx(), m.client, &model.User{Username: args})
+}
+
+func (m Model) handleCommandsLoaded(msg CommandsLoadedMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		return m, m.setError(msg.Err)
+	}
+	m.palette.SetCommands(mergeCommands(clientCommands(), msg.Commands))
+	return m, nil
+}
+
+func (m Model) handleCommandChosen(msg palette.CommandChosenMsg) (tea.Model, tea.Cmd) {
+	// Insert rather than execute: most commands take arguments, and the
+	// palette has no way to collect them. The user completes the line and
+	// presses Enter, which sends it like any other message.
+	if msg.Command != nil {
+		m.input.SetValue("/" + msg.Command.Slug + " ")
+	}
+	return m, m.setFocus(FocusInput)
 }

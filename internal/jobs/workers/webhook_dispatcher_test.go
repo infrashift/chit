@@ -14,27 +14,32 @@ import (
 	"github.com/infrashift/chit/internal/command"
 )
 
-func TestWebhookDispatcher_Delivery(t *testing.T) {
-	var (
-		mu             sync.Mutex
-		gotContentType string
-		gotSignature   string
-		gotBody        []byte
-		callCount      int
-	)
+// deliveryRecorder is a webhook receiver that records the last delivery.
+type deliveryRecorder struct {
+	t           *testing.T
+	mu          sync.Mutex
+	contentType string
+	signature   string
+	body        []byte
+	calls       int
+}
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		defer mu.Unlock()
-		callCount++
-		gotContentType = r.Header.Get("Content-Type")
-		gotSignature = r.Header.Get("X-Chit-Signature")
-		var err error
-		if gotBody, err = io.ReadAll(r.Body); err != nil {
-			t.Errorf("read body: %v", err)
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
+func (rec *deliveryRecorder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	rec.calls++
+	rec.contentType = r.Header.Get("Content-Type")
+	rec.signature = r.Header.Get("X-Chit-Signature")
+	var err error
+	if rec.body, err = io.ReadAll(r.Body); err != nil {
+		rec.t.Errorf("read body: %v", err)
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func TestWebhookDispatcher_Delivery(t *testing.T) {
+	rec := &deliveryRecorder{t: t}
+	srv := httptest.NewServer(rec)
 	defer srv.Close()
 
 	ch := make(chan *command.WebhookEvent, 10)
@@ -69,30 +74,42 @@ func TestWebhookDispatcher_Delivery(t *testing.T) {
 		t.Fatal("dispatcher did not stop")
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
 
-	if callCount != 1 {
-		t.Fatalf("expected 1 delivery, got %d", callCount)
+	if rec.calls != 1 {
+		t.Fatalf("expected 1 delivery, got %d", rec.calls)
+	}
+	checkSignedDelivery(t, rec.contentType, rec.signature, rec.body)
+	checkCloudEvent(t, rec.body)
+}
+
+// checkSignedDelivery checks the content type and the signature of a
+// delivery signed with "test-secret".
+func checkSignedDelivery(t *testing.T, contentType, signature string, body []byte) {
+	t.Helper()
+	if contentType != "application/cloudevents+json" {
+		t.Errorf("expected Content-Type=application/cloudevents+json, got %q", contentType)
 	}
 
-	if gotContentType != "application/cloudevents+json" {
-		t.Errorf("expected Content-Type=application/cloudevents+json, got %q", gotContentType)
-	}
-
-	if gotSignature == "" {
+	if signature == "" {
 		t.Error("expected X-Chit-Signature header")
 	}
 
 	// Verify the signature matches.
-	expectedSig := command.SignPayload(gotBody, "test-secret")
-	if gotSignature != expectedSig {
-		t.Errorf("signature mismatch: got %q, expected %q", gotSignature, expectedSig)
+	expectedSig := command.SignPayload(body, "test-secret")
+	if signature != expectedSig {
+		t.Errorf("signature mismatch: got %q, expected %q", signature, expectedSig)
 	}
+}
 
+// checkCloudEvent checks that body is the CloudEvent of an executed help
+// command by user-001.
+func checkCloudEvent(t *testing.T, body []byte) {
+	t.Helper()
 	// Verify CloudEvent structure.
 	var ce map[string]any
-	if err := json.Unmarshal(gotBody, &ce); err != nil {
+	if err := json.Unmarshal(body, &ce); err != nil {
 		t.Fatalf("unmarshal body: %v", err)
 	}
 	if ce["specversion"] != "1.0" {

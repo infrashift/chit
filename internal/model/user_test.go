@@ -84,7 +84,9 @@ func TestUser_PreSave(t *testing.T) {
 			t.Fatalf("expected ID to be preserved, got %q", u.ID)
 		}
 	})
+}
 
+func TestUser_PreSave_Timestamps(t *testing.T) {
 	t.Run("sets CreateAt when 0", func(t *testing.T) {
 		u := &User{}
 		u.PreSave()
@@ -108,7 +110,9 @@ func TestUser_PreSave(t *testing.T) {
 			t.Fatal("expected UpdateAt to be overwritten")
 		}
 	})
+}
 
+func TestUser_PreSave_RolesAndCase(t *testing.T) {
 	t.Run("defaults Roles to system_user", func(t *testing.T) {
 		u := &User{}
 		u.PreSave()

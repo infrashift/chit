@@ -42,41 +42,7 @@ func TestTeamStoreIntegration_CRUDAndMembers(t *testing.T) {
 		t.Errorf("GetByName: got %s, want %s", byName.ID, team.ID)
 	}
 
-	// Membership
-	if _, err = ss.Team().SaveMember(t.Context(), &model.TeamMember{
-		TeamID: team.ID,
-		UserID: user.ID,
-		Roles:  "team_admin",
-	}); err != nil {
-		t.Fatalf("SaveMember: %v", err)
-	}
-	member, err := ss.Team().GetMember(t.Context(), team.ID, user.ID)
-	if err != nil {
-		t.Fatalf("GetMember: %v", err)
-	}
-	if member.UserID != user.ID {
-		t.Errorf("GetMember: got %+v", member)
-	}
-
-	teams, err := ss.Team().GetTeamsForUser(t.Context(), user.ID)
-	if err != nil {
-		t.Fatalf("GetTeamsForUser: %v", err)
-	}
-	if len(teams) != 1 || teams[0].ID != team.ID {
-		t.Errorf("GetTeamsForUser: got %v", teams)
-	}
-
-	// Non-member lookup is a not-found AppError (authz depends on this).
-	if _, err := ss.Team().GetMember(t.Context(), team.ID, "00000000-0000-7000-8000-000000000000"); err == nil {
-		t.Error("GetMember for non-member: expected error, got nil")
-	}
-
-	if err := ss.Team().RemoveMember(t.Context(), team.ID, user.ID); err != nil {
-		t.Fatalf("RemoveMember: %v", err)
-	}
-	if _, err := ss.Team().GetMember(t.Context(), team.ID, user.ID); err == nil {
-		t.Error("GetMember after remove: expected error, got nil")
-	}
+	checkTeamMembership(t, ss, team.ID, user.ID)
 
 	// Soft delete
 	if err := ss.Team().Delete(t.Context(), team.ID, model.GetMillis()); err != nil {
@@ -84,6 +50,47 @@ func TestTeamStoreIntegration_CRUDAndMembers(t *testing.T) {
 	}
 	if _, err := ss.Team().Get(t.Context(), team.ID); err == nil {
 		t.Error("Get after soft delete: expected error, got nil")
+	}
+}
+
+// checkTeamMembership adds userID to teamID, reads the membership back and
+// removes it again.
+func checkTeamMembership(t *testing.T, ss *SqlStore, teamID, userID string) {
+	t.Helper()
+	// Membership
+	if _, err := ss.Team().SaveMember(t.Context(), &model.TeamMember{
+		TeamID: teamID,
+		UserID: userID,
+		Roles:  "team_admin",
+	}); err != nil {
+		t.Fatalf("SaveMember: %v", err)
+	}
+	member, err := ss.Team().GetMember(t.Context(), teamID, userID)
+	if err != nil {
+		t.Fatalf("GetMember: %v", err)
+	}
+	if member.UserID != userID {
+		t.Errorf("GetMember: got %+v", member)
+	}
+
+	teams, err := ss.Team().GetTeamsForUser(t.Context(), userID)
+	if err != nil {
+		t.Fatalf("GetTeamsForUser: %v", err)
+	}
+	if len(teams) != 1 || teams[0].ID != teamID {
+		t.Errorf("GetTeamsForUser: got %v", teams)
+	}
+
+	// Non-member lookup is a not-found AppError (authz depends on this).
+	if _, err := ss.Team().GetMember(t.Context(), teamID, "00000000-0000-7000-8000-000000000000"); err == nil {
+		t.Error("GetMember for non-member: expected error, got nil")
+	}
+
+	if err := ss.Team().RemoveMember(t.Context(), teamID, userID); err != nil {
+		t.Fatalf("RemoveMember: %v", err)
+	}
+	if _, err := ss.Team().GetMember(t.Context(), teamID, userID); err == nil {
+		t.Error("GetMember after remove: expected error, got nil")
 	}
 }
 

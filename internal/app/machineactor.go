@@ -96,52 +96,68 @@ func (a *App) EnsureMachineActors(ctx context.Context, actors []MachineActor) er
 		actor.normalize()
 		existing, err := a.Store.User().GetByOAuthClientID(ctx, actor.ClientID)
 		if err == nil {
-			if existing.Roles == actor.Roles && existing.DisplayName == actor.DisplayName &&
-				existing.Username == actor.Username && existing.ActorType == actor.ActorType {
-				continue
+			if err := a.reconcileMachineActor(ctx, existing, &actor); err != nil {
+				return err
 			}
-			existing.Roles = actor.Roles
-			existing.DisplayName = actor.DisplayName
-			existing.Username = actor.Username
-			existing.ActorType = actor.ActorType
-			existing.PreUpdate()
-			// Validated as creation is: a declared empty display_name was
-			// refused on create and silently written on update.
-			if verr := existing.IsValid(); verr != nil {
-				return fmt.Errorf("machine actor %q is invalid: %w", actor.ClientID, verr)
-			}
-			if _, err := a.Store.User().Update(ctx, existing); err != nil {
-				return fmt.Errorf("update machine actor %q: %w", actor.ClientID, err)
-			}
-			// The cache is keyed by client id and holds the OLD roles, so a
-			// reconcile that skipped this would take effect only after the
-			// entry expired — which reads as the change not having applied.
-			a.invalidateUserCache(existing)
-			slog.Info("machine actor reconciled", "client_id", actor.ClientID, "roles", actor.Roles)
 			continue
 		}
-
-		user := &model.User{
-			Username:      actor.Username,
-			DisplayName:   actor.DisplayName,
-			Roles:         actor.Roles,
-			ActorType:     actor.ActorType,
-			OAuthClientID: actor.ClientID,
+		if err := a.createMachineActor(ctx, &actor); err != nil {
+			return err
 		}
-		user.PreSave()
-		if verr := user.IsValid(); verr != nil {
-			return fmt.Errorf("machine actor %q is invalid: %w", actor.ClientID, verr)
-		}
-		if _, err := a.Store.User().Save(ctx, user); err != nil {
-			// Another instance may have created it. Re-read before failing:
-			// the row existing is the outcome this asked for.
-			if _, err2 := a.Store.User().GetByOAuthClientID(ctx, actor.ClientID); err2 == nil {
-				continue
-			}
-			return fmt.Errorf("create machine actor %q: %w", actor.ClientID, err)
-		}
-		slog.Info("machine actor created", "client_id", actor.ClientID,
-			"username", actor.Username, "roles", actor.Roles, "actor_type", actor.ActorType)
 	}
+	return nil
+}
+
+// reconcileMachineActor brings the existing row in line with the declared
+// actor; it writes nothing when they already agree.
+func (a *App) reconcileMachineActor(ctx context.Context, existing *model.User, actor *MachineActor) error {
+	if existing.Roles == actor.Roles && existing.DisplayName == actor.DisplayName &&
+		existing.Username == actor.Username && existing.ActorType == actor.ActorType {
+		return nil
+	}
+	existing.Roles = actor.Roles
+	existing.DisplayName = actor.DisplayName
+	existing.Username = actor.Username
+	existing.ActorType = actor.ActorType
+	existing.PreUpdate()
+	// Validated as creation is: a declared empty display_name was
+	// refused on create and silently written on update.
+	if verr := existing.IsValid(); verr != nil {
+		return fmt.Errorf("machine actor %q is invalid: %w", actor.ClientID, verr)
+	}
+	if _, err := a.Store.User().Update(ctx, existing); err != nil {
+		return fmt.Errorf("update machine actor %q: %w", actor.ClientID, err)
+	}
+	// The cache is keyed by client id and holds the OLD roles, so a
+	// reconcile that skipped this would take effect only after the
+	// entry expired — which reads as the change not having applied.
+	a.invalidateUserCache(existing)
+	slog.Info("machine actor reconciled", "client_id", actor.ClientID, "roles", actor.Roles)
+	return nil
+}
+
+// createMachineActor inserts the declared actor as a new user row.
+func (a *App) createMachineActor(ctx context.Context, actor *MachineActor) error {
+	user := &model.User{
+		Username:      actor.Username,
+		DisplayName:   actor.DisplayName,
+		Roles:         actor.Roles,
+		ActorType:     actor.ActorType,
+		OAuthClientID: actor.ClientID,
+	}
+	user.PreSave()
+	if verr := user.IsValid(); verr != nil {
+		return fmt.Errorf("machine actor %q is invalid: %w", actor.ClientID, verr)
+	}
+	if _, err := a.Store.User().Save(ctx, user); err != nil {
+		// Another instance may have created it. Re-read before failing:
+		// the row existing is the outcome this asked for.
+		if _, err2 := a.Store.User().GetByOAuthClientID(ctx, actor.ClientID); err2 == nil {
+			return nil
+		}
+		return fmt.Errorf("create machine actor %q: %w", actor.ClientID, err)
+	}
+	slog.Info("machine actor created", "client_id", actor.ClientID,
+		"username", actor.Username, "roles", actor.Roles, "actor_type", actor.ActorType)
 	return nil
 }

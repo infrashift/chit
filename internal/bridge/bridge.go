@@ -289,6 +289,17 @@ func (b *Bridge) handleEvent(ctx context.Context, event *model.WebSocketEvent) {
 		}
 	}
 
+	if !b.enqueue(ctx, root, item) {
+		slog.Warn("thread queue full, dropping message", "root_id", root, "post_id", post.ID)
+		if addressed {
+			b.noticeQueueFull(ctx, root, post)
+		}
+	}
+}
+
+// enqueue sends item to root's worker, starting the worker if the thread has
+// none, and reports whether the queue had room.
+func (b *Bridge) enqueue(ctx context.Context, root string, item queued) bool {
 	// The send happens under mu, so a worker retiring for idleness (which
 	// also takes mu) can never leave a post in a queue nobody reads.
 	b.mu.Lock()
@@ -307,18 +318,12 @@ func (b *Bridge) handleEvent(ctx context.Context, event *model.WebSocketEvent) {
 	}
 	// The agent is about to answer here, so the thread is joined now: a
 	// follow-up sent before that answer lands is for the agent too.
-	if sent && addressed {
+	if sent && item.addressed {
 		b.joined.add(root)
 		b.bystander.remove(root)
 	}
 	b.mu.Unlock()
-
-	if !sent {
-		slog.Warn("thread queue full, dropping message", "root_id", root, "post_id", post.ID)
-		if addressed {
-			b.noticeQueueFull(ctx, root, post)
-		}
-	}
+	return sent
 }
 
 // firstSighting records postID and reports whether it is new. A post delivered
@@ -611,36 +616,14 @@ func (b *Bridge) processPost(ctx context.Context, root string, post *model.Post)
 		return
 	}
 
-	// Replying to a human resets the chain; replying to an agent extends it.
-	// Error replies carry the count too: an error text could contain an
-	// @mention that would otherwise restart an exchange at hop 0.
-	hops := 0
-	if authorActor == model.ActorTypeAgent || authorActor == model.ActorTypeBot {
-		hops = agentHops(post) + 1
-	}
+	hops := replyHops(post, authorActor)
+	sessionID, seed := b.resumeSession(ctx, root, post)
 
-	// A new session in an existing thread is given the thread so far,
-	// unless !new or a retirement asked for a clean start.
-	sessionID, seed := "", false
-	if root != post.ID {
-		t := b.thread(ctx, root)
-		sessionID = t.sessionID
-		seed = sessionID == "" && !t.clean
-	}
-
-	// The run gets its own context so !stop can cancel it alone.
-	runCtx, cancelRun := context.WithCancelCause(ctx)
-	b.mu.Lock()
-	b.running[root] = runState{cancel: cancelRun, started: time.Now()}
-	b.mu.Unlock()
+	runCtx, cancelRun := b.startRun(ctx, root)
 	progress := b.showProgress(ctx, post.ChannelID, root, hops)
 	defer progress.Stop(ctx)
 	result, notice, err := b.runClaude(runCtx, root, post, sessionID, seed)
-	b.mu.Lock()
-	delete(b.running, root)
-	b.joined.add(root)
-	b.bystander.remove(root)
-	b.mu.Unlock()
+	b.finishRun(root)
 	stopped := errors.Is(context.Cause(runCtx), errStopped)
 	cancelRun(nil)
 	if stopped {
@@ -659,22 +642,74 @@ func (b *Bridge) processPost(ctx context.Context, root string, post *model.Post)
 		b.mu.Unlock()
 	}
 	if err != nil {
-		var runErr *RunError
-		if errors.As(err, &runErr) && runErr.Detail != "" {
-			slog.Error("claude run failed", "root_id", root, "error", err, "detail", runErr.Detail)
-		} else {
-			slog.Error("claude run failed", "root_id", root, "error", err)
-		}
-		props := map[string]any{hopsProp: hops}
-		// A failed run can still have started a session worth resuming
-		// (an API error mid-task leaves the work done so far).
-		if result != nil && result.SessionID != "" {
-			props[sessionProp] = result.SessionID
-		}
-		b.reply(ctx, post.ChannelID, root, notice+"⚠️ Claude run failed: "+err.Error(), props)
+		b.replyRunFailed(ctx, root, post, hops, result, notice, err)
 		return
 	}
+	b.replyResult(ctx, root, post, hops, result, notice)
+}
 
+// replyHops is the agent-hop count a reply to post carries.
+func replyHops(post *model.Post, authorActor string) int {
+	// Replying to a human resets the chain; replying to an agent extends it.
+	// Error replies carry the count too: an error text could contain an
+	// @mention that would otherwise restart an exchange at hop 0.
+	if authorActor == model.ActorTypeAgent || authorActor == model.ActorTypeBot {
+		return agentHops(post) + 1
+	}
+	return 0
+}
+
+// resumeSession returns the session a run for post resumes, and whether a new
+// session should be seeded with the thread so far.
+func (b *Bridge) resumeSession(ctx context.Context, root string, post *model.Post) (string, bool) {
+	// A new session in an existing thread is given the thread so far,
+	// unless !new or a retirement asked for a clean start.
+	if root == post.ID {
+		return "", false
+	}
+	t := b.thread(ctx, root)
+	return t.sessionID, t.sessionID == "" && !t.clean
+}
+
+// startRun records a run in root and returns its context.
+func (b *Bridge) startRun(ctx context.Context, root string) (context.Context, context.CancelCauseFunc) {
+	// The run gets its own context so !stop can cancel it alone.
+	runCtx, cancelRun := context.WithCancelCause(ctx)
+	b.mu.Lock()
+	b.running[root] = runState{cancel: cancelRun, started: time.Now()}
+	b.mu.Unlock()
+	return runCtx, cancelRun
+}
+
+// finishRun clears root's run and marks the thread as joined.
+func (b *Bridge) finishRun(root string) {
+	b.mu.Lock()
+	delete(b.running, root)
+	b.joined.add(root)
+	b.bystander.remove(root)
+	b.mu.Unlock()
+}
+
+// replyRunFailed logs a failed run and answers in the thread with the error.
+func (b *Bridge) replyRunFailed(ctx context.Context, root string, post *model.Post, hops int, result *ClaudeResult, notice string, err error) {
+	var runErr *RunError
+	if errors.As(err, &runErr) && runErr.Detail != "" {
+		slog.Error("claude run failed", "root_id", root, "error", err, "detail", runErr.Detail)
+	} else {
+		slog.Error("claude run failed", "root_id", root, "error", err)
+	}
+	props := map[string]any{hopsProp: hops}
+	// A failed run can still have started a session worth resuming
+	// (an API error mid-task leaves the work done so far).
+	if result != nil && result.SessionID != "" {
+		props[sessionProp] = result.SessionID
+	}
+	b.reply(ctx, post.ChannelID, root, notice+"⚠️ Claude run failed: "+err.Error(), props)
+}
+
+// replyResult answers in the thread with a successful run's result, retiring
+// the session when it has grown past the configured limit.
+func (b *Bridge) replyResult(ctx context.Context, root string, post *model.Post, hops int, result *ClaudeResult, notice string) {
 	content := result.Result
 	if content == "" {
 		content = "_(empty response)_"

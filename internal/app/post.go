@@ -20,25 +20,8 @@ func (a *App) CreatePost(ctx context.Context, post *model.Post) (*model.Post, er
 // ResolvePrincipal): the post is authorized as post.UserID, and the actor is
 // recorded in props.on_behalf_of and in the audit log.
 func (a *App) CreatePostAs(ctx context.Context, post *model.Post, actor *model.User) (*model.Post, error) {
-	// Membership comes first, before slash commands are intercepted: a command
-	// runs in the context of the channel it was typed in, and `/topic` with no
-	// argument reads the channel header back to whoever asked.
-	if err := a.requireChannelMember(ctx, post.ChannelID, post.UserID); err != nil {
+	if err := a.authorizePostCreate(ctx, post, actor); err != nil {
 		return nil, err
-	}
-
-	// Server-owned: only the server records who acted for whom.
-	delete(post.Props, model.PropOnBehalfOf)
-	if actor != nil && !a.OnBehalfOfAllowed(actor) {
-		return nil, model.NewForbiddenError("App.CreatePost", "this client may not act on behalf of a user")
-	}
-	if prov, ok := post.Props[model.PropProvenance]; ok {
-		if err := a.requireProvenanceWriter(ctx, post.UserID, actor); err != nil {
-			return nil, err
-		}
-		if err := model.ValidateProvenance(prov); err != nil {
-			return nil, err
-		}
 	}
 
 	// Intercept slash commands — they are NOT persisted.
@@ -48,15 +31,7 @@ func (a *App) CreatePostAs(ctx context.Context, post *model.Post, actor *model.U
 			return nil, err
 		}
 		if handled {
-			return &model.Post{
-				ID:        model.NewID(),
-				ChannelID: post.ChannelID,
-				UserID:    post.UserID,
-				Content:   resp.Text,
-				Type:      "command_response",
-				CreateAt:  model.GetMillis(),
-				Props:     map[string]any{"ephemeral": true},
-			}, nil
+			return commandResponsePost(post, resp), nil
 		}
 	}
 
@@ -73,17 +48,11 @@ func (a *App) CreatePostAs(ctx context.Context, post *model.Post, actor *model.U
 	mentionedUserIDs, err := a.processMentions(ctx, post)
 	errlog.Warn(err, "process mentions")
 	if len(mentionedUserIDs) > 0 {
-		if post.Props == nil {
-			post.Props = make(map[string]any)
-		}
-		post.Props["mentions"] = mentionedUserIDs
+		setPostProp(post, "mentions", mentionedUserIDs)
 	}
 
 	if actor != nil {
-		if post.Props == nil {
-			post.Props = make(map[string]any)
-		}
-		post.Props[model.PropOnBehalfOf] = map[string]any{"actor_id": actor.ID}
+		setPostProp(post, model.PropOnBehalfOf, map[string]any{"actor_id": actor.ID})
 	}
 
 	saved, err := a.Store.Post().Save(ctx, post)
@@ -94,6 +63,62 @@ func (a *App) CreatePostAs(ctx context.Context, post *model.Post, actor *model.U
 		a.AuditLogger.LogPostOnBehalfOf(model.NewID(), actor.ID, actor.OAuthClientID, saved.UserID, saved.ID, saved.ChannelID)
 	}
 
+	a.afterPostSaved(ctx, saved, root, mentionedUserIDs)
+	return saved, nil
+}
+
+// authorizePostCreate runs CreatePostAs's checks that come before anything
+// else: channel membership, the on-behalf-of allowlist, and provenance.
+func (a *App) authorizePostCreate(ctx context.Context, post *model.Post, actor *model.User) error {
+	// Membership comes first, before slash commands are intercepted: a command
+	// runs in the context of the channel it was typed in, and `/topic` with no
+	// argument reads the channel header back to whoever asked.
+	if err := a.requireChannelMember(ctx, post.ChannelID, post.UserID); err != nil {
+		return err
+	}
+
+	// Server-owned: only the server records who acted for whom.
+	delete(post.Props, model.PropOnBehalfOf)
+	if actor != nil && !a.OnBehalfOfAllowed(actor) {
+		return model.NewForbiddenError("App.CreatePost", "this client may not act on behalf of a user")
+	}
+	if prov, ok := post.Props[model.PropProvenance]; ok {
+		if err := a.requireProvenanceWriter(ctx, post.UserID, actor); err != nil {
+			return err
+		}
+		if err := model.ValidateProvenance(prov); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// commandResponsePost is the ephemeral, unsaved post that answers a slash
+// command typed as post.
+func commandResponsePost(post *model.Post, resp *CommandResponse) *model.Post {
+	return &model.Post{
+		ID:        model.NewID(),
+		ChannelID: post.ChannelID,
+		UserID:    post.UserID,
+		Content:   resp.Text,
+		Type:      "command_response",
+		CreateAt:  model.GetMillis(),
+		Props:     map[string]any{"ephemeral": true},
+	}
+}
+
+// setPostProp sets one prop, creating the props map when the post has none.
+func setPostProp(post *model.Post, key string, value any) {
+	if post.Props == nil {
+		post.Props = make(map[string]any)
+	}
+	post.Props[key] = value
+}
+
+// afterPostSaved does the work that follows a saved post: channel stats,
+// thread metadata, the WebSocket broadcast, and mention notifications. None
+// of it fails the post.
+func (a *App) afterPostSaved(ctx context.Context, saved, root *model.Post, mentionedUserIDs []string) {
 	// Update channel stats (atomic SQL)
 	if err := a.Store.Channel().IncrementMsgCount(ctx, saved.ChannelID, saved.CreateAt); err != nil {
 		slog.Error("failed to increment channel message count", "channel_id", saved.ChannelID, "error", err)
@@ -113,8 +138,6 @@ func (a *App) CreatePostAs(ctx context.Context, post *model.Post, actor *model.U
 	if len(mentionedUserIDs) > 0 {
 		a.notifyMentionedUsers(ctx, saved, mentionedUserIDs)
 	}
-
-	return saved, nil
 }
 
 // requireReplyableRoot returns a 400 unless post.RootID names a live root post
@@ -137,6 +160,25 @@ func (a *App) requireReplyableRoot(ctx context.Context, post *model.Post) (*mode
 		return nil, model.NewBadRequestError("App.CreatePost", "root_id names a reply; reply to its root instead")
 	}
 	return root, nil
+}
+
+// requireProvenancePatch checks an edit's provenance prop, if it has one:
+// setting or removing provenance both need the right to write it, and a value
+// that is set must be valid.
+func (a *App) requireProvenancePatch(ctx context.Context, actorID string, props map[string]any) error {
+	prov, ok := props[model.PropProvenance]
+	if !ok {
+		return nil
+	}
+	if err := a.requireProvenanceWriter(ctx, actorID, nil); err != nil {
+		return err
+	}
+	if prov != nil {
+		if err := model.ValidateProvenance(prov); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // GetPost retrieves a post by ID, requiring the caller to be a member of its channel.
@@ -179,16 +221,8 @@ func (a *App) UpdatePost(ctx context.Context, id string, patch PostPatch, actorI
 
 	// on_behalf_of is the server's record of who posted: no edit changes it.
 	delete(patch.Props, model.PropOnBehalfOf)
-	if prov, ok := patch.Props[model.PropProvenance]; ok {
-		// Setting or removing provenance both need the right to write it.
-		if provErr := a.requireProvenanceWriter(ctx, actorID, nil); provErr != nil {
-			return nil, provErr
-		}
-		if prov != nil {
-			if provErr := model.ValidateProvenance(prov); provErr != nil {
-				return nil, provErr
-			}
-		}
+	if provErr := a.requireProvenancePatch(ctx, actorID, patch.Props); provErr != nil {
+		return nil, provErr
 	}
 
 	if patch.Content != nil {

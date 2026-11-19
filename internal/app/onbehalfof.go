@@ -57,24 +57,14 @@ func (a *App) ResolvePrincipal(ctx context.Context, actor *model.User, principal
 		return nil, model.NewBadRequestError(where, "X-On-Behalf-Of names no user")
 	}
 	var principal *model.User
+	var err error
 	if kratosID, ok := strings.CutPrefix(principalID, KratosPrincipalPrefix); ok {
-		p, err := a.provisionPrincipal(ctx, actor, kratosID)
-		if err != nil {
-			return nil, err
-		}
-		principal = p
+		principal, err = a.provisionPrincipal(ctx, actor, kratosID)
 	} else {
-		if !model.IsValidID(principalID) {
-			return nil, model.NewBadRequestError(where, "X-On-Behalf-Of is not a user ID")
-		}
-		p, err := a.Store.User().Get(ctx, principalID)
-		if err != nil {
-			if isNotFound(err) {
-				return nil, model.NewBadRequestError(where, "X-On-Behalf-Of names an unknown user")
-			}
-			return nil, err
-		}
-		principal = p
+		principal, err = a.lookupPrincipal(ctx, principalID)
+	}
+	if err != nil {
+		return nil, err
 	}
 	if principal.DeleteAt != 0 {
 		return nil, model.NewBadRequestError(where, "X-On-Behalf-Of names a deactivated user")
@@ -83,6 +73,23 @@ func (a *App) ResolvePrincipal(ctx context.Context, actor *model.User, principal
 		return nil, model.NewBadRequestError(where, "X-On-Behalf-Of must name a person, not an agent or bot")
 	}
 	return principal, nil
+}
+
+// lookupPrincipal reads the existing user principalID names for
+// ResolvePrincipal.
+func (a *App) lookupPrincipal(ctx context.Context, principalID string) (*model.User, error) {
+	const where = "App.ResolvePrincipal"
+	if !model.IsValidID(principalID) {
+		return nil, model.NewBadRequestError(where, "X-On-Behalf-Of is not a user ID")
+	}
+	p, err := a.Store.User().Get(ctx, principalID)
+	if err != nil {
+		if isNotFound(err) {
+			return nil, model.NewBadRequestError(where, "X-On-Behalf-Of names an unknown user")
+		}
+		return nil, err
+	}
+	return p, nil
 }
 
 // provisionPrincipal resolves the Kratos identity kratosID for

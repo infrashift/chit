@@ -206,14 +206,7 @@ func TestWSClient_ReconnectsAfterDrop(t *testing.T) {
 	}
 
 	// Receive event from first connection
-	select {
-	case got := <-client.Events():
-		if got.Event != model.WebSocketEventPosted {
-			t.Errorf("event = %q, want %q", got.Event, model.WebSocketEventPosted)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for first event")
-	}
+	awaitPosted(t, client, "event", "first event")
 
 	// Wait for reconnection (second connection)
 	select {
@@ -223,13 +216,21 @@ func TestWSClient_ReconnectsAfterDrop(t *testing.T) {
 	}
 
 	// Receive event from reconnected connection
+	awaitPosted(t, client, "reconnected event", "event after reconnect")
+}
+
+// awaitPosted waits up to two seconds for the client's next event and checks
+// that it is a posted event. label names the event in a mismatch, waitingFor
+// in a timeout.
+func awaitPosted(t *testing.T, client ws.WSClient, label, waitingFor string) {
+	t.Helper()
 	select {
 	case got := <-client.Events():
 		if got.Event != model.WebSocketEventPosted {
-			t.Errorf("reconnected event = %q, want %q", got.Event, model.WebSocketEventPosted)
+			t.Errorf("%s = %q, want %q", label, got.Event, model.WebSocketEventPosted)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for event after reconnect")
+		t.Fatal("timeout waiting for " + waitingFor)
 	}
 }
 

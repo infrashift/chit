@@ -33,15 +33,17 @@ func slots(t Theme) map[string]string {
 	}
 }
 
-// Routing the bundled themes through a flavor generator must not change what
-// users already see. These are the exact values the hand-written constructors
-// produced before the generator existed.
-func TestLegacyThemesAreUnchanged(t *testing.T) {
-	tests := []struct {
-		name string
-		got  Theme
-		want map[string]string
-	}{
+// legacyThemeCase is a bundled theme and the slot values it must keep.
+type legacyThemeCase struct {
+	name string
+	got  Theme
+	want map[string]string
+}
+
+// legacyThemeCases are the exact values the hand-written constructors
+// produced before the flavor generator existed.
+func legacyThemeCases() []legacyThemeCase {
+	return []legacyThemeCase{
 		{
 			name: "tokyo-night",
 			got:  TokyoNight(),
@@ -95,8 +97,12 @@ func TestLegacyThemesAreUnchanged(t *testing.T) {
 			},
 		},
 	}
+}
 
-	for _, tc := range tests {
+// Routing the bundled themes through a flavor generator must not change what
+// users already see.
+func TestLegacyThemesAreUnchanged(t *testing.T) {
+	for _, tc := range legacyThemeCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			got := slots(tc.got)
 			for slot, want := range tc.want {
