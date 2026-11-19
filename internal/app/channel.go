@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 	"github.com/infrashift/chit/internal/pubsub"
 )
@@ -24,6 +25,8 @@ import (
 // "alice__bob" as its only member, add the pair, and then receive every DM
 // they later sent each other.
 func (a *App) CreateChannel(ctx context.Context, channel *model.Channel) (*model.Channel, error) {
+	assert.That(channel != nil, "App.CreateChannel: nil channel")
+	assert.That(a.Store != nil && a.Hub != nil, "App.CreateChannel: nil store or hub")
 	if channel.Type != model.ChannelOpen && channel.Type != model.ChannelPrivate {
 		return nil, model.NewBadRequestError("App.CreateChannel",
 			"type must be O or P; use /channels/direct or /channels/group for direct messages")
@@ -46,6 +49,7 @@ func (a *App) CreateChannel(ctx context.Context, channel *model.Channel) (*model
 	}); err != nil {
 		return nil, err
 	}
+	assert.That(saved != nil && saved.ID != "", "App.CreateChannel: saved channel has no id")
 	members := []string{saved.CreatorID}
 
 	// For open channels, auto-add all team members so the channel appears
@@ -59,6 +63,7 @@ func (a *App) CreateChannel(ctx context.Context, channel *model.Channel) (*model
 		}
 		members = append(members, added...)
 	}
+	assert.That(len(members) >= 1 && members[0] == saved.CreatorID, "App.CreateChannel: creator is not the first member")
 
 	for _, uid := range members {
 		a.Hub.NotifyMembershipChanged(uid, saved.ID, true)
@@ -75,10 +80,13 @@ func (a *App) CreateChannel(ctx context.Context, channel *model.Channel) (*model
 // non-members: their header and purpose are private, and a DM's name is the
 // two participants' IDs.
 func (a *App) GetChannel(ctx context.Context, id, actorID string) (*model.Channel, error) {
+	assert.That(a.Store != nil, "App.GetChannel: nil store")
+	assert.That(actorID != "", "App.GetChannel: empty actor id")
 	channel, err := a.Store.Channel().Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
+	assert.That(channel != nil, "App.GetChannel: nil channel without an error")
 	if a.isChannelMember(ctx, id, actorID) {
 		return channel, nil
 	}
@@ -103,6 +111,8 @@ type ChannelPatch struct {
 
 // UpdateChannel applies patch on behalf of actorID, who must be a member.
 func (a *App) UpdateChannel(ctx context.Context, id string, patch ChannelPatch, actorID string) (*model.Channel, error) {
+	assert.That(a.Store != nil, "App.UpdateChannel: nil store")
+	assert.That(actorID != "", "App.UpdateChannel: empty actor id")
 	if err := a.requireChannelMember(ctx, id, actorID); err != nil {
 		return nil, err
 	}
@@ -110,6 +120,7 @@ func (a *App) UpdateChannel(ctx context.Context, id string, patch ChannelPatch, 
 	if err != nil {
 		return nil, err
 	}
+	assert.That(channel != nil, "App.UpdateChannel: nil channel without an error")
 	if patch.DisplayName != nil {
 		channel.DisplayName = *patch.DisplayName
 	}
@@ -128,6 +139,7 @@ func (a *App) UpdateChannel(ctx context.Context, id string, patch ChannelPatch, 
 		return nil, err
 	}
 
+	assert.That(updated != nil && updated.ID == channel.ID, "App.UpdateChannel: store returned another channel")
 	a.broadcastChannelEvent(ctx, model.WebSocketEventChannelUpdated, updated)
 	return updated, nil
 }
@@ -135,10 +147,13 @@ func (a *App) UpdateChannel(ctx context.Context, id string, patch ChannelPatch, 
 // DeleteChannel soft-deletes a channel on behalf of actorID, who must be the
 // channel creator or a system admin.
 func (a *App) DeleteChannel(ctx context.Context, id, actorID string) error {
+	assert.That(a.Store != nil, "App.DeleteChannel: nil store")
+	assert.That(actorID != "", "App.DeleteChannel: empty actor id")
 	channel, err := a.Store.Channel().Get(ctx, id)
 	if err != nil {
 		return err
 	}
+	assert.That(channel != nil, "App.DeleteChannel: nil channel without an error")
 	if channel.CreatorID != actorID {
 		if err := a.requireSystemAdmin(ctx, actorID, "App.DeleteChannel"); err != nil {
 			return model.NewForbiddenError("App.DeleteChannel", "only the channel creator may delete a channel")
@@ -153,6 +168,7 @@ func (a *App) DeleteChannel(ctx context.Context, id, actorID string) error {
 }
 
 func (a *App) publishChannelDeleted(ctx context.Context, channelID string) {
+	assert.That(channelID != "", "App.publishChannelDeleted: empty channel id")
 	a.publishEvent(ctx, &model.WebSocketEvent{
 		Event:     model.WebSocketEventChannelDeleted,
 		Data:      map[string]any{"channel_id": channelID},
@@ -163,6 +179,9 @@ func (a *App) publishChannelDeleted(ctx context.Context, channelID string) {
 // GetChannelsForTeam retrieves channels for a team, requiring the caller to be
 // a team member.
 func (a *App) GetChannelsForTeam(ctx context.Context, teamID, userID string, page, perPage int) ([]*model.Channel, error) {
+	assert.That(a.Store != nil, "App.GetChannelsForTeam: nil store")
+	assert.That(userID != "", "App.GetChannelsForTeam: empty user id")
+	assert.That(page >= 0 && perPage >= 1, "App.GetChannelsForTeam: pagination not clamped")
 	if err := a.requireTeamMember(ctx, teamID, userID); err != nil {
 		return nil, err
 	}
@@ -171,6 +190,8 @@ func (a *App) GetChannelsForTeam(ctx context.Context, teamID, userID string, pag
 
 // GetChannelsForUser retrieves channels a user is a member of within a team.
 func (a *App) GetChannelsForUser(ctx context.Context, userID, teamID string) ([]*model.Channel, error) {
+	assert.That(a.Store != nil, "App.GetChannelsForUser: nil store")
+	assert.That(userID != "", "App.GetChannelsForUser: empty user id")
 	return a.Store.Channel().GetChannelsForUser(ctx, userID, teamID)
 }
 
@@ -178,11 +199,15 @@ func (a *App) GetChannelsForUser(ctx context.Context, userID, teamID string) ([]
 // channels. Only the caller's rows are returned, so no membership check is
 // needed: a user who is not in the team simply has none.
 func (a *App) GetMyChannelMembers(ctx context.Context, userID, teamID string) ([]*model.ChannelMember, error) {
+	assert.That(a.Store != nil, "App.GetMyChannelMembers: nil store")
+	assert.That(userID != "", "App.GetMyChannelMembers: empty user id")
 	return a.Store.Channel().GetMembersForUser(ctx, userID, teamID)
 }
 
 // GetDirectChannelsForUser retrieves DM and group channels for a user.
 func (a *App) GetDirectChannelsForUser(ctx context.Context, userID string) ([]*model.Channel, error) {
+	assert.That(a.Store != nil, "App.GetDirectChannelsForUser: nil store")
+	assert.That(userID != "", "App.GetDirectChannelsForUser: empty user id")
 	return a.Store.Channel().GetDirectChannelsForUser(ctx, userID)
 }
 
@@ -190,6 +215,8 @@ func (a *App) GetDirectChannelsForUser(ctx context.Context, userID string) ([]*m
 // actorID, who must be one of them. If a DM already exists between them, it
 // returns the existing channel.
 func (a *App) CreateDirectChannel(ctx context.Context, actorID, userID1, userID2 string) (*model.Channel, error) {
+	assert.That(actorID != "", "App.CreateDirectChannel: empty actor id")
+	assert.That(a.Store != nil && a.Hub != nil, "App.CreateDirectChannel: nil store or hub")
 	if actorID != userID1 && actorID != userID2 {
 		return nil, model.NewForbiddenError("App.CreateDirectChannel", "cannot create a direct channel for other users")
 	}
@@ -202,6 +229,7 @@ func (a *App) CreateDirectChannel(ctx context.Context, actorID, userID1, userID2
 		return nil, err
 	}
 	sort.Strings(members)
+	assert.That(len(members) == 2 && members[0] < members[1], "App.CreateDirectChannel: members not two sorted distinct ids")
 	channelName := strings.Join(members, "__")
 
 	// Idempotent: return existing DM if it exists
@@ -234,6 +262,8 @@ func (a *App) CreateDirectChannel(ctx context.Context, actorID, userID1, userID2
 // actorID, who must be one of them. If a GM already exists with the same
 // members, it returns the existing channel.
 func (a *App) CreateGroupChannel(ctx context.Context, actorID string, userIDs []string) (*model.Channel, error) {
+	assert.That(actorID != "", "App.CreateGroupChannel: empty actor id")
+	assert.That(a.Store != nil && a.Hub != nil, "App.CreateGroupChannel: nil store or hub")
 	// Sorted and de-duplicated into a fresh slice: the sorted list is the
 	// channel's identity, and the caller's slice is left as it was. A repeated
 	// ID would otherwise pass the size check and then fail the insert on the
@@ -249,6 +279,7 @@ func (a *App) CreateGroupChannel(ctx context.Context, actorID string, userIDs []
 		return nil, err
 	}
 
+	assert.That(slices.IsSorted(userIDs), "App.CreateGroupChannel: member ids not sorted")
 	channelName := strings.Join(userIDs, "__")
 
 	// Idempotent: return existing GM if it exists
@@ -282,6 +313,10 @@ func (a *App) CreateGroupChannel(ctx context.Context, actorID string, userIDs []
 // and the existing channel is returned instead, as if it had been found by
 // the lookup that preceded the save.
 func (a *App) saveDirectChannel(ctx context.Context, channel *model.Channel, members []string) (*model.Channel, error) {
+	assert.That(channel != nil && channel.Name != "", "App.saveDirectChannel: channel has no name")
+	assert.That(channel.Type == model.ChannelDirect || channel.Type == model.ChannelGroup,
+		"App.saveDirectChannel: not a direct or group channel")
+	assert.That(len(members) >= 2, "App.saveDirectChannel: fewer than two members")
 	saved, err := a.Store.Channel().SaveDirectChannel(ctx, channel, members)
 	var appErr *model.AppError
 	if errors.As(err, &appErr) && appErr.StatusCode == http.StatusConflict {
@@ -294,6 +329,9 @@ func (a *App) saveDirectChannel(ctx context.Context, channel *model.Channel, mem
 // Without it an unknown ID reaches the member insert and fails its foreign key
 // as a 500.
 func (a *App) requireUsersExist(ctx context.Context, op string, ids []string) error {
+	assert.That(op != "", "App.requireUsersExist: empty op")
+	assert.That(len(ids) >= 1, "App.requireUsersExist: no ids")
+	assert.That(a.Store != nil, "App.requireUsersExist: nil store")
 	for _, id := range ids {
 		if !model.IsValidID(id) {
 			return model.NewBadRequestError(op, "invalid user id")
@@ -317,10 +355,13 @@ func (a *App) requireUsersExist(ctx context.Context, op string, ids []string) er
 // Direct and group channels have a fixed membership: their name IS the member
 // list, and adding a third person to a DM would hand them its whole history.
 func (a *App) AddChannelMember(ctx context.Context, channelID, userID, actorID string) (*model.ChannelMember, error) {
+	assert.That(actorID != "", "App.AddChannelMember: empty actor id")
+	assert.That(a.Store != nil && a.Hub != nil, "App.AddChannelMember: nil store or hub")
 	channel, err := a.Store.Channel().Get(ctx, channelID)
 	if err != nil {
 		return nil, err
 	}
+	assert.That(channel != nil, "App.AddChannelMember: nil channel without an error")
 	switch channel.Type {
 	case model.ChannelDirect, model.ChannelGroup:
 		return nil, model.NewForbiddenError("App.AddChannelMember",
@@ -350,6 +391,7 @@ func (a *App) AddChannelMember(ctx context.Context, channelID, userID, actorID s
 	if err != nil {
 		return nil, err
 	}
+	assert.That(saved != nil, "App.AddChannelMember: nil member without an error")
 	a.Hub.NotifyMembershipChanged(userID, channelID, true)
 
 	a.logKeto(a.keto.WriteRelation(ctx, model.KetoNamespaceChannel, channelID, model.KetoRelationMember, userID), channelID, userID)
@@ -374,6 +416,9 @@ func (a *App) AddChannelMember(ctx context.Context, channelID, userID, actorID s
 // command layer and is bypassed entirely by a direct REST call, so it is
 // enforced here too.
 func (a *App) RemoveChannelMember(ctx context.Context, channelID, userID, actorID string) error {
+	assert.That(actorID != "", "App.RemoveChannelMember: empty actor id")
+	assert.That(a.Store != nil && a.Hub != nil, "App.RemoveChannelMember: nil store or hub")
+	assert.That(a.keto != nil, "App.RemoveChannelMember: nil keto client")
 	if err := a.requireChannelMember(ctx, channelID, actorID); err != nil {
 		return err
 	}
@@ -401,6 +446,8 @@ func (a *App) RemoveChannelMember(ctx context.Context, channelID, userID, actorI
 // channel's audience. So they also get the event addressed to them directly,
 // which is how their client learns to take the channel out of its sidebar.
 func (a *App) publishUserRemoved(ctx context.Context, channelID, userID string) {
+	assert.That(channelID != "" && userID != "", "App.publishUserRemoved: empty channel or user id")
+	assert.That(a.Hub != nil, "App.publishUserRemoved: nil hub")
 	data := map[string]any{"channel_id": channelID, "user_id": userID}
 	a.publishEvent(ctx, &model.WebSocketEvent{
 		Event:     model.WebSocketEventUserRemoved,
@@ -417,6 +464,9 @@ func (a *App) publishUserRemoved(ctx context.Context, channelID, userID string) 
 // GetChannelMembers retrieves members of a channel, requiring the caller to be
 // a member.
 func (a *App) GetChannelMembers(ctx context.Context, channelID, userID string, page, perPage int) ([]*model.ChannelMember, error) {
+	assert.That(a.Store != nil, "App.GetChannelMembers: nil store")
+	assert.That(userID != "", "App.GetChannelMembers: empty user id")
+	assert.That(page >= 0 && perPage >= 1, "App.GetChannelMembers: pagination not clamped")
 	if err := a.requireChannelMember(ctx, channelID, userID); err != nil {
 		return nil, err
 	}
@@ -425,6 +475,8 @@ func (a *App) GetChannelMembers(ctx context.Context, channelID, userID string, p
 
 // UpdateChannelLastViewedAt marks a channel as viewed by a user.
 func (a *App) UpdateChannelLastViewedAt(ctx context.Context, channelID, userID string) error {
+	assert.That(a.Store != nil, "App.UpdateChannelLastViewedAt: nil store")
+	assert.That(userID != "", "App.UpdateChannelLastViewedAt: empty user id")
 	if err := a.requireChannelMember(ctx, channelID, userID); err != nil {
 		return err
 	}
@@ -432,6 +484,8 @@ func (a *App) UpdateChannelLastViewedAt(ctx context.Context, channelID, userID s
 }
 
 func (a *App) broadcastChannelEvent(ctx context.Context, event string, channel *model.Channel) {
+	assert.That(channel != nil && channel.ID != "", "App.broadcastChannelEvent: channel has no id")
+	assert.That(event != "", "App.broadcastChannelEvent: empty event")
 	data, err := json.Marshal(channel)
 	if err != nil {
 		slog.Error("failed to marshal channel for broadcast", "channel_id", channel.ID, "error", err)
@@ -442,6 +496,7 @@ func (a *App) broadcastChannelEvent(ctx context.Context, event string, channel *
 		slog.Error("failed to build broadcast payload", "channel_id", channel.ID, "error", err)
 		return
 	}
+	assert.That(dataMap["id"] == channel.ID, "App.broadcastChannelEvent: payload lost the channel id")
 
 	// Open team channels are announced to the whole team; private, direct,
 	// and group channels only to their members.
@@ -449,6 +504,7 @@ func (a *App) broadcastChannelEvent(ctx context.Context, event string, channel *
 	if channel.Type == model.ChannelOpen && channel.TeamID != "" {
 		broadcast = &model.WebSocketBroadcast{TeamID: channel.TeamID}
 	}
+	assert.That(broadcast.ChannelID != "" || broadcast.TeamID != "", "App.broadcastChannelEvent: broadcast has no audience")
 
 	a.publishEvent(ctx, &model.WebSocketEvent{
 		Event:     event,

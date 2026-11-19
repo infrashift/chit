@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/errlog"
 	"github.com/infrashift/chit/internal/jobs/workers"
 	"github.com/infrashift/chit/internal/keto"
@@ -66,9 +67,13 @@ func (a *App) writeKetoMembersAsync(channelID string, userIDs []string) {
 	if len(userIDs) == 0 {
 		return
 	}
+	assert.That(channelID != "", "App.writeKetoMembersAsync: empty channel id")
+	assert.That(a.keto != nil, "App.writeKetoMembersAsync: nil keto client")
 	ids := slices.Clone(userIDs)
+	assert.That(len(ids) == len(userIDs), "App.writeKetoMembersAsync: clone lost ids")
 	a.background.Add(1)
 	go func() {
+		defer errlog.Recover("keto mirror")
 		defer a.background.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), ketoAsyncTimeout)
 		defer cancel()
@@ -88,6 +93,8 @@ func (a *App) writeKetoMembersAsync(channelID string, userIDs []string) {
 // channel_members best-effort and a failure does not fail the request, but a
 // silent one lets the mirror drift unnoticed.
 func (a *App) logKeto(err error, channelID, userID string) {
+	assert.That(channelID != "", "App.logKeto: empty channel id")
+	assert.That(userID != "", "App.logKeto: empty user id")
 	if err != nil {
 		slog.Warn("keto: failed to mirror channel membership",
 			"channel_id", channelID, "user_id", userID, "error", err)
@@ -103,6 +110,7 @@ func (a *App) WaitBackground() {
 // searchClient returns a shared ZincSearch client (the SearchIndexer type
 // doubles as the query client), created on first use.
 func (a *App) searchClient() *workers.SearchIndexer {
+	assert.That(a.Config != nil, "App.searchClient: nil config")
 	a.zincOnce.Do(func() {
 		a.zincClient = workers.NewSearchIndexer(
 			a.Config.ZincSearchURL,
@@ -110,11 +118,13 @@ func (a *App) searchClient() *workers.SearchIndexer {
 			a.Config.ZincSearchPassword,
 		)
 	})
+	assert.That(a.zincClient != nil, "App.searchClient: no client after first use")
 	return a.zincClient
 }
 
 // New creates a new App instance.
 func New(s store.Store, hub *websocket.Hub, ps pubsub.PubSub, cfg *config.Config) *App {
+	assert.That(cfg != nil, "app.New: nil config")
 	userCache, err := cache.NewLRU[string, *model.User](cfg.CacheSize, cfg.CacheTTL)
 	if err != nil {
 		// Invalid cache config (size <= 0): run uncached rather than fail.
@@ -122,7 +132,7 @@ func New(s store.Store, hub *websocket.Hub, ps pubsub.PubSub, cfg *config.Config
 		userCache = nil
 	}
 
-	return &App{
+	a := &App{
 		Store:      s,
 		Hub:        hub,
 		PubSub:     ps,
@@ -131,6 +141,9 @@ func New(s store.Store, hub *websocket.Hub, ps pubsub.PubSub, cfg *config.Config
 		httpClient: &http.Client{Timeout: 5 * time.Second},
 		userCache:  userCache,
 	}
+	assert.That(a.keto != nil, "app.New: nil keto client")
+	assert.That(a.httpClient != nil, "app.New: nil http client")
+	return a
 }
 
 // ErrKratosIdentityNotFound is FetchKratosIdentity's error when Kratos has
@@ -171,6 +184,8 @@ type kratosIdentity struct {
 
 // FetchKratosIdentity retrieves identity traits from Kratos Admin API.
 func (a *App) FetchKratosIdentity(ctx context.Context, kratosID string) (username, displayName, email string, err error) {
+	assert.That(ctx != nil, "App.FetchKratosIdentity: nil context")
+	assert.That(kratosID != "", "App.FetchKratosIdentity: empty kratos id")
 	identity, err := a.getKratosIdentity(ctx, kratosID)
 	if err != nil {
 		return "", "", "", err
@@ -188,6 +203,7 @@ func (a *App) FetchKratosIdentity(ctx context.Context, kratosID string) (usernam
 		// is a far better fallback than a blank byline.
 		displayName = identity.Traits.Username
 	}
+	assert.That(displayName != "" || identity.Traits.Username == "", "App.FetchKratosIdentity: display name fallback skipped the username")
 
 	slog.Info("fetched kratos identity", "kratos_id", kratosID, "username", identity.Traits.Username)
 
@@ -196,6 +212,8 @@ func (a *App) FetchKratosIdentity(ctx context.Context, kratosID string) (usernam
 
 // getKratosIdentity GETs one identity from the Kratos Admin API and decodes it.
 func (a *App) getKratosIdentity(ctx context.Context, kratosID string) (kratosIdentity, error) {
+	assert.That(a.Config != nil, "App.getKratosIdentity: nil config")
+	assert.That(a.httpClient != nil, "App.getKratosIdentity: nil http client")
 	var identity kratosIdentity
 	url := fmt.Sprintf("%s/admin/identities/%s", a.Config.KratosAdminURL, neturl.PathEscape(kratosID))
 

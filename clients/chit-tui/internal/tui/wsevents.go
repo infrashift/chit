@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/ws"
 )
@@ -24,6 +25,8 @@ var (
 )
 
 func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
+	assert.That(m.scope != nil, "handleWSEvent: nil request scope")
+	assert.That(m.appState == AppStateRunning, "handleWSEvent: not signed in")
 	cmds := []tea.Cmd{ListenWebSocket(m.wsClient)}
 	cmds = append(cmds, m.applyWSEvent(msg.Event)...)
 	return m, tea.Batch(cmds...)
@@ -32,6 +35,8 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 // applyWSEvent applies one server event to the model and returns the
 // requests it calls for.
 func (m *Model) applyWSEvent(evt model.WebSocketEvent) []tea.Cmd {
+	assert.That(m != nil, "applyWSEvent: nil model")
+	assert.That(m.appState == AppStateRunning, "applyWSEvent: not signed in")
 	switch evt.Event {
 	case model.WebSocketEventPosted:
 		return m.onPosted(evt)
@@ -74,6 +79,8 @@ func (m *Model) applyWSEvent(evt model.WebSocketEvent) []tea.Cmd {
 // onPosted shows a new post in the open channel, or counts it unread in
 // any other.
 func (m *Model) onPosted(evt model.WebSocketEvent) []tea.Cmd {
+	assert.That(m.appState == AppStateRunning, "onPosted: not signed in")
+	assert.That(m.unread != nil, "onPosted: nil unread counts")
 	p := decodePost(evt.Data)
 	if p == nil {
 		// A payload the client cannot read means the two sides disagree
@@ -94,6 +101,10 @@ func (m *Model) onPosted(evt model.WebSocketEvent) []tea.Cmd {
 
 // appendLivePost adds a post that arrived in the open channel.
 func (m *Model) appendLivePost(p *model.Post) []tea.Cmd {
+	assert.That(p != nil, "appendLivePost: nil post")
+	assert.That(p.ID != "", "appendLivePost: post without ID")
+	assert.That(m.activeChan != nil, "appendLivePost: no channel open")
+	assert.That(p.ChannelID == m.activeChan.ID, "appendLivePost: post from another channel")
 	// Reply counts are left to thread_updated, which carries the
 	// server's total; counting here as well over-counted each reply.
 	if p.RootID != "" && m.mainPane == paneThread && p.RootID == m.threadRootID {
@@ -105,6 +116,7 @@ func (m *Model) appendLivePost(p *model.Post) []tea.Cmd {
 	}
 	m.viewport.AppendPost(p)
 	m.resolvePostUsers([]*model.Post{p})
+	assert.That(m.viewport.HasPost(p.ID), "appendLivePost: post not shown")
 	if fetchCmd := m.fetchMissingUsers(); fetchCmd != nil {
 		return []tea.Cmd{fetchCmd}
 	}
@@ -112,12 +124,15 @@ func (m *Model) appendLivePost(p *model.Post) []tea.Cmd {
 }
 
 func (m *Model) onPostEdited(evt model.WebSocketEvent) {
+	assert.That(m.appState == AppStateRunning, "onPostEdited: not signed in")
+	assert.That(m.mainPane == paneChannel || m.mainPane == paneThread, "onPostEdited: unknown main pane")
 	// An edit carries the whole post, so it replaces what is displayed.
 	p := decodePost(evt.Data)
 	if p == nil {
 		slog.Warn("could not decode a post_edited event")
 		return
 	}
+	assert.That(p.ID != "", "onPostEdited: decoded post without ID")
 	m.viewport.UpdatePost(p)
 	if m.mainPane == paneThread {
 		m.thread.UpdatePost(p)
@@ -125,6 +140,8 @@ func (m *Model) onPostEdited(evt model.WebSocketEvent) {
 }
 
 func (m *Model) onPostDeleted(evt model.WebSocketEvent) []tea.Cmd {
+	assert.That(m.appState == AppStateRunning, "onPostDeleted: not signed in")
+	assert.That(m.mainPane == paneChannel || m.mainPane == paneThread, "onPostDeleted: unknown main pane")
 	postID := dataString(evt.Data, "post_id")
 	if postID == "" {
 		return nil
@@ -143,6 +160,9 @@ func (m *Model) onPostDeleted(evt model.WebSocketEvent) []tea.Cmd {
 }
 
 func (m *Model) onUserRemoved(evt model.WebSocketEvent) []tea.Cmd {
+	assert.That(m.scope != nil, "onUserRemoved: nil request scope")
+	assert.That(m.appState == AppStateRunning, "onUserRemoved: not signed in")
+	assert.That(m.client != nil, "onUserRemoved: nil client")
 	channelID := dataString(evt.Data, "channel_id")
 	userID := dataString(evt.Data, "user_id")
 	if m.me != nil && userID == m.me.ID {
@@ -159,7 +179,10 @@ func (m *Model) onUserRemoved(evt model.WebSocketEvent) []tea.Cmd {
 // dropChannelMembers forgets a channel's member list after someone joined
 // or left it, and reloads it if the channel is open.
 func (m *Model) dropChannelMembers(channelID string) []tea.Cmd {
+	assert.That(channelID != "", "dropChannelMembers: empty channel ID")
+	assert.That(m.channelMembers != nil, "dropChannelMembers: nil members cache")
 	delete(m.channelMembers, channelID)
+	assert.That(m.channelMembers[channelID] == nil, "dropChannelMembers: members kept")
 	if m.activeChan != nil && m.activeChan.ID == channelID {
 		return []tea.Cmd{FetchChannelMembers(m.reqCtx(), m.client, channelID)}
 	}
@@ -167,6 +190,8 @@ func (m *Model) dropChannelMembers(channelID string) []tea.Cmd {
 }
 
 func (m *Model) onCommandResponse(evt model.WebSocketEvent) {
+	assert.That(m.appState == AppStateRunning, "onCommandResponse: not signed in")
+	assert.That(m.commandAuthors != nil, "onCommandResponse: nil command authors")
 	// Ephemeral: broadcast to the invoking user only, never persisted.
 	// It is shown as a post so multi-line output such as /help stays
 	// readable, and it disappears on the next channel load.
@@ -181,6 +206,8 @@ func (m *Model) onCommandResponse(evt model.WebSocketEvent) {
 	// Each response needs its own ID: the render cache is keyed by
 	// it, so a reused one showed the first output again.
 	m.commandResponses++
+	assert.That(m.commandResponses > 0, "onCommandResponse: response counter wrapped")
+	assert.That(author != "", "onCommandResponse: no author")
 	m.viewport.AppendPost(&model.Post{
 		ID:        fmt.Sprintf("%s:%d", author, m.commandResponses),
 		ChannelID: channelID,
@@ -192,6 +219,8 @@ func (m *Model) onCommandResponse(evt model.WebSocketEvent) {
 }
 
 func (m *Model) onPostTagsUpdated(evt model.WebSocketEvent) {
+	assert.That(m.appState == AppStateRunning, "onPostTagsUpdated: not signed in")
+	assert.That(m.postTags != nil, "onPostTagsUpdated: nil post tags")
 	// Tags are applied after a post is created, so a post arrives
 	// untagged and its tags follow in this event. It carries the whole
 	// list, which replaces what is shown.
@@ -212,11 +241,14 @@ func (m *Model) onPostTagsUpdated(evt model.WebSocketEvent) {
 	for _, t := range tags {
 		names = append(names, t.Name)
 	}
+	assert.That(len(names) == len(tags), "onPostTagsUpdated: a name for each tag")
 	m.viewport.SetPostsTags(map[string][]string{postID: names})
 	m.thread.SetPostTags(m.postTags)
 }
 
 func (m *Model) onThreadUpdated(evt model.WebSocketEvent) {
+	assert.That(m.appState == AppStateRunning, "onThreadUpdated: not signed in")
+	assert.That(m.threadCounts != nil, "onThreadUpdated: nil thread counts")
 	threadData, ok := evt.Data["thread"]
 	if !ok {
 		return
@@ -231,6 +263,8 @@ func (m *Model) onThreadUpdated(evt model.WebSocketEvent) {
 }
 
 func (m *Model) onMentioned(evt model.WebSocketEvent) {
+	assert.That(m.appState == AppStateRunning, "onMentioned: not signed in")
+	assert.That(m.mentions != nil, "onMentioned: nil mention counts")
 	// The server names the channel in the data; the broadcast only
 	// addresses the mentioned user. Reading the channel from the
 	// broadcast found nothing, so live mentions were never counted.
@@ -245,6 +279,9 @@ func (m *Model) onMentioned(evt model.WebSocketEvent) {
 }
 
 func (m *Model) onUserAdded(evt model.WebSocketEvent) []tea.Cmd {
+	assert.That(m.scope != nil, "onUserAdded: nil request scope")
+	assert.That(m.appState == AppStateRunning, "onUserAdded: not signed in")
+	assert.That(m.client != nil, "onUserAdded: nil client")
 	userID := dataString(evt.Data, "user_id")
 	channelID := dataString(evt.Data, "channel_id")
 	switch {
@@ -264,6 +301,8 @@ func (m *Model) onUserAdded(evt model.WebSocketEvent) []tea.Cmd {
 }
 
 func (m *Model) onChannelCreated(evt model.WebSocketEvent) []tea.Cmd {
+	assert.That(m.client != nil, "onChannelCreated: nil client")
+	assert.That(m.scope != nil, "onChannelCreated: nil request scope")
 	kind := dataString(evt.Data, "type")
 	teamID := dataString(evt.Data, "team_id")
 	switch kind {
@@ -282,6 +321,7 @@ func (m *Model) onChannelCreated(evt model.WebSocketEvent) []tea.Cmd {
 // value. Event payloads arrive as generic maps, so this is how they are read
 // without asserting field by field.
 func reDecode(v any, out any) error {
+	assert.That(out != nil, "reDecode: nil destination")
 	raw, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -312,6 +352,9 @@ func decodeChannel(data map[string]any) *model.Channel {
 // handleWSState reacts to the socket connecting, dropping, or falling
 // behind.
 func (m Model) handleWSState(msg WSStateMsg) (tea.Model, tea.Cmd) {
+	assert.That(m.client != nil, "handleWSState: nil client")
+	assert.That(m.appState == AppStateRunning, "handleWSState: not signed in")
+	assert.That(m.scope != nil, "handleWSState: nil request scope")
 	var cmds []tea.Cmd
 	// Keep listening for the next transition before doing anything else,
 	// or a single drop would be the last one ever reported.
@@ -356,6 +399,7 @@ func (m Model) handleWSState(msg WSStateMsg) (tea.Model, tea.Cmd) {
 // handleWSConnected starts the listeners after the first dial, and reports
 // a failed one.
 func (m Model) handleWSConnected(msg WSConnectedMsg) (tea.Model, tea.Cmd) {
+	assert.That(m.appState == AppStateRunning, "handleWSConnected: not signed in")
 	var cmds []tea.Cmd
 	if errors.Is(msg.Err, ws.ErrUnauthorized) {
 		return m.handleAuthExpired()
@@ -370,6 +414,7 @@ func (m Model) handleWSConnected(msg WSConnectedMsg) (tea.Model, tea.Cmd) {
 		m.wsListening = true
 		cmds = append(cmds, ListenWebSocket(m.wsClient), ListenWSState(m.wsClient))
 	}
+	assert.That(m.wsListening, "handleWSConnected: listeners not started")
 	if msg.Err != nil {
 		// The client keeps redialing, and WSStateMsg reports when it
 		// gets through.
@@ -381,6 +426,7 @@ func (m Model) handleWSConnected(msg WSConnectedMsg) (tea.Model, tea.Cmd) {
 // dataString returns the string at key in an event's data, or "" when the
 // key is missing or holds something else.
 func dataString(data map[string]any, key string) string {
+	assert.That(key != "", "dataString: empty key")
 	s, ok := data[key].(string)
 	if !ok {
 		return ""

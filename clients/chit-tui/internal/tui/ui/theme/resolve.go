@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 )
 
 // Appearance selects between a light and a dark theme when no explicit theme
@@ -85,6 +87,7 @@ type DarkDetector interface {
 // resolveFlagTheme resolves the theme named on the command line, which must
 // exist.
 func resolveFlagTheme(req Request) (Theme, []string, error) {
+	assert.That(req.FlagTheme != "", "resolveFlagTheme: no flag theme")
 	t, w, err := ResolveNamed(req.FlagTheme, req.ThemesDir)
 	warnings := append([]string(nil), w...)
 	if err != nil {
@@ -112,6 +115,8 @@ func resolveFlagTheme(req Request) (Theme, []string, error) {
 // who just typed a name wants to know it was wrong, whereas a config file that
 // has aged out of date should not stop the client from starting.
 func Resolve(req Request) (Theme, []string, error) {
+	assert.That(req.FlagAppearance >= AppearanceUnset && req.FlagAppearance <= AppearanceSystem, "Resolve: flag appearance not a known value")
+	assert.That(req.ConfigAppearance >= AppearanceUnset && req.ConfigAppearance <= AppearanceSystem, "Resolve: config appearance not a known value")
 	var warnings []string
 
 	if req.FlagTheme != "" {
@@ -160,6 +165,8 @@ func (req Request) Dark() bool {
 	if appearance == AppearanceUnset {
 		appearance = AppearanceSystem
 	}
+	assert.That(appearance != AppearanceUnset, "Request.Dark: appearance still unset after defaulting")
+	assert.That(appearance <= AppearanceSystem, "Request.Dark: appearance not a known value")
 	return appearanceIsDark(appearance, req.System)
 }
 
@@ -173,6 +180,8 @@ func pickByAppearance(req Request, dark bool) string {
 }
 
 func appearanceIsDark(a Appearance, system DarkDetector) bool {
+	assert.That(a != AppearanceUnset, "appearanceIsDark: appearance unset")
+	assert.That(a >= AppearanceDark && a <= AppearanceSystem, "appearanceIsDark: appearance not a known value")
 	switch a {
 	case AppearanceDark:
 		return true
@@ -190,6 +199,8 @@ func appearanceIsDark(a Appearance, system DarkDetector) bool {
 // theme and a broken one need different wording: one is a name that resolves
 // to nothing, the other is a file that failed to load.
 func configThemeWarning(name string, err error) string {
+	assert.That(name != "", "configThemeWarning: empty theme name")
+	assert.That(err != nil, "configThemeWarning: nil error")
 	if errors.Is(err, ErrLocalThemeNotFound) {
 		return fmt.Sprintf("unknown theme %q in config, ignoring. Bundled themes: %s",
 			name, strings.Join(BuiltinNames(), ", "))

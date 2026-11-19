@@ -2,8 +2,10 @@ package markdown
 
 import (
 	"image/color"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/glamour/ansi"
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
 
@@ -51,11 +53,21 @@ func StyleConfig(t theme.Theme) ansi.StyleConfig {
 	setHeadings(&cfg, t)
 	setInlines(&cfg, t)
 	setLists(&cfg, t)
+	assert.That(cfg.Document.Margin != nil, "StyleConfig: document margin unset")
+	assert.That(cfg.Document.Color != nil, "StyleConfig: document color unset")
+	assert.That(cfg.CodeBlock.Chroma != nil, "StyleConfig: code block has no chroma styles")
+	assert.That(cfg.BlockQuote.Indent != nil && *cfg.BlockQuote.Indent > 0, "StyleConfig: block quote not indented")
+	assert.That(cfg.H1.Prefix != "", "StyleConfig: H1 prefix unset")
+	assert.That(cfg.H6.Prefix != "", "StyleConfig: H6 prefix unset")
+	assert.That(cfg.Item.BlockPrefix != "", "StyleConfig: bullet marker unset")
+	assert.That(cfg.Task.Ticked != "", "StyleConfig: task box unset")
 	return cfg
 }
 
 // heading styles a heading level: its marker, color and weight.
 func heading(prefix string, c color.Color, bold bool) ansi.StyleBlock {
+	assert.That(prefix != "", "heading: empty prefix")
+	assert.That(prefix[len(prefix)-1] == ' ', "heading: prefix must end in a space")
 	return ansi.StyleBlock{
 		StylePrimitive: ansi.StylePrimitive{
 			Prefix: prefix,
@@ -67,6 +79,7 @@ func heading(prefix string, c color.Color, bold bool) ansi.StyleBlock {
 
 // setHeadings styles the headings, each level in its own color.
 func setHeadings(cfg *ansi.StyleConfig, t theme.Theme) {
+	assert.That(cfg != nil, "setHeadings: nil config")
 	cfg.Heading = ansi.StyleBlock{
 		StylePrimitive: ansi.StylePrimitive{
 			BlockSuffix: "\n",
@@ -80,10 +93,15 @@ func setHeadings(cfg *ansi.StyleConfig, t theme.Theme) {
 	cfg.H4 = heading("#### ", t.Accent, true)
 	cfg.H5 = heading("##### ", t.Subtle, true)
 	cfg.H6 = heading("###### ", t.Muted, false)
+	assert.That(cfg.Heading.Bold != nil && *cfg.Heading.Bold, "setHeadings: base heading not bold")
+	assert.That(len(cfg.H1.Prefix) < len(cfg.H6.Prefix), "setHeadings: H1 marker not shorter than H6")
+	assert.That(cfg.H5.Bold != nil && *cfg.H5.Bold, "setHeadings: H5 not bold")
+	assert.That(cfg.H6.Bold != nil && !*cfg.H6.Bold, "setHeadings: H6 bold")
 }
 
 // setInlines styles emphasis, rules, links and images.
 func setInlines(cfg *ansi.StyleConfig, t theme.Theme) {
+	assert.That(cfg != nil, "setInlines: nil config")
 	cfg.Strikethrough = ansi.StylePrimitive{
 		CrossedOut: boolPtr(true),
 	}
@@ -113,10 +131,17 @@ func setInlines(cfg *ansi.StyleConfig, t theme.Theme) {
 		Color:  colorStr(t.Subtle),
 		Format: "Image: {{.text}} →",
 	}
+	assert.That(cfg.Link.Color != nil, "setInlines: link color unset")
+	assert.That(cfg.LinkText.Color != nil, "setInlines: link text color unset")
+	assert.That(cfg.Emph.Italic != nil, "setInlines: italic emphasis unset")
+	assert.That(cfg.Strong.Bold != nil, "setInlines: strong emphasis unset")
+	assert.That(cfg.HorizontalRule.Format != "", "setInlines: rule format unset")
+	assert.That(cfg.ImageText.Format != "", "setInlines: image text format unset")
 }
 
 // setLists styles list items, numbering and task boxes.
 func setLists(cfg *ansi.StyleConfig, t theme.Theme) {
+	assert.That(cfg != nil, "setLists: nil config")
 	cfg.Item = ansi.StylePrimitive{
 		BlockPrefix: "• ",
 	}
@@ -128,11 +153,18 @@ func setLists(cfg *ansi.StyleConfig, t theme.Theme) {
 		Ticked:   "[✓] ",
 		Unticked: "[ ] ",
 	}
+	assert.That(cfg.Enumeration.Color != nil, "setLists: enumeration color unset")
+	assert.That(cfg.Item.BlockPrefix != "", "setLists: bullet marker unset")
+	assert.That(cfg.Enumeration.BlockPrefix != "", "setLists: enumeration marker unset")
+	assert.That(utf8.RuneCountInString(cfg.Task.Ticked) == utf8.RuneCountInString(cfg.Task.Unticked), "setLists: task boxes differ in width")
 }
 
 // fgColor is a primitive that sets only the foreground color.
 func fgColor(c color.Color) ansi.StylePrimitive {
-	return ansi.StylePrimitive{Color: colorStr(c)}
+	p := ansi.StylePrimitive{Color: colorStr(c)}
+	assert.That(p.Color != nil, "fgColor: color pointer unset")
+	assert.That(p.BackgroundColor == nil, "fgColor: background set on a foreground-only primitive")
+	return p
 }
 
 // chroma styles syntax highlighting in code blocks.
@@ -154,11 +186,18 @@ func chroma(t theme.Theme) *ansi.Chroma {
 	}
 	setChromaNames(c, t)
 	setChromaLiterals(c, t)
+	assert.That(c.Text.Color != nil, "chroma: text color unset")
+	assert.That(c.Background.BackgroundColor != nil, "chroma: background color unset")
+	assert.That(c.Name.Color != nil, "chroma: name color unset")
+	assert.That(c.LiteralString.Color != nil, "chroma: string literal color unset")
+	assert.That(c.Keyword.Color != nil, "chroma: keyword color unset")
+	assert.That(c.Comment.Color != nil, "chroma: comment color unset")
 	return c
 }
 
 // setChromaNames styles identifiers: names, tags, classes and functions.
 func setChromaNames(c *ansi.Chroma, t theme.Theme) {
+	assert.That(c != nil, "setChromaNames: nil chroma")
 	c.Name = fgColor(t.Foreground)
 	c.NameBuiltin = fgColor(t.Accent)
 	c.NameTag = fgColor(t.Username)
@@ -170,10 +209,14 @@ func setChromaNames(c *ansi.Chroma, t theme.Theme) {
 	}
 	c.NameDecorator = fgColor(t.Warning)
 	c.NameFunction = fgColor(t.Success)
+	assert.That(c.NameClass.Color != nil && c.NameClass.Bold != nil, "setChromaNames: class style unset")
+	assert.That(c.NameBuiltin.Color != nil, "setChromaNames: builtin color unset")
+	assert.That(c.NameFunction.Color != nil, "setChromaNames: function color unset")
 }
 
 // setChromaLiterals styles literals and diff-style generic tokens.
 func setChromaLiterals(c *ansi.Chroma, t theme.Theme) {
+	assert.That(c != nil, "setChromaLiterals: nil chroma")
 	c.LiteralNumber = fgColor(t.Success)
 	c.LiteralString = fgColor(t.Warning)
 	c.LiteralStringEscape = fgColor(t.Success)
@@ -186,6 +229,10 @@ func setChromaLiterals(c *ansi.Chroma, t theme.Theme) {
 		Bold: boolPtr(true),
 	}
 	c.GenericSubheading = fgColor(t.Subtle)
+	assert.That(c.GenericEmph.Italic != nil, "setChromaLiterals: generic italic unset")
+	assert.That(c.GenericStrong.Bold != nil, "setChromaLiterals: generic bold unset")
+	assert.That(c.LiteralNumber.Color != nil, "setChromaLiterals: number color unset")
+	assert.That(c.GenericDeleted.Color != nil, "setChromaLiterals: deleted-line color unset")
 }
 
 // colorStr renders a theme color as the hex string glamour expects. Colors with
@@ -193,6 +240,8 @@ func setChromaLiterals(c *ansi.Chroma, t theme.Theme) {
 // "inherit" rather than painting a color.
 func colorStr(c color.Color) *string {
 	s := theme.Hex(c)
+	assert.That(s == "" || (len(s) == 7 && s[0] == '#'), "colorStr: hex not empty or #rrggbb")
+	assert.That(c != nil || s == "", "colorStr: hex for a nil color")
 	return &s
 }
 

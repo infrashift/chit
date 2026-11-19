@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+
+	"github.com/infrashift/chit/internal/assert"
 )
 
 // semscope: allow(NASA-P10-06) compiled once, never changed
@@ -35,6 +37,7 @@ type User struct {
 }
 
 func (u *User) IsValid() *AppError {
+	assert.That(u != nil, "User.IsValid: nil user")
 	if !IsValidID(u.ID) {
 		return NewAppError("User.IsValid", "invalid user id", "", http.StatusBadRequest)
 	}
@@ -96,14 +99,20 @@ func (u *User) PreSave() {
 	}
 	u.Username = strings.ToLower(u.Username)
 	u.Email = strings.ToLower(u.Email)
+	assert.That(u.ID != "" && u.CreateAt != 0 && u.UpdateAt == now, "User.PreSave: id or times not set")
+	assert.That(u.Roles != "" && u.ActorType != "", "User.PreSave: roles or actor type not defaulted")
+	assert.That(u.Username == strings.ToLower(u.Username), "User.PreSave: username not lowercased")
 }
 
 func (u *User) PreUpdate() {
+	assert.That(u != nil, "User.PreUpdate: nil user")
 	u.UpdateAt = GetMillis()
+	assert.That(u.UpdateAt > 0, "User.PreUpdate: update_at not set")
 }
 
 // IsSystemAdmin reports whether the user's space-separated roles include system_admin.
 func (u *User) IsSystemAdmin() bool {
+	assert.That(u != nil, "User.IsSystemAdmin: nil user")
 	for _, role := range strings.Fields(u.Roles) {
 		if role == "system_admin" {
 			return true
@@ -115,6 +124,7 @@ func (u *User) IsSystemAdmin() bool {
 // Sanitize strips what one user must not learn about another before the user
 // is returned to an API consumer.
 func (u *User) Sanitize() {
+	assert.That(u != nil, "User.Sanitize: nil user")
 	u.Email = ""
 	// The Kratos identity ID is the key the trusted proxy header carries;
 	// it identifies the person to the auth stack, not to other users.

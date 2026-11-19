@@ -6,6 +6,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/infrashift/chit/internal/app"
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 )
 
@@ -30,6 +31,8 @@ const (
 
 // searchPosts serves the three search routes, which differ only in scope.
 func searchPosts(a *app.App, scope searchScope) http.HandlerFunc {
+	assert.That(a != nil && a.Store != nil, "searchPosts: nil app or store")
+	assert.That(scope >= searchEverywhere && scope <= searchChannel, "searchPosts: unknown scope")
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body searchPostsBody
 		if !decodeBody(w, r, &body, "searchPosts") {
@@ -43,6 +46,7 @@ func searchPosts(a *app.App, scope searchScope) http.HandlerFunc {
 			body.PerPage = 60
 		}
 		body.Page, body.PerPage = clampPagination(body.Page, body.PerPage)
+		assert.That(ContextGetUser(r) != nil, "searchPosts: no authenticated user")
 
 		req := &app.SearchRequest{
 			UserID: ContextGetUser(r).ID, Terms: body.Terms, TagIDs: body.TagIDs,
@@ -60,6 +64,7 @@ func searchPosts(a *app.App, scope searchScope) http.HandlerFunc {
 			WriteAppError(w, "searchPosts", err)
 			return
 		}
+		assert.That(results != nil, "searchPosts: app returned nil without an error")
 		WriteJSON(w, http.StatusOK, results)
 	}
 }

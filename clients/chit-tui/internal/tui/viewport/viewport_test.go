@@ -828,3 +828,22 @@ func TestSearchHighlightShowsOnTheSelectedPost(t *testing.T) {
 		t.Error("the selected post lost the highlight")
 	}
 }
+
+// A selection that outlives its posts must not index lines that are gone:
+// the channel can empty (a switch, or a delete of the last post) while the
+// mouse selection is still active.
+func TestSelectionSurvivesAnEmptyChannel(t *testing.T) {
+	m := newSelectionModel(t)
+	m.SetSelectionAnchor(0)
+	m.ExtendSelection(3)
+	m.SetPosts(nil)
+	if !m.HasSelection() {
+		t.Fatal("SetPosts cleared the selection; this test needs it active")
+	}
+	_ = m.View()
+
+	empty := viewport.New(styles.New(theme.TokyoNight()))
+	empty.SetSize(80, 20)
+	empty.SetSelectionAnchor(0)
+	_ = empty.View()
+}

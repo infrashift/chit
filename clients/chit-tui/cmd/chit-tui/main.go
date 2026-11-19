@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/api"
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/auth"
 	"github.com/infrashift/chit/clients/chit-tui/internal/config"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui"
@@ -51,6 +52,7 @@ func main() {
 		stderr.Printf("config error: %v\n", err)
 		os.Exit(1)
 	}
+	assert.That(cfg != nil, "main: config.Load returned neither a config nor an error")
 
 	// Resolved before the program starts: detecting terminal darkness queries
 	// the terminal, and the reply would land in the input stream otherwise.
@@ -78,6 +80,10 @@ func main() {
 // newModel connects the clients and stores the configuration names and
 // builds the root model on them.
 func newModel(cfg *config.Config, s styles.Styles) tui.Model {
+	assert.That(cfg != nil, "newModel: nil config")
+	// config.Load validated these before main got here.
+	assert.That(cfg.ServerURL != "", "newModel: no server URL")
+	assert.That(cfg.AuthHeader != "", "newModel: no auth header")
 	kratosClient := auth.NewKratosClient(cfg.KratosBaseURL())
 	tokenStore := auth.NewTokenStore("")
 	sessionStore := auth.NewSessionStore(cfg.SessionFile)
@@ -89,6 +95,7 @@ func newModel(cfg *config.Config, s styles.Styles) tui.Model {
 	} else {
 		tokenStore.Set(storedToken(context.Background(), sessionStore, kratosClient))
 	}
+	assert.That(!cfg.HasToken() || tokenStore.Get() == cfg.SessionToken, "newModel: an environment token must take precedence")
 
 	client := api.NewClientWithTokenSource(cfg.ServerURL, tokenStore, cfg.AuthHeader)
 	wsClient := ws.NewWSClientWithHeader(cfg.WSURL(), tokenStore.Get(), 256, cfg.AuthHeader)
@@ -112,8 +119,15 @@ type sessionChecker interface {
 // Kratos cannot be reached, the session may well be fine, and the server
 // will ask for sign-in itself if it is not.
 func storedToken(ctx context.Context, store sessionLoader, checker sessionChecker) string {
+	assert.That(ctx != nil, "storedToken: nil context")
+	assert.That(store != nil, "storedToken: nil session loader")
+	assert.That(checker != nil, "storedToken: nil session checker")
 	stored, err := store.Load()
-	if err != nil || stored.Token == "" {
+	if err != nil {
+		return ""
+	}
+	assert.That(stored != nil, "storedToken: Load returned neither a session nor an error")
+	if stored.Token == "" {
 		return ""
 	}
 	if _, err := checker.CheckSession(ctx, stored.Token); err != nil && auth.IsSessionRejected(err) {

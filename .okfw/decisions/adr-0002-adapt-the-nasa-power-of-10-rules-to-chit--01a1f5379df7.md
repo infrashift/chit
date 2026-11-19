@@ -34,7 +34,7 @@ The user requires the Power of 10 rules. The rules are for C. chit is a Go serve
 | R9 Restricted pointers | No function types, fields of function type or dispatch tables in chit code. Use an interface or a `switch`. A signature that net/http, chi or Bubble Tea requires stays, with a suppression. | semscope |
 | R10 Zero warnings | `go vet` and golangci-lint report zero issues in both modules. No `unsafe`. | `make lint lint-tui` |
 
-**Assertions:** `assert.That(cond, msg)` panics when `cond` is false. The HTTP recover middleware changes a panic in a handler into a 500 response. Each worker, pump and listener goroutine has a recover guard that logs the panic.
+**Assertions:** `assert.That(cond, msg)` panics when `cond` is false. [ADR-0011](/decisions/adr-0011-a-failed-assertion-stops-one-unit-of-work-or-the-process--01a1f56cdcd3.md) gives the result of a failed assertion. A request gets a 500 response. A goroutine for one connection or thread stops alone. A loop that the process needs stops the process.
 
 **Suppression:** `// semscope: allow(NASA-P10-NN) <reason>` on the line or the line above. Each suppression has a reason.
 

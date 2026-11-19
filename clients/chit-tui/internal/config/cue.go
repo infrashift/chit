@@ -8,6 +8,8 @@ import (
 	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/cuecontext"
 	cueerrors "cuelang.org/go/cue/errors"
+
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 )
 
 //go:embed schema/config.cue
@@ -41,6 +43,8 @@ func keyMessage(key string) (string, bool) {
 
 // compileSchema compiles an embedded schema and returns the named definition.
 func compileSchema(src, defName string) (cue.Value, error) {
+	assert.That(src != "", "compileSchema: empty schema source")
+	assert.That(strings.HasPrefix(defName, "#"), "compileSchema: name is not a definition")
 	ctx := cuecontext.New()
 
 	v := ctx.CompileString(src, cue.Filename(strings.TrimPrefix(defName, "#")+".cue"))
@@ -52,6 +56,7 @@ func compileSchema(src, defName string) (cue.Value, error) {
 	if err := s.Err(); err != nil {
 		return cue.Value{}, err
 	}
+	assert.That(s.Exists(), "compileSchema: definition found without an error but does not exist")
 	return s, nil
 }
 
@@ -60,6 +65,11 @@ func compileSchema(src, defName string) (cue.Value, error) {
 // a bad key falls back to its default, which keeps a stale config file from
 // locking someone out of the client.
 func vetConfig(raw map[string]any, warnings *[]string) {
+	assert.That(raw != nil, "vetConfig: nil document")
+	assert.That(warnings != nil, "vetConfig: nil warnings")
+	// Unknown keys are stripped first, and each pass drops one key, so the
+	// loop ends long before maxVetPasses.
+	assert.That(len(raw) < maxVetPasses, "vetConfig: more keys than passes")
 	schema, err := compileSchema(configSchemaSrc, "#Config")
 	if err != nil {
 		*warnings = append(*warnings,
@@ -82,12 +92,15 @@ func vetConfig(raw map[string]any, warnings *[]string) {
 			return
 		}
 
+		before := len(raw)
 		if !dropFirstOffender(raw, verr, warnings) {
 			clearMap(raw)
 			*warnings = append(*warnings,
 				"config: could not validate remaining settings — using defaults")
 			return
 		}
+		// Each pass drops one key, so the loop ends within len(raw) passes.
+		assert.That(len(raw) == before-1, "vetConfig: a pass must drop exactly one key")
 	}
 }
 
@@ -95,6 +108,9 @@ func vetConfig(raw map[string]any, warnings *[]string) {
 // whether anything was dropped. Returning false means the errors could not be
 // traced to a key, so the caller gives up on the document as a whole.
 func dropFirstOffender(raw map[string]any, verr error, warnings *[]string) bool {
+	assert.That(raw != nil, "dropFirstOffender: nil document")
+	assert.That(verr != nil, "dropFirstOffender: no validation error")
+	assert.That(warnings != nil, "dropFirstOffender: nil warnings")
 	for _, e := range cueerrors.Errors(verr) {
 		key := trimDefinitionPrefix(e.Path())
 		if key == "" {
@@ -103,6 +119,7 @@ func dropFirstOffender(raw map[string]any, verr error, warnings *[]string) bool 
 		if _, ok := raw[key]; !ok {
 			continue
 		}
+		assert.That(!strings.HasPrefix(key, "#"), "dropFirstOffender: key still has a definition prefix")
 		delete(raw, key)
 		*warnings = append(*warnings, warnKey(key))
 		return true
@@ -125,14 +142,20 @@ func trimDefinitionPrefix(path []string) string {
 
 // warnKey renders the user-facing message for a rejected key.
 func warnKey(key string) string {
-	if msg, ok := keyMessage(key); ok {
+	msg, ok := keyMessage(key)
+	// A recognized setting is exactly one with an explanation.
+	assert.That(ok == (msg != ""), "warnKey: keyMessage must explain each key it knows")
+	assert.That(ok == isFileKey(key), "warnKey: keyMessage and fileKeys disagree")
+	if ok {
 		return fmt.Sprintf("config %q: %s — ignored", key, msg)
 	}
 	return fmt.Sprintf("config %q: not a recognized setting — ignored", key)
 }
 
 func clearMap(m map[string]any) {
+	assert.That(m != nil, "clearMap: nil map")
 	for k := range m {
 		delete(m, k)
 	}
+	assert.That(len(m) == 0, "clearMap: keys remain")
 }

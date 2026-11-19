@@ -3,16 +3,20 @@ package app
 import (
 	"context"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 )
 
 // CreateTeam creates a new team and adds the creator as a member.
 func (a *App) CreateTeam(ctx context.Context, team *model.Team) (*model.Team, error) {
+	assert.That(team != nil, "App.CreateTeam: nil team")
+	assert.That(a.Store != nil && a.Hub != nil, "App.CreateTeam: nil store or hub")
 	saved, err := a.Store.Team().Save(ctx, team)
 	if err != nil {
 		return nil, err
 	}
 
+	assert.That(saved != nil && saved.ID != "", "App.CreateTeam: saved team has no id")
 	member := &model.TeamMember{
 		TeamID: saved.ID,
 		UserID: saved.CreatorID,
@@ -29,10 +33,13 @@ func (a *App) CreateTeam(ctx context.Context, team *model.Team) (*model.Team, er
 // GetTeam retrieves a team by ID on actor's behalf. Invite-only teams are
 // visible only to their members and to system admins.
 func (a *App) GetTeam(ctx context.Context, id string, actor *model.User) (*model.Team, error) {
+	assert.That(actor != nil, "App.GetTeam: nil actor")
+	assert.That(a.Store != nil, "App.GetTeam: nil store")
 	team, err := a.Store.Team().Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
+	assert.That(team != nil, "App.GetTeam: nil team without an error")
 	if err := a.requireTeamVisible(ctx, team, actor); err != nil {
 		return nil, err
 	}
@@ -51,10 +58,13 @@ type TeamPatch struct {
 // UpdateTeam applies patch on actor's behalf. Requires team_admin or
 // system_admin.
 func (a *App) UpdateTeam(ctx context.Context, id string, patch TeamPatch, actor *model.User) (*model.Team, error) {
+	assert.That(actor != nil, "App.UpdateTeam: nil actor")
+	assert.That(a.Store != nil, "App.UpdateTeam: nil store")
 	team, err := a.Store.Team().Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
+	assert.That(team != nil, "App.UpdateTeam: nil team without an error")
 	if err := a.requireTeamAdmin(ctx, id, actor, "App.UpdateTeam"); err != nil {
 		return nil, err
 	}
@@ -70,12 +80,15 @@ func (a *App) UpdateTeam(ctx context.Context, id string, patch TeamPatch, actor 
 	if err := team.IsValid(); err != nil {
 		return nil, err
 	}
+	assert.That(team.ID != "", "App.UpdateTeam: team has no id")
 	return a.Store.Team().Update(ctx, team)
 }
 
 // DeleteTeam soft-deletes a team on actor's behalf. Requires team_admin or
 // system_admin.
 func (a *App) DeleteTeam(ctx context.Context, id string, actor *model.User) error {
+	assert.That(actor != nil, "App.DeleteTeam: nil actor")
+	assert.That(a.Store != nil, "App.DeleteTeam: nil store")
 	if _, err := a.Store.Team().Get(ctx, id); err != nil {
 		return err
 	}
@@ -83,6 +96,7 @@ func (a *App) DeleteTeam(ctx context.Context, id string, actor *model.User) erro
 		return err
 	}
 	now := model.GetMillis()
+	assert.That(now > 0, "App.DeleteTeam: clock before the epoch")
 	if err := a.Store.Team().Delete(ctx, id, now); err != nil {
 		return err
 	}
@@ -94,6 +108,7 @@ func (a *App) DeleteTeam(ctx context.Context, id string, actor *model.User) erro
 		return err
 	}
 	for _, channelID := range channelIDs {
+		assert.That(channelID != "", "App.DeleteTeam: store returned an empty channel id")
 		a.publishChannelDeleted(ctx, channelID)
 	}
 	return nil
@@ -102,6 +117,9 @@ func (a *App) DeleteTeam(ctx context.Context, id string, actor *model.User) erro
 // GetAllTeams lists the teams actor can see: every team for a system admin,
 // otherwise open teams plus the invite-only teams actor belongs to.
 func (a *App) GetAllTeams(ctx context.Context, actor *model.User, page, perPage int) ([]*model.Team, error) {
+	assert.That(actor != nil && actor.ID != "", "App.GetAllTeams: actor has no id")
+	assert.That(page >= 0 && perPage >= 1, "App.GetAllTeams: pagination not clamped")
+	assert.That(a.Store != nil, "App.GetAllTeams: nil store")
 	visibleTo := actor.ID
 	if actor.IsSystemAdmin() {
 		visibleTo = ""
@@ -111,6 +129,8 @@ func (a *App) GetAllTeams(ctx context.Context, actor *model.User, page, perPage 
 
 // GetTeamsForUser retrieves teams that a user is a member of.
 func (a *App) GetTeamsForUser(ctx context.Context, userID string) ([]*model.Team, error) {
+	assert.That(a.Store != nil, "App.GetTeamsForUser: nil store")
+	assert.That(userID != "", "App.GetTeamsForUser: empty user id")
 	return a.Store.Team().GetTeamsForUser(ctx, userID)
 }
 
@@ -123,10 +143,13 @@ func (a *App) GetTeamsForUser(ctx context.Context, userID string) ([]*model.Team
 // to ANY team, and team membership is what AddChannelMember consults to
 // authorize joining an open channel.
 func (a *App) AddTeamMember(ctx context.Context, teamID, userID, actorID string) (*model.TeamMember, error) {
+	assert.That(actorID != "", "App.AddTeamMember: empty actor id")
+	assert.That(a.Store != nil && a.Hub != nil, "App.AddTeamMember: nil store or hub")
 	team, err := a.Store.Team().Get(ctx, teamID)
 	if err != nil {
 		return nil, err
 	}
+	assert.That(team != nil, "App.AddTeamMember: nil team without an error")
 	if userID != actorID || team.Type != model.TeamOpen {
 		if authErr := a.requireTeamMember(ctx, teamID, actorID); authErr != nil {
 			return nil, authErr
@@ -144,6 +167,7 @@ func (a *App) AddTeamMember(ctx context.Context, teamID, userID, actorID string)
 	if err != nil {
 		return nil, err
 	}
+	assert.That(saved != nil, "App.AddTeamMember: nil member without an error")
 	a.Hub.NotifyTeamMembershipChanged(userID, teamID, true)
 	return saved, nil
 }
@@ -154,6 +178,9 @@ func (a *App) AddTeamMember(ctx context.Context, teamID, userID, actorID string)
 // same split RemoveChannelMember makes, and for the same reason: a member who
 // can evict their peers is an admin in everything but name.
 func (a *App) RemoveTeamMember(ctx context.Context, teamID, userID, actorID string) error {
+	assert.That(actorID != "", "App.RemoveTeamMember: empty actor id")
+	assert.That(a.Store != nil && a.Hub != nil, "App.RemoveTeamMember: nil store or hub")
+	assert.That(a.keto != nil, "App.RemoveTeamMember: nil keto client")
 	if err := a.requireTeamMember(ctx, teamID, actorID); err != nil {
 		return err
 	}
@@ -176,6 +203,7 @@ func (a *App) RemoveTeamMember(ctx context.Context, teamID, userID, actorID stri
 		return err
 	}
 	for _, channelID := range channelIDs {
+		assert.That(channelID != "", "App.RemoveTeamMember: store returned an empty channel id")
 		a.Hub.NotifyMembershipChanged(userID, channelID, false)
 		a.logKeto(a.keto.DeleteRelation(ctx, model.KetoNamespaceChannel, channelID, model.KetoRelationMember, userID), channelID, userID)
 		a.publishUserRemoved(ctx, channelID, userID)
@@ -186,6 +214,8 @@ func (a *App) RemoveTeamMember(ctx context.Context, teamID, userID, actorID stri
 // GetTeamMembers lists a team's members on actor's behalf. Only members and
 // system admins may read the roster.
 func (a *App) GetTeamMembers(ctx context.Context, teamID string, actor *model.User, page, perPage int) ([]*model.TeamMember, error) {
+	assert.That(actor != nil, "App.GetTeamMembers: nil actor")
+	assert.That(page >= 0 && perPage >= 1, "App.GetTeamMembers: pagination not clamped")
 	if !actor.IsSystemAdmin() {
 		if err := a.requireTeamMember(ctx, teamID, actor.ID); err != nil {
 			return nil, err

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 )
 
@@ -59,14 +60,21 @@ type Model struct {
 
 // New creates a new action bar.
 func New(s styles.Styles) Model {
+	assert.That(s.MarkdownStyleConfig.CodeBlock.Chroma != nil, "actionbar.New: styles not built by styles.New")
 	return Model{styles: s}
 }
 
 // SetSize sets the bar width.
-func (m *Model) SetSize(w int) { m.width = w }
+func (m *Model) SetSize(w int) {
+	assert.That(w >= 0, "actionbar.SetSize: negative width")
+	m.width = w
+}
 
 // SetStyles replaces the styles.
-func (m *Model) SetStyles(s styles.Styles) { m.styles = s }
+func (m *Model) SetStyles(s styles.Styles) {
+	assert.That(s.MarkdownStyleConfig.CodeBlock.Chroma != nil, "actionbar.SetStyles: styles not built by styles.New")
+	m.styles = s
+}
 
 // SetContext sets the team, channel, and user names shown on the bar.
 func (m *Model) SetContext(team, channel, user string) {
@@ -108,6 +116,9 @@ func (m Model) buttons() []button {
 		button{label: "^N New", action: ActionNewChannel},
 		button{label: "? Help", action: ActionHelp},
 	)
+	assert.That(len(btns) >= 5 && len(btns) <= 7, "actionbar.buttons: button count outside 5-7")
+	assert.That(btns[len(btns)-1].action == ActionHelp, "actionbar.buttons: Help is not the last button")
+	assert.That(!m.threadOpen || btns[0].action == ActionCloseThread, "actionbar.buttons: Back is not first while a thread is open")
 	return btns
 }
 
@@ -115,6 +126,7 @@ func (m Model) buttons() []button {
 // the single source of truth for button geometry: View and HitTest both use
 // it so clicks can never drift from what is drawn.
 func (m Model) layout() rendered {
+	assert.That(m.width >= 0, "actionbar.layout: negative width")
 	base := m.styles.StatusBar.Padding(0, 0)
 
 	var b strings.Builder
@@ -126,14 +138,19 @@ func (m Model) layout() rendered {
 	}
 
 	write(base.Render(" "))
-	for i, btn := range m.buttons() {
+	btns := m.buttons()
+	for i, btn := range btns {
 		if i > 0 {
 			write(base.Render(" "))
 		}
 		start := x
 		write(m.styles.BarButton.Render("[" + btn.label + "]"))
+		assert.That(x > start, "actionbar.layout: button drawn with no width")
+		assert.That(len(spans) == 0 || spans[len(spans)-1].end < start, "actionbar.layout: buttons overlap or touch")
 		spans = append(spans, span{start: start, end: x, action: btn.action})
 	}
+	assert.That(len(spans) == len(btns), "actionbar.layout: a button has no span")
+	assert.That(spans[len(spans)-1].end <= x, "actionbar.layout: last span past the drawn text")
 
 	if m.editing {
 		write(m.styles.MentionBadge.Render(" editing — enter saves, esc cancels "))
@@ -157,6 +174,7 @@ func (m Model) layout() rendered {
 	}
 	write(base.Render(strings.Repeat(" ", gap)))
 	write(right)
+	assert.That(x >= m.width, "actionbar.layout: bar narrower than the width it fills")
 
 	return rendered{text: b.String(), spans: spans}
 }
@@ -168,6 +186,7 @@ func (m Model) layout() rendered {
 // the message is news. Whatever still does not fit is cut short, so the
 // bar never runs past the edge and pushes the dot and name off it.
 func (m Model) contextAndStatus(room int) (string, string) {
+	assert.That(room >= 0, "actionbar.contextAndStatus: negative room")
 	ctx := " │ " + m.team
 	if m.channel != "" {
 		ctx += " > " + m.channel
@@ -181,17 +200,24 @@ func (m Model) contextAndStatus(room int) (string, string) {
 	}
 	ctx = ansi.Truncate(ctx, room, "…")
 	status = ansi.Truncate(status, room-ansi.StringWidth(ctx), "…")
+	assert.That(ansi.StringWidth(ctx)+ansi.StringWidth(status) <= room, "actionbar.contextAndStatus: text wider than room")
+	assert.That(m.err == "" || status != "" || room-ansi.StringWidth(ctx) <= 0, "actionbar.contextAndStatus: error dropped while room remained")
 	return ctx, status
 }
 
 // View renders the action bar as a single line.
 func (m Model) View() string {
-	return m.layout().text
+	text := m.layout().text
+	assert.That(text != "", "actionbar.View: empty bar")
+	return text
 }
 
 // HitTest returns the action under screen column x, or ActionNone.
 func (m Model) HitTest(x int) Action {
-	for _, sp := range m.layout().spans {
+	spans := m.layout().spans
+	assert.That(len(spans) >= 5, "actionbar.HitTest: fewer spans than the fixed buttons")
+	for _, sp := range spans {
+		assert.That(sp.start < sp.end, "actionbar.HitTest: empty span")
 		if x >= sp.start && x < sp.end {
 			return sp.action
 		}

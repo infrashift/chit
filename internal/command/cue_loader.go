@@ -7,6 +7,8 @@ import (
 	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/cuecontext"
 	"cuelang.org/go/cue/load"
+
+	"github.com/infrashift/chit/internal/assert"
 )
 
 // CUERole represents a role loaded from CUE.
@@ -37,6 +39,7 @@ func LoadCUE(dir string) (*CUEConfig, error) {
 		return nil, fmt.Errorf("resolve cue dir: %w", err)
 	}
 
+	assert.That(filepath.IsAbs(absDir), "LoadCUE: resolved dir is not absolute")
 	unified, err := loadUnifiedCUE(absDir)
 	if err != nil {
 		return nil, err
@@ -56,6 +59,7 @@ func LoadCUE(dir string) (*CUEConfig, error) {
 	for i := range commands {
 		result.Commands = append(result.Commands, &commands[i])
 	}
+	assert.That(len(result.Commands) == len(commands), "LoadCUE: lost a command")
 
 	// Extract roles.
 	if result.Roles, err = decodeCUEFields[CUERole](unified, "roles", "role"); err != nil {
@@ -73,7 +77,9 @@ func LoadCUE(dir string) (*CUEConfig, error) {
 // loadUnifiedCUE loads all CUE files under absDir as a single package and
 // unifies the instances into a single value.
 func loadUnifiedCUE(absDir string) (cue.Value, error) {
+	assert.That(filepath.IsAbs(absDir), "loadUnifiedCUE: dir is not absolute")
 	ctx := cuecontext.New()
+	assert.That(ctx != nil, "loadUnifiedCUE: nil cue context")
 
 	// Load all CUE files under the auth directory as a single package.
 	cfg := &load.Config{
@@ -107,6 +113,7 @@ func loadUnifiedCUE(absDir string) (cue.Value, error) {
 // field order. A path that does not exist yields no values. what names one
 // value in error messages; the path names the struct ("iterate <path>").
 func decodeCUEFields[T any](unified cue.Value, path, what string) ([]T, error) {
+	assert.That(path != "" && what != "", "decodeCUEFields: empty path or name")
 	val := unified.LookupPath(cue.ParsePath(path))
 	if !val.Exists() {
 		return nil, nil

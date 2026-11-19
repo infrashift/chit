@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/auth"
 	"github.com/infrashift/chit/clients/chit-tui/internal/errlog"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
@@ -13,6 +14,9 @@ import (
 )
 
 func (m Model) updateLogin(msg tea.Msg) (tea.Model, tea.Cmd) {
+	assert.That(m.scope != nil, "updateLogin: nil request scope")
+	assert.That(m.appState != AppStateRunning, "updateLogin: already signed in")
+	assert.That(m.sessionStore != nil, "updateLogin: nil session store")
 	// The listeners are one chain each, re-armed by every message they
 	// deliver. Whatever arrives while signed out is stale, but dropping it
 	// without re-arming would leave the next session deaf.
@@ -39,6 +43,9 @@ func (m Model) updateLogin(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleLoginSuccess(msg login.LoginSuccessMsg) (tea.Model, tea.Cmd) {
+	assert.That(m.sessionStore != nil, "handleLoginSuccess: nil session store")
+	assert.That(m.scope != nil, "handleLoginSuccess: nil request scope")
+	assert.That(m.client != nil, "handleLoginSuccess: nil client")
 	if m.tokenStore != nil {
 		m.tokenStore.Set(msg.Token)
 	}
@@ -70,8 +77,11 @@ func (m Model) handleLoginSuccess(msg login.LoginSuccessMsg) (tea.Model, tea.Cmd
 // usually the same user picking up where they left off. Who signs in is only
 // known once their user loads; resumeAfterReLogin decides then.
 func (m Model) handleAuthExpired() (tea.Model, tea.Cmd) {
+	assert.That(m.appState == AppStateRunning, "handleAuthExpired: not signed in")
+	assert.That(m.sessionStore != nil, "handleAuthExpired: nil session store")
 	m.endRequests()
 	m.appState = AppStateReLogin
+	assert.That(m.scope.ctx.Err() == nil, "handleAuthExpired: the new scope is already canceled")
 	m.wsConnected = false
 	m.loginModel.Reset()
 	if m.me != nil {
@@ -92,6 +102,9 @@ func (m Model) handleAuthExpired() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleLogout() (tea.Model, tea.Cmd) {
+	assert.That(m.appState == AppStateRunning, "handleLogout: not signed in")
+	assert.That(m.scope != nil, "handleLogout: nil request scope")
+	assert.That(m.sessionStore != nil, "handleLogout: nil session store")
 	if m.tokenStore != nil {
 		m.tokenStore.Set("")
 	}
@@ -105,6 +118,8 @@ func (m Model) handleLogout() (tea.Model, tea.Cmd) {
 	m.scope.cancel()
 	m = m.newSession()
 	m.appState = AppStateLogin
+	assert.That(m.me == nil, "handleLogout: the old user survived")
+	assert.That(m.activeChan == nil, "handleLogout: the old channel survived")
 
 	// Logging out and leaving the token on disk would sign the user straight
 	// back in on next start, which is the opposite of what they asked for.
@@ -120,15 +135,19 @@ func (m Model) handleLogout() (tea.Model, tea.Cmd) {
 // expired never arrived over the socket, so the open channel is re-read.
 // Anyone else starts from nothing.
 func (m Model) resumeAfterReLogin(u *model.User) (tea.Model, tea.Cmd) {
+	assert.That(u != nil, "resumeAfterReLogin: nil user")
+	assert.That(m.expiredUserID != "", "resumeAfterReLogin: no session expired")
 	same := u.ID == m.expiredUserID
 	m.expiredUserID = ""
 	if !same {
 		m = m.newSession()
 		m.appState = AppStateRunning
+		assert.That(m.me == nil, "resumeAfterReLogin: the old user survived")
 		return m.applyLoadedUser(u)
 	}
 
 	m, cmd := m.applyLoadedUser(u)
+	assert.That(m.me == u, "resumeAfterReLogin: user not applied")
 	if m.activeChan != nil {
 		cmd = tea.Batch(cmd, m.selectChannel(m.activeChan))
 	}
@@ -141,6 +160,7 @@ func (m Model) resumeAfterReLogin(u *model.User) (tea.Model, tea.Cmd) {
 // the status line, and the WebSocket listeners, which keep reading the same
 // channels.
 func (m Model) newSession() Model {
+	assert.That(m.client != nil, "newSession: nil client")
 	fresh := NewModel(m.cfg, m.client, m.wsClient, m.styles, m.tokenStore, m.kratosClient, m.sessionStore)
 	fresh.appState = m.appState
 	fresh.wsListening = m.wsListening
@@ -150,5 +170,8 @@ func (m Model) newSession() Model {
 	fresh.width, fresh.height = m.width, m.height
 	fresh.loginModel.SetSize(m.width, m.height)
 	fresh.resizeComponents()
+	assert.That(fresh.appState == m.appState, "newSession: app state not kept")
+	assert.That(fresh.me == nil, "newSession: user kept")
+	assert.That(fresh.scope != nil, "newSession: nil request scope")
 	return fresh
 }

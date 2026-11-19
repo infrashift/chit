@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/command"
 	"github.com/infrashift/chit/internal/errlog"
 )
@@ -33,6 +34,10 @@ func NewWebhookDispatcher(
 	numWorkers int,
 	timeout time.Duration,
 ) *WebhookDispatcher {
+	assert.That(eventCh != nil, "NewWebhookDispatcher: nil event channel")
+	assert.That(targetURL != "", "NewWebhookDispatcher: empty target URL")
+	assert.That(numWorkers > 0, "NewWebhookDispatcher: no workers")
+	assert.That(timeout > 0, "NewWebhookDispatcher: timeout must be positive")
 	return &WebhookDispatcher{
 		eventCh:    eventCh,
 		targetURL:  targetURL,
@@ -45,6 +50,8 @@ func NewWebhookDispatcher(
 
 // Start launches the worker goroutines. It blocks until ctx is cancelled or Stop is called.
 func (d *WebhookDispatcher) Start(ctx context.Context) error {
+	assert.That(d.numWorkers > 0, "WebhookDispatcher.Start: no workers")
+	assert.That(d.stop != nil && d.eventCh != nil, "WebhookDispatcher.Start: not built by NewWebhookDispatcher")
 	slog.Info("webhook dispatcher started", "workers", d.numWorkers, "target", d.targetURL)
 
 	for i := range d.numWorkers {
@@ -65,11 +72,13 @@ func (d *WebhookDispatcher) Start(ctx context.Context) error {
 
 // Stop signals all workers to drain and exit.
 func (d *WebhookDispatcher) Stop() {
+	assert.That(d.stop != nil, "WebhookDispatcher.Stop: not built by NewWebhookDispatcher")
 	close(d.stop)
 	d.wg.Wait()
 }
 
 func (d *WebhookDispatcher) worker(ctx context.Context, id int) {
+	assert.That(id >= 0 && id < d.numWorkers, "WebhookDispatcher.worker: id out of range")
 	defer d.wg.Done()
 	for ctx.Err() == nil {
 		select {
@@ -81,6 +90,7 @@ func (d *WebhookDispatcher) worker(ctx context.Context, id int) {
 			if !ok {
 				return
 			}
+			assert.That(evt != nil, "WebhookDispatcher.worker: nil event on the channel")
 			if err := d.deliver(ctx, evt); err != nil {
 				slog.Error("webhook delivery failed",
 					"worker", id, "event_id", evt.EventID, "error", err)
@@ -90,7 +100,10 @@ func (d *WebhookDispatcher) worker(ctx context.Context, id int) {
 }
 
 func (d *WebhookDispatcher) deliver(ctx context.Context, evt *command.WebhookEvent) error {
+	assert.That(evt != nil, "WebhookDispatcher.deliver: nil event")
+	assert.That(d.client != nil && d.targetURL != "", "WebhookDispatcher.deliver: no client or target")
 	ce := command.NewCloudEvent(evt)
+	assert.That(ce != nil && ce.ID != "", "WebhookDispatcher.deliver: cloud event has no id")
 	payload, err := json.Marshal(ce)
 	if err != nil {
 		return fmt.Errorf("marshal cloudevent: %w", err)

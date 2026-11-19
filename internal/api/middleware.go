@@ -15,6 +15,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/infrashift/chit/internal/app"
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 )
 
@@ -27,9 +28,12 @@ import (
 // semscope: allow(NASA-P10-09) chi's Router.Use requires func(http.Handler) http.Handler.
 func AuthExtract(a *app.App) func(http.Handler) http.Handler {
 	// The routes are compiled once, here, and shared by every request.
+	assert.That(a != nil && a.Config != nil, "AuthExtract: nil app or config")
 	routes := onBehalfOfRoutes()
 	routeList := onBehalfOfRouteList(routes)
+	assert.That(len(routes) > 0 && routeList != "", "AuthExtract: no on-behalf-of routes")
 	return func(next http.Handler) http.Handler {
+		assert.That(next != nil, "AuthExtract: nil next handler")
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !checkProxySecret(a, w, r) {
 				return
@@ -56,6 +60,8 @@ func AuthExtract(a *app.App) func(http.Handler) http.Handler {
 // checkProxySecret answers 401 and returns false when
 // CHIT_TRUSTED_PROXY_SECRET is set and the request does not present it.
 func checkProxySecret(a *app.App, w http.ResponseWriter, r *http.Request) bool {
+	assert.That(a != nil && a.Config != nil, "checkProxySecret: nil app or config")
+	assert.That(r != nil, "checkProxySecret: nil request")
 	secret := a.Config.TrustedProxySecret
 	if secret == "" {
 		return true
@@ -74,12 +80,15 @@ func checkProxySecret(a *app.App, w http.ResponseWriter, r *http.Request) bool {
 func authenticateClient(a *app.App, routes []onBehalfOfRouteSpec, routeList string,
 	w http.ResponseWriter, r *http.Request, clientID string,
 ) (*http.Request, bool) {
+	assert.That(clientID != "", "authenticateClient: empty client id")
+	assert.That(len(routes) > 0, "authenticateClient: no on-behalf-of routes")
 	user, err := a.ResolveOAuthClient(r.Context(), clientID)
 	if err != nil {
 		slog.Warn("auth: unknown oauth client", "client_id", clientID, "error", err)
 		WriteError(w, model.NewUnauthorizedError("AuthExtract", "unknown oauth client"))
 		return r, false
 	}
+	assert.That(user != nil, "authenticateClient: ResolveOAuthClient returned nil without an error")
 	principalID, ok := onBehalfOf(r)
 	if !ok {
 		return ContextSetUser(r, user), true
@@ -95,6 +104,7 @@ func authenticateClient(a *app.App, routes []onBehalfOfRouteSpec, routeList stri
 		WriteAppError(w, "AuthExtract", err)
 		return r, false
 	}
+	assert.That(principal != nil, "authenticateClient: ResolvePrincipal returned nil without an error")
 	// Authorized as the person from here on; the client is
 	// kept beside them for the record.
 	return ContextSetActor(ContextSetUser(r, principal), user), true
@@ -104,6 +114,7 @@ func authenticateClient(a *app.App, routes []onBehalfOfRouteSpec, routeList stri
 // Kratos header. It returns the request carrying the user, or false once it
 // has written the error response.
 func authenticatePerson(a *app.App, w http.ResponseWriter, r *http.Request) (*http.Request, bool) {
+	assert.That(a != nil && a.Config != nil, "authenticatePerson: nil app or config")
 	// A person's session never acts for somebody else. Refused rather
 	// than ignored, so a caller that meant it learns it did not happen.
 	if _, ok := onBehalfOf(r); ok {
@@ -124,6 +135,7 @@ func authenticatePerson(a *app.App, w http.ResponseWriter, r *http.Request) (*ht
 		WriteAppError(w, "AuthExtract", err)
 		return r, false
 	}
+	assert.That(user != nil, "authenticatePerson: ProvisionUser returned nil without an error")
 	return ContextSetUser(r, user), true
 }
 
@@ -134,6 +146,7 @@ const OnBehalfOfHeader = "X-On-Behalf-Of"
 // present at all: present and empty is a request to act for nobody, and is
 // refused, not read as "no header".
 func onBehalfOf(r *http.Request) (string, bool) {
+	assert.That(r != nil, "onBehalfOf: nil request")
 	values, ok := r.Header[http.CanonicalHeaderKey(OnBehalfOfHeader)]
 	if !ok {
 		return "", false
@@ -174,8 +187,10 @@ func onBehalfOfRoutes() []onBehalfOfRouteSpec {
 
 // onBehalfOfRouteList names the routes, for the refusal message.
 func onBehalfOfRouteList(routes []onBehalfOfRouteSpec) string {
+	assert.That(len(routes) > 0, "onBehalfOfRouteList: no routes")
 	names := make([]string, len(routes))
 	for i, route := range routes {
+		assert.That(route.name != "", "onBehalfOfRouteList: unnamed route")
 		names[i] = route.name
 	}
 	return strings.Join(names, ", ")
@@ -183,7 +198,9 @@ func onBehalfOfRouteList(routes []onBehalfOfRouteSpec) string {
 
 // onBehalfOfRoute reports whether r is one of routes.
 func onBehalfOfRoute(routes []onBehalfOfRouteSpec, r *http.Request) bool {
+	assert.That(r != nil && r.URL != nil, "onBehalfOfRoute: nil request or URL")
 	for _, route := range routes {
+		assert.That(route.path != nil, "onBehalfOfRoute: route without a pattern")
 		if r.Method == route.method && route.path.MatchString(r.URL.Path) {
 			return true
 		}
@@ -193,6 +210,7 @@ func onBehalfOfRoute(routes []onBehalfOfRouteSpec, r *http.Request) bool {
 
 // StructuredLogger logs each request using slog.
 func StructuredLogger(next http.Handler) http.Handler {
+	assert.That(next != nil, "StructuredLogger: nil next handler")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
@@ -216,6 +234,7 @@ type responseWriter struct {
 }
 
 func (rw *responseWriter) WriteHeader(code int) {
+	assert.That(rw.ResponseWriter != nil, "responseWriter.WriteHeader: nil underlying writer")
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
 }
@@ -223,6 +242,7 @@ func (rw *responseWriter) WriteHeader(code int) {
 // Hijack implements http.Hijacker so that WebSocket upgrades work through
 // the logging middleware.
 func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	assert.That(rw.ResponseWriter != nil, "responseWriter.Hijack: nil underlying writer")
 	h, ok := rw.ResponseWriter.(http.Hijacker)
 	if !ok {
 		return nil, nil, fmt.Errorf("underlying ResponseWriter does not implement http.Hijacker")
@@ -235,9 +255,11 @@ func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 //
 // semscope: allow(NASA-P10-09) chi's Router.Use requires func(http.Handler) http.Handler.
 func RateLimit(requestsPerSecond float64, burst int) func(http.Handler) http.Handler {
+	assert.That(requestsPerSecond > 0 && burst > 0, "RateLimit: limit and burst must be positive")
 	limiters := newUserLimiters(rate.Limit(requestsPerSecond), burst, systemClock{})
 
 	return func(next http.Handler) http.Handler {
+		assert.That(next != nil, "RateLimit: nil next handler")
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			key := r.RemoteAddr
 			if user := ContextGetUser(r); user != nil {
@@ -286,6 +308,8 @@ type limiterEntry struct {
 }
 
 func newUserLimiters(limit rate.Limit, burst int, c clock) *userLimiters {
+	assert.That(c != nil, "newUserLimiters: nil clock")
+	assert.That(limit > 0 && burst > 0, "newUserLimiters: limit and burst must be positive")
 	// Time for an empty bucket to refill, with margin; at least a minute.
 	idle := time.Minute
 	if limit > 0 {
@@ -298,6 +322,7 @@ func newUserLimiters(limit rate.Limit, burst int, c clock) *userLimiters {
 }
 
 func (u *userLimiters) allow(key string) bool {
+	assert.That(u.clock != nil && u.entries != nil, "userLimiters.allow: not built by newUserLimiters")
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	now := u.clock.Now()

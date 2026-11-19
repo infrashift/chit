@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/chcreator"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/dmpicker"
@@ -25,6 +26,11 @@ func errGroupTooSmall() error {
 // selectChannel makes ch the active channel: marks the previous channel as
 // viewed, loads posts, resets thread state, and derives the active team.
 func (m *Model) selectChannel(ch *model.Channel) tea.Cmd {
+	assert.That(m.appState == AppStateRunning, "selectChannel: not signed in")
+	assert.That(ch != nil, "selectChannel: nil channel")
+	assert.That(m.client != nil, "selectChannel: nil client")
+	assert.That(m.scope != nil, "selectChannel: nil request scope")
+	assert.That(m.channelMembers != nil, "selectChannel: nil members cache")
 	var cmds []tea.Cmd
 	if m.activeChan != nil && m.activeChan.ID != ch.ID {
 		cmds = append(cmds, ViewChannel(m.reqCtx(), m.client, m.activeChan.ID))
@@ -59,12 +65,21 @@ func (m *Model) selectChannel(ch *model.Channel) tea.Cmd {
 	m.threadCounts = make(map[string]int)
 	m.viewport.SetThreadCounts(m.threadCounts)
 	m.resizeComponents()
+	assert.That(m.activeChan == ch, "selectChannel: channel not made active")
+	assert.That(m.mainPane == paneChannel, "selectChannel: thread still shown")
+	assert.That(m.historyPage == 0, "selectChannel: paging state kept")
+	assert.That(m.editingPostID == "", "selectChannel: edit kept across channels")
+	assert.That(m.searchTerm == "", "selectChannel: search highlight kept")
+	assert.That(len(cmds) >= 2, "selectChannel: posts or view request missing")
 	return tea.Batch(cmds...)
 }
 
 // addDMChannel prepends a DM/group channel to the list if it is not already
 // present and refreshes derived display names.
 func (m *Model) addDMChannel(ch *model.Channel) {
+	assert.That(m.appState == AppStateRunning, "addDMChannel: not signed in")
+	assert.That(ch != nil, "addDMChannel: nil channel")
+	assert.That(m.dmDisplayNames != nil, "addDMChannel: nil DM names")
 	for _, existing := range m.dmChannels {
 		if existing.ID == ch.ID {
 			m.resolveDMDisplayNames()
@@ -72,6 +87,7 @@ func (m *Model) addDMChannel(ch *model.Channel) {
 		}
 	}
 	m.dmChannels = append([]*model.Channel{ch}, m.dmChannels...)
+	assert.That(m.dmChannels[0] == ch, "addDMChannel: channel not first")
 	m.palette.SetDMChannels(m.dmChannels)
 	m.resolveDMDisplayNames()
 }
@@ -79,6 +95,7 @@ func (m *Model) addDMChannel(ch *model.Channel) {
 // flattenChannels merges the per-team channel lists into one slice, in team
 // order. Buckets are only ever keyed by known team IDs.
 func (m Model) flattenChannels() []*model.Channel {
+	assert.That(m.channelsByTeam != nil, "flattenChannels: nil team buckets")
 	var flat []*model.Channel
 	for _, t := range m.teams {
 		flat = append(flat, m.channelsByTeam[t.ID]...)
@@ -100,6 +117,8 @@ func (m *Model) resolveDMDisplayNames() {
 	if m.me == nil {
 		return
 	}
+	assert.That(m.dmDisplayNames != nil, "resolveDMDisplayNames: nil DM names")
+	assert.That(m.users != nil, "resolveDMDisplayNames: nil users cache")
 	for _, ch := range m.dmChannels {
 		if name := m.peopleName(ch); name != "" {
 			m.dmDisplayNames[ch.ID] = name
@@ -116,6 +135,7 @@ func (m *Model) resolveDMDisplayNames() {
 // peerIDs returns the other members of a DM or group, read from its name,
 // which joins the member IDs with "__".
 func (m Model) peerIDs(ch *model.Channel) []string {
+	assert.That(ch != nil, "peerIDs: nil channel")
 	if m.me == nil || (ch.Type != model.ChannelDirect && ch.Type != model.ChannelGroup) {
 		return nil
 	}
@@ -129,6 +149,7 @@ func (m Model) peerIDs(ch *model.Channel) []string {
 			peers = append(peers, id)
 		}
 	}
+	assert.That(len(peers) <= len(parts), "peerIDs: more peers than members")
 	return peers
 }
 
@@ -136,6 +157,8 @@ func (m Model) peerIDs(ch *model.Channel) []string {
 // and a group for its other members' usernames. It is "" until at least one
 // of them has loaded.
 func (m Model) peopleName(ch *model.Channel) string {
+	assert.That(ch != nil, "peopleName: nil channel")
+	assert.That(m.users != nil, "peopleName: nil users cache")
 	var names []string
 	for _, id := range m.peerIDs(ch) {
 		u := m.users[id]
@@ -169,6 +192,9 @@ func (m Model) activeChannelDisplayName() string {
 // replaceChannel swaps an updated channel into every list holding it, so a
 // rename shows up without a reload.
 func (m *Model) replaceChannel(ch *model.Channel) {
+	assert.That(m.appState == AppStateRunning, "replaceChannel: not signed in")
+	assert.That(ch != nil, "replaceChannel: nil channel")
+	assert.That(ch.ID != "", "replaceChannel: channel without ID")
 	replace := func(list []*model.Channel) {
 		for i, existing := range list {
 			if existing.ID == ch.ID {
@@ -194,6 +220,9 @@ func (m *Model) removeChannel(channelID string) []tea.Cmd {
 	if channelID == "" {
 		return nil
 	}
+	assert.That(m.appState == AppStateRunning, "removeChannel: not signed in")
+	assert.That(m.channelsByTeam != nil, "removeChannel: nil team buckets")
+	assert.That(m.unread != nil, "removeChannel: nil unread counts")
 
 	drop := func(list []*model.Channel) []*model.Channel {
 		out := list[:0]
@@ -225,6 +254,8 @@ func (m *Model) removeChannel(channelID string) []tea.Cmd {
 		}
 		cmds = append(cmds, m.setError(errChannelGone()))
 	}
+	assert.That(m.channelByID(channelID) == nil, "removeChannel: channel still listed")
+	assert.That(m.activeChan == nil || m.activeChan.ID != channelID, "removeChannel: removed channel still open")
 	return cmds
 }
 
@@ -257,6 +288,7 @@ func (m Model) channelByID(id string) *model.Channel {
 // channelDisplayNames maps channel IDs to the names shown in the UI, so the
 // thread inbox can say where each thread lives.
 func (m Model) channelDisplayNames() map[string]string {
+	assert.That(m.dmDisplayNames != nil, "channelDisplayNames: nil DM names")
 	names := make(map[string]string, len(m.channels)+len(m.dmChannels))
 	for _, ch := range m.channels {
 		names[ch.ID] = ch.DisplayName
@@ -268,12 +300,16 @@ func (m Model) channelDisplayNames() map[string]string {
 		}
 		names[ch.ID] = ch.DisplayName
 	}
+	assert.That(len(names) <= len(m.channels)+len(m.dmChannels), "channelDisplayNames: more names than channels")
 	return names
 }
 
 // handleMembersPicked creates the private channel or group the member
 // picker was choosing people for.
 func (m Model) handleMembersPicked(msg dmpicker.MembersPickedMsg) (tea.Model, tea.Cmd) {
+	assert.That(m.scope != nil, "handleMembersPicked: nil request scope")
+	assert.That(m.appState == AppStateRunning, "handleMembersPicked: not signed in")
+	assert.That(m.client != nil, "handleMembersPicked: nil client")
 	var cmds []tea.Cmd
 	m.dmPicker.Close()
 
@@ -292,6 +328,7 @@ func (m Model) handleMembersPicked(msg dmpicker.MembersPickedMsg) (tea.Model, te
 				ids = append(ids, u.ID)
 			}
 		}
+		assert.That(len(ids) <= len(msg.Users)+1, "handleMembersPicked: more members than picked")
 		if len(ids) < minGroupChannelMembers {
 			cmds = append(cmds, m.setError(errGroupTooSmall()))
 			return m, tea.Batch(cmds...)
@@ -307,12 +344,17 @@ func (m Model) handleMembersPicked(msg dmpicker.MembersPickedMsg) (tea.Model, te
 		cmds = append(cmds, CreateChannel(m.reqCtx(), m.client, m.pendingPrivateChannel))
 		m.pendingPrivateChannel = nil
 	}
+	assert.That(m.pendingPrivateChannel == nil, "handleMembersPicked: private channel still pending")
+	assert.That(!m.pendingGroupChannel, "handleMembersPicked: group still pending")
 	return m, tea.Batch(cmds...)
 }
 
 // handleMemberPickCancelled creates a pending private channel without extra
 // members, or drops a pending group.
 func (m Model) handleMemberPickCancelled(msg dmpicker.CancelledMsg) (tea.Model, tea.Cmd) {
+	assert.That(m.scope != nil, "handleMemberPickCancelled: nil request scope")
+	assert.That(m.appState == AppStateRunning, "handleMemberPickCancelled: not signed in")
+	assert.That(m.client != nil, "handleMemberPickCancelled: nil client")
 	var cmds []tea.Cmd
 	// A group channel is nothing but its members, so an abandoned pick
 	// leaves nothing to create — unlike a private channel, which was
@@ -326,12 +368,17 @@ func (m Model) handleMemberPickCancelled(msg dmpicker.CancelledMsg) (tea.Model, 
 		m.pendingMembers = nil
 		cmds = append(cmds, CreateChannel(m.reqCtx(), m.client, ch))
 	}
+	assert.That(m.pendingPrivateChannel == nil, "handleMemberPickCancelled: private channel still pending")
+	assert.That(!m.pendingGroupChannel, "handleMemberPickCancelled: group still pending")
 	return m, tea.Batch(cmds...)
 }
 
 // handleDMChannelsLoaded records the DM and group channels and fetches
 // member rows for ones not seen before.
 func (m Model) handleDMChannelsLoaded(msg DMChannelsLoadedMsg) (tea.Model, tea.Cmd) {
+	assert.That(m.appState == AppStateRunning, "handleDMChannelsLoaded: not signed in")
+	assert.That(m.client != nil, "handleDMChannelsLoaded: nil client")
+	assert.That(m.channelMembers != nil, "handleDMChannelsLoaded: nil members cache")
 	var cmds []tea.Cmd
 	if msg.Err != nil {
 		return m, m.setError(msg.Err)
@@ -357,6 +404,9 @@ func (m Model) handleDMChannelsLoaded(msg DMChannelsLoadedMsg) (tea.Model, tea.C
 
 // handleChannelCreated adds a channel the user just created and opens it.
 func (m Model) handleChannelCreated(msg ChannelCreatedMsg) (tea.Model, tea.Cmd) {
+	assert.That(m.appState == AppStateRunning, "handleChannelCreated: not signed in")
+	assert.That(m.client != nil, "handleChannelCreated: nil client")
+	assert.That(m.channelsByTeam != nil, "handleChannelCreated: nil team buckets")
 	var cmds []tea.Cmd
 	if msg.Err != nil {
 		cmd := m.setError(msg.Err)
@@ -375,6 +425,8 @@ func (m Model) handleChannelCreated(msg ChannelCreatedMsg) (tea.Model, tea.Cmd) 
 			m.pendingMembers = nil
 			cmds = append(cmds, AddChannelMembersCmd(m.reqCtx(), m.client, msg.Channel.ID, members))
 		}
+		assert.That(m.activeChan == msg.Channel, "handleChannelCreated: new channel not opened")
+		assert.That(len(m.pendingMembers) == 0, "handleChannelCreated: members still pending")
 	}
 	return m, tea.Batch(cmds...)
 }
@@ -382,6 +434,10 @@ func (m Model) handleChannelCreated(msg ChannelCreatedMsg) (tea.Model, tea.Cmd) 
 // handleChannelsLoaded records a team's channels, loads their badges, and
 // opens the first one on the first load.
 func (m Model) handleChannelsLoaded(msg ChannelsLoadedMsg) (tea.Model, tea.Cmd) {
+	assert.That(m.scope != nil, "handleChannelsLoaded: nil request scope")
+	assert.That(m.appState == AppStateRunning, "handleChannelsLoaded: not signed in")
+	assert.That(m.client != nil, "handleChannelsLoaded: nil client")
+	assert.That(m.channelsByTeam != nil, "handleChannelsLoaded: nil team buckets")
 	var cmds []tea.Cmd
 	if msg.Err != nil {
 		return m, m.setError(msg.Err)
@@ -402,6 +458,9 @@ func (m Model) handleChannelsLoaded(msg ChannelsLoadedMsg) (tea.Model, tea.Cmd) 
 }
 
 func (m Model) handleTeamsLoaded(msg TeamsLoadedMsg) (tea.Model, tea.Cmd) {
+	assert.That(m.scope != nil, "handleTeamsLoaded: nil request scope")
+	assert.That(m.appState == AppStateRunning, "handleTeamsLoaded: not signed in")
+	assert.That(m.client != nil, "handleTeamsLoaded: nil client")
 	if msg.Err != nil {
 		return m, m.setError(msg.Err)
 	}
@@ -414,18 +473,27 @@ func (m Model) handleTeamsLoaded(msg TeamsLoadedMsg) (tea.Model, tea.Cmd) {
 	for _, t := range msg.Teams {
 		cmds = append(cmds, FetchChannels(m.reqCtx(), m.client, t.ID))
 	}
+	assert.That(len(cmds) == len(msg.Teams), "handleTeamsLoaded: a channel request for each team")
 	return m, tea.Batch(cmds...)
 }
 
 func (m Model) handleChannelChosen(msg palette.ChannelChosenMsg) (tea.Model, tea.Cmd) {
+	assert.That(msg.Channel != nil, "handleChannelChosen: nil channel")
+	assert.That(m.appState == AppStateRunning, "handleChannelChosen: not signed in")
 	var cmds []tea.Cmd
 	cmds = append(cmds, m.selectChannel(msg.Channel))
 	cmds = append(cmds, m.setFocus(FocusInput))
+	assert.That(m.focus == FocusInput, "handleChannelChosen: input not focused")
+	assert.That(m.activeChan == msg.Channel, "handleChannelChosen: channel not opened")
 	return m, tea.Batch(cmds...)
 }
 
 // handleUserChosen opens a DM with the person picked in the palette.
 func (m Model) handleUserChosen(msg palette.UserChosenMsg) (tea.Model, tea.Cmd) {
+	assert.That(m.scope != nil, "handleUserChosen: nil request scope")
+	assert.That(msg.User != nil, "handleUserChosen: nil user")
+	assert.That(m.appState == AppStateRunning, "handleUserChosen: not signed in")
+	assert.That(m.client != nil, "handleUserChosen: nil client")
 	var cmds []tea.Cmd
 	if m.me != nil {
 		cmds = append(cmds, CreateDMChannel(m.reqCtx(), m.client, m.me.ID, msg.User.ID))
@@ -434,6 +502,9 @@ func (m Model) handleUserChosen(msg palette.UserChosenMsg) (tea.Model, tea.Cmd) 
 }
 
 func (m Model) handleDMCreated(msg DMCreatedMsg) (tea.Model, tea.Cmd) {
+	assert.That(m.scope != nil, "handleDMCreated: nil request scope")
+	assert.That(m.appState == AppStateRunning, "handleDMCreated: not signed in")
+	assert.That(m.client != nil, "handleDMCreated: nil client")
 	if msg.Err != nil {
 		return m, m.setError(msg.Err)
 	}
@@ -441,6 +512,7 @@ func (m Model) handleDMCreated(msg DMCreatedMsg) (tea.Model, tea.Cmd) {
 	if msg.Channel != nil {
 		m.addDMChannel(msg.Channel)
 		cmds = append(cmds, m.selectChannel(msg.Channel))
+		assert.That(m.activeChan == msg.Channel, "handleDMCreated: conversation not opened")
 		cmds = append(cmds, FetchDMChannels(m.reqCtx(), m.client))
 	}
 	return m, tea.Batch(cmds...)
@@ -449,17 +521,25 @@ func (m Model) handleDMCreated(msg DMCreatedMsg) (tea.Model, tea.Cmd) {
 // handleChannelSubmitted creates the channel the creator dialog describes. A
 // private channel first asks for its members.
 func (m Model) handleChannelSubmitted(msg chcreator.ChannelSubmittedMsg) (tea.Model, tea.Cmd) {
+	assert.That(m.client != nil, "handleChannelSubmitted: nil client")
+	assert.That(msg.Channel != nil, "handleChannelSubmitted: nil channel")
+	assert.That(m.appState == AppStateRunning, "handleChannelSubmitted: not signed in")
 	if msg.Channel.Type == model.ChannelPrivate {
 		m.pendingPrivateChannel = msg.Channel
 		m.pendingMembers = nil
 		cmd := m.setFocus(FocusDMPicker)
 		m.dmPicker.OpenForMembers()
+		assert.That(m.focus == FocusDMPicker, "handleChannelSubmitted: member picker not focused")
+		assert.That(m.dmPicker.Visible(), "handleChannelSubmitted: member picker not open")
 		return m, cmd
 	}
 	return m, tea.Batch(CreateChannel(m.reqCtx(), m.client, msg.Channel))
 }
 
 func (m Model) handleChannelLeft(msg ChannelLeftMsg) (tea.Model, tea.Cmd) {
+	assert.That(m.scope != nil, "handleChannelLeft: nil request scope")
+	assert.That(m.appState == AppStateRunning, "handleChannelLeft: not signed in")
+	assert.That(m.client != nil, "handleChannelLeft: nil client")
 	if msg.Err != nil {
 		return m, m.setError(msg.Err)
 	}

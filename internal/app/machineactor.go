@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 )
 
@@ -41,6 +42,7 @@ func (m *MachineActor) normalize() {
 	if m.Roles == "" {
 		m.Roles = "system_user"
 	}
+	assert.That(m.Roles != "", "MachineActor.normalize: roles still empty")
 }
 
 // ParseMachineActors reads the declared actors from their JSON encoding.
@@ -58,6 +60,7 @@ func ParseMachineActors(raw string) ([]MachineActor, error) {
 		if err := actors[i].validate(); err != nil {
 			return nil, fmt.Errorf("machine actor %d: %w", i, err)
 		}
+		assert.That(actors[i].ClientID != "", "ParseMachineActors: validated actor has no client id")
 	}
 	return actors, nil
 }
@@ -88,12 +91,15 @@ func (m *MachineActor) validate() error {
 // leaves the row, since deleting a user cascades into messages and membership
 // and is not a thing to do as a side effect of an edit to a config value.
 func (a *App) EnsureMachineActors(ctx context.Context, actors []MachineActor) error {
+	assert.That(a.Store != nil, "App.EnsureMachineActors: nil store")
+	assert.That(ctx != nil, "App.EnsureMachineActors: nil context")
 	for i := range actors {
 		actor := actors[i] // a copy: normalizing must not edit the caller's slice
 		if err := actor.validate(); err != nil {
 			return fmt.Errorf("machine actor: %w", err)
 		}
 		actor.normalize()
+		assert.That(actor.ClientID == actors[i].ClientID, "App.EnsureMachineActors: normalize changed the client id")
 		existing, err := a.Store.User().GetByOAuthClientID(ctx, actor.ClientID)
 		if err == nil {
 			if err := a.reconcileMachineActor(ctx, existing, &actor); err != nil {
@@ -111,6 +117,8 @@ func (a *App) EnsureMachineActors(ctx context.Context, actors []MachineActor) er
 // reconcileMachineActor brings the existing row in line with the declared
 // actor; it writes nothing when they already agree.
 func (a *App) reconcileMachineActor(ctx context.Context, existing *model.User, actor *MachineActor) error {
+	assert.That(existing != nil && actor != nil, "App.reconcileMachineActor: nil row or declaration")
+	assert.That(existing.OAuthClientID == actor.ClientID, "App.reconcileMachineActor: row is bound to another client")
 	if existing.Roles == actor.Roles && existing.DisplayName == actor.DisplayName &&
 		existing.Username == actor.Username && existing.ActorType == actor.ActorType {
 		return nil
@@ -120,6 +128,7 @@ func (a *App) reconcileMachineActor(ctx context.Context, existing *model.User, a
 	existing.Username = actor.Username
 	existing.ActorType = actor.ActorType
 	existing.PreUpdate()
+	assert.That(existing.Roles == actor.Roles, "App.reconcileMachineActor: roles not applied")
 	// Validated as creation is: a declared empty display_name was
 	// refused on create and silently written on update.
 	if verr := existing.IsValid(); verr != nil {
@@ -138,6 +147,8 @@ func (a *App) reconcileMachineActor(ctx context.Context, existing *model.User, a
 
 // createMachineActor inserts the declared actor as a new user row.
 func (a *App) createMachineActor(ctx context.Context, actor *MachineActor) error {
+	assert.That(actor != nil && actor.ClientID != "", "App.createMachineActor: declaration has no client id")
+	assert.That(a.Store != nil, "App.createMachineActor: nil store")
 	user := &model.User{
 		Username:      actor.Username,
 		DisplayName:   actor.DisplayName,
@@ -146,6 +157,7 @@ func (a *App) createMachineActor(ctx context.Context, actor *MachineActor) error
 		OAuthClientID: actor.ClientID,
 	}
 	user.PreSave()
+	assert.That(user.ID != "" && user.OAuthClientID == actor.ClientID, "App.createMachineActor: PreSave left the row unkeyed")
 	if verr := user.IsValid(); verr != nil {
 		return fmt.Errorf("machine actor %q is invalid: %w", actor.ClientID, verr)
 	}

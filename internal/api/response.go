@@ -6,11 +6,14 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 )
 
 // WriteJSON writes a JSON response with the given status code.
 func WriteJSON(w http.ResponseWriter, status int, data any) {
+	assert.That(w != nil, "WriteJSON: nil writer")
+	assert.That(status >= 100 && status <= 599, "WriteJSON: status is not an HTTP status")
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if data != nil {
@@ -30,6 +33,7 @@ func writeList[T any](w http.ResponseWriter, items []T) {
 	if items == nil {
 		items = []T{}
 	}
+	assert.That(w != nil, "writeList: nil writer")
 	WriteJSON(w, http.StatusOK, items)
 }
 
@@ -40,12 +44,16 @@ func writeList[T any](w http.ResponseWriter, items []T) {
 // tells a client nothing it can act on and an attacker something about the
 // schema.
 func WriteError(w http.ResponseWriter, appErr *model.AppError) {
+	assert.That(w != nil, "WriteError: nil writer")
+	assert.That(appErr != nil, "WriteError: nil error")
 	if appErr.StatusCode >= http.StatusInternalServerError && appErr.DetailedError != "" {
 		slog.Error("request failed", "where", appErr.Where, "error", appErr.DetailedError)
 		clean := *appErr
 		clean.DetailedError = ""
 		appErr = &clean
 	}
+	assert.That(appErr.StatusCode < http.StatusInternalServerError || appErr.DetailedError == "",
+		"WriteError: server error detail would reach the client")
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(appErr.StatusCode)
 	writeBody(w, appErr)
@@ -55,6 +63,7 @@ func WriteError(w http.ResponseWriter, appErr *model.AppError) {
 // change at that point, so a failure (almost always the client going away)
 // is logged rather than returned.
 func writeBody(w http.ResponseWriter, data any) {
+	assert.That(w != nil, "writeBody: nil writer")
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		slog.Debug("write response body", "error", err)
 	}
@@ -63,6 +72,8 @@ func writeBody(w http.ResponseWriter, data any) {
 // WriteAppError writes err preserving its AppError status code (403, 404, …)
 // and falls back to a 500 for unknown errors.
 func WriteAppError(w http.ResponseWriter, where string, err error) {
+	assert.That(err != nil, "WriteAppError: nil error")
+	assert.That(where != "", "WriteAppError: empty where")
 	var appErr *model.AppError
 	if errors.As(err, &appErr) {
 		WriteError(w, appErr)
@@ -78,6 +89,9 @@ const maxBodyBytes = 1 << 20
 // decodeBody reads r's JSON body into v. On failure it writes the error (413
 // for an oversized body, 400 otherwise) and returns false.
 func decodeBody(w http.ResponseWriter, r *http.Request, v any, where string) bool {
+	assert.That(r != nil && r.Body != nil, "decodeBody: nil request or body")
+	assert.That(v != nil, "decodeBody: nil target")
+	assert.That(where != "", "decodeBody: empty where")
 	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes)).Decode(v)
 	if err == nil {
 		return true

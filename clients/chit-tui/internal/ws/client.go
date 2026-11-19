@@ -10,6 +10,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/errlog"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 )
@@ -81,10 +82,13 @@ func NewWSClient(url, token string, bufSize int) WSClient {
 
 // NewWSClientWithHeader creates a WebSocket client that uses a custom auth header name.
 func NewWSClientWithHeader(url, token string, bufSize int, headerName string) WSClient {
+	assert.That(url != "", "NewWSClientWithHeader: empty URL")
+	assert.That(headerName != "", "NewWSClientWithHeader: empty header name")
 	if bufSize <= 0 {
 		bufSize = 256
 	}
-	return &wsClient{
+	assert.That(bufSize > 0, "NewWSClientWithHeader: event buffer must have room")
+	c := &wsClient{
 		url:        url,
 		token:      token,
 		headerName: headerName,
@@ -97,10 +101,14 @@ func NewWSClientWithHeader(url, token string, bufSize int, headerName string) WS
 		pongWait:    defaultPongWait,
 		pingPeriod:  defaultPingPeriod,
 	}
+	assert.That(c.pingPeriod < c.pongWait, "NewWSClientWithHeader: a ping must come before the link is declared dead")
+	return c
 }
 
 // newBackoff builds a fresh delay schedule for one session's redials.
 func (c *wsClient) newBackoff() *Backoff {
+	assert.That(c.backoffBase > 0, "newBackoff: backoff base must be positive")
+	assert.That(c.backoffMax >= c.backoffBase, "newBackoff: backoff max is below its base")
 	return &Backoff{Base: c.backoffBase, Max: c.backoffMax}
 }
 
@@ -109,17 +117,20 @@ func (c *wsClient) newBackoff() *Backoff {
 // redialing in the background, the same as after a drop. Calling Connect on
 // a running session does nothing.
 func (c *wsClient) Connect() error {
+	assert.That(c.events != nil && c.state != nil, "Connect: client not built by NewWSClient")
 	c.mu.Lock()
 	if c.stop != nil {
 		c.mu.Unlock()
 		return nil
 	}
+	assert.That(c.conn == nil, "Connect: a connection outlived its session")
 	stop := make(chan struct{})
 	c.stop = stop
 	c.mu.Unlock()
 
 	conn, err := c.dial()
 	if err != nil {
+		assert.That(conn == nil, "Connect: a failed dial returned a connection")
 		if errors.Is(err, ErrUnauthorized) {
 			c.mu.Lock()
 			if c.stop == stop {
@@ -131,6 +142,7 @@ func (c *wsClient) Connect() error {
 		go c.run(stop, nil)
 		return err
 	}
+	assert.That(conn != nil, "Connect: a successful dial returned no connection")
 	if !c.adopt(stop, conn) {
 		return nil
 	}
@@ -142,6 +154,8 @@ func (c *wsClient) Connect() error {
 // dial opens one connection. A handshake the server rejected for its
 // credentials wraps ErrUnauthorized: retrying cannot fix it.
 func (c *wsClient) dial() (*websocket.Conn, error) {
+	assert.That(c.url != "", "dial: empty URL")
+	assert.That(c.headerName != "", "dial: empty header name")
 	c.mu.Lock()
 	token := c.token
 	c.mu.Unlock()
@@ -151,6 +165,7 @@ func (c *wsClient) dial() (*websocket.Conn, error) {
 
 	conn, resp, err := websocket.DefaultDialer.Dial(c.url, header)
 	if err != nil {
+		assert.That(conn == nil, "dial: a failed dial returned a connection")
 		if resp != nil {
 			errlog.Close(resp.Body, "websocket handshake response body")
 			if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
@@ -160,6 +175,7 @@ func (c *wsClient) dial() (*websocket.Conn, error) {
 		}
 		return nil, err
 	}
+	assert.That(conn != nil, "dial: no connection without an error")
 	return conn, nil
 }
 
@@ -167,18 +183,22 @@ func (c *wsClient) dial() (*websocket.Conn, error) {
 // to. If that session was closed while the dial was in flight, the
 // connection is discarded and adopt reports false.
 func (c *wsClient) adopt(stop chan struct{}, conn *websocket.Conn) bool {
+	assert.That(stop != nil, "adopt: nil stop channel")
+	assert.That(conn != nil, "adopt: nil connection")
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.stop != stop {
 		errlog.Debug(conn.Close(), "close websocket dialed after the session closed")
 		return false
 	}
+	assert.That(c.conn == nil, "adopt: the session already has a live connection")
 	c.conn = conn
 	return true
 }
 
 // release forgets conn if it is still the live connection, and closes it.
 func (c *wsClient) release(conn *websocket.Conn) {
+	assert.That(conn != nil, "release: nil connection")
 	c.mu.Lock()
 	if c.conn == conn {
 		c.conn = nil
@@ -188,11 +208,17 @@ func (c *wsClient) release(conn *websocket.Conn) {
 }
 
 // State returns the connection-state channel.
-func (c *wsClient) State() <-chan ConnState { return c.state }
+func (c *wsClient) State() <-chan ConnState {
+	assert.That(c.state != nil, "State: nil state channel")
+	return c.state
+}
 
 // emitState publishes a transition without ever blocking: the reader may be
 // busy, and a stalled read loop would stop reconnecting altogether.
 func (c *wsClient) emitState(s ConnState) {
+	assert.That(c.state != nil, "emitState: nil state channel")
+	assert.That(!s.Desynced || s.Connected, "emitState: a desync is reported only while connected")
+	assert.That(!s.Unauthorized || !s.Connected, "emitState: an unauthorized state is a disconnect")
 	select {
 	case c.state <- s:
 	default:
@@ -201,6 +227,8 @@ func (c *wsClient) emitState(s ConnState) {
 
 // closed reports, without a wait, whether stop is closed.
 func closed(stop chan struct{}) bool {
+	// A nil channel never closes, so a loop waiting on it would never end.
+	assert.That(stop != nil, "closed: nil channel")
 	select {
 	case <-stop:
 		return true
@@ -214,6 +242,8 @@ func closed(stop chan struct{}) bool {
 // redialing. A conn given at the start is read even when stop is closed, so
 // it is released (Power of 10 rule 2: the loop ends when stop is closed).
 func (c *wsClient) run(stop chan struct{}, conn *websocket.Conn) {
+	defer errlog.Recover("websocket session")
+	assert.That(stop != nil, "run: nil stop channel")
 	backoff := c.newBackoff()
 	for conn != nil || !closed(stop) {
 		if conn == nil {
@@ -223,6 +253,7 @@ func (c *wsClient) run(stop chan struct{}, conn *websocket.Conn) {
 			}
 			c.emitState(ConnState{Connected: true})
 		}
+		assert.That(conn != nil, "run: no connection to read")
 
 		err := c.read(stop, conn)
 		c.release(conn)
@@ -239,6 +270,10 @@ func (c *wsClient) run(stop chan struct{}, conn *websocket.Conn) {
 // silent for longer than pongWait is treated as dead, since a half-open TCP
 // connection would otherwise block here forever.
 func (c *wsClient) read(stop chan struct{}, conn *websocket.Conn) error {
+	assert.That(stop != nil, "read: nil stop channel")
+	assert.That(conn != nil, "read: nil connection")
+	assert.That(c.pongWait > 0, "read: pongWait must be positive")
+	assert.That(c.events != nil, "read: nil events channel")
 	// A deadline that cannot be set means the connection is already closed,
 	// and the read below reports that.
 	alive := func() {
@@ -297,6 +332,10 @@ func (c *wsClient) read(stop chan struct{}, conn *websocket.Conn) error {
 // ping keeps a quiet link provably alive until done is closed. WriteControl
 // is safe alongside the reader and Send, so it needs no lock.
 func (c *wsClient) ping(conn *websocket.Conn, done chan struct{}) {
+	defer errlog.Recover("websocket ping")
+	assert.That(conn != nil, "ping: nil connection")
+	assert.That(done != nil, "ping: nil done channel")
+	assert.That(c.pingPeriod > 0 && c.pingPeriod < c.pongWait, "ping: the ping period must be positive and shorter than pongWait")
 	t := time.NewTicker(c.pingPeriod)
 	defer t.Stop()
 	for !closed(done) {
@@ -314,6 +353,8 @@ func (c *wsClient) ping(conn *websocket.Conn, done chan struct{}) {
 // redial dials until it connects, stop is closed, or the credentials are
 // rejected. It returns the adopted connection, or nil if the session ends.
 func (c *wsClient) redial(stop chan struct{}, backoff *Backoff) *websocket.Conn {
+	assert.That(stop != nil, "redial: nil stop channel")
+	assert.That(backoff != nil, "redial: nil backoff")
 	for !closed(stop) {
 		select {
 		case <-stop:
@@ -323,6 +364,7 @@ func (c *wsClient) redial(stop chan struct{}, backoff *Backoff) *websocket.Conn 
 
 		conn, err := c.dial()
 		if err != nil {
+			assert.That(conn == nil, "redial: a failed dial returned a connection")
 			// Retrying cannot fix rejected credentials. Report it and stop,
 			// so the UI can ask the user to sign in again instead of the
 			// loop dialing forever behind a dead session.
@@ -332,6 +374,7 @@ func (c *wsClient) redial(stop chan struct{}, backoff *Backoff) *websocket.Conn 
 			}
 			continue
 		}
+		assert.That(conn != nil, "redial: a successful dial returned no connection")
 		if !c.adopt(stop, conn) {
 			return nil
 		}
@@ -346,6 +389,8 @@ func (c *wsClient) redial(stop chan struct{}, backoff *Backoff) *websocket.Conn 
 func (c *wsClient) Close() error {
 	c.mu.Lock()
 	stop, conn := c.stop, c.conn
+	// A connection is adopted only by a running session.
+	assert.That(conn == nil || stop != nil, "Close: a connection without a session")
 	c.stop, c.conn = nil, nil
 	c.mu.Unlock()
 
@@ -361,11 +406,13 @@ func (c *wsClient) Close() error {
 
 // SetToken updates the token used for reconnections.
 func (c *wsClient) SetToken(token string) {
+	assert.That(c != nil, "SetToken: nil client")
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.token = token
 }
 
 func (c *wsClient) Events() <-chan model.WebSocketEvent {
+	assert.That(c.events != nil, "Events: nil events channel")
 	return c.events
 }

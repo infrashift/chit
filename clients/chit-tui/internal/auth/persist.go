@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/config"
 	"github.com/infrashift/chit/clients/chit-tui/internal/errlog"
 )
@@ -39,6 +40,7 @@ func NewSessionStore(overridePath string) *SessionStore {
 }
 
 func (ss *SessionStore) resolve() (string, error) {
+	assert.That(ss != nil, "SessionStore.resolve: nil store")
 	if ss.path != "" {
 		return ss.path, nil
 	}
@@ -48,6 +50,7 @@ func (ss *SessionStore) resolve() (string, error) {
 // legacyPath is where the default session file used to be, or "" when the
 // store has an explicit path and so never used it.
 func (ss *SessionStore) legacyPath() string {
+	assert.That(ss != nil, "SessionStore.legacyPath: nil store")
 	if ss.path != "" {
 		return ""
 	}
@@ -60,10 +63,12 @@ func (ss *SessionStore) legacyPath() string {
 
 // Save writes a session to disk.
 func (ss *SessionStore) Save(s StoredSession) error {
+	assert.That(ss != nil, "SessionStore.Save: nil store")
 	p, err := ss.resolve()
 	if err != nil {
 		return err
 	}
+	assert.That(p != "", "SessionStore.Save: empty session path")
 	if err := os.MkdirAll(filepath.Dir(p), dirPermissions); err != nil {
 		return err
 	}
@@ -71,6 +76,7 @@ func (ss *SessionStore) Save(s StoredSession) error {
 	if err != nil {
 		return err
 	}
+	assert.That(len(data) > 0, "SessionStore.Save: empty encoding")
 	return writeFileAtomic(p, data)
 }
 
@@ -79,11 +85,13 @@ func (ss *SessionStore) Save(s StoredSession) error {
 // session file kept whatever looser mode it had, token and all; and a write
 // interrupted halfway left a truncated file that no longer parsed.
 func writeFileAtomic(path string, data []byte) error {
+	assert.That(path != "", "writeFileAtomic: empty path")
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".session-*.json")
 	if err != nil {
 		return err
 	}
 	name := tmp.Name()
+	assert.That(filepath.Dir(name) == filepath.Dir(path), "writeFileAtomic: temp file must be beside the target for the rename to be atomic")
 	if err := tmp.Chmod(filePermissions); err != nil {
 		errlog.Debug(tmp.Close(), "close temp session file")
 		errlog.Debug(os.Remove(name), "remove temp session file")
@@ -107,10 +115,12 @@ func writeFileAtomic(path string, data []byte) error {
 
 // Load reads a stored session from disk.
 func (ss *SessionStore) Load() (*StoredSession, error) {
+	assert.That(ss != nil, "SessionStore.Load: nil store")
 	p, err := ss.resolve()
 	if err != nil {
 		return nil, err
 	}
+	assert.That(p != "", "SessionStore.Load: empty session path")
 	data, err := os.ReadFile(p)
 	if os.IsNotExist(err) {
 		data, err = ss.moveLegacy(p)
@@ -129,10 +139,14 @@ func (ss *SessionStore) Load() (*StoredSession, error) {
 // contents, so upgrading does not sign anyone out. With nothing to move it
 // reports p as not existing, as reading it did.
 func (ss *SessionStore) moveLegacy(p string) ([]byte, error) {
+	assert.That(p != "", "SessionStore.moveLegacy: empty session path")
 	legacy := ss.legacyPath()
 	if legacy == "" {
 		return nil, &os.PathError{Op: "open", Path: p, Err: os.ErrNotExist}
 	}
+	// Only the default location has a legacy predecessor.
+	assert.That(ss.path == "", "SessionStore.moveLegacy: a legacy path for an explicit store")
+	assert.That(legacy != p, "SessionStore.moveLegacy: legacy and current paths are the same")
 	data, err := os.ReadFile(legacy)
 	if err != nil {
 		return nil, err
@@ -155,11 +169,14 @@ func (ss *SessionStore) moveLegacy(p string) ([]byte, error) {
 // directory goes too: left there, the next start would move it over and
 // sign the user straight back in.
 func (ss *SessionStore) Clear() error {
+	assert.That(ss != nil, "SessionStore.Clear: nil store")
 	p, err := ss.resolve()
 	if err != nil {
 		return err
 	}
+	assert.That(p != "", "SessionStore.Clear: empty session path")
 	if legacy := ss.legacyPath(); legacy != "" {
+		assert.That(legacy != p, "SessionStore.Clear: legacy and current paths are the same")
 		if err := os.Remove(legacy); err != nil && !os.IsNotExist(err) {
 			return err
 		}

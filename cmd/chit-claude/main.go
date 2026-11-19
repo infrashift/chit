@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/bridge"
 )
 
@@ -29,12 +30,14 @@ func run() error {
 		return err
 	}
 
+	assert.That(cfg != nil, "chit-claude: nil config without an error")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
+		assert.That(cap(sigCh) >= 1, "chit-claude: signal channel must be buffered")
 		<-sigCh
 		slog.Info("bridge: shutdown signal received")
 		cancel()

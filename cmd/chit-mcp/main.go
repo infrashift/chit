@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/mcp"
 	"github.com/infrashift/chit/internal/model"
 )
@@ -33,7 +34,9 @@ func run() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	assert.That(cfg != nil, "chit-mcp: nil config without an error")
 	client := cfg.NewClient()
+	assert.That(client != nil, "chit-mcp: nil client")
 
 	// Resolve the agent's identity through chitd (provisioning it on first
 	// contact); warn when it is not marked as an agent actor so audit logs
@@ -49,6 +52,7 @@ func run() error {
 	}
 
 	server := mcp.New(client)
+	assert.That(server != nil, "chit-mcp: nil server")
 
 	// Feed real-time events from chitd's WebSocket into the agent's poll buffer.
 	server.StartEventFeed(ctx)
@@ -57,6 +61,7 @@ func run() error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
+		assert.That(cap(sigCh) >= 1, "chit-mcp: signal channel must be buffered")
 		<-sigCh
 		slog.Info("mcp: shutdown signal received")
 		cancel()

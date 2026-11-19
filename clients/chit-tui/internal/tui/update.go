@@ -3,6 +3,7 @@ package tui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/api"
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/chcreator"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/dmpicker"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/input"
@@ -17,6 +18,7 @@ import (
 
 // Update processes messages.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	assert.That(m.scope != nil, "Update: nil request scope")
 	// Always handle window size regardless of state.
 	if wsm, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width = wsm.Width
@@ -30,6 +32,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.appState == AppStateLogin || m.appState == AppStateReLogin {
 		return m.updateLogin(msg)
 	}
+	assert.That(m.appState == AppStateRunning, "Update: not signed in")
+	assert.That(m.client != nil, "Update: nil client")
 
 	// A rejected session is the same problem whichever request noticed it, so
 	// it is caught once here. Previously only five message types checked,
@@ -60,12 +64,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handled marks a message as consumed by one of the routers below, which
 // report whether the message was theirs so Update can try the next.
 func handled(next tea.Model, cmd tea.Cmd) (tea.Model, tea.Cmd, bool) {
+	assert.That(next != nil, "handled: nil model")
 	return next, cmd, true
 }
 
 // ackRequest handles a request whose success needs no further work: only a
 // failure is worth showing.
 func (m Model) ackRequest(err error) (tea.Model, tea.Cmd) {
+	assert.That(m.appState == AppStateRunning, "ackRequest: not signed in")
 	if err != nil {
 		return m, m.setError(err)
 	}
@@ -74,6 +80,8 @@ func (m Model) ackRequest(err error) (tea.Model, tea.Cmd) {
 
 // routeSessionMsg routes input, connection, account and status messages.
 func (m Model) routeSessionMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
+	assert.That(m.appState == AppStateRunning, "routeSessionMsg: not signed in")
+	assert.That(m.scope != nil, "routeSessionMsg: nil request scope")
 	switch msg := msg.(type) {
 	case login.LoginSuccessMsg:
 		return handled(m.handleLoginSuccess(msg))
@@ -100,6 +108,7 @@ func (m Model) routeSessionMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	case clipboardCopiedMsg:
 		return handled(m.handleClipboardCopied(msg))
 	case ClearErrMsg:
+		assert.That(msg.Seq <= m.errSeq, "routeSessionMsg: clear for an error not yet set")
 		if msg.Seq == m.errSeq {
 			m.err = nil
 		}
@@ -112,6 +121,9 @@ func (m Model) routeSessionMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 
 // routeChannelMsg routes messages about teams, channels and their members.
 func (m Model) routeChannelMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
+	assert.That(m.appState == AppStateRunning, "routeChannelMsg: not signed in")
+	assert.That(m.client != nil, "routeChannelMsg: nil client")
+	assert.That(m.scope != nil, "routeChannelMsg: nil request scope")
 	switch msg := msg.(type) {
 	case TeamsLoadedMsg:
 		return handled(m.handleTeamsLoaded(msg))
@@ -151,6 +163,9 @@ func (m Model) routeChannelMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 
 // routePostMsg routes messages about posts, threads and sending.
 func (m Model) routePostMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
+	assert.That(m.appState == AppStateRunning, "routePostMsg: not signed in")
+	assert.That(m.client != nil, "routePostMsg: nil client")
+	assert.That(m.scope != nil, "routePostMsg: nil request scope")
 	switch msg := msg.(type) {
 	case PostsLoadedMsg:
 		return handled(m.handlePostsLoaded(msg))
@@ -188,6 +203,9 @@ func (m Model) routePostMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 
 // routeTagMsg routes messages about tags and the tag picker.
 func (m Model) routeTagMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
+	assert.That(m.appState == AppStateRunning, "routeTagMsg: not signed in")
+	assert.That(m.client != nil, "routeTagMsg: nil client")
+	assert.That(m.scope != nil, "routeTagMsg: nil request scope")
 	switch msg := msg.(type) {
 	case AllTagsLoadedMsg:
 		return handled(m.handleAllTagsLoaded(msg))
@@ -212,6 +230,9 @@ func (m Model) routeTagMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 // routeLookupMsg routes the palette, search, mention and user-search
 // messages: everything that looks something up for the user.
 func (m Model) routeLookupMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
+	assert.That(m.appState == AppStateRunning, "routeLookupMsg: not signed in")
+	assert.That(m.client != nil, "routeLookupMsg: nil client")
+	assert.That(m.scope != nil, "routeLookupMsg: nil request scope")
 	switch msg := msg.(type) {
 	case CommandsLoadedMsg:
 		return handled(m.handleCommandsLoaded(msg))

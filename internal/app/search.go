@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 )
 
@@ -39,6 +40,9 @@ type SearchRequest struct {
 // short or empty while later pages still held hits, and a team search was
 // not scoped to the team at all.
 func (a *App) SearchPosts(ctx context.Context, req *SearchRequest) (*model.PostList, error) {
+	assert.That(req != nil && req.UserID != "", "App.SearchPosts: request has no user")
+	assert.That(req.Page >= 0 && req.PerPage >= 1, "App.SearchPosts: pagination not clamped")
+	assert.That(req.TeamID == "" || req.ChannelID == "", "App.SearchPosts: both team and channel scope")
 	empty := &model.PostList{Order: []*model.Post{}}
 
 	// Only Tags the searcher can see may filter: a private Tag of somebody
@@ -87,12 +91,15 @@ func (a *App) SearchPosts(ctx context.Context, req *SearchRequest) (*model.PostL
 	if posts == nil {
 		posts = []*model.Post{}
 	}
+	assert.That(len(posts) <= req.PerPage, "App.SearchPosts: more results than one page")
 	return &model.PostList{Order: posts}, nil
 }
 
 // searchAuthorID resolves a search's author filter, a username with an
 // optional leading @, to a user ID. found is false for an unknown username.
 func (a *App) searchAuthorID(ctx context.Context, from string) (id string, found bool, err error) {
+	assert.That(from != "", "App.searchAuthorID: empty author filter")
+	assert.That(a.Store != nil, "App.searchAuthorID: nil store")
 	author, err := a.Store.User().GetByUsername(ctx, strings.ToLower(strings.TrimPrefix(from, "@")))
 	if err != nil {
 		if isNotFound(err) {
@@ -100,12 +107,15 @@ func (a *App) searchAuthorID(ctx context.Context, from string) (id string, found
 		}
 		return "", false, err
 	}
+	assert.That(author != nil && author.ID != "", "App.searchAuthorID: store returned a user with no id")
 	return author.ID, true, nil
 }
 
 // runPostSearch runs q through ZincSearch when it has terms and Zinc is
 // configured, and through SQL otherwise.
 func (a *App) runPostSearch(ctx context.Context, q *model.PostSearch) ([]*model.Post, error) {
+	assert.That(q != nil && len(q.ChannelIDs) > 0, "App.runPostSearch: query has no channel scope")
+	assert.That(a.Config != nil && a.Store != nil, "App.runPostSearch: nil config or store")
 	if q.Terms == "" || a.Config.ZincSearchURL == "" {
 		return a.Store.Post().Search(ctx, q)
 	}
@@ -123,6 +133,8 @@ func (a *App) runPostSearch(ctx context.Context, q *model.PostSearch) ([]*model.
 // searchScope returns the channels req may search, after checking the caller
 // may search them.
 func (a *App) searchScope(ctx context.Context, req *SearchRequest) ([]string, error) {
+	assert.That(req != nil && req.UserID != "", "App.searchScope: request has no user")
+	assert.That(a.Store != nil, "App.searchScope: nil store")
 	switch {
 	case req.ChannelID != "":
 		if err := a.requireChannelMember(ctx, req.ChannelID, req.UserID); err != nil {
@@ -141,6 +153,7 @@ func (a *App) searchScope(ctx context.Context, req *SearchRequest) ([]string, er
 		for _, c := range channels {
 			ids = append(ids, c.ID)
 		}
+		assert.That(len(ids) == len(channels), "App.searchScope: lost a channel id")
 		return ids, nil
 	default:
 		return a.Store.Channel().GetChannelIDsForUser(ctx, req.UserID)
@@ -154,7 +167,10 @@ func (a *App) searchZinc(ctx context.Context, q *model.PostSearch) ([]*model.Pos
 	for _, id := range q.ChannelIDs {
 		inScope[id] = true
 	}
+	assert.That(q.PerPage >= 1 && q.Page >= 0, "App.searchZinc: pagination not clamped")
+	assert.That(q.Terms != "", "App.searchZinc: query has no terms")
 	skip := q.Page * q.PerPage
+	assert.That(skip >= 0, "App.searchZinc: negative skip")
 	out := make([]*model.Post, 0, q.PerPage)
 
 	for from := 0; from < zincScanLimit; from += zincScanBatch {
@@ -176,6 +192,7 @@ func (a *App) searchZinc(ctx context.Context, q *model.PostSearch) ([]*model.Pos
 				continue
 			}
 			out = append(out, p)
+			assert.That(len(out) <= q.PerPage, "App.searchZinc: page overfilled")
 			if len(out) == q.PerPage {
 				return out, nil
 			}
@@ -191,6 +208,8 @@ func (a *App) searchZinc(ctx context.Context, q *model.PostSearch) ([]*model.Pos
 // (Zinc's relevance order), the posts that fall in q's scope: an allowed
 // channel, q's author if set, and every one of q's tags if set.
 func (a *App) zincBatchMatches(ctx context.Context, q *model.PostSearch, ids []string, inScope map[string]bool) ([]*model.Post, error) {
+	assert.That(len(ids) > 0 && len(ids) <= zincScanBatch, "App.zincBatchMatches: batch size out of range")
+	assert.That(inScope != nil, "App.zincBatchMatches: nil scope")
 	posts, err := a.Store.Post().GetByIDs(ctx, ids)
 	if err != nil {
 		return nil, err
@@ -220,5 +239,6 @@ func (a *App) zincBatchMatches(ctx context.Context, q *model.PostSearch, ids []s
 		}
 		out = append(out, p)
 	}
+	assert.That(len(out) <= len(ids), "App.zincBatchMatches: more matches than hits")
 	return out, nil
 }

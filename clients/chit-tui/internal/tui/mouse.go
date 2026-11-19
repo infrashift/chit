@@ -3,6 +3,7 @@ package tui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/actionbar"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/viewport"
 )
@@ -14,6 +15,7 @@ const wheelScrollLines = 3
 // palette cursor), left-clicks select palette rows or trigger action-bar
 // buttons.
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	assert.That(m.appState == AppStateRunning, "handleMouse: not signed in")
 	switch msg.Button {
 	case tea.MouseButtonWheelUp:
 		if m.palette.Visible() {
@@ -83,6 +85,8 @@ func (m Model) historyContentRow(y int) (int, bool) {
 	if y < top || y >= bottom {
 		return 0, false
 	}
+	assert.That(y-top >= 0, "historyContentRow: row above the pane")
+	assert.That(m.height >= 0, "historyContentRow: negative height")
 	return y - top, true
 }
 
@@ -90,6 +94,10 @@ func (m Model) historyContentRow(y int) (int, bool) {
 // anchors it and also moves the post cursor, so a plain click behaves like
 // picking a post; motion extends it; release leaves it in place to be copied.
 func (m Model) handleHistoryDrag(msg tea.MouseMsg, contentRow int) (tea.Model, tea.Cmd) {
+	assert.That(!m.anyOverlayVisible(), "handleHistoryDrag: an overlay is open")
+	assert.That(contentRow >= 0, "handleHistoryDrag: negative content row")
+	assert.That(m.appState == AppStateRunning, "handleHistoryDrag: not signed in")
+	assert.That(m.mainPane == paneChannel, "handleHistoryDrag: history pane not shown")
 	line := m.viewport.LineAt(contentRow)
 
 	switch msg.Action {
@@ -110,6 +118,9 @@ func (m Model) handleHistoryDrag(msg tea.MouseMsg, contentRow int) (tea.Model, t
 // wheel always scrolled the main pane, so scrolling with the pointer over the
 // input box moved the history instead.
 func (m *Model) scrollUnderPointer(y, lines int) {
+	assert.That(m.mainPane == paneChannel || m.mainPane == paneThread, "scrollUnderPointer: unknown main pane")
+	assert.That(lines != 0, "scrollUnderPointer: zero scroll")
+	assert.That(m != nil, "scrollUnderPointer: nil model")
 	if _, overHistory := m.historyContentRow(y); overHistory {
 		m.scrollMain(lines)
 	}
@@ -118,6 +129,8 @@ func (m *Model) scrollUnderPointer(y, lines int) {
 // handlePaletteClick selects the clicked palette row, or closes the palette
 // when the click lands outside it.
 func (m Model) handlePaletteClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	assert.That(m.palette.Visible(), "handlePaletteClick: palette not open")
+	assert.That(m.appState == AppStateRunning, "handlePaletteClick: not signed in")
 	view := m.palette.View()
 	px, py := m.paletteOrigin(view)
 	w, h := lipgloss.Width(view), lipgloss.Height(view)
@@ -129,6 +142,7 @@ func (m Model) handlePaletteClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if idx, ok := m.palette.RowAt(msg.Y - py); ok {
+		assert.That(idx >= 0, "handlePaletteClick: negative row")
 		cmd := m.palette.ChooseRow(idx)
 		// Choosing closes the palette, which then has to hand focus back
 		// as the keyboard path does; left on it, keys went nowhere.
@@ -142,6 +156,8 @@ func (m Model) handlePaletteClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 // scrollMain scrolls whichever pane fills the top content area.
 func (m *Model) scrollMain(lines int) {
+	assert.That(lines != 0, "scrollMain: zero scroll")
+	assert.That(m.mainPane == paneChannel || m.mainPane == paneThread, "scrollMain: unknown main pane")
 	if m.mainPane == paneThread {
 		m.thread.ScrollBy(lines)
 		return
@@ -151,6 +167,9 @@ func (m *Model) scrollMain(lines int) {
 
 // dispatchAction triggers the same code path as the action's keybinding.
 func (m Model) dispatchAction(a actionbar.Action) (tea.Model, tea.Cmd) {
+	assert.That(!m.anyOverlayVisible(), "dispatchAction: an overlay is open")
+	assert.That(m.appState == AppStateRunning, "dispatchAction: not signed in")
+	assert.That(m.mainPane == paneChannel || m.mainPane == paneThread, "dispatchAction: unknown main pane")
 	switch a {
 	case actionbar.ActionPalette:
 		return m, m.openPalette("")
@@ -178,6 +197,7 @@ func (m Model) dispatchAction(a actionbar.Action) (tea.Model, tea.Cmd) {
 
 // anyOverlayVisible reports whether any floating overlay is currently open.
 func (m Model) anyOverlayVisible() bool {
+	assert.That(m.appState == AppStateRunning, "anyOverlayVisible: not signed in")
 	for _, o := range m.overlays() {
 		if o.visible() {
 			return true

@@ -14,4 +14,6 @@
 * [ISSUE-008: R4: functions of 60 lines or fewer](issue-008-r4-functions-of-60-lines-or-fewer--01a1f5379e65.md) - Split each function that has more than 60 lines.
 * [ISSUE-009: R5: assertion density](issue-009-r5-assertion-density--01a1f5379e6c.md) - Add internal/assert to each module and reach an average of two assertions for each function.
 * [ISSUE-010: ASD-STE100 documentation](issue-010-asd-ste100-documentation--01a1f5379e74.md) - The Markdown documentation and the wiki give zero lexis findings.
+* [ISSUE-011: The TUI acceptance tutorial and README describe the old repository layout](issue-011-the-tui-acceptance-tutorial-and-readme-describe-the-old-repository-layout--01a1f5750c6d.md) - The TUI acceptance tutorial describes a separate chit-tui repository, and the README file tree omits newer files.
+* [ISSUE-012: ValidateTagName cuts the reserved prefix at the wrong byte](issue-012-validatetagname-cuts-the-reserved-prefix-at-the-wrong-byte--01a1f5857d5f.md) - A profile/ tag name that spells the prefix with a character whose lowercase is shorter, for example İ, keeps the slash after the cut, and chitd refuses it.
 

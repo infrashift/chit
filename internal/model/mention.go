@@ -3,6 +3,8 @@ package model
 import (
 	"regexp"
 	"strings"
+
+	"github.com/infrashift/chit/internal/assert"
 )
 
 // mentionRe matches @username patterns at word boundaries. It uses the same
@@ -25,6 +27,7 @@ func ParseMentions(content string) []string {
 	seen := make(map[string]struct{}, len(matches))
 	var result []string
 	for _, m := range matches {
+		assert.That(len(m) == 2, "ParseMentions: match without its one group")
 		username := strings.ToLower(m[1])
 		if _, ok := seen[username]; ok {
 			continue
@@ -32,5 +35,7 @@ func ParseMentions(content string) []string {
 		seen[username] = struct{}{}
 		result = append(result, username)
 	}
+	assert.That(len(result) > 0 && len(result) <= len(matches), "ParseMentions: result size out of range")
+	assert.That(len(result) == len(seen), "ParseMentions: result has a duplicate")
 	return result
 }

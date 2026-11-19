@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/errlog"
 	"github.com/infrashift/chit/internal/model"
 )
@@ -79,6 +80,7 @@ func NewSearchIndexer(zincURL, zincUser, zincPass string) *SearchIndexer {
 // WithPostStore enables the background indexing loop by giving the worker a
 // source of posts to poll.
 func (si *SearchIndexer) WithPostStore(ps PostSource) *SearchIndexer {
+	assert.That(ps != nil, "SearchIndexer.WithPostStore: nil post source")
 	si.posts = ps
 	return si
 }
@@ -92,6 +94,7 @@ func (si *SearchIndexer) Start(ctx context.Context) error {
 		return nil
 	}
 	slog.Info("search indexer started")
+	assert.That(si.stop != nil, "SearchIndexer.Start: not built by NewSearchIndexer")
 
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -112,6 +115,8 @@ func (si *SearchIndexer) Start(ctx context.Context) error {
 // runOnce syncs every settled post after the cursor. A post that fails is
 // retried on the next tick; after indexMaxAttempts it is logged and skipped.
 func (si *SearchIndexer) runOnce(ctx context.Context) {
+	assert.That(si.posts != nil, "SearchIndexer.runOnce: no post source")
+	assert.That(si.clock != nil && si.failures != nil, "SearchIndexer.runOnce: not built by NewSearchIndexer")
 	until := si.clock.Now().Add(-indexSettleLag).UnixMilli()
 	for range indexMaxBatchesPerTick {
 		posts, err := si.posts.GetPostsSince(ctx, si.cursor, until, indexBatchSize)
@@ -143,6 +148,7 @@ func (si *SearchIndexer) runOnce(ctx context.Context) {
 
 // sync writes one post's current state to the index.
 func (si *SearchIndexer) sync(ctx context.Context, p *model.Post) error {
+	assert.That(p != nil, "SearchIndexer.sync: nil post")
 	if p.DeleteAt > 0 {
 		return si.DeletePost(ctx, p.ID)
 	}
@@ -156,12 +162,15 @@ func (si *SearchIndexer) sync(ctx context.Context, p *model.Post) error {
 
 // Stop signals the indexer to shut down.
 func (si *SearchIndexer) Stop() {
+	assert.That(si.stop != nil, "SearchIndexer.Stop: not built by NewSearchIndexer")
 	close(si.stop)
 }
 
 // IndexPost upserts a single post document in ZincSearch, keyed by post ID so
 // re-indexing is idempotent and search hits map straight back to posts.
 func (si *SearchIndexer) IndexPost(ctx context.Context, id string, doc map[string]any) error {
+	assert.That(si.client != nil, "SearchIndexer.IndexPost: nil HTTP client")
+	assert.That(doc != nil, "SearchIndexer.IndexPost: nil document")
 	body, err := json.Marshal(doc)
 	if err != nil {
 		return fmt.Errorf("marshal document: %w", err)
@@ -192,6 +201,7 @@ func (si *SearchIndexer) IndexPost(ctx context.Context, id string, doc map[strin
 // not an error — the post may never have been indexed. ZincSearch reports
 // that as 400 ("id not found") rather than 404, so both are tolerated.
 func (si *SearchIndexer) DeletePost(ctx context.Context, id string) error {
+	assert.That(si.client != nil, "SearchIndexer.DeletePost: nil HTTP client")
 	url := fmt.Sprintf("%s/api/%s/_doc/%s", si.zincURL, "chit-posts", id)
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, http.NoBody)
 	if err != nil {
@@ -214,6 +224,8 @@ func (si *SearchIndexer) DeletePost(ctx context.Context, id string) error {
 
 // Search queries ZincSearch and returns matching document IDs.
 func (si *SearchIndexer) Search(ctx context.Context, query string, from, size int) ([]string, error) {
+	assert.That(si.client != nil, "SearchIndexer.Search: nil HTTP client")
+	assert.That(from >= 0 && size > 0, "SearchIndexer.Search: bad window")
 	searchReq := map[string]any{
 		"search_type": "match",
 		"query": map[string]any{
@@ -264,5 +276,6 @@ func (si *SearchIndexer) Search(ctx context.Context, query string, from, size in
 	for _, hit := range result.Hits.Hits {
 		ids = append(ids, hit.ID)
 	}
+	assert.That(len(ids) == len(result.Hits.Hits), "SearchIndexer.Search: lost a hit")
 	return ids, nil
 }

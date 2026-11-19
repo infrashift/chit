@@ -57,10 +57,10 @@ Tracking: [ISSUE-008](.okfw/issues/issue-008-r4-functions-of-60-lines-or-fewer--
 ## Phase 9: R5, assertion density
 Tracking: [ISSUE-009](.okfw/issues/issue-009-r5-assertion-density--01a1f5379e6c.md)
 
-- [ ] Add `internal/assert` to each module.
-- [ ] Add assertions to an average of two for each function.
-- [ ] Add recover guards to the goroutines.
-- [ ] Remove the NASA-P10-05 omission. Turn on `forbidigo`.
+- [x] Add `internal/assert` to each module.
+- [x] Add assertions to an average of two for each function.
+- [x] Add recover guards to the goroutines.
+- [x] Remove the NASA-P10-05 omission. Turn on `forbidigo`.
 
 ## Phase 10: ASD-STE100 documentation
 Tracking: [ISSUE-010](.okfw/issues/issue-010-asd-ste100-documentation--01a1f5379e74.md)

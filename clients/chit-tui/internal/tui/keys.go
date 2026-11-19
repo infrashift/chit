@@ -5,12 +5,17 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 )
 
 // handleKey routes a key press: open overlays first, then global
 // bindings, then the focused component.
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	assert.That(m.focus >= FocusViewport, "handleKey: focus before the first area")
+	assert.That(m.appState == AppStateRunning, "handleKey: not signed in")
+	assert.That(m.scope != nil, "handleKey: nil request scope")
+	assert.That(m.focus <= FocusThreadInbox, "handleKey: focus past the last area")
 	// Global keybindings (Ctrl+C always quits)
 	if key.Matches(msg, m.keys.Quit) {
 		return m, tea.Quit
@@ -50,6 +55,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // Anything else cancels it and then does what it does, so only a
 // confirmation reports the key as handled.
 func (m *Model) confirmPendingDelete(msg tea.KeyMsg) (tea.Cmd, bool) {
+	assert.That(m.appState == AppStateRunning, "confirmPendingDelete: not signed in")
 	id := m.confirmDeleteID
 	if id == "" {
 		return nil, false
@@ -63,6 +69,8 @@ func (m *Model) confirmPendingDelete(msg tea.KeyMsg) (tea.Cmd, bool) {
 		return nil, false
 	}
 	if p := m.ownSelectedPost(); p != nil && p.ID == id {
+		assert.That(m.scope != nil, "confirmPendingDelete: nil request scope")
+		assert.That(m.client != nil, "confirmPendingDelete: nil client")
 		return DeletePost(m.reqCtx(), m.client, p.ID), true
 	}
 	return nil, false
@@ -70,6 +78,9 @@ func (m *Model) confirmPendingDelete(msg tea.KeyMsg) (tea.Cmd, bool) {
 
 // routeOverlayKey gives the key to a visible overlay or the mention popup.
 func (m *Model) routeOverlayKey(msg tea.KeyMsg) (tea.Cmd, bool) {
+	assert.That(m.focus >= FocusViewport, "routeOverlayKey: focus before the first area")
+	assert.That(m.focus <= FocusThreadInbox, "routeOverlayKey: focus past the last area")
+	assert.That(m.appState == AppStateRunning, "routeOverlayKey: not signed in")
 	// A visible overlay intercepts all keys. If it self-closes (Esc or a
 	// selection), restore focus to a live component and run any
 	// close-time behavior.
@@ -78,6 +89,8 @@ func (m *Model) routeOverlayKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 			continue
 		}
 		cmd := m.updateOverlay(o.id, msg)
+		assert.That(o.closeFocus >= focusKeep, "routeOverlayKey: unknown close focus")
+		assert.That(o.closeFocus <= FocusThread, "routeOverlayKey: an overlay hands focus to another overlay")
 		if !o.visible() && o.closeFocus != focusKeep {
 			return tea.Batch(cmd, m.setFocus(o.closeFocus)), true
 		}
@@ -99,6 +112,9 @@ func (m *Model) routeOverlayKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 // globalKey handles the bindings that open a dialog or leave the current
 // one, wherever focus is.
 func (m *Model) globalKey(msg tea.KeyMsg) (tea.Cmd, bool) {
+	assert.That(m.appState == AppStateRunning, "globalKey: not signed in")
+	assert.That(m.focus >= FocusViewport, "globalKey: focus before the first area")
+	assert.That(m.focus <= FocusThreadInbox, "globalKey: focus past the last area")
 	switch {
 	case key.Matches(msg, m.keys.NewDM):
 		return m.openPalette("@"), true
@@ -126,6 +142,9 @@ func (m *Model) viewportPostKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 	if m.focus != FocusViewport {
 		return nil, false
 	}
+	assert.That(m.appState == AppStateRunning, "viewportPostKey: not signed in")
+	assert.That(m.client != nil, "viewportPostKey: nil client")
+	assert.That(m.clipboardOut != nil, "viewportPostKey: nil clipboard output")
 	// Copy the mouse selection, or the post under the cursor when there
 	// is none — so the key is useful without a mouse.
 	if key.Matches(msg, m.keys.Copy) {
@@ -163,6 +182,8 @@ func (m *Model) viewportPostKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 // copyText is the mouse selection, or the content of the post under the
 // cursor when there is none.
 func (m Model) copyText() string {
+	assert.That(m.focus == FocusViewport, "copyText: history pane not focused")
+	assert.That(m.appState == AppStateRunning, "copyText: not signed in")
 	if text := m.viewport.SelectedText(); text != "" {
 		return text
 	}
@@ -174,6 +195,8 @@ func (m Model) copyText() string {
 
 // openTagPicker opens the tag picker on the post in focus, if there is one.
 func (m *Model) openTagPicker() (tea.Cmd, bool) {
+	assert.That(m.appState == AppStateRunning, "openTagPicker: not signed in")
+	assert.That(m.postTags != nil, "openTagPicker: nil post tags")
 	// In the history pane the subject is the post under the cursor;
 	// in a thread there is no cursor, so it is the root post.
 	var sel *model.Post
@@ -188,5 +211,7 @@ func (m *Model) openTagPicker() (tea.Cmd, bool) {
 	}
 	cmd := m.setFocus(FocusTagPicker)
 	m.tagPicker.Open(sel.ID, m.tagsUsableIn(sel.ChannelID), m.postTags[sel.ID])
+	assert.That(m.focus == FocusTagPicker, "openTagPicker: tag picker not focused")
+	assert.That(m.tagPicker.Visible(), "openTagPicker: tag picker not open")
 	return cmd, true
 }

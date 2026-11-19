@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/command"
 	"github.com/infrashift/chit/internal/model"
 )
@@ -16,6 +17,8 @@ type CommandResponse struct {
 
 // CheckCommandPermission verifies an actor can execute a command via Keto.
 func (a *App) CheckCommandPermission(ctx context.Context, actorID, commandID string) (bool, error) {
+	assert.That(a.keto != nil, "App.CheckCommandPermission: nil keto client")
+	assert.That(actorID != "" && commandID != "", "App.CheckCommandPermission: empty actor or command id")
 	return a.keto.Check(ctx, model.KetoNamespaceCommand,
 		"Command:"+commandID, model.KetoRelationExecute, "Actor:"+actorID)
 }
@@ -24,10 +27,13 @@ func (a *App) CheckCommandPermission(ctx context.Context, actorID, commandID str
 // and executes it if so. Returns (response, handled, error). If handled is
 // true the caller should NOT persist the post.
 func (a *App) InterceptSlashCommand(ctx context.Context, userID, channelID, content string) (*CommandResponse, bool, error) {
+	assert.That(a.CommandRegistry != nil, "App.InterceptSlashCommand: nil command registry")
+	assert.That(userID != "", "App.InterceptSlashCommand: empty user id")
 	parsed, ok := command.Parse(content)
 	if !ok {
 		return nil, false, nil
 	}
+	assert.That(parsed.Slug != "", "App.InterceptSlashCommand: parsed command has no slug")
 
 	cmd, ok := a.CommandRegistry.Lookup(parsed.Slug)
 	if !ok {
@@ -36,6 +42,7 @@ func (a *App) InterceptSlashCommand(ctx context.Context, userID, channelID, cont
 		}, true, nil
 	}
 
+	assert.That(cmd != nil, "App.InterceptSlashCommand: registry returned a nil command")
 	eventID := model.NewID()
 
 	if denied := a.authorizeCommand(ctx, eventID, userID, cmd); denied != nil {
@@ -55,6 +62,7 @@ func (a *App) InterceptSlashCommand(ctx context.Context, userID, channelID, cont
 		return &CommandResponse{Text: fmt.Sprintf("Error executing `/%s`: %s", cmd.Slug, err.Error())}, true, nil
 	}
 
+	assert.That(result != nil, "App.InterceptSlashCommand: handler returned no result and no error")
 	// Dispatch webhook if enabled and handler flagged it.
 	if a.WebhookCh != nil && result.Triggered {
 		a.dispatchCommandWebhook(&command.WebhookEvent{
@@ -76,6 +84,9 @@ func (a *App) InterceptSlashCommand(ctx context.Context, userID, channelID, cont
 // the attempt in the audit log. It returns nil when the command is allowed,
 // otherwise the response to show the user.
 func (a *App) authorizeCommand(ctx context.Context, eventID, userID string, cmd *command.Command) *CommandResponse {
+	assert.That(cmd != nil, "App.authorizeCommand: nil command")
+	assert.That(eventID != "", "App.authorizeCommand: empty event id")
+	assert.That(a.Store != nil, "App.authorizeCommand: nil store")
 	// Determine actor type for audit purposes: human, agent, and bot actors
 	// all execute commands the same way; only the audit record differs.
 	actorType := model.ActorTypeUser
@@ -111,6 +122,8 @@ func (a *App) authorizeCommand(ctx context.Context, eventID, userID string, cmd 
 // dispatchCommandWebhook queues evt for the webhook dispatcher without
 // blocking; the event is dropped when the queue is full.
 func (a *App) dispatchCommandWebhook(evt *command.WebhookEvent) {
+	assert.That(a.WebhookCh != nil, "App.dispatchCommandWebhook: nil webhook channel")
+	assert.That(evt != nil && evt.EventID != "", "App.dispatchCommandWebhook: event has no id")
 	select {
 	case a.WebhookCh <- evt:
 	default:
@@ -121,6 +134,8 @@ func (a *App) dispatchCommandWebhook(evt *command.WebhookEvent) {
 // broadcastCommandResponse sends the ephemeral command response to the
 // invoking user only.
 func (a *App) broadcastCommandResponse(userID, channelID, slug, text string) {
+	assert.That(a.Hub != nil, "App.broadcastCommandResponse: nil hub")
+	assert.That(userID != "" && slug != "", "App.broadcastCommandResponse: empty user id or slug")
 	a.Hub.Broadcast(&model.WebSocketEvent{
 		Event: model.WebSocketEventCommandResponse,
 		Data: map[string]any{

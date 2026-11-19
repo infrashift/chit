@@ -28,6 +28,7 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/errlog"
 	"github.com/infrashift/chit/internal/model"
 )
@@ -47,6 +48,10 @@ type OAuthConfig struct {
 	Audience string
 }
 
+// maxPerPage is the largest page a caller in this repository asks for; the
+// MCP tools clamp to it.
+const maxPerPage = 200
+
 // Client talks to chitd over its HTTP API and WebSocket.
 type Client struct {
 	baseURL     string
@@ -58,12 +63,14 @@ type Client struct {
 
 // New creates a client that authenticates with the trusted proxy header.
 func New(baseURL, kratosID, proxySecret string) *Client {
-	return &Client{
+	c := &Client{
 		baseURL:     strings.TrimRight(baseURL, "/"),
 		kratosID:    kratosID,
 		proxySecret: proxySecret,
 		http:        &http.Client{Timeout: 15 * time.Second},
 	}
+	assert.That(!strings.HasSuffix(c.baseURL, "/"), "New: base URL keeps a trailing slash")
+	return c
 }
 
 // NewOAuth creates a client that authenticates with Hydra-issued access
@@ -73,6 +80,9 @@ func New(baseURL, kratosID, proxySecret string) *Client {
 // The returned token source caches the token and fetches a new one when it
 // expires, so callers never deal with refresh.
 func NewOAuth(baseURL string, cfg *OAuthConfig) *Client {
+	assert.That(cfg != nil, "NewOAuth: nil OAuth config")
+	assert.That(cfg.ClientID != "", "NewOAuth: called without a client ID")
+	assert.That(cfg.TokenURL != "", "NewOAuth: called without a token URL")
 	ccfg := &clientcredentials.Config{
 		ClientID:     cfg.ClientID,
 		ClientSecret: cfg.ClientSecret,
@@ -87,11 +97,13 @@ func NewOAuth(baseURL string, cfg *OAuthConfig) *Client {
 	if cfg.Audience != "" {
 		ccfg.EndpointParams = url.Values{"audience": {cfg.Audience}}
 	}
-	return &Client{
+	c := &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		tokens:  ccfg.TokenSource(context.Background()),
 		http:    &http.Client{Timeout: 15 * time.Second},
 	}
+	assert.That(c.tokens != nil, "NewOAuth: nil token source")
+	return c
 }
 
 // authHeaders returns the credentials for one request. In OAuth2 mode this
@@ -104,7 +116,9 @@ func (c *Client) authHeaders() (http.Header, error) {
 		if err != nil {
 			return nil, fmt.Errorf("obtain access token: %w", err)
 		}
+		assert.That(token != nil, "Client.authHeaders: nil token without an error")
 		h.Set("Authorization", token.Type()+" "+token.AccessToken)
+		assert.That(c.kratosID == "", "Client.authHeaders: OAuth client carries a Kratos ID")
 		return h, nil
 	}
 	h.Set("X-User-Id", c.kratosID)
@@ -115,6 +129,10 @@ func (c *Client) authHeaders() (http.Header, error) {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
+	assert.That(ctx != nil, "Client.do: nil context")
+	assert.That(c.http != nil, "Client.do: client not built by New or NewOAuth")
+	assert.That(method != "", "Client.do: empty method")
+	assert.That(strings.HasPrefix(path, "/api/v1/"), "Client.do: path outside the API")
 	var reader io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
@@ -145,6 +163,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	if err != nil {
 		return fmt.Errorf("%s %s: %w", method, path, err)
 	}
+	assert.That(resp != nil && resp.Body != nil, "Client.do: nil response without an error")
 	defer func() { errlog.Debug(resp.Body.Close(), "close chit API response body") }()
 
 	if resp.StatusCode >= 300 {
@@ -171,12 +190,15 @@ type StatusError struct {
 }
 
 func (e *StatusError) Error() string {
+	assert.That(e.Status >= 300, "StatusError.Error: built for a success status")
 	return fmt.Sprintf("%s %s: status %d: %s", e.Method, e.Path, e.Status, e.Body)
 }
 
 // pageQuery renders page/per_page query params understood by chitd's list
 // endpoints.
 func pageQuery(page, perPage int) string {
+	assert.That(page >= 0, "pageQuery: negative page")
+	assert.That(perPage >= 1 && perPage <= maxPerPage, "pageQuery: per_page out of range")
 	q := url.Values{}
 	q.Set("page", strconv.Itoa(page))
 	q.Set("per_page", strconv.Itoa(perPage))
@@ -187,6 +209,8 @@ func pageQuery(page, perPage int) string {
 
 // Me returns the agent's own user record (provisioning it on first contact).
 func (c *Client) Me(ctx context.Context) (*model.User, error) {
+	assert.That(ctx != nil, "Client.Me: nil context")
+	assert.That(c.http != nil, "Client.Me: client not built by New or NewOAuth")
 	var user model.User
 	if err := c.do(ctx, http.MethodGet, "/api/v1/users/me", nil, &user); err != nil {
 		return nil, err
@@ -196,6 +220,8 @@ func (c *Client) Me(ctx context.Context) (*model.User, error) {
 
 // GetUser returns a user's (sanitized) profile by internal ID.
 func (c *Client) GetUser(ctx context.Context, id string) (*model.User, error) {
+	assert.That(ctx != nil, "Client.GetUser: nil context")
+	assert.That(c.http != nil, "Client.GetUser: client not built by New or NewOAuth")
 	var user model.User
 	if err := c.do(ctx, http.MethodGet, "/api/v1/users/"+id, nil, &user); err != nil {
 		return nil, err
@@ -205,6 +231,8 @@ func (c *Client) GetUser(ctx context.Context, id string) (*model.User, error) {
 
 // GetUserByUsername looks a user up by username.
 func (c *Client) GetUserByUsername(ctx context.Context, username string) (*model.User, error) {
+	assert.That(ctx != nil, "Client.GetUserByUsername: nil context")
+	assert.That(c.http != nil, "Client.GetUserByUsername: client not built by New or NewOAuth")
 	var user model.User
 	if err := c.do(ctx, http.MethodGet, "/api/v1/users/username/"+username, nil, &user); err != nil {
 		return nil, err
@@ -216,6 +244,9 @@ func (c *Client) GetUserByUsername(ctx context.Context, username string) (*model
 
 // GetAllTeams lists teams.
 func (c *Client) GetAllTeams(ctx context.Context, page, perPage int) ([]*model.Team, error) {
+	assert.That(ctx != nil, "Client.GetAllTeams: nil context")
+	assert.That(c.http != nil, "Client.GetAllTeams: client not built by New or NewOAuth")
+	assert.That(page >= 0 && perPage >= 1 && perPage <= maxPerPage, "Client.GetAllTeams: pagination not clamped")
 	var teams []*model.Team
 	if err := c.do(ctx, http.MethodGet, "/api/v1/teams"+pageQuery(page, perPage), nil, &teams); err != nil {
 		return nil, err
@@ -225,6 +256,8 @@ func (c *Client) GetAllTeams(ctx context.Context, page, perPage int) ([]*model.T
 
 // GetTeam returns one team by ID.
 func (c *Client) GetTeam(ctx context.Context, id string) (*model.Team, error) {
+	assert.That(ctx != nil, "Client.GetTeam: nil context")
+	assert.That(c.http != nil, "Client.GetTeam: client not built by New or NewOAuth")
 	var team model.Team
 	if err := c.do(ctx, http.MethodGet, "/api/v1/teams/"+id, nil, &team); err != nil {
 		return nil, err
@@ -236,6 +269,9 @@ func (c *Client) GetTeam(ctx context.Context, id string) (*model.Team, error) {
 
 // GetChannelsForTeam lists a team's channels visible to the agent.
 func (c *Client) GetChannelsForTeam(ctx context.Context, teamID string, page, perPage int) ([]*model.Channel, error) {
+	assert.That(ctx != nil, "Client.GetChannelsForTeam: nil context")
+	assert.That(c.http != nil, "Client.GetChannelsForTeam: client not built by New or NewOAuth")
+	assert.That(page >= 0 && perPage >= 1 && perPage <= maxPerPage, "Client.GetChannelsForTeam: pagination not clamped")
 	var channels []*model.Channel
 	if err := c.do(ctx, http.MethodGet, "/api/v1/teams/"+teamID+"/channels"+pageQuery(page, perPage), nil, &channels); err != nil {
 		return nil, err
@@ -245,6 +281,8 @@ func (c *Client) GetChannelsForTeam(ctx context.Context, teamID string, page, pe
 
 // GetChannel returns one channel by ID.
 func (c *Client) GetChannel(ctx context.Context, id string) (*model.Channel, error) {
+	assert.That(ctx != nil, "Client.GetChannel: nil context")
+	assert.That(c.http != nil, "Client.GetChannel: client not built by New or NewOAuth")
 	var channel model.Channel
 	if err := c.do(ctx, http.MethodGet, "/api/v1/channels/"+id, nil, &channel); err != nil {
 		return nil, err
@@ -254,6 +292,9 @@ func (c *Client) GetChannel(ctx context.Context, id string) (*model.Channel, err
 
 // GetChannelMembers lists a channel's members.
 func (c *Client) GetChannelMembers(ctx context.Context, channelID string, page, perPage int) ([]*model.ChannelMember, error) {
+	assert.That(ctx != nil, "Client.GetChannelMembers: nil context")
+	assert.That(c.http != nil, "Client.GetChannelMembers: client not built by New or NewOAuth")
+	assert.That(page >= 0 && perPage >= 1 && perPage <= maxPerPage, "Client.GetChannelMembers: pagination not clamped")
 	var members []*model.ChannelMember
 	if err := c.do(ctx, http.MethodGet, "/api/v1/channels/"+channelID+"/members"+pageQuery(page, perPage), nil, &members); err != nil {
 		return nil, err
@@ -264,6 +305,8 @@ func (c *Client) GetChannelMembers(ctx context.Context, channelID string, page, 
 // GetMyChannelMembers returns the agent's own membership in each channel of a
 // team it belongs to.
 func (c *Client) GetMyChannelMembers(ctx context.Context, teamID string) ([]*model.ChannelMember, error) {
+	assert.That(ctx != nil, "Client.GetMyChannelMembers: nil context")
+	assert.That(c.http != nil, "Client.GetMyChannelMembers: client not built by New or NewOAuth")
 	var members []*model.ChannelMember
 	if err := c.do(ctx, http.MethodGet, "/api/v1/users/me/teams/"+teamID+"/channels/members", nil, &members); err != nil {
 		return nil, err
@@ -273,6 +316,8 @@ func (c *Client) GetMyChannelMembers(ctx context.Context, teamID string) ([]*mod
 
 // ViewChannel marks a channel as viewed for the agent, clearing unreads.
 func (c *Client) ViewChannel(ctx context.Context, channelID string) error {
+	assert.That(ctx != nil, "Client.ViewChannel: nil context")
+	assert.That(c.http != nil, "Client.ViewChannel: client not built by New or NewOAuth")
 	return c.do(ctx, http.MethodPost, "/api/v1/channels/"+channelID+"/members/me/view", nil, nil)
 }
 
@@ -281,6 +326,9 @@ func (c *Client) ViewChannel(ctx context.Context, channelID string) error {
 // GetChannelPosts returns a channel's posts. since (unix ms) is optional; 0
 // means no lower bound.
 func (c *Client) GetChannelPosts(ctx context.Context, channelID string, page, perPage int, since int64) (*model.PostList, error) {
+	assert.That(ctx != nil, "Client.GetChannelPosts: nil context")
+	assert.That(c.http != nil, "Client.GetChannelPosts: client not built by New or NewOAuth")
+	assert.That(page >= 0 && perPage >= 1 && perPage <= maxPerPage, "Client.GetChannelPosts: pagination not clamped")
 	path := "/api/v1/channels/" + channelID + "/posts" + pageQuery(page, perPage)
 	if since > 0 {
 		path += "&since=" + strconv.FormatInt(since, 10)
@@ -294,6 +342,8 @@ func (c *Client) GetChannelPosts(ctx context.Context, channelID string, page, pe
 
 // GetPost returns one post by ID.
 func (c *Client) GetPost(ctx context.Context, id string) (*model.Post, error) {
+	assert.That(ctx != nil, "Client.GetPost: nil context")
+	assert.That(c.http != nil, "Client.GetPost: client not built by New or NewOAuth")
 	var post model.Post
 	if err := c.do(ctx, http.MethodGet, "/api/v1/posts/"+id, nil, &post); err != nil {
 		return nil, err
@@ -303,6 +353,8 @@ func (c *Client) GetPost(ctx context.Context, id string) (*model.Post, error) {
 
 // GetPinnedPosts returns a channel's pinned posts.
 func (c *Client) GetPinnedPosts(ctx context.Context, channelID string) (*model.PostList, error) {
+	assert.That(ctx != nil, "Client.GetPinnedPosts: nil context")
+	assert.That(c.http != nil, "Client.GetPinnedPosts: client not built by New or NewOAuth")
 	var list model.PostList
 	if err := c.do(ctx, http.MethodGet, "/api/v1/channels/"+channelID+"/pinned", nil, &list); err != nil {
 		return nil, err
@@ -312,6 +364,8 @@ func (c *Client) GetPinnedPosts(ctx context.Context, channelID string) (*model.P
 
 // CreatePost posts a message as the agent. rootID may be empty for a root post.
 func (c *Client) CreatePost(ctx context.Context, channelID, rootID, content string, props map[string]any) (*model.Post, error) {
+	assert.That(ctx != nil, "Client.CreatePost: nil context")
+	assert.That(c.http != nil, "Client.CreatePost: client not built by New or NewOAuth")
 	post := &model.Post{
 		ChannelID: channelID,
 		RootID:    rootID,
@@ -327,12 +381,17 @@ func (c *Client) CreatePost(ctx context.Context, channelID, rootID, content stri
 
 // DeletePost deletes one of the agent's own posts.
 func (c *Client) DeletePost(ctx context.Context, id string) error {
+	assert.That(ctx != nil, "Client.DeletePost: nil context")
+	assert.That(c.http != nil, "Client.DeletePost: client not built by New or NewOAuth")
 	return c.do(ctx, http.MethodDelete, "/api/v1/posts/"+id, nil, nil)
 }
 
 // SearchPosts searches posts across all channels the agent is a member of.
 // Provide terms, tagIDs, or both.
 func (c *Client) SearchPosts(ctx context.Context, terms string, tagIDs []string, page, perPage int) (*model.PostList, error) {
+	assert.That(ctx != nil, "Client.SearchPosts: nil context")
+	assert.That(c.http != nil, "Client.SearchPosts: client not built by New or NewOAuth")
+	assert.That(page >= 0 && perPage >= 1 && perPage <= maxPerPage, "Client.SearchPosts: pagination not clamped")
 	body := map[string]any{
 		"terms":    terms,
 		"tag_ids":  tagIDs,
@@ -350,6 +409,8 @@ func (c *Client) SearchPosts(ctx context.Context, terms string, tagIDs []string,
 
 // GetThread returns all posts in a thread (root + replies, oldest first).
 func (c *Client) GetThread(ctx context.Context, rootID string) ([]*model.Post, error) {
+	assert.That(ctx != nil, "Client.GetThread: nil context")
+	assert.That(c.http != nil, "Client.GetThread: client not built by New or NewOAuth")
 	var list model.PostList
 	if err := c.do(ctx, http.MethodGet, "/api/v1/posts/"+rootID+"/thread", nil, &list); err != nil {
 		return nil, err
@@ -359,6 +420,9 @@ func (c *Client) GetThread(ctx context.Context, rootID string) ([]*model.Post, e
 
 // GetMyThreads returns threads the agent follows in a team.
 func (c *Client) GetMyThreads(ctx context.Context, teamID string, page, perPage int) (*model.UserThreadList, error) {
+	assert.That(ctx != nil, "Client.GetMyThreads: nil context")
+	assert.That(c.http != nil, "Client.GetMyThreads: client not built by New or NewOAuth")
+	assert.That(page >= 0 && perPage >= 1 && perPage <= maxPerPage, "Client.GetMyThreads: pagination not clamped")
 	var threads model.UserThreadList
 	if err := c.do(ctx, http.MethodGet, "/api/v1/users/me/teams/"+teamID+"/threads"+pageQuery(page, perPage), nil, &threads); err != nil {
 		return nil, err
@@ -368,11 +432,15 @@ func (c *Client) GetMyThreads(ctx context.Context, teamID string, page, perPage 
 
 // MarkThreadAsRead marks a thread as read for the agent.
 func (c *Client) MarkThreadAsRead(ctx context.Context, teamID, postID string) error {
+	assert.That(ctx != nil, "Client.MarkThreadAsRead: nil context")
+	assert.That(c.http != nil, "Client.MarkThreadAsRead: client not built by New or NewOAuth")
 	return c.do(ctx, http.MethodPut, "/api/v1/users/me/teams/"+teamID+"/threads/"+postID+"/read", nil, nil)
 }
 
 // UpdateThreadFollowing follows or unfollows a thread for the agent.
 func (c *Client) UpdateThreadFollowing(ctx context.Context, teamID, postID string, following bool) error {
+	assert.That(ctx != nil, "Client.UpdateThreadFollowing: nil context")
+	assert.That(c.http != nil, "Client.UpdateThreadFollowing: client not built by New or NewOAuth")
 	body := map[string]bool{"following": following}
 	return c.do(ctx, http.MethodPut, "/api/v1/users/me/teams/"+teamID+"/threads/"+postID+"/following", body, nil)
 }
@@ -382,6 +450,8 @@ func (c *Client) UpdateThreadFollowing(ctx context.Context, teamID, postID strin
 // GetAllTags lists the tags the caller can see: their private tags and the
 // channel tags of their channels.
 func (c *Client) GetAllTags(ctx context.Context) ([]*model.Tag, error) {
+	assert.That(ctx != nil, "Client.GetAllTags: nil context")
+	assert.That(c.http != nil, "Client.GetAllTags: client not built by New or NewOAuth")
 	var tags []*model.Tag
 	if err := c.do(ctx, http.MethodGet, "/api/v1/tags", nil, &tags); err != nil {
 		return nil, err
@@ -391,12 +461,16 @@ func (c *Client) GetAllTags(ctx context.Context) ([]*model.Tag, error) {
 
 // AddTagToPost tags a post.
 func (c *Client) AddTagToPost(ctx context.Context, postID, tagID string) error {
+	assert.That(ctx != nil, "Client.AddTagToPost: nil context")
+	assert.That(c.http != nil, "Client.AddTagToPost: client not built by New or NewOAuth")
 	body := map[string]string{"tag_id": tagID}
 	return c.do(ctx, http.MethodPost, "/api/v1/posts/"+postID+"/tags", body, nil)
 }
 
 // GetTagsForPost returns a post's tags.
 func (c *Client) GetTagsForPost(ctx context.Context, postID string) ([]*model.Tag, error) {
+	assert.That(ctx != nil, "Client.GetTagsForPost: nil context")
+	assert.That(c.http != nil, "Client.GetTagsForPost: client not built by New or NewOAuth")
 	var tags []*model.Tag
 	if err := c.do(ctx, http.MethodGet, "/api/v1/posts/"+postID+"/tags", nil, &tags); err != nil {
 		return nil, err
@@ -414,10 +488,13 @@ type EventHandler interface {
 // Listen connects to chitd's WebSocket and passes every event to h until ctx
 // is cancelled, reconnecting with backoff on connection loss.
 func (c *Client) Listen(ctx context.Context, h EventHandler) {
+	assert.That(ctx != nil, "Client.Listen: nil context")
+	assert.That(h != nil, "Client.Listen: nil event handler")
 	wsURL := strings.Replace(c.baseURL, "http", "ws", 1) + "/api/v1/websocket"
 	backoff := time.Second
 
 	for ctx.Err() == nil {
+		assert.That(backoff >= time.Second && backoff < time.Minute, "Client.Listen: backoff out of bounds")
 		conn, err := c.dialWebsocket(ctx, wsURL, backoff)
 		if err != nil {
 			select {
@@ -439,6 +516,9 @@ func (c *Client) Listen(ctx context.Context, h EventHandler) {
 // dialWebsocket opens the WebSocket at wsURL, logging a failure along with
 // the backoff before the next attempt.
 func (c *Client) dialWebsocket(ctx context.Context, wsURL string, backoff time.Duration) (*websocket.Conn, error) {
+	assert.That(ctx != nil, "Client.dialWebsocket: nil context")
+	assert.That(backoff > 0, "Client.dialWebsocket: backoff not positive")
+	assert.That(strings.HasSuffix(wsURL, "/api/v1/websocket"), "Client.dialWebsocket: URL is not the WebSocket endpoint")
 	headers, err := c.authHeaders()
 	if err != nil {
 		// A token fetch failure is usually transient (Hydra restarting,
@@ -455,12 +535,16 @@ func (c *Client) dialWebsocket(ctx context.Context, wsURL string, backoff time.D
 		slog.Info("websocket connect failed, retrying", "error", err, "backoff", backoff)
 		return nil, err
 	}
+	assert.That(conn != nil, "Client.dialWebsocket: nil connection without an error")
 	return conn, nil
 }
 
 // readEvents passes each event read from conn to h until a read fails, then
 // closes conn.
 func readEvents(ctx context.Context, conn *websocket.Conn, h EventHandler) {
+	assert.That(ctx != nil, "readEvents: nil context")
+	assert.That(conn != nil, "readEvents: nil connection")
+	assert.That(h != nil, "readEvents: nil event handler")
 	// Close the connection when ctx is cancelled so ReadMessage unblocks.
 	done := make(chan struct{})
 	go func() {

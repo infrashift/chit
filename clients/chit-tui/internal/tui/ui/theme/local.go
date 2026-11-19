@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/config"
 )
 
@@ -78,6 +79,7 @@ func parseThemeColor(value string) color.Color {
 		return hexColor(value)
 	}
 	if c, ok := namedTermColor(strings.ToLower(value)); ok {
+		assert.That(c != "", "parseThemeColor: known name mapped to an empty color")
 		return c
 	}
 	return nil
@@ -95,6 +97,7 @@ func normalizeLocalThemeName(name string) (string, error) {
 		trimmed == "." || filepath.IsAbs(trimmed) {
 		return "", fmt.Errorf("invalid theme name %q: names cannot contain path separators", name)
 	}
+	assert.That(filepath.Base(trimmed) == trimmed, "normalizeLocalThemeName: accepted name has a directory part")
 	return trimmed, nil
 }
 
@@ -106,6 +109,7 @@ func LoadLocal(name, themesDir string) (Theme, []string, error) {
 	}
 
 	path := filepath.Join(themesDir, normalized+".toml")
+	assert.That(filepath.Dir(path) == filepath.Clean(themesDir), "LoadLocal: theme path escapes the themes directory")
 	values, warnings, err := config.ValidateThemeTOML(path)
 	if err != nil {
 		if errors.Is(err, config.ErrThemeNotFound) {
@@ -150,6 +154,7 @@ func LoadLocal(name, themesDir string) (Theme, []string, error) {
 	if t.Author == "" {
 		t.Author = "local"
 	}
+	assert.That(t.Author != "", "LoadLocal: author left empty")
 	return t, warnings, nil
 }
 
@@ -159,6 +164,7 @@ func LoadLocal(name, themesDir string) (Theme, []string, error) {
 // ~/.config/chit/skins/<name>.json keeps working.
 func ResolveNamed(name, themesDir string) (Theme, []string, error) {
 	if t, ok := Lookup(name); ok {
+		assert.That(t.Name != "", "ResolveNamed: bundled theme without a name")
 		return t, nil, nil
 	}
 
@@ -169,6 +175,7 @@ func ResolveNamed(name, themesDir string) (Theme, []string, error) {
 
 	// Fall back to the pre-TOML skin format.
 	if legacy, ok := loadLegacySkin(name); ok {
+		assert.That(legacy.baseSet(), "ResolveNamed: legacy skin missing a defaulted slot")
 		return legacy, append(warnings, fmt.Sprintf(
 			"theme %q was loaded from the legacy skins directory; "+
 				"move it to %s as a .toml file", name, themesDir)), nil
@@ -184,9 +191,12 @@ func loadLegacySkin(name string) (Theme, bool) {
 	if err != nil {
 		return Theme{}, false
 	}
-	t, err := LoadFromFile(filepath.Join(skinsDir(), normalized+".json"))
+	path := filepath.Join(skinsDir(), normalized+".json")
+	assert.That(filepath.Dir(path) == skinsDir(), "loadLegacySkin: skin path escapes the skins directory")
+	t, err := LoadFromFile(path)
 	if err != nil {
 		return Theme{}, false
 	}
+	assert.That(t.baseSet(), "loadLegacySkin: JSON theme missing a defaulted slot")
 	return t, true
 }

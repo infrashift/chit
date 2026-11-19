@@ -1,6 +1,10 @@
 package model
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/infrashift/chit/internal/assert"
+)
 
 type Thread struct {
 	PostID       string   `json:"post_id"`
@@ -11,6 +15,7 @@ type Thread struct {
 }
 
 func (t *Thread) IsValid() *AppError {
+	assert.That(t != nil, "Thread.IsValid: nil thread")
 	if !IsValidID(t.PostID) {
 		return NewAppError("Thread.IsValid", "invalid post_id", "", http.StatusBadRequest)
 	}
@@ -29,6 +34,7 @@ type ThreadMembership struct {
 }
 
 func (tm *ThreadMembership) IsValid() *AppError {
+	assert.That(tm != nil, "ThreadMembership.IsValid: nil membership")
 	if !IsValidID(tm.PostID) {
 		return NewAppError("ThreadMembership.IsValid", "invalid post_id", "", http.StatusBadRequest)
 	}

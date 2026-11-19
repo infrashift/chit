@@ -8,6 +8,8 @@ import (
 
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/v2"
+
+	"github.com/infrashift/chit/internal/assert"
 )
 
 // Config holds all configuration for the chit server.
@@ -76,7 +78,7 @@ type Config struct {
 
 // Defaults returns a Config populated with default values.
 func Defaults() *Config {
-	return &Config{
+	cfg := &Config{
 		ListenAddress:       ":8065",
 		DBMaxOpenConn:       25,
 		DBMaxIdleConn:       10,
@@ -105,6 +107,9 @@ func Defaults() *Config {
 		WebhookQueueSize:        1024,
 		WebhookTimeoutSec:       10,
 	}
+	assert.That(cfg.validate() == nil, "Defaults: the defaults do not validate")
+	assert.That(cfg.DBMaxIdleConn <= cfg.DBMaxOpenConn, "Defaults: more idle than open connections")
+	return cfg
 }
 
 // Load reads configuration for a process that SERVES chit, and requires
@@ -126,21 +131,26 @@ func Load() (*Config, error) {
 		// function already returns an error for every other failure.
 		return nil, errors.New("CHIT_DATABASE_URL is required")
 	}
+	assert.That(cfg != nil && cfg.DatabaseURL != "", "Load: config without a database URL")
 	return cfg, nil
 }
 
 // LoadWithoutDatabase reads the same configuration for a tool that never opens
 // the database. Everything else is validated identically.
 func LoadWithoutDatabase() (*Config, error) {
-	return load()
+	cfg, err := load()
+	assert.That((cfg == nil) != (err == nil), "LoadWithoutDatabase: want exactly one of config and error")
+	return cfg, err
 }
 
 // load reads configuration from environment variables prefixed with CHIT_.
 func load() (*Config, error) {
 	k := koanf.New(".")
 	cfg := Defaults()
+	assert.That(k != nil && cfg != nil, "config.load: nil koanf or defaults")
 
 	err := k.Load(env.ProviderWithValue("CHIT_", ".", func(key, value string) (string, any) {
+		assert.That(strings.HasPrefix(key, "CHIT_"), "config.load: env provider passed a key without the prefix")
 		key = strings.ToLower(strings.TrimPrefix(key, "CHIT_"))
 		if key == "allowed_origins" || key == "on_behalf_of_clients" {
 			parts := strings.Split(value, ",")
@@ -150,6 +160,7 @@ func load() (*Config, error) {
 					origins = append(origins, p)
 				}
 			}
+			assert.That(len(origins) <= len(parts), "config.load: more list items than parts")
 			return key, origins
 		}
 		return key, value
@@ -164,6 +175,7 @@ func load() (*Config, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
+	assert.That(cfg.TrustedProxyHeader != "" && cfg.CacheSize > 0, "config.load: validated config breaks its rules")
 
 	return cfg, nil
 }
@@ -173,8 +185,10 @@ func load() (*Config, error) {
 // zero cache TTL expires every entry at once, and a misspelt pubsub backend
 // silently fell back to pgnotify.
 func (c *Config) validate() error {
+	assert.That(c != nil, "Config.validate: nil config")
 	var errs []error
 	positive := func(name string, v int64) {
+		assert.That(name != "", "Config.validate: unnamed setting")
 		if v <= 0 {
 			errs = append(errs, fmt.Errorf("%s must be positive, got %d", name, v))
 		}
@@ -222,5 +236,7 @@ func (c *Config) validate() error {
 		positive("CHIT_WEBHOOK_QUEUE_SIZE", int64(c.WebhookQueueSize))
 		positive("CHIT_WEBHOOK_TIMEOUT_SEC", int64(c.WebhookTimeoutSec))
 	}
-	return errors.Join(errs...)
+	err := errors.Join(errs...)
+	assert.That((err == nil) == (len(errs) == 0), "Config.validate: join lost the errors")
+	return err
 }

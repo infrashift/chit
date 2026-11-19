@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
 
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/config"
 	"github.com/infrashift/chit/clients/chit-tui/internal/errlog"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
@@ -26,6 +27,7 @@ type options struct {
 // parseFlags parses argv. It takes the output writer and arg slice so the
 // parsing is testable without touching the real command line.
 func parseFlags(out io.Writer, args []string) (options, error) {
+	assert.That(out != nil, "parseFlags: nil output")
 	var opts options
 
 	fs := flag.NewFlagSet("chit-tui", flag.ContinueOnError)
@@ -55,15 +57,18 @@ func parseFlags(out io.Writer, args []string) (options, error) {
 	if err := fs.Parse(args); err != nil {
 		return opts, err
 	}
+	assert.That(fs.Parsed(), "parseFlags: flags not parsed")
 	return opts, nil
 }
 
 // listThemes writes the available theme names, marking which are bundled.
 func listThemes(out io.Writer) {
+	assert.That(out != nil, "listThemes: nil output")
 	bundled := make(map[string]bool)
 	for _, n := range theme.BuiltinNames() {
 		bundled[n] = true
 	}
+	assert.That(len(bundled) > 0, "listThemes: no bundled themes")
 
 	var b strings.Builder
 	for _, name := range theme.ListAvailable(config.ThemesDir()) {
@@ -81,6 +86,8 @@ func listThemes(out io.Writer) {
 // system answers whether the terminal is dark when the appearance is
 // "system".
 func resolveTheme(opts options, cfg *config.Config, system theme.DarkDetector) (theme.Theme, []string, error) {
+	assert.That(cfg != nil, "resolveTheme: nil config")
+	assert.That(system != nil, "resolveTheme: nil dark detector")
 	req, err := themeRequest(opts, cfg, system)
 	if err != nil {
 		return theme.Theme{}, nil, err
@@ -91,14 +98,20 @@ func resolveTheme(opts options, cfg *config.Config, system theme.DarkDetector) (
 // themeSetting is the config key a theme picked in the client is saved under,
 // which depends on the appearance in effect.
 func themeSetting(opts options, cfg *config.Config, system theme.DarkDetector) string {
+	assert.That(cfg != nil, "themeSetting: nil config")
+	assert.That(system != nil, "themeSetting: nil dark detector")
 	req, err := themeRequest(opts, cfg, system)
 	if err != nil {
 		return "theme"
 	}
-	return cfg.ThemeSettingKey(req.Dark())
+	key := cfg.ThemeSettingKey(req.Dark())
+	assert.That(key == "theme" || strings.HasPrefix(key, "theme_"), "themeSetting: not a theme setting key")
+	return key
 }
 
 func themeRequest(opts options, cfg *config.Config, system theme.DarkDetector) (theme.Request, error) {
+	assert.That(cfg != nil, "themeRequest: nil config")
+	assert.That(system != nil, "themeRequest: nil dark detector")
 	flagAppearance, err := theme.ParseAppearance(opts.appearance)
 	if err != nil {
 		return theme.Request{}, err
@@ -135,6 +148,7 @@ type terminalBackground struct {
 // IsDark reports whether the terminal has a dark background. The first call
 // asks the terminal; later calls return the same answer.
 func (b *terminalBackground) IsDark() bool {
+	assert.That(b != nil, "terminalBackground.IsDark: nil detector")
 	b.once.Do(func() { b.dark = detectSystemDark() })
 	return b.dark
 }

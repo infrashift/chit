@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"time"
+
+	"github.com/infrashift/chit/internal/assert"
 )
 
 // progressDelay is how long a run may go before the thread is shown that the
@@ -31,6 +33,9 @@ type progressNote struct {
 // `posted` events, and an @mention that arrived by edit would hand work to
 // another agent that never hears of it.
 func (b *Bridge) showProgress(ctx context.Context, channelID, root string, hops int) *progressNote {
+	assert.That(root != "", "Bridge.showProgress: empty thread root")
+	assert.That(b.client != nil, "Bridge.showProgress: nil chitd client")
+	assert.That(b.progressDelay > 0, "Bridge.showProgress: progress delay not positive")
 	p := &progressNote{b: b, root: root, created: make(chan struct{})}
 	p.timer = time.AfterFunc(b.progressDelay, func() {
 		defer close(p.created)
@@ -41,14 +46,18 @@ func (b *Bridge) showProgress(ctx context.Context, channelID, root string, hops 
 			slog.Warn("failed to post progress note", "root_id", root, "error", err)
 			return
 		}
+		assert.That(note != nil, "Bridge.showProgress: nil note without an error")
 		p.noteID = note.ID
 	})
+	assert.That(p.timer != nil, "Bridge.showProgress: no timer")
 	return p
 }
 
 // Stop cancels the note if it has not been posted yet, or deletes it. ctx is
 // the run's context; the delete outlives its cancellation.
 func (p *progressNote) Stop(ctx context.Context) {
+	assert.That(p.timer != nil && p.created != nil, "progressNote.Stop: note not built by showProgress")
+	assert.That(p.b != nil && p.b.client != nil, "progressNote.Stop: nil bridge or client")
 	if p.timer.Stop() {
 		return
 	}

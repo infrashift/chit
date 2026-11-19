@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 )
 
@@ -14,6 +15,8 @@ import (
 
 // requireChannelMember returns a 403 error unless the user is a member of the channel.
 func (a *App) requireChannelMember(ctx context.Context, channelID, userID string) error {
+	assert.That(a.Store != nil, "App.requireChannelMember: nil store")
+	assert.That(userID != "", "App.requireChannelMember: empty user id")
 	_, err := a.Store.Channel().GetMember(ctx, channelID, userID)
 	if err == nil {
 		return nil
@@ -27,12 +30,16 @@ func (a *App) requireChannelMember(ctx context.Context, channelID, userID string
 
 // isChannelMember reports membership, treating lookup failures as non-membership.
 func (a *App) isChannelMember(ctx context.Context, channelID, userID string) bool {
+	assert.That(a.Store != nil, "App.isChannelMember: nil store")
+	assert.That(userID != "", "App.isChannelMember: empty user id")
 	_, err := a.Store.Channel().GetMember(ctx, channelID, userID)
 	return err == nil
 }
 
 // requireTeamMember returns a 403 error unless the user is a member of the team.
 func (a *App) requireTeamMember(ctx context.Context, teamID, userID string) error {
+	assert.That(a.Store != nil, "App.requireTeamMember: nil store")
+	assert.That(userID != "", "App.requireTeamMember: empty user id")
 	_, err := a.Store.Team().GetMember(ctx, teamID, userID)
 	if err == nil {
 		return nil
@@ -49,6 +56,9 @@ func (a *App) requireTeamMember(ctx context.Context, teamID, userID string) erro
 // creator; until this check existed nothing read it, and anyone could rename or
 // delete any team.
 func (a *App) requireTeamAdmin(ctx context.Context, teamID string, actor *model.User, op string) error {
+	assert.That(actor != nil, "App.requireTeamAdmin: nil actor")
+	assert.That(op != "", "App.requireTeamAdmin: empty op")
+	assert.That(a.Store != nil, "App.requireTeamAdmin: nil store")
 	if actor.IsSystemAdmin() {
 		return nil
 	}
@@ -56,6 +66,7 @@ func (a *App) requireTeamAdmin(ctx context.Context, teamID string, actor *model.
 	if err != nil && !isNotFound(err) {
 		return err
 	}
+	assert.That(err != nil || member != nil, "App.requireTeamAdmin: nil member without an error")
 	if err == nil && member.IsTeamAdmin() {
 		return nil
 	}
@@ -66,6 +77,8 @@ func (a *App) requireTeamAdmin(ctx context.Context, teamID string, actor *model.
 // teams are visible to everyone, invite-only teams to their members and to
 // system admins.
 func (a *App) requireTeamVisible(ctx context.Context, team *model.Team, actor *model.User) error {
+	assert.That(team != nil, "App.requireTeamVisible: nil team")
+	assert.That(actor != nil, "App.requireTeamVisible: nil actor")
 	if team.Type == model.TeamOpen || actor.IsSystemAdmin() {
 		return nil
 	}
@@ -85,6 +98,8 @@ func isNotFound(err error) bool {
 // a 500 would turn a permission decision into something an operator reads as an
 // outage.
 func (a *App) requireSystemAdmin(ctx context.Context, actorID, op string) error {
+	assert.That(op != "", "App.requireSystemAdmin: empty op")
+	assert.That(a.Store != nil, "App.requireSystemAdmin: nil store")
 	user, err := a.Store.User().Get(ctx, actorID)
 	if err != nil || !user.IsSystemAdmin() {
 		return model.NewForbiddenError(op, "requires system_admin")
@@ -95,6 +110,9 @@ func (a *App) requireSystemAdmin(ctx context.Context, actorID, op string) error 
 // requirePostOwner returns a 403 error unless userID authored the post or is a
 // system admin.
 func (a *App) requirePostOwner(ctx context.Context, post *model.Post, userID string) error {
+	assert.That(post != nil, "App.requirePostOwner: nil post")
+	assert.That(userID != "", "App.requirePostOwner: empty user id")
+	assert.That(a.Store != nil, "App.requirePostOwner: nil store")
 	if post.UserID == userID {
 		return nil
 	}

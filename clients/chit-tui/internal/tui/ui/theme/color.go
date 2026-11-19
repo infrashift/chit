@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 )
 
 // Colors are image/color.Color rather than lipgloss.Color so palettes can be
@@ -23,6 +24,8 @@ func rgbComponents(c color.Color) (r, g, b uint8, ok bool) {
 	if lc, isHex := c.(lipgloss.Color); isHex {
 		c = hexColor(string(lc))
 	}
+	_, stillHex := c.(lipgloss.Color)
+	assert.That(!stillHex, "rgbComponents: lipgloss.Color left unparsed")
 	if c == nil {
 		return 0, 0, 0, false
 	}
@@ -47,6 +50,7 @@ func rgbComponents(c color.Color) (r, g, b uint8, ok bool) {
 	if a16 == 0 {
 		return 0, 0, 0, false
 	}
+	assert.That(r16 <= a16 && g16 <= a16 && b16 <= a16, "rgbComponents: premultiplied component above alpha")
 	return uint8(r16 >> 8), uint8(g16 >> 8), uint8(b16 >> 8), true
 }
 
@@ -84,12 +88,17 @@ func Blend(base, accent color.Color, accentPercent int) color.Color {
 	if accentPercent > 100 {
 		accentPercent = 100
 	}
+	assert.That(accentPercent >= 0 && accentPercent <= 100, "Blend: percent outside 0-100 after clamping")
 
 	mix := func(b, a uint8) uint8 {
 		return clamp8((int(b)*(100-accentPercent) + int(a)*accentPercent) / 100)
 	}
 
-	return color.RGBA{R: mix(br, ar), G: mix(bg, ag), B: mix(bb, ab), A: 0xff}
+	out := color.RGBA{R: mix(br, ar), G: mix(bg, ag), B: mix(bb, ab), A: 0xff}
+	assert.That(out.R >= min(br, ar) && out.R <= max(br, ar), "Blend: red channel outside the two inputs")
+	assert.That(out.G >= min(bg, ag) && out.G <= max(bg, ag), "Blend: green channel outside the two inputs")
+	assert.That(out.B >= min(bb, ab) && out.B <= max(bb, ab), "Blend: blue channel outside the two inputs")
+	return out
 }
 
 // hexColor parses "#rgb" and "#rrggbb". Anything else yields nil, which callers
@@ -118,6 +127,8 @@ func hexColor(s string) color.Color {
 	if err != nil {
 		return nil
 	}
+	assert.That(len(digits) == 6, "hexColor: parsed digits not six long")
+	assert.That(v <= 0xffffff, "hexColor: value wider than 24 bits")
 
 	return color.RGBA{
 		R: uint8(v >> 16),
@@ -133,7 +144,21 @@ func colorToHex(c color.Color) string {
 	if !ok {
 		return ""
 	}
-	return fmt.Sprintf("#%02x%02x%02x", r, g, b)
+	hex := fmt.Sprintf("#%02x%02x%02x", r, g, b)
+	assert.That(len(hex) == 7, "colorToHex: hex not seven characters")
+	assert.That(hex[0] == '#', "colorToHex: hex lacks the # prefix")
+	return hex
+}
+
+// brighter reports whether a is brighter than b, comparing the sum of the
+// RGB channels. Either color lacking an RGB form compares as not brighter.
+func brighter(a, b color.Color) bool {
+	ar, ag, ab, aOK := rgbComponents(a)
+	br, bg, bb, bOK := rgbComponents(b)
+	if !aOK || !bOK {
+		return false
+	}
+	return int(ar)+int(ag)+int(ab) > int(br)+int(bg)+int(bb)
 }
 
 // Hex renders a color as "#rrggbb" for consumers that need a string, such as
@@ -154,5 +179,6 @@ func Lip(c color.Color) lipgloss.TerminalColor {
 	if hex == "" {
 		return lipgloss.NoColor{}
 	}
+	assert.That(len(hex) == 7 && hex[0] == '#', "Lip: hex not #rrggbb")
 	return lipgloss.Color(hex)
 }

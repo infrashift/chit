@@ -4,6 +4,7 @@ import (
 	"context"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/auth"
 )
 
@@ -20,7 +21,9 @@ type LoginErrorMsg struct {
 
 // InitLoginAndSubmit initiates a Kratos login flow and submits credentials.
 func InitLoginAndSubmit(kratosClient *auth.KratosClient, identifier, password string) tea.Cmd {
+	assert.That(identifier != "" && password != "", "login.InitLoginAndSubmit: empty credentials")
 	return func() tea.Msg {
+		assert.That(kratosClient != nil, "login.InitLoginAndSubmit: nil Kratos client")
 		ctx := context.Background()
 
 		flow, err := kratosClient.InitLoginFlow(ctx)
@@ -28,10 +31,12 @@ func InitLoginAndSubmit(kratosClient *auth.KratosClient, identifier, password st
 			return LoginErrorMsg{Err: err}
 		}
 
+		assert.That(flow != nil, "login.InitLoginAndSubmit: nil flow without an error")
 		sess, err := kratosClient.SubmitLogin(ctx, flow.ID, identifier, password)
 		if err != nil {
 			return LoginErrorMsg{Err: err}
 		}
+		assert.That(sess != nil, "login.InitLoginAndSubmit: nil session without an error")
 
 		return LoginSuccessMsg{
 			Token:     sess.Token,

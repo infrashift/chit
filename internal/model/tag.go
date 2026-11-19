@@ -7,6 +7,8 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/text/unicode/norm"
+
+	"github.com/infrashift/chit/internal/assert"
 )
 
 // Tag scopes. A private Tag is seen only by its owner, on any channel or post
@@ -62,15 +64,19 @@ type Tag struct {
 // of the item is a member of that channel. A private Tag is its owner's
 // alone.
 func (t *Tag) VisibleTo(userID string) bool {
+	assert.That(t != nil, "Tag.VisibleTo: nil tag")
+	assert.That(userID != "", "Tag.VisibleTo: empty user id")
 	return t.Scope == TagScopeChannel || t.OwnerID == userID
 }
 
 // IsReserved reports whether the Tag's name starts with ReservedTagPrefix.
 func (t *Tag) IsReserved() bool {
+	assert.That(t != nil, "Tag.IsReserved: nil tag")
 	return IsReservedTagName(t.Name)
 }
 
 func (t *Tag) IsValid() *AppError {
+	assert.That(t != nil, "Tag.IsValid: nil tag")
 	if !IsValidID(t.ID) {
 		return NewAppError("Tag.IsValid", "invalid tag id", "", http.StatusBadRequest)
 	}
@@ -110,12 +116,15 @@ func (t *Tag) PreSave() {
 		t.CreateAt = now
 	}
 	t.UpdateAt = now
+	assert.That(t.ID != "" && t.CreateAt != 0, "Tag.PreSave: tag left without id or create_at")
 }
 
 // NormalizeTagName returns the name as stored: NFKC-normalized, with spaces
 // trimmed from both ends. Case is kept for display.
 func NormalizeTagName(name string) string {
-	return strings.TrimSpace(norm.NFKC.String(name))
+	out := strings.TrimSpace(norm.NFKC.String(name))
+	assert.That(out == strings.TrimSpace(out), "NormalizeTagName: result not trimmed")
+	return out
 }
 
 // TagNameKey is the key a name is unique by: NFKC, then simple Unicode
@@ -149,6 +158,7 @@ func ValidateTagName(raw string) *AppError {
 	if IsReservedTagName(name) {
 		// The prefix is ASCII in the key; in the NFKC name it may differ in
 		// case only, so it has the same byte length.
+		assert.That(len(name) >= len(ReservedTagPrefix), "ValidateTagName: reserved name shorter than its prefix")
 		rest = name[len(ReservedTagPrefix):]
 		if rest == "" {
 			return NewBadRequestError("Tag.IsValid", "a profile/ tag needs a name after the prefix")

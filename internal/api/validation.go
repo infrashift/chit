@@ -10,6 +10,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi3filter"
 	nethttpmiddleware "github.com/oapi-codegen/nethttp-middleware"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 )
 
@@ -19,6 +20,7 @@ import (
 //
 // semscope: allow(NASA-P10-09) chi's Router.Use requires func(http.Handler) http.Handler.
 func NewValidationMiddleware(specBytes []byte) (func(http.Handler) http.Handler, error) {
+	assert.That(len(specBytes) > 0, "NewValidationMiddleware: empty spec")
 	loader := openapi3.NewLoader()
 	doc, err := loader.LoadFromData(specBytes)
 	if err != nil {
@@ -40,11 +42,13 @@ func NewValidationMiddleware(specBytes []byte) (func(http.Handler) http.Handler,
 		// host to validate; the warning about it was printed on every start.
 		SilenceServersWarning: true,
 	})
+	assert.That(mw != nil, "NewValidationMiddleware: nil middleware")
 
 	return mw, nil
 }
 
 func validationErrorHandler(w http.ResponseWriter, message string, statusCode int) {
+	assert.That(w != nil, "validationErrorHandler: nil writer")
 	WriteError(w, model.NewAppError(
 		"OpenAPIValidation",
 		message,

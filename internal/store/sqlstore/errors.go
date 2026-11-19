@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/errlog"
 	"github.com/infrashift/chit/internal/model"
 )
@@ -16,6 +17,7 @@ import (
 // transaction is closed and pgx.ErrTxClosed is expected, so only another
 // error is logged.
 func rollback(ctx context.Context, tx pgx.Tx) {
+	assert.That(tx != nil, "rollback: nil transaction")
 	if err := tx.Rollback(ctx); !errors.Is(err, pgx.ErrTxClosed) {
 		errlog.Warn(err, "rollback transaction")
 	}
@@ -24,6 +26,7 @@ func rollback(ctx context.Context, tx pgx.Tx) {
 // isUniqueViolation reports whether err is a Postgres unique_violation
 // (SQLSTATE 23505), which callers map to a 409 instead of a 500.
 func isUniqueViolation(err error) bool {
+	assert.That(err != nil, "isUniqueViolation: nil error")
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
@@ -33,6 +36,7 @@ func isUniqueViolation(err error) bool {
 // 22P02), which surfaced as a 500 rather than a 404 for a malformed id from
 // a path or a request body.
 func validIDs(ids ...string) bool {
+	assert.That(len(ids) > 0, "validIDs: no ids")
 	for _, id := range ids {
 		if !model.IsValidID(id) {
 			return false
@@ -46,5 +50,8 @@ func validIDs(ids ...string) bool {
 // wildcards. Use it with ESCAPE '\'.
 func likePattern(term string) string {
 	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-	return "%" + r.Replace(term) + "%"
+	pattern := "%" + r.Replace(term) + "%"
+	assert.That(len(pattern) >= len(term)+2, "likePattern: pattern lost characters of the term")
+	assert.That(strings.HasPrefix(pattern, "%") && strings.HasSuffix(pattern, "%"), "likePattern: pattern must match anywhere")
+	return pattern
 }

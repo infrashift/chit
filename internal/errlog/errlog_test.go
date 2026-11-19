@@ -48,3 +48,28 @@ func TestDebugAndWarnLogOnlyAnError(t *testing.T) {
 		t.Fatalf("log = %q, want one debug and one warn record", got)
 	}
 }
+
+func TestRecoverLogsAPanicAndEndsTheGoroutine(t *testing.T) {
+	buf := capture(t)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer Recover("unit of work")
+		panic("boom")
+	}()
+	<-done
+	got := buf.String()
+	if !strings.Contains(got, "unit of work") || !strings.Contains(got, "boom") || !strings.Contains(got, "stack=") {
+		t.Fatalf("log = %q, want the unit, the panic value and the stack", got)
+	}
+}
+
+func TestRecoverWithoutAPanicLogsNothing(t *testing.T) {
+	buf := capture(t)
+	func() {
+		defer Recover("quiet")
+	}()
+	if buf.Len() != 0 {
+		t.Fatalf("Recover without a panic logged %q", buf.String())
+	}
+}

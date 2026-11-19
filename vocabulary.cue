@@ -28,4 +28,23 @@ vocabulary: {
 	conversation: true // a HALO Conversation: a private channel for one person
 	integration:  true // the integration tests and the integration build tag
 	marketing:    true // the marketing words of the style rules
+
+	// Security and identity (the Ory stack, ADR-0006).
+	authentication: true // Kratos sessions and Hydra tokens
+	authorization:  true // permission checks in chitd and Keto
+	audience:       true // the OAuth2 audience of a Hydra token
+	subscription:   true // a Claude subscription, and a pub/sub subscription
+
+	// Server features and their names in the API and the docs.
+	migration:    true // a database schema migration in migrations/
+	pagination:   true // the page and per_page query parameters
+	notification: true // a PostgreSQL NOTIFY, and an @mention notification
+	validation:   true // request validation against the OpenAPI document
+	pinning:      true // the message pinning feature
+	rendering:    true // Markdown rendering in a client
+
+	// The TUI and the test process.
+	appearance: true // the appearance setting of chit-tui: dark or light
+	navigation: true // keyboard navigation in chit-tui
+	testing:    true // user acceptance testing and manual acceptance testing
 }

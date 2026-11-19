@@ -1,6 +1,10 @@
 package palette
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
+)
 
 // fuzzyScore reports whether query is a case-insensitive subsequence of
 // candidate and how good the match is. Higher scores are better matches:
@@ -30,11 +34,16 @@ func fuzzyScore(query, candidate string) (int, bool) {
 		if ci == qi {
 			score++ // prefix-alignment bonus
 		}
+		assert.That(ci > prevMatch, "fuzzyScore: matches out of order")
+		assert.That(qi <= ci, "fuzzyScore: more query runes matched than candidate runes read")
 		prevMatch = ci
 		qi++
 	}
 	if qi < len(q) {
 		return 0, false
 	}
+	// Each matched rune scores 1, plus at most 2 for a run and 1 for alignment.
+	assert.That(score >= len(q), "fuzzyScore: a match scored less than one per rune")
+	assert.That(score <= 4*len(q), "fuzzyScore: a match scored more than four per rune")
 	return score, true
 }

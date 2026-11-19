@@ -13,6 +13,7 @@ import (
 
 	"github.com/infrashift/chit/internal/api"
 	"github.com/infrashift/chit/internal/app"
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/command"
 	"github.com/infrashift/chit/internal/config"
 	"github.com/infrashift/chit/internal/errlog"
@@ -37,6 +38,7 @@ type Server struct {
 
 // New creates a Server from configuration.
 func New(cfg *config.Config) (*Server, error) {
+	assert.That(cfg != nil, "server.New: nil config")
 	s := &Server{config: cfg}
 
 	if err := s.initLogging(); err != nil {
@@ -66,11 +68,13 @@ func New(cfg *config.Config) (*Server, error) {
 	s.initCommands()
 	s.initJobs()
 	s.initHTTP()
+	assert.That(s.app != nil && s.scheduler != nil && s.httpSrv != nil, "server.New: a component was not built")
 
 	return s, nil
 }
 
 func (s *Server) initLogging() error {
+	assert.That(s.config != nil, "Server.initLogging: nil config")
 	var handler slog.Handler
 	level := slog.LevelInfo
 	switch s.config.LogLevel {
@@ -88,11 +92,14 @@ func (s *Server) initLogging() error {
 	} else {
 		handler = slog.NewTextHandler(os.Stdout, opts)
 	}
+	assert.That(handler != nil, "Server.initLogging: no handler chosen")
 	slog.SetDefault(slog.New(handler))
 	return nil
 }
 
 func (s *Server) initStore() error {
+	assert.That(s.config != nil, "Server.initStore: nil config")
+	assert.That(s.store == nil, "Server.initStore: store already open")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
@@ -100,12 +107,15 @@ func (s *Server) initStore() error {
 	if err != nil {
 		return err
 	}
+	assert.That(store != nil, "Server.initStore: nil store without an error")
 	s.store = store
 	return nil
 }
 
 func (s *Server) initHub() {
+	assert.That(s.store != nil, "Server.initHub: store not open")
 	s.hub = websocket.NewHub(hubMembershipAdapter{store: s.store})
+	assert.That(s.hub != nil, "Server.initHub: nil hub")
 }
 
 // hubMembershipAdapter exposes channel and team memberships to the websocket
@@ -120,12 +130,16 @@ type hubMembershipAdapter struct {
 const membershipLoadTimeout = 10 * time.Second
 
 func (a hubMembershipAdapter) GetChannelIDsForUser(userID string) ([]string, error) {
+	assert.That(a.store != nil, "hubMembershipAdapter.GetChannelIDsForUser: nil store")
+	assert.That(userID != "", "hubMembershipAdapter.GetChannelIDsForUser: empty user id")
 	ctx, cancel := context.WithTimeout(context.Background(), membershipLoadTimeout)
 	defer cancel()
 	return a.store.Channel().GetChannelIDsForUser(ctx, userID)
 }
 
 func (a hubMembershipAdapter) GetTeamIDsForUser(userID string) ([]string, error) {
+	assert.That(a.store != nil, "hubMembershipAdapter.GetTeamIDsForUser: nil store")
+	assert.That(userID != "", "hubMembershipAdapter.GetTeamIDsForUser: empty user id")
 	ctx, cancel := context.WithTimeout(context.Background(), membershipLoadTimeout)
 	defer cancel()
 	teams, err := a.store.Team().GetTeamsForUser(ctx, userID)
@@ -136,10 +150,12 @@ func (a hubMembershipAdapter) GetTeamIDsForUser(userID string) ([]string, error)
 	for i, t := range teams {
 		ids[i] = t.ID
 	}
+	assert.That(len(ids) == len(teams), "hubMembershipAdapter.GetTeamIDsForUser: lost a team id")
 	return ids, nil
 }
 
 func (s *Server) initPubSub() error {
+	assert.That(s.store != nil, "Server.initPubSub: store not open")
 	switch s.config.PubSubBackend {
 	case "nats":
 		ps, err := pubsub.NewNatsPubSub(s.config.NatsURL)
@@ -154,14 +170,18 @@ func (s *Server) initPubSub() error {
 		}
 		s.pubsub = ps
 	}
+	assert.That(s.pubsub != nil, "Server.initPubSub: nil pubsub without an error")
 	return nil
 }
 
 func (s *Server) initApp() {
+	assert.That(s.store != nil && s.hub != nil && s.pubsub != nil, "Server.initApp: a dependency is not ready")
 	s.app = app.New(s.store, s.hub, s.pubsub, s.config)
+	assert.That(s.app != nil, "Server.initApp: nil app")
 }
 
 func (s *Server) initCommands() {
+	assert.That(s.app != nil, "Server.initCommands: app not built")
 	cueCfg, err := command.LoadCUE(s.config.CommandsCUEDir)
 	if err != nil {
 		slog.Warn("slash commands disabled: failed to load CUE definitions",
@@ -169,6 +189,7 @@ func (s *Server) initCommands() {
 		return
 	}
 
+	assert.That(cueCfg != nil, "Server.initCommands: nil CUE config without an error")
 	reg := command.NewRegistry(cueCfg.Commands)
 	s.app.CommandRegistry = reg
 
@@ -179,6 +200,7 @@ func (s *Server) initCommands() {
 	handlers["kick"] = kickCommand{app: s.app}
 	handlers["topic"] = topicCommand{app: s.app}
 
+	assert.That(len(handlers) == 4, "Server.initCommands: a built-in handler is missing")
 	s.app.CommandHandlers = handlers
 
 	// Audit logger.
@@ -206,6 +228,8 @@ func (s *Server) initCommands() {
 }
 
 func (s *Server) initJobs() {
+	assert.That(s.store != nil, "Server.initJobs: store not open")
+	assert.That(s.scheduler == nil, "Server.initJobs: scheduler already built")
 	s.scheduler = jobs.NewScheduler()
 	// Without ZincSearch there is nothing to index into, and an indexer
 	// left running would fail and log every five seconds.
@@ -231,7 +255,9 @@ func (s *Server) initJobs() {
 }
 
 func (s *Server) initHTTP() {
+	assert.That(s.app != nil, "Server.initHTTP: app not built")
 	handler := api.New(s.app)
+	assert.That(handler != nil, "Server.initHTTP: nil handler")
 	s.httpSrv = &http.Server{
 		Addr:         s.config.ListenAddress,
 		Handler:      handler,
@@ -248,6 +274,8 @@ func (s *Server) initHTTP() {
 // without them looks entirely healthy while refusing every client_credentials
 // token — which is a much longer debugging session than a refusal to start.
 func (s *Server) ensureMachineActors() error {
+	assert.That(s.app != nil, "Server.ensureMachineActors: app not built")
+	assert.That(s.config != nil, "Server.ensureMachineActors: nil config")
 	actors, err := app.ParseMachineActors(s.config.MachineActors)
 	if err != nil {
 		return err
@@ -266,12 +294,15 @@ func (s *Server) ensureMachineActors() error {
 // Start begins serving and blocks until a shutdown signal is received or the
 // listener fails. Either way it shuts down every component before returning.
 func (s *Server) Start() error {
+	assert.That(s.scheduler != nil, "Server.Start: scheduler not built")
+	assert.That(s.httpSrv != nil, "Server.Start: http server not built")
 	s.scheduler.Start()
 
 	slog.Info("server starting", "address", s.config.ListenAddress)
 
 	errCh := make(chan error, 1)
 	go func() {
+		assert.That(cap(errCh) == 1, "Server.Start: the listener error must not block its send")
 		if err := s.httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}
@@ -295,6 +326,8 @@ func (s *Server) Start() error {
 // Shutdown gracefully shuts down all components.
 func (s *Server) Shutdown() error {
 	slog.Info("shutting down server")
+	assert.That(s.httpSrv != nil && s.hub != nil && s.scheduler != nil, "Server.Shutdown: server not fully built")
+	assert.That(s.app != nil && s.store != nil, "Server.Shutdown: app or store not built")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

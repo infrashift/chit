@@ -11,6 +11,8 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/adrg/xdg"
+
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 )
 
 // FileSettings holds the values a config file may supply. Every field is a
@@ -48,6 +50,7 @@ func isFileKey(key string) bool { return slices.Contains(fileKeys(), key) }
 // setFileKey stores v in the FileSettings field key names. It reports false
 // for a key that is not a recognized setting and leaves s unchanged.
 func setFileKey(s *FileSettings, key, v string) bool {
+	assert.That(s != nil, "setFileKey: nil settings")
 	switch key {
 	case "server_url":
 		s.ServerURL = v
@@ -80,7 +83,9 @@ func FilePath() string {
 	if p := os.Getenv("CHIT_CONFIG_FILE"); p != "" {
 		return p
 	}
-	return filepath.Join(Dir(), "config.toml")
+	p := filepath.Join(Dir(), "config.toml")
+	assert.That(filepath.Dir(p) == filepath.Clean(Dir()), "FilePath: default file must be in the config directory")
+	return p
 }
 
 // ThemesDir returns the directory holding user theme files.
@@ -91,6 +96,7 @@ func ThemesDir() string { return filepath.Join(Dir(), "themes") }
 // back to defaults with a warning rather than locking the user out of a chat
 // client over a typo. Callers surface the warnings; nothing is fatal.
 func LoadFile(path string) (FileSettings, []string) {
+	assert.That(path != "", "LoadFile: empty path")
 	var settings FileSettings
 
 	data, err := os.ReadFile(path)
@@ -108,6 +114,7 @@ func LoadFile(path string) (FileSettings, []string) {
 		}
 	}
 
+	assert.That(raw != nil, "LoadFile: a decoded document must be a table")
 	var warnings []string
 	stripUnknownKeys(raw, &warnings)
 	vetConfig(raw, &warnings)
@@ -120,6 +127,8 @@ func LoadFile(path string) (FileSettings, []string) {
 // here rather than in CUE so the message can name the key plainly; CUE reports
 // a closed-struct violation, which reads as noise.
 func stripUnknownKeys(raw map[string]any, warnings *[]string) {
+	assert.That(raw != nil, "stripUnknownKeys: nil document")
+	assert.That(warnings != nil, "stripUnknownKeys: nil warnings")
 	unknown := make([]string, 0)
 	for k := range raw {
 		if !isFileKey(k) {
@@ -133,18 +142,23 @@ func stripUnknownKeys(raw map[string]any, warnings *[]string) {
 		delete(raw, k)
 		*warnings = append(*warnings, warnKey(k))
 	}
+	assert.That(len(*warnings) >= len(unknown), "stripUnknownKeys: a dropped key went unreported")
+	assert.That(len(raw) <= len(fileKeys()), "stripUnknownKeys: unknown keys remain")
 }
 
 // apply copies validated values onto settings. Anything that survived vetting
 // is known to be a string, so a non-string here is simply skipped.
 func apply(raw map[string]any, settings *FileSettings) {
+	assert.That(raw != nil, "apply: nil document")
+	assert.That(settings != nil, "apply: nil settings")
 	for _, key := range fileKeys() {
 		v, ok := raw[key]
 		if !ok {
 			continue
 		}
 		if s, ok := v.(string); ok {
-			setFileKey(settings, key, s)
+			handled := setFileKey(settings, key, s)
+			assert.That(handled, "apply: setFileKey does not handle a recognized key")
 		}
 	}
 }

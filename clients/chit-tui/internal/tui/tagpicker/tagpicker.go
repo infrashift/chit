@@ -3,10 +3,12 @@ package tagpicker
 import (
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/listwin"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
@@ -51,11 +53,13 @@ func New(s styles.Styles) Model {
 	ti := textinput.New()
 	ti.Placeholder = "Filter tags... (ctrl+n create, ctrl+t private)"
 	ti.CharLimit = 50
-	return Model{
+	m := Model{
 		postTags: make(map[string]bool),
 		styles:   s,
 		input:    ti,
 	}
+	assert.That(m.postTags != nil, "tagpicker.New: nil applied-tag set")
+	return m
 }
 
 // Open shows the tag picker for a post.
@@ -63,6 +67,9 @@ func (m *Model) Open(postID string, allTags []*model.Tag, appliedTags []*model.T
 	m.visible = true
 	m.focused = true
 	m.postID = postID
+	for _, t := range allTags {
+		assert.That(t != nil, "Model.Open: nil tag in the list")
+	}
 	m.allTags = allTags
 	m.postTags = make(map[string]bool)
 	for _, t := range appliedTags {
@@ -73,6 +80,10 @@ func (m *Model) Open(postID string, allTags []*model.Tag, appliedTags []*model.T
 	m.input.Focus()
 	m.cursor = 0
 	m.filter()
+	assert.That(len(m.postTags) <= len(appliedTags), "Model.Open: more applied tags than given")
+	assert.That(len(m.filtered) == len(m.allTags), "Model.Open: empty filter hides tags")
+	assert.That(m.cursor == 0, "Model.Open: cursor not on the first tag")
+	assert.That(m.input.Focused(), "Model.Open: filter input not focused")
 }
 
 // Private reports whether Ctrl+N will create a private tag.
@@ -85,12 +96,16 @@ func (m *Model) AddApplied(postID string, tag *model.Tag) {
 	if !m.visible || postID != m.postID || tag == nil {
 		return
 	}
+	assert.That(m.postTags != nil, "Model.AddApplied: nil applied-tag set")
 	if !slices.ContainsFunc(m.allTags, func(t *model.Tag) bool { return t.ID == tag.ID }) {
 		// Clip so the append cannot write into the caller's backing array.
 		m.allTags = append(slices.Clip(m.allTags), tag)
 	}
 	m.postTags[tag.ID] = true
 	m.filter()
+	assert.That(slices.ContainsFunc(m.allTags, func(t *model.Tag) bool { return t.ID == tag.ID }),
+		"Model.AddApplied: added tag not listed")
+	assert.That(m.cursor >= 0 && m.cursor <= max(len(m.filtered)-1, 0), "Model.AddApplied: cursor outside the list")
 }
 
 // Close hides the tag picker.
@@ -98,6 +113,7 @@ func (m *Model) Close() {
 	m.visible = false
 	m.focused = false
 	m.input.Blur()
+	assert.That(!m.input.Focused(), "Model.Close: filter input kept focus")
 }
 
 // Visible returns the visibility state.
@@ -107,12 +123,14 @@ func (m Model) Visible() bool { return m.visible }
 func (m *Model) Focus() {
 	m.focused = true
 	m.input.Focus()
+	assert.That(m.input.Focused(), "Model.Focus: filter input not focused")
 }
 
 // Blur removes focus.
 func (m *Model) Blur() {
 	m.focused = false
 	m.input.Blur()
+	assert.That(!m.input.Focused(), "Model.Blur: filter input kept focus")
 }
 
 // SetStyles replaces the styles.
@@ -130,6 +148,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	if !m.visible || !m.focused {
 		return m, nil
 	}
+	assert.That(m.cursor >= 0 && m.cursor <= max(len(m.filtered)-1, 0), "Model.Update: cursor outside the list")
 
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		if next, cmd, handled := m.handleKey(keyMsg); handled {
@@ -139,26 +158,32 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
+	assert.That(utf8.RuneCountInString(m.input.Value()) <= m.input.CharLimit, "Model.Update: filter over the input limit")
 	m.filter()
+	assert.That(m.cursor >= 0 && m.cursor <= max(len(m.filtered)-1, 0), "Model.Update: cursor outside the list after filtering")
 	return m, cmd
 }
 
 // handleKey handles the keys the picker itself uses, and reports whether
 // msg was one of them; the rest go to the filter input.
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	assert.That(m.visible && m.focused, "Model.handleKey: keys reached a closed or unfocused picker")
 	switch msg.Type {
 	case tea.KeyEscape:
 		m.Close()
+		assert.That(!m.visible && !m.focused, "Model.handleKey: Esc left the picker open")
 		return m, nil, true
 	case tea.KeyUp:
 		if m.cursor > 0 {
 			m.cursor--
 		}
+		assert.That(m.cursor >= 0, "Model.handleKey: cursor above the list")
 		return m, nil, true
 	case tea.KeyDown:
 		if m.cursor < len(m.filtered)-1 {
 			m.cursor++
 		}
+		assert.That(m.cursor <= max(len(m.filtered)-1, 0), "Model.handleKey: cursor below the list")
 		return m, nil, true
 	case tea.KeyEnter:
 		return m, m.toggleCursor(), true
@@ -176,7 +201,10 @@ func (m *Model) toggleCursor() tea.Cmd {
 	if len(m.filtered) == 0 || m.cursor >= len(m.filtered) {
 		return nil
 	}
+	assert.That(m.cursor >= 0, "Model.toggleCursor: negative cursor")
+	assert.That(m.postTags != nil, "Model.toggleCursor: nil applied-tag set")
 	tag := m.filtered[m.cursor]
+	assert.That(tag != nil, "Model.toggleCursor: nil tag under the cursor")
 	applied := m.postTags[tag.ID]
 	// Toggle
 	if applied {
@@ -184,6 +212,7 @@ func (m *Model) toggleCursor() tea.Cmd {
 	} else {
 		m.postTags[tag.ID] = true
 	}
+	assert.That(m.postTags[tag.ID] != applied, "Model.toggleCursor: tag state did not flip")
 	postID := m.postID
 	return func() tea.Msg {
 		return TagToggledMsg{
@@ -201,9 +230,12 @@ func (m *Model) requestCreate() tea.Cmd {
 	if name == "" {
 		return nil
 	}
+	assert.That(utf8.RuneCountInString(name) <= m.input.CharLimit, "Model.requestCreate: name over the input limit")
 	postID, private := m.postID, m.private
 	m.input.Reset()
 	m.filter()
+	assert.That(m.input.Value() == "", "Model.requestCreate: filter not cleared")
+	assert.That(len(m.filtered) == len(m.allTags), "Model.requestCreate: cleared filter hides tags")
 	return func() tea.Msg {
 		return TagCreateRequestMsg{Name: name, PostID: postID, Private: private}
 	}
@@ -224,6 +256,8 @@ func (m Model) View() string {
 	items = append(items, m.styles.Timestamp.Render("  "+mode), "")
 
 	start, end := listwin.Window(m.cursor, len(m.filtered), listwin.Rows(m.height))
+	assert.That(start >= 0 && start <= end && end <= len(m.filtered), "Model.View: window outside the list")
+	assert.That(len(m.filtered) == 0 || (m.cursor >= start && m.cursor < end), "Model.View: cursor row not in the window")
 	for i := start; i < end; i++ {
 		tag := m.filtered[i]
 		check := "[ ]"
@@ -241,6 +275,7 @@ func (m Model) View() string {
 		}
 		items = append(items, line)
 	}
+	assert.That(len(items) == 3+end-start, "Model.View: row count does not match the window")
 
 	if len(m.filtered) == 0 && m.input.Value() != "" {
 		kind := "channel"
@@ -258,6 +293,7 @@ func (m *Model) filter() {
 	prefix := strings.ToLower(strings.TrimSpace(m.input.Value()))
 	if prefix == "" {
 		m.filtered = m.allTags
+		assert.That(len(m.filtered) == len(m.allTags), "Model.filter: empty filter hides tags")
 	} else {
 		m.filtered = nil
 		for _, t := range m.allTags {
@@ -269,4 +305,6 @@ func (m *Model) filter() {
 	if m.cursor >= len(m.filtered) {
 		m.cursor = max(len(m.filtered)-1, 0)
 	}
+	assert.That(len(m.filtered) <= len(m.allTags), "Model.filter: more matches than tags")
+	assert.That(m.cursor >= 0 && m.cursor <= max(len(m.filtered)-1, 0), "Model.filter: cursor outside the list")
 }

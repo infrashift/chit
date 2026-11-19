@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 )
 
 // Config holds the application configuration.
@@ -55,6 +57,11 @@ func Load() (*Config, []string, error) {
 		return nil, warnings, err
 	}
 
+	// Each of these ends in a non-empty default, and the server URL has just
+	// been validated and trimmed.
+	assert.That(cfg.ServerURL != "" && !strings.HasSuffix(cfg.ServerURL, "/"), "Load: server URL must be set and have no trailing slash")
+	assert.That(cfg.WSScheme != "", "Load: empty WebSocket scheme")
+	assert.That(cfg.AuthHeader != "", "Load: empty auth header")
 	return cfg, warnings, nil
 }
 
@@ -62,15 +69,19 @@ func Load() (*Config, []string, error) {
 // fixed "ws" failed to dial an HTTPS server, or sent the session token in the
 // clear.
 func defaultWSScheme(serverURL string) string {
+	scheme := DefaultWSScheme
 	if strings.HasPrefix(strings.ToLower(serverURL), "https://") {
-		return "wss"
+		scheme = "wss"
 	}
-	return DefaultWSScheme
+	assert.That(scheme == "ws" || scheme == "wss", "defaultWSScheme: scheme must be ws or wss")
+	return scheme
 }
 
 // firstNonEmpty returns the first value that is set, which is how each setting
 // walks its precedence chain.
 func firstNonEmpty(values ...string) string {
+	// A chain has a source to fall back to.
+	assert.That(len(values) >= 2, "firstNonEmpty: a precedence chain needs at least two sources")
 	for _, v := range values {
 		if v != "" {
 			return v
@@ -81,6 +92,7 @@ func firstNonEmpty(values ...string) string {
 
 // Validate checks that required fields are set.
 func (c *Config) Validate() error {
+	assert.That(c != nil, "Config.Validate: nil config")
 	if c.ServerURL == "" {
 		return fmt.Errorf("no server URL configured: set CHIT_SERVER_URL, "+
 			"or add server_url to %s", FilePath())
@@ -93,35 +105,50 @@ func (c *Config) Validate() error {
 // one for the current appearance: saving "theme" would outrank both and turn
 // appearance switching off for good. Otherwise it is "theme".
 func (c *Config) ThemeSettingKey(dark bool) string {
-	if c.ThemeName != "" || (c.ThemeDark == "" && c.ThemeLight == "") {
-		return "theme"
+	assert.That(c != nil, "Config.ThemeSettingKey: nil config")
+	key := "theme_light"
+	switch {
+	case c.ThemeName != "" || (c.ThemeDark == "" && c.ThemeLight == ""):
+		key = "theme"
+	case dark:
+		key = "theme_dark"
 	}
-	if dark {
-		return "theme_dark"
-	}
-	return "theme_light"
+	// SaveThemeSetting accepts exactly these keys.
+	_, ok := themeSettingRe(key)
+	assert.That(ok, "Config.ThemeSettingKey: key is not a theme setting")
+	return key
 }
 
 // HasToken returns true if a session token is configured.
 func (c *Config) HasToken() bool {
+	assert.That(c != nil, "Config.HasToken: nil config")
 	return c.SessionToken != ""
 }
 
 // KratosBaseURL returns the Kratos API base URL derived from ServerURL.
 func (c *Config) KratosBaseURL() string {
+	assert.That(c != nil, "Config.KratosBaseURL: nil config")
+	assert.That(c.ServerURL != "", "Config.KratosBaseURL: no server URL")
 	return c.ServerURL + "/kratos"
 }
 
 // WSURL returns the WebSocket URL derived from the server URL.
 func (c *Config) WSURL() string {
+	assert.That(c != nil, "Config.WSURL: nil config")
+	assert.That(c.ServerURL != "", "Config.WSURL: no server URL")
+	assert.That(c.WSScheme != "", "Config.WSURL: no WebSocket scheme")
 	return c.WSScheme + "://" + stripScheme(c.ServerURL) + "/api/v1/websocket"
 }
 
 func stripScheme(url string) string {
+	rest := url
 	for _, prefix := range []string{"https://", "http://", "ws://", "wss://"} {
 		if len(url) > len(prefix) && url[:len(prefix)] == prefix {
-			return url[len(prefix):]
+			rest = url[len(prefix):]
+			break
 		}
 	}
-	return url
+	assert.That(strings.HasSuffix(url, rest), "stripScheme: result must be a suffix of the URL")
+	assert.That(rest != "" || url == "", "stripScheme: a URL must not be stripped to nothing")
+	return rest
 }

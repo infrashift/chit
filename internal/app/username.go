@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+
+	"github.com/infrashift/chit/internal/assert"
 )
 
 // Usernames for Kratos identities that have no username trait.
@@ -40,6 +42,7 @@ func usernameCandidates(traitUsername, email, kratosID string) []string {
 		return []string{strings.ToLower(traitUsername)}
 	}
 	digits := kratosHexDigits(kratosID)
+	assert.That(len(digits) == 32, "usernameCandidates: kratos hex digits are not 32 long")
 	local := sanitizeLocalPart(email)
 	var out []string
 	for _, n := range usernameSuffixLens() {
@@ -55,8 +58,10 @@ func usernameCandidates(traitUsername, email, kratosID string) []string {
 		if room := maxUsernameLen - len(suffix) - 1; len(prefix) > room {
 			prefix = strings.TrimRight(prefix[:room], "._-")
 		}
+		assert.That(len(prefix)+1+len(suffix) <= maxUsernameLen, "usernameCandidates: candidate is longer than maxUsernameLen")
 		out = append(out, prefix+"-"+suffix)
 	}
+	assert.That(len(out) > 0, "usernameCandidates: no candidates")
 	return out
 }
 
@@ -80,15 +85,22 @@ func sanitizeLocalPart(email string) string {
 			dash = true
 		}
 	}
-	return strings.Trim(b.String(), "._-")
+	out := strings.Trim(b.String(), "._-")
+	assert.That(len(out) <= len(email), "sanitizeLocalPart: result longer than the email")
+	assert.That(!strings.Contains(out, "@"), "sanitizeLocalPart: result holds an @")
+	return out
 }
 
 // kratosHexDigits returns 32 lowercase hex digits for kratosID: its own when
 // it is a UUID (Kratos IDs are), otherwise a SHA-256 of it.
 func kratosHexDigits(kratosID string) string {
 	if id, err := uuid.Parse(kratosID); err == nil {
-		return strings.ReplaceAll(id.String(), "-", "")
+		out := strings.ReplaceAll(id.String(), "-", "")
+		assert.That(len(out) == 32, "kratosHexDigits: uuid hex is not 32 digits")
+		return out
 	}
 	sum := sha256.Sum256([]byte(kratosID))
-	return hex.EncodeToString(sum[:])[:32]
+	out := hex.EncodeToString(sum[:])[:32]
+	assert.That(len(out) == 32, "kratosHexDigits: hash hex is not 32 digits")
+	return out
 }

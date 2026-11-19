@@ -7,6 +7,7 @@ import (
 	"github.com/aymanbagabas/go-osc52/v2"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/errlog"
 )
 
@@ -19,6 +20,7 @@ import (
 // ignores it, and tmux and screen need it enabled — so a copy can silently do
 // nothing, which is why the UI confirms it rather than staying quiet.
 func copyToClipboard(out io.Writer, text string) tea.Cmd {
+	assert.That(out != nil, "copyToClipboard: nil writer")
 	return func() tea.Msg {
 		if text == "" {
 			return nil
@@ -45,10 +47,14 @@ func countLines(s string) int {
 			n++
 		}
 	}
+	assert.That(n >= 1, "countLines: fewer than one line")
+	assert.That(n <= len(s)+1, "countLines: more lines than newlines")
 	return n
 }
 
 func (m Model) handleClipboardCopied(msg clipboardCopiedMsg) (tea.Model, tea.Cmd) {
+	assert.That(msg.lines >= 1, "handleClipboardCopied: copied no lines")
+	assert.That(m.appState == AppStateRunning, "handleClipboardCopied: not signed in")
 	// OSC 52 gives no delivery confirmation, and several terminals ignore
 	// it outright, so say what was sent rather than leaving the user to
 	// guess whether anything happened.

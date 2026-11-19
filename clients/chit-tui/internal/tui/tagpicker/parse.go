@@ -3,6 +3,8 @@ package tagpicker
 import (
 	"regexp"
 	"strings"
+
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 )
 
 // hashtagRe matches a #tag at the start of a line or after a space or tab.
@@ -16,6 +18,11 @@ var hashtagRe = regexp.MustCompile(`(^|[ \t])#([a-zA-Z0-9_-]*[a-zA-Z][a-zA-Z0-9_
 // tags: "#include" in a C snippet is not one.
 func ExtractHashtags(content string) []string {
 	_, tags := scanHashtags(content, false)
+	// Every tag is matched at its own '#'.
+	assert.That(len(tags) <= strings.Count(content, "#"), "ExtractHashtags: more tags than '#' marks")
+	for _, t := range tags {
+		assert.That(t != "" && t == strings.ToLower(t), "ExtractHashtags: tag empty or not lowercased")
+	}
 	return tags
 }
 
@@ -24,7 +31,10 @@ func ExtractHashtags(content string) []string {
 // space that separated it; indentation, runs of spaces and line breaks are
 // left as written, and a line that held nothing but tags is dropped.
 func StripHashtags(content string) (string, []string) {
-	return scanHashtags(content, true)
+	cleaned, tags := scanHashtags(content, true)
+	assert.That(len(cleaned) <= len(content), "StripHashtags: stripping made the content longer")
+	assert.That(len(tags) <= strings.Count(content, "#"), "StripHashtags: more tags than '#' marks")
+	return cleaned, tags
 }
 
 func scanHashtags(content string, strip bool) (string, []string) {
@@ -54,10 +64,14 @@ func scanHashtags(content string, strip bool) (string, []string) {
 		}
 	}
 
+	assert.That(len(out) <= len(lines), "scanHashtags: more output lines than input lines")
+	assert.That(len(sc.seen) == len(sc.tags), "scanHashtags: seen set and tag list out of step")
 	if !strip {
 		return content, sc.tags
 	}
-	return strings.Trim(strings.Join(out, "\n"), "\n"), sc.tags
+	cleaned := strings.Trim(strings.Join(out, "\n"), "\n")
+	assert.That(strings.Count(cleaned, "\n") <= strings.Count(content, "\n"), "scanHashtags: stripping added lines")
+	return cleaned, sc.tags
 }
 
 // hashtagScan collects the tags of one piece of content, in order of first
@@ -75,7 +89,9 @@ func (sc *hashtagScan) scanLine(line string) (string, bool) {
 	// Backticks alternate text and inline code: even parts are text.
 	// An unmatched final backtick opens no span, so the part after it
 	// is text as well.
+	assert.That(sc.seen != nil, "hashtagScan.scanLine: nil seen set")
 	parts := strings.Split(line, "`")
+	assert.That(len(parts) == strings.Count(line, "`")+1, "scanLine: split lost a part")
 	removed := false
 	for i := range parts {
 		unmatched := i == len(parts)-1 && len(parts)%2 == 0
@@ -86,20 +102,26 @@ func (sc *hashtagScan) scanLine(line string) (string, bool) {
 		parts[i], r = sc.scanText(parts[i], i > 0)
 		removed = removed || r
 	}
+	assert.That(sc.strip || !removed, "scanLine: removed a tag while only extracting")
 	if !removed {
 		return line, false
 	}
-	return strings.TrimRight(strings.Join(parts, "`"), " \t"), true
+	cleaned := strings.TrimRight(strings.Join(parts, "`"), " \t")
+	assert.That(len(cleaned) < len(line), "hashtagScan.scanLine: removing tags did not shorten the line")
+	return cleaned, true
 }
 
 // scanText scans one stretch of text between inline code spans; afterCode
 // says whether inline code precedes it on the line. It returns the text,
 // without its tags when stripping, and whether any were removed.
 func (sc *hashtagScan) scanText(text string, afterCode bool) (string, bool) {
+	assert.That(sc.seen != nil, "hashtagScan.scanText: nil seen set")
 	var kept strings.Builder
 	last, skipSpace, removed := 0, false, false
 	for _, mt := range hashtagRe.FindAllStringSubmatchIndex(text, -1) {
 		start, end, lead := mt[0], mt[1], mt[3]-mt[2]
+		assert.That(start >= last && end <= len(text), "scanText: match outside the unscanned text")
+		assert.That(mt[4] < mt[5], "scanText: empty tag name matched")
 		// "^" is the start of the segment; only at the start of the
 		// line does it mean a tag, not text right after inline code.
 		if lead == 0 && afterCode {
@@ -122,20 +144,25 @@ func (sc *hashtagScan) scanText(text string, afterCode bool) (string, bool) {
 	if !sc.strip {
 		return text, false
 	}
+	assert.That(last <= len(text), "scanText: scan position past the text")
 	rest := text[last:]
 	if skipSpace {
 		rest = trimOneSpace(rest)
 	}
 	kept.WriteString(rest)
+	assert.That(kept.Len() <= len(text), "scanText: kept more than the text")
 	return kept.String(), removed
 }
 
 // add records a tag name the first time it is seen.
 func (sc *hashtagScan) add(name string) {
+	assert.That(name != "", "hashtagScan.add: empty tag name")
+	assert.That(sc.seen != nil, "hashtagScan.add: nil seen set")
 	if !sc.seen[name] {
 		sc.seen[name] = true
 		sc.tags = append(sc.tags, name)
 	}
+	assert.That(len(sc.seen) == len(sc.tags), "hashtagScan.add: seen set and tag list out of step")
 }
 
 func trimOneSpace(s string) string {

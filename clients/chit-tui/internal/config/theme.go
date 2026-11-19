@@ -12,6 +12,8 @@ import (
 	cueerrors "cuelang.org/go/cue/errors"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 )
 
 // ThemeColorKeys returns the canonical palette key list for a theme file. It
@@ -64,6 +66,7 @@ var ErrThemeNotFound = errors.New("theme file not found")
 // is an error rather than a warning: silently substituting defaults would leave
 // the user staring at a theme that is not the one they asked for.
 func ValidateThemeTOML(path string) (values map[string]string, warnings []string, err error) {
+	assert.That(path != "", "ValidateThemeTOML: empty path")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -76,6 +79,7 @@ func ValidateThemeTOML(path string) (values map[string]string, warnings []string
 	if _, err := toml.Decode(string(data), &raw); err != nil {
 		return nil, nil, fmt.Errorf("theme %s: invalid TOML: %w", path, err)
 	}
+	assert.That(raw != nil, "ValidateThemeTOML: a decoded document must be a table")
 
 	warnings = stripUnknownThemeKeys(raw)
 
@@ -98,6 +102,8 @@ func ValidateThemeTOML(path string) (values map[string]string, warnings []string
 			values[k] = s
 		}
 	}
+	// Every required key was present and passed the schema as a string.
+	assert.That(len(values) > len(ThemeColorKeys()), "ValidateThemeTOML: a valid theme lacks required keys")
 	return values, warnings, nil
 }
 
@@ -113,6 +119,8 @@ func knownThemeKeys() map[string]bool {
 	for _, k := range meta {
 		known[k] = true
 	}
+	// A key in two lists would be both required and optional.
+	assert.That(len(known) == len(colors)+len(derived)+len(meta), "knownThemeKeys: a key appears in more than one list")
 	return known
 }
 
@@ -120,6 +128,7 @@ func knownThemeKeys() map[string]bool {
 // key is a warning, not an error — it is most likely a stale key from an older
 // version, and refusing to load over it would be unhelpful.
 func stripUnknownThemeKeys(raw map[string]any) []string {
+	assert.That(raw != nil, "stripUnknownThemeKeys: nil document")
 	known := knownThemeKeys()
 
 	unknown := make([]string, 0)
@@ -135,10 +144,13 @@ func stripUnknownThemeKeys(raw map[string]any) []string {
 		delete(raw, k)
 		warnings = append(warnings, fmt.Sprintf("theme %q: not a recognized key — ignored", k))
 	}
+	assert.That(len(warnings) == len(unknown), "stripUnknownThemeKeys: one warning per dropped key")
+	assert.That(len(raw) <= len(known), "stripUnknownThemeKeys: unknown keys remain")
 	return warnings
 }
 
 func missingThemeKeys(raw map[string]any) []string {
+	assert.That(raw != nil, "missingThemeKeys: nil document")
 	var missing []string
 	if _, ok := raw["name"]; !ok {
 		missing = append(missing, "key `name` is required")
@@ -148,12 +160,14 @@ func missingThemeKeys(raw map[string]any) []string {
 			missing = append(missing, fmt.Sprintf("key `%s` is required", k))
 		}
 	}
+	assert.That(len(missing) <= len(ThemeColorKeys())+1, "missingThemeKeys: more keys missing than are required")
 	return missing
 }
 
 // validateThemeValues unifies the document with the CUE schema and translates
 // each rejected key into a message written for someone editing a TOML file.
 func validateThemeValues(raw map[string]any) []string {
+	assert.That(raw != nil, "validateThemeValues: nil document")
 	schema, err := compileSchema(themeSchemaSrc, "#Theme")
 	if err != nil {
 		return []string{fmt.Sprintf("theme schema failed to compile: %v", err)}
@@ -168,12 +182,16 @@ func validateThemeValues(raw map[string]any) []string {
 	if verr == nil {
 		return nil
 	}
-	return themeErrorMessages(raw, verr)
+	msgs := themeErrorMessages(raw, verr)
+	assert.That(len(msgs) <= len(raw), "validateThemeValues: more messages than keys")
+	return msgs
 }
 
 // themeErrorMessages renders one message per offending key, deduplicated —
 // CUE frequently reports the same key from several constraint branches.
 func themeErrorMessages(raw map[string]any, verr error) []string {
+	assert.That(raw != nil, "themeErrorMessages: nil document")
+	assert.That(verr != nil, "themeErrorMessages: no validation error")
 	colors, derived := ThemeColorKeys(), ThemeDerivedKeys()
 	colorKeys := make(map[string]bool, len(colors)+len(derived))
 	for _, k := range colors {
@@ -182,6 +200,7 @@ func themeErrorMessages(raw map[string]any, verr error) []string {
 	for _, k := range derived {
 		colorKeys[k] = true
 	}
+	assert.That(len(colorKeys) == len(colors)+len(derived), "themeErrorMessages: a color key is both required and derived")
 
 	seen := make(map[string]bool)
 	var msgs []string
@@ -206,5 +225,7 @@ func themeErrorMessages(raw map[string]any, verr error) []string {
 			msgs = append(msgs, fmt.Sprintf("key `%s` is not valid", key))
 		}
 	}
+	// One message per offending key.
+	assert.That(len(msgs) == len(seen), "themeErrorMessages: messages and keys disagree")
 	return msgs
 }

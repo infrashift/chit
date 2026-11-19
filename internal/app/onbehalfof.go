@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 )
 
@@ -28,6 +29,7 @@ import (
 // OnBehalfOfAllowed reports whether the machine actor may act on behalf of a
 // person.
 func (a *App) OnBehalfOfAllowed(actor *model.User) bool {
+	assert.That(a.Config != nil, "App.OnBehalfOfAllowed: nil config")
 	return actor != nil && actor.OAuthClientID != "" &&
 		slices.Contains(a.Config.OnBehalfOfClients, actor.OAuthClientID)
 }
@@ -66,6 +68,8 @@ func (a *App) ResolvePrincipal(ctx context.Context, actor *model.User, principal
 	if err != nil {
 		return nil, err
 	}
+	assert.That(actor != nil, where+": allowed a nil actor")
+	assert.That(principal != nil, where+": nil principal without an error")
 	if principal.DeleteAt != 0 {
 		return nil, model.NewBadRequestError(where, "X-On-Behalf-Of names a deactivated user")
 	}
@@ -79,6 +83,7 @@ func (a *App) ResolvePrincipal(ctx context.Context, actor *model.User, principal
 // ResolvePrincipal.
 func (a *App) lookupPrincipal(ctx context.Context, principalID string) (*model.User, error) {
 	const where = "App.ResolvePrincipal"
+	assert.That(a.Store != nil, "App.lookupPrincipal: nil store")
 	if !model.IsValidID(principalID) {
 		return nil, model.NewBadRequestError(where, "X-On-Behalf-Of is not a user ID")
 	}
@@ -89,6 +94,7 @@ func (a *App) lookupPrincipal(ctx context.Context, principalID string) (*model.U
 		}
 		return nil, err
 	}
+	assert.That(p != nil, "App.lookupPrincipal: store returned a nil user")
 	return p, nil
 }
 
@@ -96,6 +102,7 @@ func (a *App) lookupPrincipal(ctx context.Context, principalID string) (*model.U
 // ResolvePrincipal, creating the user when needed.
 func (a *App) provisionPrincipal(ctx context.Context, actor *model.User, kratosID string) (*model.User, error) {
 	const where = "App.ResolvePrincipal"
+	assert.That(actor != nil, "App.provisionPrincipal: nil actor")
 	// Canonical only: the ID goes into the Kratos admin URL and is the user
 	// cache key, so one identity must have exactly one spelling.
 	if parsed, err := uuid.Parse(kratosID); err != nil || parsed.String() != kratosID {
@@ -110,6 +117,7 @@ func (a *App) provisionPrincipal(ctx context.Context, actor *model.User, kratosI
 	case err != nil:
 		return nil, err
 	}
+	assert.That(principal != nil, "App.provisionPrincipal: nil principal without an error")
 	if created {
 		a.AuditOnBehalfOf(actor, "user_provisioned", principal.ID, "kratos_id", kratosID)
 	}
@@ -120,6 +128,8 @@ func (a *App) provisionPrincipal(ctx context.Context, actor *model.User, kratosI
 // did on behalf of principalID. A request made as oneself (actor nil) writes
 // nothing.
 func (a *App) AuditOnBehalfOf(actor *model.User, action, principalID string, attrs ...any) {
+	assert.That(action != "", "App.AuditOnBehalfOf: empty action")
+	assert.That(len(attrs)%2 == 0, "App.AuditOnBehalfOf: attrs are not key-value pairs")
 	if actor == nil || a.AuditLogger == nil {
 		return
 	}
@@ -130,6 +140,9 @@ func (a *App) AuditOnBehalfOf(actor *model.User, action, principalID string, att
 // machine actor. A typo in the allowlist would otherwise authorize nothing
 // and say nothing; a client that is not a machine actor cannot authenticate.
 func CheckOnBehalfOfClients(allowlist []string, actors []MachineActor) error {
+	for i := range actors {
+		assert.That(actors[i].ClientID != "", "CheckOnBehalfOfClients: a parsed actor has no client id")
+	}
 	for _, clientID := range allowlist {
 		if !slices.ContainsFunc(actors, func(m MachineActor) bool { return m.ClientID == clientID }) {
 			return fmt.Errorf("CHIT_ON_BEHALF_OF_CLIENTS names %q, which is not in CHIT_MACHINE_ACTORS", clientID)

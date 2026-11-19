@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/infrashift/chit/internal/assert"
+	"github.com/infrashift/chit/internal/errlog"
 	"github.com/infrashift/chit/internal/model"
 )
 
@@ -63,6 +65,8 @@ func (b *Bridge) parseControl(content string) (word, rest string) {
 // reports whether it handled the post. It runs on the WebSocket read loop, so
 // its replies go out from their own goroutine.
 func (b *Bridge) controlNow(ctx context.Context, root string, post *model.Post, word string) bool {
+	assert.That(root != "", "Bridge.controlNow: empty thread root")
+	assert.That(post != nil, "Bridge.controlNow: nil post")
 	var msg string
 	switch word {
 	case controlStop:
@@ -72,8 +76,10 @@ func (b *Bridge) controlNow(ctx context.Context, root string, post *model.Post, 
 	default:
 		return false
 	}
+	assert.That(msg != "", "Bridge.controlNow: empty reply")
 	b.wg.Add(1)
 	go func() {
+		defer errlog.Recover("bridge control reply")
 		defer b.wg.Done()
 		b.reply(ctx, post.ChannelID, root, msg, map[string]any{hopsProp: agentHops(post)})
 	}()
@@ -82,8 +88,10 @@ func (b *Bridge) controlNow(ctx context.Context, root string, post *model.Post, 
 
 // stop cancels the thread's run and empties its queue.
 func (b *Bridge) stop(root string) string {
+	assert.That(root != "", "Bridge.stop: empty thread root")
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	assert.That(b.queues != nil && b.running != nil, "Bridge.stop: bridge not built by New")
 	dropped := 0
 	if queue, ok := b.queues[root]; ok {
 		for drained := false; !drained; {
@@ -95,8 +103,10 @@ func (b *Bridge) stop(root string) string {
 			}
 		}
 	}
+	assert.That(dropped <= perThreadQueueSize, "Bridge.stop: dropped more than a queue holds")
 	run, running := b.running[root]
 	if running {
+		assert.That(run.cancel != nil, "Bridge.stop: run without a cancel func")
 		run.cancel(errStopped)
 	}
 	switch {
@@ -112,6 +122,7 @@ func (b *Bridge) stop(root string) string {
 
 // status describes the thread's run, queue and session from memory.
 func (b *Bridge) status(root string) string {
+	assert.That(root != "", "Bridge.status: empty thread root")
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	parts := []string{"idle"}
@@ -127,6 +138,7 @@ func (b *Bridge) status(root string) string {
 	case ok:
 		parts = append(parts, "next reply starts a new session")
 	}
+	assert.That(len(parts) >= 1 && len(parts) <= 3, "Bridge.status: wrong number of status parts")
 	return "ℹ️ " + strings.Join(parts, " · ")
 }
 
@@ -135,7 +147,10 @@ func (b *Bridge) status(root string) string {
 // marking the reply so that a restart does not resume the old session either;
 // otherwise the run that follows replies, with its new session.
 func (b *Bridge) newSession(ctx context.Context, root string, post *model.Post, announce bool) {
+	assert.That(root != "", "Bridge.newSession: empty thread root")
+	assert.That(post != nil, "Bridge.newSession: nil post")
 	b.mu.Lock()
+	assert.That(b.sessions != nil && b.cleanStart != nil, "Bridge.newSession: bridge not built by New")
 	b.sessions[root] = ""
 	b.cleanStart.add(root)
 	b.mu.Unlock()

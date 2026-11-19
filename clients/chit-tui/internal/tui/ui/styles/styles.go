@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/glamour/ansi"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/markdown"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
@@ -74,11 +75,19 @@ func New(t theme.Theme) Styles {
 	s.setBadges(t)
 	s.setHighlights(t)
 	s.MarkdownStyleConfig = markdown.StyleConfig(t)
+	assert.That(s.Input.GetHorizontalFrameSize() == s.Viewport.GetHorizontalFrameSize(),
+		"styles.New: input and viewport frames differ in width")
+	assert.That(s.ThreadPanel.GetHorizontalFrameSize() == s.Viewport.GetHorizontalFrameSize(),
+		"styles.New: thread and viewport frames differ in width")
+	assert.That(s.ListItem.GetHorizontalPadding() == s.ListItemActive.GetHorizontalPadding(),
+		"styles.New: active list row padded differently from the others")
+	assert.That(s.MarkdownStyleConfig.CodeBlock.Chroma != nil, "styles.New: markdown config has no code styles")
 	return s
 }
 
 // setPanes styles the bordered panes and overlays and the bar.
 func (s *Styles) setPanes(t theme.Theme) {
+	assert.That(s != nil, "Styles.setPanes: nil receiver")
 	base := lipgloss.NewStyle()
 	rounded := base.BorderStyle(lipgloss.RoundedBorder())
 	double := base.BorderStyle(lipgloss.DoubleBorder())
@@ -105,10 +114,15 @@ func (s *Styles) setPanes(t theme.Theme) {
 		BorderRight(false).
 		BorderBottom(false), t.Subtle).
 		PaddingLeft(1)
+	assert.That(s.Viewport.GetBorderStyle() == lipgloss.RoundedBorder(), "Styles.setPanes: viewport border not rounded")
+	assert.That(s.CmdPalette.GetBorderStyle() == lipgloss.DoubleBorder(), "Styles.setPanes: palette border not double")
+	assert.That(s.AutocompletePanel.GetBorderStyle() == lipgloss.DoubleBorder(), "Styles.setPanes: completion border not double")
+	assert.That(s.ReplyIndent.GetBorderLeft() && !s.ReplyIndent.GetBorderTop(), "Styles.setPanes: reply indent not a left rule")
 }
 
 // setText styles list items, names and other text.
 func (s *Styles) setText(t theme.Theme) {
+	assert.That(s != nil, "Styles.setText: nil receiver")
 	base := lipgloss.NewStyle()
 
 	s.ListItem = fg(base, t.Foreground).
@@ -124,10 +138,15 @@ func (s *Styles) setText(t theme.Theme) {
 	s.AutocompleteActive = fg(base, t.ChannelActive).
 		Bold(true)
 	s.DaySeparator = fg(base, t.Muted)
+	assert.That(s.ListItemActive.GetBold(), "Styles.setText: active list row not bold")
+	assert.That(s.AutocompleteActive.GetBold(), "Styles.setText: active completion not bold")
+	assert.That(!s.ListItem.GetBold(), "Styles.setText: inactive list row bold")
+	assert.That(!s.AutocompleteItem.GetBold(), "Styles.setText: inactive completion bold")
 }
 
 // setBadges styles the badges and mention markers.
 func (s *Styles) setBadges(t theme.Theme) {
+	assert.That(s != nil, "Styles.setBadges: nil receiver")
 	base := lipgloss.NewStyle()
 
 	s.UnreadBadge = fg(base, t.UnreadBadge).
@@ -141,10 +160,15 @@ func (s *Styles) setBadges(t theme.Theme) {
 		Bold(true)
 	s.TagBadge = fg(base, t.TagBadge).
 		Bold(true)
+	assert.That(s.UnreadBadge.GetBold(), "Styles.setBadges: unread badge not bold")
+	assert.That(s.MentionBadge.GetBold(), "Styles.setBadges: mention badge not bold")
+	assert.That(s.TagBadge.GetBold(), "Styles.setBadges: tag badge not bold")
+	assert.That(s.MentionText.GetBold(), "Styles.setBadges: mention text not bold")
 }
 
 // setHighlights styles selections and search matches.
 func (s *Styles) setHighlights(t theme.Theme) {
+	assert.That(s != nil, "Styles.setHighlights: nil receiver")
 	base := lipgloss.NewStyle()
 
 	s.SelectedPost = bg(base, t.Highlight).
@@ -153,4 +177,7 @@ func (s *Styles) setHighlights(t theme.Theme) {
 	s.SearchMatch = bg(base, t.SearchMatch)
 	s.SearchMatchActive = fg(bg(base, t.SearchMatchActive), t.Foreground).
 		Bold(true)
+	assert.That(s.SearchMatchActive.GetBold(), "Styles.setHighlights: active match not bold")
+	assert.That(!s.SearchMatch.GetBold(), "Styles.setHighlights: inactive match bold")
+	assert.That(s.SelectedPost.GetHorizontalPadding() == 2, "Styles.setHighlights: selected post padding not one cell each side")
 }

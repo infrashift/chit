@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 )
 
@@ -16,10 +17,12 @@ import (
 // A deactivated user is refused (403), not provisioned again: their row
 // still holds the Kratos ID, so a second row could not be saved anyway.
 func (a *App) ProvisionUser(ctx context.Context, kratosID string) (*model.User, error) {
+	assert.That(kratosID != "", "App.ProvisionUser: empty kratos id")
 	user, _, err := a.provisionUser(ctx, kratosID)
 	if errors.Is(err, errUserDeactivated) {
 		return nil, model.NewForbiddenError("App.ProvisionUser", "this user is deactivated")
 	}
+	assert.That((user == nil) != (err == nil), "App.ProvisionUser: want exactly one of user and error")
 	return user, err
 }
 
@@ -33,6 +36,8 @@ var errUserDeactivated = errors.New("user is deactivated")
 // user. A browser request and an on-behalf-of request (X-On-Behalf-Of:
 // kratos:<id>) both come here, so both make the same user.
 func (a *App) provisionUser(ctx context.Context, kratosID string) (*model.User, bool, error) {
+	assert.That(kratosID != "", "App.provisionUser: empty kratos id")
+	assert.That(a.Store != nil, "App.provisionUser: nil store")
 	if a.userCache != nil {
 		if user, ok := a.userCache.Get(kratosID); ok {
 			return user, false, nil
@@ -63,9 +68,19 @@ func (a *App) provisionUser(ctx context.Context, kratosID string) (*model.User, 
 	// An identity without a username trait gets a derived one (username.go).
 	// A taken derived name is not an error: the next candidate is longer.
 	candidates := usernameCandidates(username, email, kratosID)
+	assert.That(len(candidates) > 0, "App.provisionUser: no username candidates")
 	if displayName == "" {
 		displayName = candidates[0]
 	}
+	return a.saveProvisionedUser(ctx, kratosID, displayName, email, candidates)
+}
+
+// saveProvisionedUser saves a new user for the Kratos identity kratosID under
+// the first username candidate that is free. created is false when another
+// request created the user first.
+func (a *App) saveProvisionedUser(ctx context.Context, kratosID, displayName, email string, candidates []string) (*model.User, bool, error) {
+	assert.That(len(candidates) > 0, "App.saveProvisionedUser: no username candidates")
+	assert.That(displayName != "", "App.saveProvisionedUser: empty display name")
 	for i, candidate := range candidates {
 		user := &model.User{
 			KratosID:    kratosID,
@@ -75,6 +90,7 @@ func (a *App) provisionUser(ctx context.Context, kratosID string) (*model.User, 
 		}
 		saved, err := a.Store.User().Save(ctx, user)
 		if err == nil {
+			assert.That(saved != nil && saved.KratosID == kratosID, "App.saveProvisionedUser: saved user has another kratos id")
 			a.cacheUser(saved)
 			return saved, true, nil
 		}
@@ -110,11 +126,14 @@ func (a *App) provisionUser(ctx context.Context, kratosID string) (*model.User, 
 // The first admin is seeded out of band by scripts/seed-uat, so requiring one
 // here cannot lock an empty deployment out of itself.
 func (a *App) CreateUser(ctx context.Context, user *model.User, actorID string) (*model.User, error) {
+	assert.That(user != nil, "App.CreateUser: nil user")
+	assert.That(actorID != "", "App.CreateUser: empty actor id")
 	if err := a.requireSystemAdmin(ctx, actorID, "App.CreateUser"); err != nil {
 		return nil, err
 	}
 
 	user.PreSave()
+	assert.That(user.ID != "" && user.ActorType != "", "App.CreateUser: PreSave left the user unkeyed")
 
 	saved, err := a.Store.User().Save(ctx, user)
 	if err != nil {
@@ -127,13 +146,16 @@ func (a *App) CreateUser(ctx context.Context, user *model.User, actorID string) 
 // oauthCacheKey namespaces OAuth2 client IDs away from Kratos IDs, which
 // share the one user cache.
 func oauthCacheKey(clientID string) string {
+	assert.That(clientID != "", "oauthCacheKey: empty client id")
 	return "oauth:" + clientID
 }
 
 func (a *App) cacheUser(user *model.User) {
+	assert.That(user != nil, "App.cacheUser: nil user")
 	if a.userCache == nil {
 		return
 	}
+	assert.That(a.userCache != nil, "App.cacheUser: nil cache past the guard")
 	if user.KratosID != "" {
 		a.userCache.Set(user.KratosID, user)
 	}
@@ -150,6 +172,7 @@ func (a *App) invalidateUserCache(user *model.User) {
 	if a.userCache == nil || user == nil {
 		return
 	}
+	assert.That(a.userCache != nil && user != nil, "App.invalidateUserCache: nil cache or user past the guard")
 	if user.KratosID != "" {
 		a.userCache.Remove(user.KratosID)
 	}
@@ -165,6 +188,7 @@ func (a *App) invalidateUserCache(user *model.User) {
 // whereas an unrecognised OAuth2 client must be rejected. Binding a client to
 // a user is an explicit provisioning step.
 func (a *App) ResolveOAuthClient(ctx context.Context, clientID string) (*model.User, error) {
+	assert.That(a.Store != nil, "App.ResolveOAuthClient: nil store")
 	if clientID == "" {
 		return nil, model.NewUnauthorizedError("App.ResolveOAuthClient", "empty client id")
 	}
@@ -180,17 +204,20 @@ func (a *App) ResolveOAuthClient(ctx context.Context, clientID string) (*model.U
 			"oauth client is not bound to a user")
 	}
 
+	assert.That(user != nil && user.OAuthClientID == clientID, "App.ResolveOAuthClient: store returned another client's user")
 	a.cacheUser(user)
 	return user, nil
 }
 
 // GetUser retrieves a user by ID.
 func (a *App) GetUser(ctx context.Context, id string) (*model.User, error) {
+	assert.That(a.Store != nil, "App.GetUser: nil store")
 	return a.Store.User().Get(ctx, id)
 }
 
 // GetUserByUsername retrieves a user by username.
 func (a *App) GetUserByUsername(ctx context.Context, username string) (*model.User, error) {
+	assert.That(a.Store != nil, "App.GetUserByUsername: nil store")
 	return a.Store.User().GetByUsername(ctx, username)
 }
 
@@ -209,6 +236,8 @@ type UserPatch struct {
 // request until the entry expired, and concurrent requests for the same user
 // raced on the struct.
 func (a *App) UpdateMe(ctx context.Context, userID string, patch UserPatch) (*model.User, error) {
+	assert.That(userID != "", "App.UpdateMe: empty user id")
+	assert.That(a.Store != nil, "App.UpdateMe: nil store")
 	user, err := a.Store.User().Get(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -230,16 +259,20 @@ func (a *App) UpdateMe(ctx context.Context, userID string, patch UserPatch) (*mo
 	if err != nil {
 		return nil, err
 	}
+	assert.That(updated != nil && updated.ID == userID, "App.UpdateMe: store returned another user")
 	a.invalidateUserCache(updated)
 	return updated, nil
 }
 
 // SearchUsers searches for users by term.
 func (a *App) SearchUsers(ctx context.Context, term string, page, perPage int) ([]*model.User, error) {
+	assert.That(a.Store != nil, "App.SearchUsers: nil store")
+	assert.That(page >= 0 && perPage >= 1, "App.SearchUsers: pagination not clamped")
 	return a.Store.User().Search(ctx, term, page, perPage)
 }
 
 // GetUsersByIDs retrieves users by their IDs.
 func (a *App) GetUsersByIDs(ctx context.Context, ids []string) ([]*model.User, error) {
+	assert.That(a.Store != nil, "App.GetUsersByIDs: nil store")
 	return a.Store.User().GetByIDs(ctx, ids)
 }

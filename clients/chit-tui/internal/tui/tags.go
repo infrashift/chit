@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/tagpicker"
 )
@@ -62,12 +63,16 @@ func (m Model) tagsUsableIn(channelID string) []*model.Tag {
 			out = append(out, t)
 		}
 	}
+	assert.That(len(out) <= len(m.allTags), "tagsUsableIn: more tags than known")
 	return out
 }
 
 // tagPost applies #tags typed in a message to a post. Each is a channel tag
 // of the active channel, created there when it does not exist yet.
 func (m Model) tagPost(postID string, names []string) []tea.Cmd {
+	assert.That(m.appState == AppStateRunning, "tagPost: not signed in")
+	assert.That(m.client != nil, "tagPost: nil client")
+	assert.That(m.scope != nil, "tagPost: nil request scope")
 	cmds := make([]tea.Cmd, 0, len(names))
 	channelID := m.activeChannelID()
 	for _, name := range names {
@@ -77,11 +82,14 @@ func (m Model) tagPost(postID string, names []string) []tea.Cmd {
 			cmds = append(cmds, CreateTagAndApplyCmd(m.reqCtx(), m.client, name, postID, channelID, false))
 		}
 	}
+	assert.That(len(cmds) == len(names), "tagPost: a request for each tag")
 	return cmds
 }
 
 // handlePostsTagsLoaded applies a page's tags in one redraw.
 func (m Model) handlePostsTagsLoaded(msg PostsTagsLoadedMsg) (tea.Model, tea.Cmd) {
+	assert.That(m.appState == AppStateRunning, "handlePostsTagsLoaded: not signed in")
+	assert.That(m.postTags != nil, "handlePostsTagsLoaded: nil post tags")
 	if msg.Err != nil {
 		// Tags are decoration; a failure here should not disturb the
 		// channel, but it should not vanish silently either.
@@ -96,6 +104,7 @@ func (m Model) handlePostsTagsLoaded(msg PostsTagsLoadedMsg) (tea.Model, tea.Cmd
 		}
 		byPost[postID] = names
 	}
+	assert.That(len(byPost) == len(msg.Tags), "handlePostsTagsLoaded: names for each post")
 	m.viewport.SetPostsTags(byPost)
 	m.thread.SetPostTags(m.postTags)
 	return m, nil
@@ -103,6 +112,8 @@ func (m Model) handlePostsTagsLoaded(msg PostsTagsLoadedMsg) (tea.Model, tea.Cmd
 
 // handlePostTagsLoaded applies one post's tags.
 func (m Model) handlePostTagsLoaded(msg PostTagsLoadedMsg) (tea.Model, tea.Cmd) {
+	assert.That(m.appState == AppStateRunning, "handlePostTagsLoaded: not signed in")
+	assert.That(m.postTags != nil, "handlePostTagsLoaded: nil post tags")
 	if msg.Err != nil {
 		// Tags are decoration, but silently never appearing looks like
 		// the post has none.
@@ -122,6 +133,7 @@ func (m Model) handlePostTagsLoaded(msg PostTagsLoadedMsg) (tea.Model, tea.Cmd) 
 }
 
 func (m Model) handleAllTagsLoaded(msg AllTagsLoadedMsg) (tea.Model, tea.Cmd) {
+	assert.That(m.appState == AppStateRunning, "handleAllTagsLoaded: not signed in")
 	if msg.Err != nil {
 		return m, m.setError(msg.Err)
 	}
@@ -130,6 +142,9 @@ func (m Model) handleAllTagsLoaded(msg AllTagsLoadedMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleTagToggled(msg tagpicker.TagToggledMsg) (tea.Model, tea.Cmd) {
+	assert.That(m.scope != nil, "handleTagToggled: nil request scope")
+	assert.That(m.appState == AppStateRunning, "handleTagToggled: not signed in")
+	assert.That(m.client != nil, "handleTagToggled: nil client")
 	if msg.Applied {
 		return m, tea.Batch(AddTagToPostCmd(m.reqCtx(), m.client, msg.PostID, msg.TagID))
 	}
@@ -137,6 +152,7 @@ func (m Model) handleTagToggled(msg tagpicker.TagToggledMsg) (tea.Model, tea.Cmd
 }
 
 func (m Model) handleTagCreated(msg TagCreatedMsg) (tea.Model, tea.Cmd) {
+	assert.That(m.appState == AppStateRunning, "handleTagCreated: not signed in")
 	if msg.Err != nil {
 		return m, m.setError(msg.Err)
 	}
@@ -147,17 +163,24 @@ func (m Model) handleTagCreated(msg TagCreatedMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleTagAddedToPost(msg TagAddedToPostMsg) (tea.Model, tea.Cmd) {
+	assert.That(m.scope != nil, "handleTagAddedToPost: nil request scope")
+	assert.That(m.appState == AppStateRunning, "handleTagAddedToPost: not signed in")
+	assert.That(m.client != nil, "handleTagAddedToPost: nil client")
 	if msg.Err != nil {
 		return m, m.setError(msg.Err)
 	}
 	if msg.NewTag != nil && !m.knownTag(msg.NewTag.ID) {
 		m.allTags = append(m.allTags, msg.NewTag)
 	}
+	assert.That(msg.NewTag == nil || m.knownTag(msg.NewTag.ID), "handleTagAddedToPost: new tag not recorded")
 	m.tagPicker.AddApplied(msg.PostID, msg.NewTag)
 	return m, tea.Batch(FetchPostTags(m.reqCtx(), m.client, msg.PostID))
 }
 
 func (m Model) handleTagRemovedFromPost(msg TagRemovedFromPostMsg) (tea.Model, tea.Cmd) {
+	assert.That(m.scope != nil, "handleTagRemovedFromPost: nil request scope")
+	assert.That(m.appState == AppStateRunning, "handleTagRemovedFromPost: not signed in")
+	assert.That(m.client != nil, "handleTagRemovedFromPost: nil client")
 	if msg.Err != nil {
 		return m, m.setError(msg.Err)
 	}

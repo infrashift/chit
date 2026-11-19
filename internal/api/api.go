@@ -11,10 +11,13 @@ import (
 
 	chitapi "github.com/infrashift/chit/api"
 	"github.com/infrashift/chit/internal/app"
+	"github.com/infrashift/chit/internal/assert"
 )
 
 // New creates and configures the chi router with all routes and middleware.
 func New(a *app.App) http.Handler {
+	assert.That(a != nil, "api.New: nil app")
+	assert.That(a.Config != nil, "api.New: nil config")
 	r := chi.NewRouter()
 
 	// Global middleware
@@ -59,6 +62,7 @@ func New(a *app.App) http.Handler {
 // WebSocket check refuses every Origin. It used to mean "*" for CORS
 // only, since go-chi/cors treats an empty list as allow-all.
 func useCORS(r chi.Router, allowedOrigins []string) {
+	assert.That(r != nil, "useCORS: nil router")
 	if slices.Contains(allowedOrigins, "*") {
 		slog.Warn("CORS and WebSocket origins are open to all sites; set CHIT_ALLOWED_ORIGINS in production")
 	}
@@ -79,6 +83,8 @@ func useCORS(r chi.Router, allowedOrigins []string) {
 // useAuthenticated installs the middleware of the authenticated group:
 // authentication, rate limiting and, when enabled, OpenAPI validation.
 func useAuthenticated(r chi.Router, a *app.App) {
+	assert.That(r != nil, "useAuthenticated: nil router")
+	assert.That(a != nil && a.Config != nil, "useAuthenticated: nil app or config")
 	r.Use(AuthExtract(a))
 	r.Use(RateLimit(10, 50))
 
@@ -95,6 +101,8 @@ func useAuthenticated(r chi.Router, a *app.App) {
 
 // routeUsers registers the user routes.
 func routeUsers(r chi.Router, a *app.App) {
+	assert.That(r != nil, "routeUsers: nil router")
+	assert.That(a != nil, "routeUsers: nil app")
 	// Users
 	r.Post("/users", createUser(a))
 	r.Get("/users/me", getMe())
@@ -107,6 +115,8 @@ func routeUsers(r chi.Router, a *app.App) {
 
 // routeTeams registers the team routes.
 func routeTeams(r chi.Router, a *app.App) {
+	assert.That(r != nil, "routeTeams: nil router")
+	assert.That(a != nil, "routeTeams: nil app")
 	// Teams
 	r.Post("/teams", createTeam(a))
 	r.Get("/teams/{id}", getTeam(a))
@@ -121,6 +131,8 @@ func routeTeams(r chi.Router, a *app.App) {
 
 // routeChannels registers the channel routes.
 func routeChannels(r chi.Router, a *app.App) {
+	assert.That(r != nil, "routeChannels: nil router")
+	assert.That(a != nil, "routeChannels: nil app")
 	// Channels
 	r.Post("/channels", createChannel(a))
 	r.Get("/channels/{id}", getChannel(a))
@@ -142,6 +154,8 @@ func routeChannels(r chi.Router, a *app.App) {
 
 // routePosts registers the post routes.
 func routePosts(r chi.Router, a *app.App) {
+	assert.That(r != nil, "routePosts: nil router")
+	assert.That(a != nil, "routePosts: nil app")
 	// Posts
 	r.Post("/posts", createPost(a))
 	r.Get("/posts/{id}", getPost(a))
@@ -155,6 +169,8 @@ func routePosts(r chi.Router, a *app.App) {
 
 // routeThreads registers the thread routes.
 func routeThreads(r chi.Router, a *app.App) {
+	assert.That(r != nil, "routeThreads: nil router")
+	assert.That(a != nil, "routeThreads: nil app")
 	// Threads
 	r.Get("/posts/{id}/thread", getThread(a))
 	r.Get("/users/me/teams/{id}/threads", getMyThreads(a))
@@ -170,6 +186,8 @@ func routeThreads(r chi.Router, a *app.App) {
 
 // routeTags registers the tag routes.
 func routeTags(r chi.Router, a *app.App) {
+	assert.That(r != nil, "routeTags: nil router")
+	assert.That(a != nil, "routeTags: nil app")
 	// Tags
 	r.Post("/tags", createTag(a))
 	r.Get("/tags", getAllTags(a))
@@ -192,6 +210,8 @@ func routeTags(r chi.Router, a *app.App) {
 // routeCommandsSearchAndWebSocket registers the command, search and
 // WebSocket routes.
 func routeCommandsSearchAndWebSocket(r chi.Router, a *app.App) {
+	assert.That(r != nil, "routeCommandsSearchAndWebSocket: nil router")
+	assert.That(a != nil, "routeCommandsSearchAndWebSocket: nil app")
 	// Commands
 	r.Get("/commands", listCommands(a))
 

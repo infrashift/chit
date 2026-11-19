@@ -7,9 +7,13 @@ import (
 	"strconv"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/infrashift/chit/internal/assert"
 )
 
 func (s *ChitMCPServer) registerPrompts() {
+	assert.That(s.server != nil, "ChitMCPServer.registerPrompts: nil MCP server")
+	assert.That(s.client != nil, "ChitMCPServer.registerPrompts: prompts registered without a chitd client")
 	s.server.AddPrompt(&mcp.Prompt{
 		Name:        "summarize_channel",
 		Description: "Generate a summary of recent activity in a channel",
@@ -46,6 +50,9 @@ func (s *ChitMCPServer) registerPrompts() {
 }
 
 func (s *ChitMCPServer) handleSummarizeChannel(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+	assert.That(ctx != nil, "ChitMCPServer.handleSummarizeChannel: nil context")
+	assert.That(s.client != nil, "ChitMCPServer.handleSummarizeChannel: nil chitd client")
+	assert.That(req != nil && req.Params != nil, "ChitMCPServer.handleSummarizeChannel: nil request")
 	channelID := req.Params.Arguments["channel_id"]
 	if channelID == "" {
 		return nil, fmt.Errorf("channel_id is required")
@@ -59,11 +66,13 @@ func (s *ChitMCPServer) handleSummarizeChannel(ctx context.Context, req *mcp.Get
 		}
 		perPage = parsed
 	}
+	assert.That(perPage >= 1 && perPage <= maxPerPage, "ChitMCPServer.handleSummarizeChannel: num_posts not bounded")
 
 	channel, err := s.client.GetChannel(ctx, channelID)
 	if err != nil {
 		return nil, fmt.Errorf("get channel: %w", err)
 	}
+	assert.That(channel != nil, "ChitMCPServer.handleSummarizeChannel: nil channel without an error")
 
 	posts, err := s.client.GetChannelPosts(ctx, channelID, 0, perPage, 0)
 	if err != nil {
@@ -95,6 +104,9 @@ func (s *ChitMCPServer) handleSummarizeChannel(ctx context.Context, req *mcp.Get
 }
 
 func (s *ChitMCPServer) handleDraftReply(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+	assert.That(ctx != nil, "ChitMCPServer.handleDraftReply: nil context")
+	assert.That(s.client != nil, "ChitMCPServer.handleDraftReply: nil chitd client")
+	assert.That(req != nil && req.Params != nil, "ChitMCPServer.handleDraftReply: nil request")
 	postID := req.Params.Arguments["post_id"]
 	if postID == "" {
 		return nil, fmt.Errorf("post_id is required")
@@ -111,6 +123,7 @@ func (s *ChitMCPServer) handleDraftReply(ctx context.Context, req *mcp.GetPrompt
 	if err != nil {
 		return nil, fmt.Errorf("marshal thread: %w", err)
 	}
+	assert.That(len(threadJSON) > 0, "ChitMCPServer.handleDraftReply: empty thread encoding without an error")
 
 	promptText := fmt.Sprintf(
 		"Draft a reply to the following thread conversation.\n\nThread (JSON):\n%s",

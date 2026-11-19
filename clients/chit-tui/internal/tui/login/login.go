@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/auth"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 )
@@ -40,6 +41,7 @@ type Model struct {
 
 // New creates a new login model.
 func New(s styles.Styles, kratosClient *auth.KratosClient) Model {
+	assert.That(s.MarkdownStyleConfig.CodeBlock.Chroma != nil, "login.New: styles not built by styles.New")
 	id := textinput.New()
 	id.Placeholder = "Email or username"
 	id.CharLimit = 256
@@ -50,6 +52,9 @@ func New(s styles.Styles, kratosClient *auth.KratosClient) Model {
 	pw.CharLimit = 256
 	pw.EchoMode = textinput.EchoPassword
 	pw.EchoCharacter = '*'
+	assert.That(id.Focused(), "login.New: identifier not focused")
+	assert.That(!pw.Focused(), "login.New: password focused")
+	assert.That(pw.EchoMode == textinput.EchoPassword, "login.New: password echoed in clear")
 
 	return Model{
 		identifier:   id,
@@ -61,12 +66,15 @@ func New(s styles.Styles, kratosClient *auth.KratosClient) Model {
 
 // SetSize sets the available dimensions.
 func (m *Model) SetSize(w, h int) {
+	assert.That(w >= 0, "login.SetSize: negative width")
+	assert.That(h >= 0, "login.SetSize: negative height")
 	m.width = w
 	m.height = h
 }
 
 // SetStyles updates the styles.
 func (m *Model) SetStyles(s styles.Styles) {
+	assert.That(s.MarkdownStyleConfig.CodeBlock.Chroma != nil, "login.SetStyles: styles not built by styles.New")
 	m.styles = s
 }
 
@@ -79,10 +87,15 @@ func (m *Model) Reset() {
 	m.password.Blur()
 	m.state = StateIdle
 	m.errorMsg = ""
+	assert.That(m.identifier.Focused(), "login.Reset: identifier not focused")
+	assert.That(!m.password.Focused(), "login.Reset: password still focused")
+	assert.That(m.identifier.Value() == "", "login.Reset: identifier not cleared")
+	assert.That(m.password.Value() == "", "login.Reset: password not cleared")
 }
 
 // Update handles messages for the login screen.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+	assert.That(m.focusField >= 0 && m.focusField < numFields, "login.Update: focus field out of range")
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if m.state == StateLoading {
@@ -112,6 +125,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 
 	case LoginErrorMsg:
+		assert.That(msg.Err != nil, "login.Update: LoginErrorMsg without an error")
 		m.state = StateError
 		var kratosErr *auth.KratosError
 		if errors.As(msg.Err, &kratosErr) {
@@ -135,6 +149,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m *Model) updateFocus() {
+	assert.That(m.focusField >= 0 && m.focusField < numFields, "login.updateFocus: focus field out of range")
 	m.identifier.Blur()
 	m.password.Blur()
 	switch m.focusField {
@@ -143,6 +158,7 @@ func (m *Model) updateFocus() {
 	case fieldPassword:
 		m.password.Focus()
 	}
+	assert.That(m.identifier.Focused() != m.password.Focused(), "login.updateFocus: not exactly one field focused")
 }
 
 // View renders the login screen.
@@ -156,6 +172,7 @@ func (m Model) View() string {
 	idLabel := m.styles.Timestamp.Render("Email / Username:")
 	pwLabel := m.styles.Timestamp.Render("Password:")
 
+	assert.That(m.state >= StateIdle && m.state <= StateError, "login.View: unknown state")
 	var statusLine string
 	switch m.state {
 	case StateLoading:
@@ -187,6 +204,8 @@ func (m Model) View() string {
 	if m.width < boxWidth+4 {
 		boxWidth = m.width - 4
 	}
+	assert.That(boxWidth <= 50, "login.View: box wider than 50")
+	assert.That(boxWidth <= m.width, "login.View: box wider than the screen")
 
 	box := m.styles.CmdPalette.Width(boxWidth).Render(content)
 

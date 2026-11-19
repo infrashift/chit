@@ -6,10 +6,13 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/infrashift/chit/internal/app"
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 )
 
 func createTeam(a *app.App) http.HandlerFunc {
+	assert.That(a != nil, "createTeam: nil app")
+	assert.That(a.Store != nil, "createTeam: nil store")
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
 		var body struct {
@@ -22,6 +25,7 @@ func createTeam(a *app.App) http.HandlerFunc {
 			return
 		}
 
+		assert.That(user != nil, "createTeam: no authenticated user")
 		saved, err := a.CreateTeam(r.Context(), &model.Team{
 			Name: body.Name, DisplayName: body.DisplayName, Description: body.Description,
 			Type: body.Type, CreatorID: user.ID,
@@ -30,23 +34,29 @@ func createTeam(a *app.App) http.HandlerFunc {
 			WriteAppError(w, "createTeam", err)
 			return
 		}
+		assert.That(saved != nil, "createTeam: app returned nil without an error")
 
 		WriteJSON(w, http.StatusCreated, saved)
 	}
 }
 
 func getTeam(a *app.App) http.HandlerFunc {
+	assert.That(a != nil, "getTeam: nil app")
+	assert.That(a.Store != nil, "getTeam: nil store")
 	return func(w http.ResponseWriter, r *http.Request) {
 		team, err := a.GetTeam(r.Context(), chi.URLParam(r, "id"), ContextGetUser(r))
 		if err != nil {
 			WriteAppError(w, "getTeam", err)
 			return
 		}
+		assert.That(team != nil, "getTeam: app returned nil without an error")
 		WriteJSON(w, http.StatusOK, team)
 	}
 }
 
 func updateTeam(a *app.App) http.HandlerFunc {
+	assert.That(a != nil, "updateTeam: nil app")
+	assert.That(a.Store != nil, "updateTeam: nil store")
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Name        *string `json:"name"`
@@ -73,11 +83,14 @@ func updateTeam(a *app.App) http.HandlerFunc {
 			WriteAppError(w, "updateTeam", err)
 			return
 		}
+		assert.That(updated != nil, "updateTeam: app returned nil without an error")
 		WriteJSON(w, http.StatusOK, updated)
 	}
 }
 
 func deleteTeam(a *app.App) http.HandlerFunc {
+	assert.That(a != nil, "deleteTeam: nil app")
+	assert.That(a.Store != nil, "deleteTeam: nil store")
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := a.DeleteTeam(r.Context(), chi.URLParam(r, "id"), ContextGetUser(r)); err != nil {
 			WriteAppError(w, "deleteTeam", err)
@@ -88,6 +101,8 @@ func deleteTeam(a *app.App) http.HandlerFunc {
 }
 
 func getAllTeams(a *app.App) http.HandlerFunc {
+	assert.That(a != nil, "getAllTeams: nil app")
+	assert.That(a.Store != nil, "getAllTeams: nil store")
 	return func(w http.ResponseWriter, r *http.Request) {
 		page, perPage := parsePagination(r, 60)
 
@@ -102,8 +117,11 @@ func getAllTeams(a *app.App) http.HandlerFunc {
 }
 
 func getMyTeams(a *app.App) http.HandlerFunc {
+	assert.That(a != nil, "getMyTeams: nil app")
+	assert.That(a.Store != nil, "getMyTeams: nil store")
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
+		assert.That(user != nil, "getMyTeams: no authenticated user")
 		teams, err := a.GetTeamsForUser(r.Context(), user.ID)
 		if err != nil {
 			WriteAppError(w, "getMyTeams", err)
@@ -114,6 +132,8 @@ func getMyTeams(a *app.App) http.HandlerFunc {
 }
 
 func addTeamMember(a *app.App) http.HandlerFunc {
+	assert.That(a != nil, "addTeamMember: nil app")
+	assert.That(a.Store != nil, "addTeamMember: nil store")
 	return func(w http.ResponseWriter, r *http.Request) {
 		actor := ContextGetUser(r)
 		if actor == nil {
@@ -133,12 +153,15 @@ func addTeamMember(a *app.App) http.HandlerFunc {
 			WriteAppError(w, "addTeamMember", err)
 			return
 		}
+		assert.That(member != nil, "addTeamMember: app returned nil without an error")
 
 		WriteJSON(w, http.StatusCreated, member)
 	}
 }
 
 func removeTeamMember(a *app.App) http.HandlerFunc {
+	assert.That(a != nil, "removeTeamMember: nil app")
+	assert.That(a.Store != nil, "removeTeamMember: nil store")
 	return func(w http.ResponseWriter, r *http.Request) {
 		actor := ContextGetUser(r)
 		if actor == nil {
@@ -158,6 +181,8 @@ func removeTeamMember(a *app.App) http.HandlerFunc {
 }
 
 func getTeamMembers(a *app.App) http.HandlerFunc {
+	assert.That(a != nil, "getTeamMembers: nil app")
+	assert.That(a.Store != nil, "getTeamMembers: nil store")
 	return func(w http.ResponseWriter, r *http.Request) {
 		teamID := chi.URLParam(r, "id")
 		page, perPage := parsePagination(r, 60)

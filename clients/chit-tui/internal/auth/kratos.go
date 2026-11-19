@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/errlog"
 )
 
@@ -55,6 +56,7 @@ type KratosError struct {
 }
 
 func (e *KratosError) Error() string {
+	assert.That(e != nil, "KratosError.Error: nil error")
 	return fmt.Sprintf("kratos: %d %s", e.StatusCode, e.Message)
 }
 
@@ -63,8 +65,11 @@ func (e *KratosError) Error() string {
 // about whether the session is still good.
 func IsSessionRejected(err error) bool {
 	var ke *KratosError
-	return errors.As(err, &ke) &&
-		(ke.StatusCode == http.StatusUnauthorized || ke.StatusCode == http.StatusForbidden)
+	if !errors.As(err, &ke) {
+		return false
+	}
+	assert.That(ke != nil, "IsSessionRejected: errors.As matched a nil *KratosError")
+	return ke.StatusCode == http.StatusUnauthorized || ke.StatusCode == http.StatusForbidden
 }
 
 // KratosClient is an HTTP client for Kratos self-service flows.
@@ -75,14 +80,19 @@ type KratosClient struct {
 
 // NewKratosClient creates a new KratosClient. baseURL should be "{ServerURL}/kratos".
 func NewKratosClient(baseURL string) *KratosClient {
-	return &KratosClient{
+	assert.That(baseURL != "", "NewKratosClient: empty base URL")
+	c := &KratosClient{
 		baseURL: baseURL,
 		http:    &http.Client{Timeout: 30 * time.Second},
 	}
+	assert.That(c.http.Timeout > 0, "NewKratosClient: requests must time out")
+	return c
 }
 
 // InitLoginFlow initiates a Kratos self-service login flow for API clients.
 func (c *KratosClient) InitLoginFlow(ctx context.Context) (*LoginFlow, error) {
+	assert.That(ctx != nil, "InitLoginFlow: nil context")
+	assert.That(c.http != nil && c.baseURL != "", "InitLoginFlow: client not built by NewKratosClient")
 	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/self-service/login/api", nil)
 	if err != nil {
 		return nil, err
@@ -93,6 +103,7 @@ func (c *KratosClient) InitLoginFlow(ctx context.Context) (*LoginFlow, error) {
 	if err != nil {
 		return nil, err
 	}
+	assert.That(resp != nil && resp.Body != nil, "kratos: no response without an error")
 	defer errlog.Close(resp.Body, "kratos response body")
 
 	if resp.StatusCode >= 400 {
@@ -108,6 +119,8 @@ func (c *KratosClient) InitLoginFlow(ctx context.Context) (*LoginFlow, error) {
 
 // SubmitLogin submits credentials to an active login flow.
 func (c *KratosClient) SubmitLogin(ctx context.Context, flowID, identifier, password string) (*Session, error) {
+	assert.That(ctx != nil, "SubmitLogin: nil context")
+	assert.That(c.http != nil && c.baseURL != "", "SubmitLogin: client not built by NewKratosClient")
 	body := map[string]string{
 		"method":     "password",
 		"identifier": identifier,
@@ -117,6 +130,7 @@ func (c *KratosClient) SubmitLogin(ctx context.Context, flowID, identifier, pass
 	if err != nil {
 		return nil, err
 	}
+	assert.That(len(data) > 0, "SubmitLogin: empty request body")
 
 	url := fmt.Sprintf("%s/self-service/login?flow=%s", c.baseURL, flowID)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
@@ -130,6 +144,7 @@ func (c *KratosClient) SubmitLogin(ctx context.Context, flowID, identifier, pass
 	if err != nil {
 		return nil, err
 	}
+	assert.That(resp != nil && resp.Body != nil, "kratos: no response without an error")
 	defer errlog.Close(resp.Body, "kratos response body")
 
 	if resp.StatusCode >= 400 {
@@ -150,6 +165,9 @@ func (c *KratosClient) SubmitLogin(ctx context.Context, flowID, identifier, pass
 
 // CheckSession validates a session token against Kratos.
 func (c *KratosClient) CheckSession(ctx context.Context, token string) (*Identity, error) {
+	assert.That(ctx != nil, "CheckSession: nil context")
+	assert.That(c.http != nil && c.baseURL != "", "CheckSession: client not built by NewKratosClient")
+	assert.That(token != "", "CheckSession: empty token")
 	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/sessions/whoami", nil)
 	if err != nil {
 		return nil, err
@@ -161,6 +179,7 @@ func (c *KratosClient) CheckSession(ctx context.Context, token string) (*Identit
 	if err != nil {
 		return nil, err
 	}
+	assert.That(resp != nil && resp.Body != nil, "kratos: no response without an error")
 	defer errlog.Close(resp.Body, "kratos response body")
 
 	if resp.StatusCode >= 400 {
@@ -177,6 +196,8 @@ func (c *KratosClient) CheckSession(ctx context.Context, token string) (*Identit
 }
 
 func (c *KratosClient) parseError(resp *http.Response) error {
+	assert.That(resp != nil && resp.Body != nil, "parseError: no response body")
+	assert.That(resp.StatusCode >= 400, "parseError: not an error status")
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return &KratosError{StatusCode: resp.StatusCode, Message: "failed to read error response"}
@@ -226,5 +247,6 @@ func (c *KratosClient) parseError(resp *http.Response) error {
 	if msg == "" {
 		msg = string(body)
 	}
+	assert.That(msg != "" || len(body) == 0, "parseError: a non-empty body produced no message")
 	return &KratosError{StatusCode: resp.StatusCode, Message: msg}
 }

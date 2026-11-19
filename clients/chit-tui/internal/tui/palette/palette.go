@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/listwin"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
@@ -99,7 +100,7 @@ func New(s styles.Styles) Model {
 	ti := textinput.New()
 	ti.Placeholder = "Jump to channel — @ people, / commands, ? search"
 	ti.CharLimit = 256
-	return Model{
+	m := Model{
 		input:     ti,
 		teamNames: make(map[string]string),
 		dmNames:   make(map[string]string),
@@ -108,18 +109,29 @@ func New(s styles.Styles) Model {
 		usernames: make(map[string]string),
 		styles:    s,
 	}
+	assert.That(m.mode == modeFor(m.input.Value()), "palette.New: mode out of step with the query")
+	assert.That(!m.visible && !m.focused, "palette.New: a new palette starts hidden")
+	return m
 }
 
 // SetChannels sets the flattened all-team channel list.
 func (m *Model) SetChannels(channels []*model.Channel) {
 	m.channels = channels
 	m.refresh()
+	assert.That(m.mode == modeFor(m.input.Value()), "palette.SetChannels: mode out of step with the query")
+	assert.That(m.cursor >= 0 && (m.cursor == 0 || m.cursor < len(m.rows)), "palette.SetChannels: cursor outside the rows")
+	assert.That(m.mode != ModeChannels || len(m.rows) <= len(m.channels)+len(m.dms),
+		"palette.SetChannels: more rows than channels")
 }
 
 // SetDMChannels sets the DM/group channel list.
 func (m *Model) SetDMChannels(channels []*model.Channel) {
 	m.dms = channels
 	m.refresh()
+	assert.That(m.mode == modeFor(m.input.Value()), "palette.SetDMChannels: mode out of step with the query")
+	assert.That(m.cursor >= 0 && (m.cursor == 0 || m.cursor < len(m.rows)), "palette.SetDMChannels: cursor outside the rows")
+	assert.That(m.mode != ModeChannels || len(m.rows) <= len(m.channels)+len(m.dms),
+		"palette.SetDMChannels: more rows than channels")
 }
 
 // SetTeams sets the known teams, used for "#channel · team" row suffixes.
@@ -134,14 +146,22 @@ func (m *Model) SetTeams(teams []*model.Team) {
 	}
 	m.multiTeam = len(teams) > 1
 	m.refresh()
+	assert.That(len(m.teamNames) <= len(teams), "palette.SetTeams: more team names than teams")
+	assert.That(m.mode == modeFor(m.input.Value()), "palette.SetTeams: mode out of step with the query")
+	assert.That(m.cursor >= 0 && (m.cursor == 0 || m.cursor < len(m.rows)), "palette.SetTeams: cursor outside the rows")
 }
 
 // SetDMDisplayNames shares the root's DM display-name map. The map is held by
 // reference, so later root-side updates are picked up automatically.
-func (m *Model) SetDMDisplayNames(names map[string]string) { m.dmNames = names }
+func (m *Model) SetDMDisplayNames(names map[string]string) {
+	assert.That(names != nil, "palette.SetDMDisplayNames: nil map")
+	m.dmNames = names
+}
 
 // SetCounts shares the root's unread and mention maps by reference.
 func (m *Model) SetCounts(unread, mentions map[string]int64) {
+	assert.That(unread != nil, "palette.SetCounts: nil unread map")
+	assert.That(mentions != nil, "palette.SetCounts: nil mentions map")
 	m.unread = unread
 	m.mentions = mentions
 }
@@ -150,26 +170,41 @@ func (m *Model) SetCounts(unread, mentions map[string]int64) {
 func (m *Model) SetCommands(cmds []*model.Command) {
 	m.commands = cmds
 	m.refresh()
+	assert.That(m.mode != ModeCommands || len(m.rows) <= len(cmds),
+		"palette.SetCommands: more rows than commands")
+	assert.That(m.cursor >= 0 && (m.cursor == 0 || m.cursor < len(m.rows)), "palette.SetCommands: cursor outside the rows")
 }
 
 // SetUsers sets the "@" mode search results.
 func (m *Model) SetUsers(users []*model.User) {
 	m.users = users
 	m.refresh()
+	assert.That(m.mode != ModeUsers || len(m.rows) == len(users),
+		"palette.SetUsers: one row per user")
+	assert.That(m.cursor >= 0 && (m.cursor == 0 || m.cursor < len(m.rows)), "palette.SetUsers: cursor outside the rows")
 }
 
 // SetSearchResults sets the "?" mode search results.
 func (m *Model) SetSearchResults(posts []*model.Post) {
 	m.posts = posts
 	m.refresh()
+	assert.That(m.mode != ModeSearch || len(m.rows) == len(posts),
+		"palette.SetSearchResults: one row per post")
+	assert.That(m.cursor >= 0 && (m.cursor == 0 || m.cursor < len(m.rows)), "palette.SetSearchResults: cursor outside the rows")
 }
 
 // SetUsernames sets the userID -> username map used to render search results.
-func (m *Model) SetUsernames(names map[string]string) { m.usernames = names }
+func (m *Model) SetUsernames(names map[string]string) {
+	assert.That(names != nil, "palette.SetUsernames: nil map")
+	m.usernames = names
+}
 
 // SetActiveChannel sets the display name of the active channel, shown in the
 // "?" mode header (message search is scoped to the active channel).
-func (m *Model) SetActiveChannel(name string) { m.activeChanName = name }
+func (m *Model) SetActiveChannel(name string) {
+	assert.That(m.mode == modeFor(m.input.Value()), "palette.SetActiveChannel: mode out of step with the query")
+	m.activeChanName = name
+}
 
 // Open shows the palette with the query pre-filled (e.g. "", "@", "/", "?").
 func (m *Model) Open(prefix string) {
@@ -182,6 +217,10 @@ func (m *Model) Open(prefix string) {
 	m.posts = nil
 	m.cursor = 0
 	m.refresh()
+	assert.That(m.mode == modeFor(prefix), "palette.Open: mode does not match the prefix")
+	assert.That(m.cursor == 0, "palette.Open: cursor not on the first row")
+	assert.That(m.visible && m.focused, "palette.Open: not shown and focused")
+	assert.That(m.input.Focused(), "palette.Open: input not focused")
 }
 
 // Close hides the palette.
@@ -191,6 +230,8 @@ func (m *Model) Close() {
 	m.input.Blur()
 	m.users = nil
 	m.posts = nil
+	assert.That(!m.input.Focused(), "palette.Close: input still focused")
+	assert.That(m.cursor >= 0 && (m.cursor == 0 || m.cursor < len(m.rows)), "palette.Close: cursor outside the rows")
 }
 
 // Visible returns the visibility state.
@@ -203,12 +244,14 @@ func (m Model) Focused() bool { return m.focused }
 func (m *Model) Focus() {
 	m.focused = true
 	m.input.Focus()
+	assert.That(m.input.Focused(), "palette.Focus: input not focused")
 }
 
 // Blur removes focus.
 func (m *Model) Blur() {
 	m.focused = false
 	m.input.Blur()
+	assert.That(!m.input.Focused(), "palette.Blur: input still focused")
 }
 
 // SetStyles replaces the styles.
@@ -219,10 +262,15 @@ func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
 	m.input.Width = w/2 - 8
+	assert.That(m.maxVisibleRows() >= 5, "palette.SetSize: fewer than 5 visible rows")
+	assert.That(m.cursor >= 0 && (m.cursor == 0 || m.cursor < len(m.rows)), "palette.SetSize: cursor outside the rows")
 }
 
 // Mode returns the current mode.
-func (m Model) Mode() Mode { return m.mode }
+func (m Model) Mode() Mode {
+	assert.That(m.mode == modeFor(m.input.Value()), "palette.Mode: mode out of step with the query")
+	return m.mode
+}
 
 // query returns the input value without its mode prefix.
 func (m Model) query() string {
@@ -230,11 +278,14 @@ func (m Model) query() string {
 	if v == "" {
 		return ""
 	}
+	q := v
 	switch v[0] {
 	case '@', '/', '?':
-		return v[1:]
+		q = v[1:]
 	}
-	return v
+	assert.That(len(q) <= len(v), "palette.query: query longer than the input")
+	assert.That(len(v)-len(q) <= 1, "palette.query: more than the one-byte prefix removed")
+	return q
 }
 
 func modeFor(value string) Mode {
@@ -261,6 +312,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	if !m.visible || !m.focused {
 		return m, nil
 	}
+	assert.That(m.cursor >= 0 && (m.cursor == 0 || m.cursor < len(m.rows)), "palette.Update: cursor outside the rows")
+	assert.That(m.mode == modeFor(m.input.Value()), "palette.Update: mode out of step with the query")
 
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		if next, cmd, handled := m.handleKey(keyMsg); handled {
@@ -272,7 +325,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	if m.input.Value() != prevValue {
-		return m, m.queryChanged(cmd)
+		cmd = m.queryChanged(cmd)
+		assert.That(m.mode == modeFor(m.input.Value()), "palette.Update: mode out of step with the query")
+		return m, cmd
 	}
 	return m, cmd
 }
@@ -283,6 +338,7 @@ func (m Model) debounced(deb DebounceMsg) tea.Cmd {
 	if !m.visible || deb.Gen != m.debounceGen || m.mode != ModeUsers {
 		return nil
 	}
+	assert.That(strings.HasPrefix(m.input.Value(), "@"), "palette.debounced: user mode without the @ prefix")
 	if term := strings.TrimSpace(m.query()); term != "" {
 		return func() tea.Msg { return UserQueryMsg{Term: term} }
 	}
@@ -295,6 +351,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	switch msg.Type {
 	case tea.KeyEscape:
 		m.Close()
+		assert.That(!m.visible && !m.focused, "palette.handleKey: still shown after Escape")
 		return m, nil, true
 	case tea.KeyEnter:
 		next, cmd := m.choose(m.cursor)
@@ -303,11 +360,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		if m.cursor > 0 {
 			m.cursor--
 		}
+		assert.That(m.cursor >= 0, "palette.handleKey: cursor above the first row")
 		return m, nil, true
 	case tea.KeyDown:
 		if m.cursor < len(m.rows)-1 {
 			m.cursor++
 		}
+		assert.That(m.cursor == 0 || m.cursor < len(m.rows), "palette.handleKey: cursor below the last row")
 		return m, nil, true
 	}
 	return m, nil, false
@@ -321,6 +380,8 @@ func (m *Model) queryChanged(cmd tea.Cmd) tea.Cmd {
 	// keeping the old index would point Enter at whatever landed there.
 	m.cursor = 0
 	m.refresh()
+	assert.That(m.mode == modeFor(m.input.Value()), "palette.queryChanged: mode out of step with the query")
+	assert.That(m.cursor == 0, "palette.queryChanged: cursor not reset to the best match")
 	// Editing a submitted search invalidates its results.
 	if m.mode == ModeSearch {
 		m.posts = nil
@@ -335,6 +396,7 @@ func (m *Model) queryChanged(cmd tea.Cmd) tea.Cmd {
 	}
 	m.debounceGen++
 	gen := m.debounceGen
+	assert.That(gen > 0, "palette.queryChanged: debounce generation did not advance")
 	return tea.Batch(cmd, tea.Tick(debounceDelay, func(time.Time) tea.Msg {
 		return DebounceMsg{Gen: gen}
 	}))
@@ -342,6 +404,8 @@ func (m *Model) queryChanged(cmd tea.Cmd) tea.Cmd {
 
 // choose activates the row at idx (Enter or mouse click).
 func (m *Model) choose(idx int) (Model, tea.Cmd) {
+	assert.That(idx >= 0, "palette.choose: negative row index")
+	assert.That(m.mode == modeFor(m.input.Value()), "palette.choose: mode out of step with the query")
 	switch m.mode {
 	case ModeSearch:
 		// No results yet: Enter submits the search.
@@ -374,7 +438,10 @@ func (m *Model) choose(idx int) (Model, tea.Cmd) {
 		return *m, nil
 	}
 	r := m.rows[idx]
+	assert.That(r.channel != nil || r.user != nil || r.command != nil || r.post != nil,
+		"palette.choose: row has no target")
 	m.Close()
+	assert.That(!m.visible, "palette.choose: still visible after a choice")
 	switch {
 	case r.channel != nil:
 		ch := r.channel
@@ -408,10 +475,17 @@ func (m *Model) refresh() {
 	if m.cursor >= len(m.rows) {
 		m.cursor = 0
 	}
+	assert.That(m.mode >= ModeChannels && m.mode <= ModeSearch, "palette.refresh: unknown mode")
+	assert.That(m.mode != ModeUsers || len(m.rows) == len(m.users), "palette.refresh: one row per user")
+	assert.That(m.mode != ModeSearch || len(m.rows) == len(m.posts), "palette.refresh: one row per post")
+	assert.That(m.mode != ModeCommands || len(m.rows) <= len(m.commands), "palette.refresh: more rows than commands")
+	assert.That(m.cursor >= 0 && (m.cursor == 0 || m.cursor < len(m.rows)), "palette.refresh: cursor outside the rows")
 }
 
 // channelDisplayName resolves the label for a channel or DM row.
 func (m Model) channelDisplayName(ch *model.Channel) string {
+	assert.That(ch != nil, "palette.channelDisplayName: nil channel")
+	assert.That(m.dmNames != nil, "palette.channelDisplayName: nil DM name map")
 	if name := m.dmNames[ch.ID]; name != "" {
 		return name
 	}
@@ -422,6 +496,8 @@ func (m Model) channelDisplayName(ch *model.Channel) string {
 }
 
 func (m Model) channelRows() []row {
+	assert.That(m.mode == ModeChannels, "palette.channelRows: called outside channel mode")
+	assert.That(m.unread != nil && m.mentions != nil, "palette.channelRows: nil count maps")
 	query := strings.TrimSpace(m.query())
 
 	type scored struct {
@@ -460,8 +536,11 @@ func (m Model) channelRows() []row {
 		return a.ch.LastPostAt > b.ch.LastPostAt
 	})
 
+	assert.That(len(matches) <= len(m.channels)+len(m.dms), "palette.channelRows: more matches than channels")
 	rows := make([]row, len(matches))
 	for i, s := range matches {
+		assert.That(s.ch != nil, "palette.channelRows: match without a channel")
+		assert.That(query != "" || s.score == 0, "palette.channelRows: empty query scored a match")
 		label := s.label
 		if unread := m.unread[s.ch.ID]; unread > 0 {
 			label += " " + m.styles.UnreadBadge.Render(fmt.Sprintf("(%d)", unread))
@@ -475,6 +554,7 @@ func (m Model) channelRows() []row {
 }
 
 func (m Model) userRows() []row {
+	assert.That(m.mode == ModeUsers, "palette.userRows: called outside user mode")
 	rows := make([]row, len(m.users))
 	for i, u := range m.users {
 		label := "@" + u.Username
@@ -483,10 +563,12 @@ func (m Model) userRows() []row {
 		}
 		rows[i] = row{label: label, user: u}
 	}
+	assert.That(len(rows) == len(m.users), "palette.userRows: one row per user")
 	return rows
 }
 
 func (m Model) commandRows() []row {
+	assert.That(m.mode == ModeCommands, "palette.commandRows: called outside command mode")
 	query := strings.TrimSpace(m.query())
 
 	type scored struct {
@@ -502,28 +584,35 @@ func (m Model) commandRows() []row {
 		matches = append(matches, scored{cmd: c, score: score})
 	}
 	sort.SliceStable(matches, func(i, j int) bool { return matches[i].score > matches[j].score })
+	assert.That(len(matches) <= len(m.commands), "palette.commandRows: more matches than commands")
 
 	rows := make([]row, len(matches))
 	for i, s := range matches {
+		assert.That(s.cmd != nil, "palette.commandRows: match without a command")
 		rows[i] = row{
 			label:   "/" + s.cmd.Slug + "  " + m.styles.Timestamp.Render(s.cmd.Description),
 			command: s.cmd,
 		}
 	}
+	assert.That(len(rows) == len(matches), "palette.commandRows: one row per match")
 	return rows
 }
 
 func (m Model) postRows() []row {
+	assert.That(m.mode == ModeSearch, "palette.postRows: called outside search mode")
+	assert.That(m.usernames != nil, "palette.postRows: nil username map")
 	rows := make([]row, len(m.posts))
 	for i, p := range m.posts {
 		author := m.usernames[p.UserID]
 		if author == "" && p.UserID != "" {
 			author = p.UserID[:min(8, len(p.UserID))]
 		}
+		assert.That(author != "" || p.UserID == "", "palette.postRows: known author left unnamed")
 		excerpt := strings.ReplaceAll(p.Content, "\n", " ")
 		if len([]rune(excerpt)) > 60 {
 			excerpt = string([]rune(excerpt)[:60]) + "…"
 		}
+		assert.That(len([]rune(excerpt)) <= 61, "palette.postRows: excerpt not truncated")
 		rows[i] = row{label: author + ": " + excerpt, post: p}
 	}
 	return rows
@@ -540,16 +629,24 @@ const (
 
 // maxVisibleRows is how many result rows fit in the palette.
 func (m Model) maxVisibleRows() int {
-	return max(m.height/2-6, 5)
+	n := max(m.height/2-6, 5)
+	assert.That(n >= 5, "palette.maxVisibleRows: below the minimum of 5")
+	return n
 }
 
 // windowStart is the index of the first visible row, keeping the cursor in view.
 func (m Model) windowStart() int {
-	return listwin.Start(m.cursor, len(m.rows), m.maxVisibleRows())
+	start := listwin.Start(m.cursor, len(m.rows), m.maxVisibleRows())
+	assert.That(start >= 0, "palette.windowStart: negative start")
+	assert.That(start <= m.cursor, "palette.windowStart: cursor above the window")
+	assert.That(start == 0 || start < len(m.rows), "palette.windowStart: start past the last row")
+	return start
 }
 
 // contextLine renders the second line of the palette body.
 func (m Model) contextLine() string {
+	assert.That(m.visible, "palette.contextLine: rendered while hidden")
+	assert.That(m.mode == modeFor(m.input.Value()), "palette.contextLine: mode out of step with the query")
 	switch m.mode {
 	case ModeSearch:
 		if m.activeChanName == "" && !strings.HasPrefix(m.query(), "?") {
@@ -560,6 +657,7 @@ func (m Model) contextLine() string {
 		if strings.HasPrefix(m.query(), "?") {
 			scope = "all channels"
 		}
+		assert.That(scope != "", "palette.contextLine: empty search scope")
 		if len(m.posts) == 0 {
 			return m.styles.Timestamp.Render(
 				"Search in " + scope + " — press Enter, or ?? to search everywhere")
@@ -588,6 +686,9 @@ func (m Model) View() string {
 
 	start := m.windowStart()
 	end := min(start+m.maxVisibleRows(), len(m.rows))
+	assert.That(start == 0 || start < end, "palette.View: window starts past its end")
+	assert.That(end <= len(m.rows), "palette.View: window ends past the rows")
+	assert.That(m.cursor >= 0 && (m.cursor == 0 || m.cursor < len(m.rows)), "palette.View: cursor outside the rows")
 	for i := start; i < end; i++ {
 		line := m.rows[i].label
 		if i == m.cursor {
@@ -598,6 +699,7 @@ func (m Model) View() string {
 		items = append(items, line)
 	}
 
+	assert.That(len(items) == 2+end-start, "palette.View: one line per visible row")
 	items = append(items, "", m.footer())
 	content := lipgloss.JoinVertical(lipgloss.Left, items...)
 	return m.styles.CmdPalette.Width(m.width / 2).Render(content)
@@ -614,6 +716,8 @@ func (m Model) RowAt(localY int) (int, bool) {
 	if idx >= len(m.rows) {
 		return 0, false
 	}
+	assert.That(idx >= 0, "palette.RowAt: negative row index")
+	assert.That(m.cursor >= 0 && (m.cursor == 0 || m.cursor < len(m.rows)), "palette.RowAt: cursor outside the rows")
 	return idx, true
 }
 
@@ -622,6 +726,9 @@ func (m Model) RowAt(localY int) (int, bool) {
 func (m *Model) ChooseRow(idx int) tea.Cmd {
 	updated, cmd := m.choose(idx)
 	*m = updated
+	assert.That(m.visible || !m.focused, "palette.ChooseRow: hidden but focused")
+	assert.That(m.mode == modeFor(m.input.Value()), "palette.ChooseRow: mode out of step with the query")
+	assert.That(m.cursor >= 0 && (m.cursor == 0 || m.cursor < len(m.rows)), "palette.ChooseRow: cursor outside the rows")
 	return cmd
 }
 
@@ -634,4 +741,6 @@ func (m *Model) MoveCursor(delta int) {
 	if m.cursor >= len(m.rows) {
 		m.cursor = max(len(m.rows)-1, 0)
 	}
+	assert.That(m.cursor >= 0, "palette.MoveCursor: cursor above the first row")
+	assert.That(m.cursor == 0 || m.cursor < len(m.rows), "palette.MoveCursor: cursor below the last row")
 }

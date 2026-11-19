@@ -2,9 +2,11 @@ package input
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/mention"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 )
@@ -45,49 +47,70 @@ func New(s styles.Styles) Model {
 	ta.CharLimit = 65535
 	ta.ShowLineNumbers = false
 	ta.SetHeight(3)
-	return Model{
+	m := Model{
 		textarea: ta,
 		styles:   s,
 	}
+	assert.That(m.focused == m.textarea.Focused(), "input.New: focus flag and textarea disagree")
+	assert.That(m.textarea.Height() >= 1, "input.New: textarea has no rows")
+	return m
 }
 
 // Focus sets focus state and focuses the textarea.
 func (m *Model) Focus() tea.Cmd {
 	m.focused = true
-	return m.textarea.Focus()
+	cmd := m.textarea.Focus()
+	assert.That(m.textarea.Focused(), "Model.Focus: textarea not focused")
+	return cmd
 }
 
 // Blur removes focus and blurs the textarea.
 func (m *Model) Blur() {
 	m.focused = false
 	m.textarea.Blur()
+	assert.That(!m.textarea.Focused(), "Model.Blur: textarea kept focus")
 }
 
 // Focused returns the focus state.
-func (m Model) Focused() bool { return m.focused }
+func (m Model) Focused() bool {
+	assert.That(m.focused == m.textarea.Focused(), "Model.Focused: focus flag and textarea disagree")
+	return m.focused
+}
 
 // SetStyles replaces the styles.
 func (m *Model) SetStyles(s styles.Styles) { m.styles = s }
 
 // SetSize sets the input area dimensions.
 func (m *Model) SetSize(w, h int) {
+	assert.That(h > 0, "Model.SetSize: no height")
 	m.width = w
 	m.height = h
 	m.textarea.SetWidth(w - 4)
 	m.textarea.SetHeight(max(h-2, 1))
+	assert.That(m.textarea.Height() >= 1, "Model.SetSize: textarea has no rows")
+	assert.That(m.textarea.Height() <= max(h-2, 1), "Model.SetSize: textarea taller than the area")
 }
 
 // Value returns the current input text.
-func (m Model) Value() string { return m.textarea.Value() }
+func (m Model) Value() string {
+	v := m.textarea.Value()
+	assert.That(utf8.RuneCountInString(v) <= m.textarea.CharLimit, "Model.Value: text over the character limit")
+	return v
+}
 
 // Reset clears the input.
-func (m *Model) Reset() { m.textarea.Reset() }
+func (m *Model) Reset() {
+	m.textarea.Reset()
+	assert.That(m.textarea.Value() == "", "Model.Reset: text left behind")
+	assert.That(m.textarea.Line() == 0, "Model.Reset: cursor not on the first line")
+}
 
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	if !m.focused {
 		return m, nil
 	}
+	assert.That(m.textarea.Focused(), "Model.Update: focused input with a blurred textarea")
 
 	keyMsg, ok := msg.(tea.KeyMsg)
 	if ok {
@@ -97,6 +120,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				// Alt+Enter: insert newline
 				var cmd tea.Cmd
 				m.textarea, cmd = m.textarea.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\n'}})
+				assert.That(m.textarea.Line() < m.textarea.LineCount(), "Model.Update: cursor past the last line after a newline")
 				return m, cmd
 			}
 			content := strings.TrimSpace(m.textarea.Value())
@@ -106,15 +130,19 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			// Check for slash command
 			if strings.HasPrefix(content, "/") {
 				m.textarea.Reset()
+				assert.That(m.textarea.Value() == "", "Model.Update: slash command left in the input")
 				return m, func() tea.Msg { return SlashTriggerMsg{Input: content} }
 			}
 			m.textarea.Reset()
+			assert.That(m.textarea.Value() == "", "Model.Update: sent message left in the input")
 			return m, func() tea.Msg { return SendMsg{Content: content} }
 		}
 	}
 
 	var cmd tea.Cmd
 	m.textarea, cmd = m.textarea.Update(msg)
+	assert.That(utf8.RuneCountInString(m.textarea.Value()) <= m.textarea.CharLimit, "Model.Update: text over the character limit")
+	assert.That(m.textarea.Line() < m.textarea.LineCount(), "Model.Update: cursor past the last line")
 
 	// Detect @ mention trigger
 	atCmd := m.detectAtTrigger()
@@ -136,9 +164,13 @@ func (m *Model) detectAtTrigger() tea.Cmd {
 		return nil
 	}
 	currentLine := lines[row]
-	prefix, startCol, active := mention.ExtractMentionPrefix(currentLine, m.cursorCol())
+	col := m.cursorCol()
+	assert.That(col <= utf8.RuneCountInString(currentLine), "Model.detectAtTrigger: cursor past the end of its line")
+	prefix, startCol, active := mention.ExtractMentionPrefix(currentLine, col)
 
 	if active {
+		assert.That(startCol >= 0 && startCol < col, "Model.detectAtTrigger: @ not before the cursor")
+		assert.That(utf8.RuneCountInString(prefix) == col-startCol-1, "Model.detectAtTrigger: prefix not the text after the @")
 		m.prevAtActive = true
 		return func() tea.Msg { return AtTriggerMsg{Prefix: prefix, StartCol: startCol} }
 	}
@@ -156,12 +188,17 @@ func (m *Model) detectAtTrigger() tea.Cmd {
 func (m *Model) ReplaceAtMention(startCol int, username string) {
 	// Each backspace returns a command that restarts the cursor blink. A
 	// mention pick has never scheduled it, so it is not run.
+	assert.That(startCol >= 0, "Model.ReplaceAtMention: negative start column")
 	var restartBlink tea.Cmd
-	for range max(m.cursorCol()-startCol, 0) {
+	before := m.cursorCol()
+	for range max(before-startCol, 0) {
 		m.textarea, restartBlink = m.textarea.Update(tea.KeyMsg{Type: tea.KeyBackspace})
 	}
 	_ = restartBlink
+	assert.That(m.cursorCol() == min(before, startCol), "Model.ReplaceAtMention: prefix not deleted back to the @")
 	m.textarea.InsertString("@" + username + " ")
+	assert.That(utf8.RuneCountInString(m.textarea.Value()) <= m.textarea.CharLimit, "Model.ReplaceAtMention: text over the character limit")
+	assert.That(m.textarea.Line() < m.textarea.LineCount(), "Model.ReplaceAtMention: cursor past the last line")
 }
 
 // cursorCol is the cursor's position in its line, in characters.
@@ -169,11 +206,16 @@ func (m *Model) ReplaceAtMention(startCol int, username string) {
 // is wrong after wide characters and on a wrapped line.
 func (m Model) cursorCol() int {
 	li := m.textarea.LineInfo()
+	assert.That(li.StartColumn >= 0, "Model.cursorCol: negative row start")
+	assert.That(li.ColumnOffset >= 0, "Model.cursorCol: negative column in the row")
 	return li.StartColumn + li.ColumnOffset
 }
 
 // View renders the input area.
 func (m Model) View() string {
+	assert.That(m.focused == m.textarea.Focused(), "Model.View: focus flag and textarea disagree")
+	assert.That(m.textarea.Height() >= 1, "Model.View: textarea has no rows")
+	assert.That(m.textarea.Line() < m.textarea.LineCount(), "Model.View: cursor past the last line")
 	borderStyle := m.styles.Input
 	if m.focused {
 		borderStyle = borderStyle.BorderForeground(m.styles.ActiveBorder.GetBorderBottomForeground())
@@ -186,4 +228,6 @@ func (m Model) View() string {
 func (m *Model) SetValue(s string) {
 	m.textarea.SetValue(s)
 	m.textarea.CursorEnd()
+	assert.That(utf8.RuneCountInString(m.textarea.Value()) <= m.textarea.CharLimit, "Model.SetValue: text over the character limit")
+	assert.That(m.textarea.Line() == m.textarea.LineCount()-1, "Model.SetValue: cursor not on the last line")
 }

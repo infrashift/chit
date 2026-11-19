@@ -13,6 +13,7 @@ import (
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/v2"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/chitclient"
 )
 
@@ -103,7 +104,7 @@ const SettingSourcesAll = "all"
 
 // Defaults returns a Config populated with default values.
 func Defaults() *Config {
-	return &Config{
+	c := &Config{
 		ServerURL:      "http://localhost:8065",
 		ClaudeBin:      "claude",
 		PermissionMode: "dontAsk",
@@ -122,6 +123,8 @@ func Defaults() *Config {
 		MaxConcurrentRuns: 2,
 		ShutdownGrace:     60 * time.Second,
 	}
+	assert.That(c.validateLimits() == nil, "Defaults: default limits fail validation")
+	return c
 }
 
 // UseOAuth reports whether the bridge authenticates with Hydra-issued access
@@ -130,6 +133,7 @@ func (c *Config) UseOAuth() bool { return c.OAuthClientID != "" }
 
 // OAuth returns the client-credentials configuration for chitclient.
 func (c *Config) OAuth() *chitclient.OAuthConfig {
+	assert.That(c.UseOAuth(), "Config.OAuth: OAuth is not configured")
 	return &chitclient.OAuthConfig{
 		TokenURL:     c.OAuthTokenURL,
 		ClientID:     c.OAuthClientID,
@@ -166,6 +170,8 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	assert.That(len(cfg.Channels) > 0 && cfg.WorkDir != "", "Load: channels or workdir missing after validation")
+	assert.That(cfg.RunTimeout > 0 && cfg.MaxConcurrentRuns >= 1, "Load: run limits invalid after validation")
 	return cfg, nil
 }
 
@@ -181,6 +187,7 @@ func envValue(key, value string) (configKey string, configValue any) {
 				channels = append(channels, p)
 			}
 		}
+		assert.That(len(channels) <= len(parts), "envValue: more channels than comma-separated parts")
 		return key, channels
 	}
 	return key, value
@@ -208,6 +215,7 @@ func (c *Config) validateAuth() error {
 	case c.AgentKratosID == "":
 		return fmt.Errorf("either CHIT_CLAUDE_OAUTH_CLIENT_ID or CHIT_CLAUDE_AGENT_KRATOS_ID is required")
 	}
+	assert.That(c.UseOAuth() != (c.AgentKratosID != ""), "Config.validateAuth: not exactly one auth mode")
 	return nil
 }
 

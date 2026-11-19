@@ -7,6 +7,7 @@ import (
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/v2"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/chitclient"
 )
 
@@ -49,6 +50,7 @@ func (c *Config) UseOAuth() bool { return c.OAuthClientID != "" }
 
 // OAuth returns the client-credentials configuration for chitclient.
 func (c *Config) OAuth() *chitclient.OAuthConfig {
+	assert.That(c.UseOAuth(), "Config.OAuth: OAuth is not configured")
 	return &chitclient.OAuthConfig{
 		TokenURL:     c.OAuthTokenURL,
 		ClientID:     c.OAuthClientID,
@@ -60,6 +62,7 @@ func (c *Config) OAuth() *chitclient.OAuthConfig {
 
 // NewClient builds the chitd client for this configuration.
 func (c *Config) NewClient() *chitclient.Client {
+	assert.That(c.UseOAuth() != (c.AgentKratosID != ""), "Config.NewClient: not exactly one auth mode; LoadConfig validates it")
 	if c.UseOAuth() {
 		return chitclient.NewOAuth(c.ServerURL, c.OAuth())
 	}
@@ -102,5 +105,8 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("either CHIT_MCP_OAUTH_CLIENT_ID or CHIT_MCP_AGENT_KRATOS_ID is required")
 	}
 
+	assert.That(cfg.UseOAuth() != (cfg.AgentKratosID != ""), "LoadConfig: not exactly one auth mode after validation")
+	assert.That(!cfg.UseOAuth() || (cfg.OAuthClientSecret != "" && cfg.OAuthTokenURL != ""),
+		"LoadConfig: OAuth mode without its secret or token URL after validation")
 	return cfg, nil
 }

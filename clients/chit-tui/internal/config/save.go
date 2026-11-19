@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/errlog"
 )
 
@@ -17,7 +18,12 @@ import (
 func themeSettingRe(key string) (*regexp.Regexp, bool) {
 	switch key {
 	case "theme", "theme_dark", "theme_light":
-		return regexp.MustCompile(`(?m)^\s*` + key + `\s*=.*$`), true
+		re := regexp.MustCompile(`(?m)^\s*` + key + `\s*=.*$`)
+		// It must find the line SaveThemeSetting writes, or each save would
+		// append another assignment of the same key.
+		assert.That(re.MatchString(key+` = "x"`), "themeSettingRe: pattern misses the line it writes")
+		assert.That(isFileKey(key), "themeSettingRe: key is not a config setting")
+		return re, true
 	default:
 		return nil, false
 	}
@@ -37,13 +43,16 @@ func SaveThemeSetting(key, name string) error {
 	if !ok {
 		return fmt.Errorf("%q is not a theme setting", key)
 	}
+	assert.That(themeLineRe != nil, "SaveThemeSetting: no pattern for a theme setting")
 	path := FilePath()
+	assert.That(path != "", "SaveThemeSetting: empty config path")
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create config directory: %w", err)
 	}
 
 	line := fmt.Sprintf("%s = %q", key, name)
+	assert.That(themeLineRe.MatchString(line), "SaveThemeSetting: pattern misses the line it writes")
 
 	existing, err := os.ReadFile(path)
 	if err != nil {
@@ -65,17 +74,23 @@ func SaveThemeSetting(key, name string) error {
 		body += "\n" + line + "\n"
 	}
 
+	assert.That(strings.Contains(body, line), "SaveThemeSetting: the new setting is missing from the file")
+	// The next save must find this assignment and replace it.
+	assert.That(themeLineRe.MatchString(body), "SaveThemeSetting: the next save would not find the setting")
 	return writeConfig(path, body)
 }
 
 // writeConfig replaces the config file atomically, so an interrupted write
 // cannot leave a truncated file that fails to parse on next start.
 func writeConfig(path, body string) error {
+	assert.That(path != "", "writeConfig: empty path")
+	assert.That(body != "", "writeConfig: empty body")
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.toml")
 	if err != nil {
 		return fmt.Errorf("create temp config: %w", err)
 	}
 	tmpName := tmp.Name()
+	assert.That(filepath.Dir(tmpName) == filepath.Dir(path), "writeConfig: temp file must be beside the target for the rename to be atomic")
 
 	// Cleanup is best-effort: the write has already failed by the time it
 	// runs, and a leftover temp file is not worth masking the real error.

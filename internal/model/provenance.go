@@ -2,9 +2,13 @@ package model
 
 import (
 	"fmt"
+	"net/http"
 	"regexp"
+	"slices"
 
 	"github.com/google/uuid"
+
+	"github.com/infrashift/chit/internal/assert"
 )
 
 // Server-owned and checked post props.
@@ -33,7 +37,9 @@ var sha256HexRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // provenanceIDFields returns the provenance fields that hold UUID lists.
 func provenanceIDFields() []string {
-	return []string{"tool_ids", "okf_namespace_ids", "attachment_ids"}
+	out := []string{"tool_ids", "okf_namespace_ids", "attachment_ids"}
+	assert.That(len(out) == 3, "provenanceIDFields: wrong number of id fields")
+	return out
 }
 
 // ValidateProvenance checks a props.provenance value, as decoded from JSON.
@@ -59,7 +65,10 @@ func ValidateProvenance(v any) *AppError {
 
 // badProvenance is ValidateProvenance's 400 for an invalid props.provenance.
 func badProvenance(format string, args ...any) *AppError {
-	return NewBadRequestError("Post.Provenance", "props.provenance: "+fmt.Sprintf(format, args...))
+	assert.That(format != "", "badProvenance: empty format")
+	err := NewBadRequestError("Post.Provenance", "props.provenance: "+fmt.Sprintf(format, args...))
+	assert.That(err.StatusCode == http.StatusBadRequest, "badProvenance: not a 400")
+	return err
 }
 
 // validateProvenanceField checks one field of a props.provenance object.
@@ -85,6 +94,7 @@ func validateProvenanceField(key string, val any) *AppError {
 
 // validateProvenanceIDs checks a provenance field that holds a list of UUIDs.
 func validateProvenanceIDs(key string, val any) *AppError {
+	assert.That(slices.Contains(provenanceIDFields(), key), "validateProvenanceIDs: not an id field")
 	list, ok := val.([]any)
 	if !ok {
 		return badProvenance("%s must be a list of UUIDs", key)
