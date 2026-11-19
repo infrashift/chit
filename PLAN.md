@@ -13,9 +13,9 @@ Tracking: [ISSUE-001](.okfw/issues/issue-001-okf-wiki-and-mcp-server--01a1f5379e
 ## Phase 2: Lint gates
 Tracking: [ISSUE-002](.okfw/issues/issue-002-lint-gates-for-the-power-of-10-rules-and-the-documentation--01a1f5379e37.md)
 
-- [ ] Add `.semscope.cue` with the R3 deviation and the omissions.
-- [ ] Add the `semscope`, `docs-lexis`, `wiki` and `check` targets.
-- [ ] Fix the golangci-lint issues of the baseline (R10).
+- [x] Add `.semscope.cue` with the R3 deviation and the omissions.
+- [x] Add the `semscope`, `docs-lexis`, `wiki` and `check` targets.
+- [x] Fix the golangci-lint issues of the baseline (R10).
 
 ## Phase 3: R7, check each return value
 Tracking: [ISSUE-003](.okfw/issues/issue-003-r7-check-each-return-value--01a1f5379e3e.md)

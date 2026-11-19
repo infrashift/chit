@@ -27,12 +27,12 @@ func (a *App) HandleInvite(ctx context.Context, actorID, channelID, args string)
 
 	if _, err := a.AddChannelMember(ctx, channelID, target.ID, actorID); err != nil {
 		return &command.CommandResult{
-			ResponseText: fmt.Sprintf("Could not add `%s`: %s", target.Username, err.Error()),
+			ResponseText: fmt.Sprintf("Could not add %#q: %s", target.Username, err.Error()),
 		}, nil
 	}
 
 	return &command.CommandResult{
-		ResponseText: fmt.Sprintf("Added `%s` to the channel.", target.Username),
+		ResponseText: fmt.Sprintf("Added %#q to the channel.", target.Username),
 		ChannelID:    channelID,
 		Triggered:    true,
 	}, nil
@@ -48,12 +48,12 @@ func (a *App) HandleKick(ctx context.Context, actorID, channelID, args string) (
 
 	if err := a.RemoveChannelMember(ctx, channelID, target.ID, actorID); err != nil {
 		return &command.CommandResult{
-			ResponseText: fmt.Sprintf("Could not remove `%s`: %s", target.Username, err.Error()),
+			ResponseText: fmt.Sprintf("Could not remove %#q: %s", target.Username, err.Error()),
 		}, nil
 	}
 
 	return &command.CommandResult{
-		ResponseText: fmt.Sprintf("Removed `%s` from the channel.", target.Username),
+		ResponseText: fmt.Sprintf("Removed %#q from the channel.", target.Username),
 		ChannelID:    channelID,
 		Triggered:    true,
 	}, nil

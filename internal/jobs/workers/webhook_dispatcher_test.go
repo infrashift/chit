@@ -138,7 +138,9 @@ func TestWebhookDispatcher_NoSignatureWithoutSecret(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 	cancel()
-	<-done
+	if err := <-done; err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if gotSignature != "" {
 		t.Errorf("expected empty signature without secret, got %q", gotSignature)

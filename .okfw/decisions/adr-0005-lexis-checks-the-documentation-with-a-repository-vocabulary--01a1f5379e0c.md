@@ -26,6 +26,7 @@ The user requires ASD-STE100 Simplified Technical English for the documentation.
 - `make docs-lexis` scans `README.md`, `CLAUDE.md`, `PLAN.md`, `PRD.md`, `PRD-SLASH-COMMANDS.md`, `SPECS-SLASH-COMMANDS.md`, `ROADMAP.md`, `tests/e2e/README.md`, the TUI Markdown files, `docs/src/content/docs` and `.okfw` with `--fail-on note`.
 - The gate skips the history: `CHANGELOG.md`, the TUI `CHANGELOG.md`, `changelog.mdx`, `clients/chit-tui/docs/history`, the daily notes, `index.md` and `log.md`.
 - The gate does not scan Go comments.
+- During the refactor, `DOCS_LEXIS_PENDING` holds the files that still have findings. Phase 10 moves them to `DOCS_LEXIS_PATHS`, so each commit passes the gate.
 - `docs-lexis` runs lexis only when `command -v` finds it. Otherwise it prints a note and passes. The variable `LEXIS` names the command.
 
 ## Consequences
