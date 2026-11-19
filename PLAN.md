@@ -26,8 +26,8 @@ Tracking: [ISSUE-003](.okfw/issues/issue-003-r7-check-each-return-value--01a1f53
 ## Phase 4: R1, no recursion
 Tracking: [ISSUE-004](.okfw/issues/issue-004-r1-no-recursion--01a1f5379e46.md)
 
-- [ ] Remove the two recursion cycles in chit-tui.
-- [ ] Remove the NASA-P10-01 omission. Turn on `gocognit` and `nestif`.
+- [x] Remove the two recursion cycles in chit-tui.
+- [x] Remove the NASA-P10-01 omission. Move `gocognit` and `nestif` to Phase 8.
 
 ## Phase 5: R2, loops with a bound
 Tracking: [ISSUE-005](.okfw/issues/issue-005-r2-loops-with-a-bound--01a1f5379e4d.md)
@@ -52,7 +52,7 @@ Tracking: [ISSUE-007](.okfw/issues/issue-007-r6-no-mutable-package-variables--01
 Tracking: [ISSUE-008](.okfw/issues/issue-008-r4-functions-of-60-lines-or-fewer--01a1f5379e65.md)
 
 - [ ] Split each long function.
-- [ ] Remove the NASA-P10-04 omission. Turn on `funlen`.
+- [ ] Remove the NASA-P10-04 omission. Turn on `funlen`, `gocognit` and `nestif`.
 
 ## Phase 9: R5, assertion density
 Tracking: [ISSUE-009](.okfw/issues/issue-009-r5-assertion-density--01a1f5379e6c.md)

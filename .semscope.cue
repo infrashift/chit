@@ -19,7 +19,6 @@ exclude: docs: "the Astro docs site; no Go code"
 
 // Refactor omissions. Each phase of PLAN.md fixes one rule and removes its
 // line. At the end of Phase 9 this list is empty.
-rules: "NASA-P10-01": enabled: false // Phase 4
 rules: "NASA-P10-02": enabled: false // Phase 5
 rules: "NASA-P10-04": enabled: false // Phase 8
 rules: "NASA-P10-05": enabled: false // Phase 9

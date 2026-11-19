@@ -165,8 +165,15 @@ func (m Model) handleUserLoaded(msg UserLoadedMsg) (tea.Model, tea.Cmd) {
 	if m.expiredUserID != "" {
 		return m.resumeAfterReLogin(msg.User)
 	}
+	return m.applyLoadedUser(msg.User)
+}
+
+// applyLoadedUser makes u the signed-in user and fetches the users that the
+// model still lacks. resumeAfterReLogin calls it directly, not through
+// Update, so the call graph has no cycle (Power of 10 rule 1).
+func (m Model) applyLoadedUser(u *model.User) (Model, tea.Cmd) {
 	firstLoad := m.me == nil
-	m.applyMe(msg.User)
+	m.applyMe(u)
 	// Member rows that arrived before the user did could not be
 	// matched to them; work their badges out now.
 	if firstLoad {

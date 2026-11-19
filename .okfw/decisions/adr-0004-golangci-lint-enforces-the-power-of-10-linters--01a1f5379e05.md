@@ -33,7 +33,7 @@ Both `.golangci.yml` files enable these linters. They keep the linters that are 
 | `gocognit`, `nestif` | R1 |
 | `depguard` (no `unsafe`), `gosec` | R10 |
 
-- A phase enables a linter when it removes the omission of the semscope rule for it.
+- A phase enables a linter when it removes the omission of the semscope rule for it. `gocognit` and `nestif` are the exception: Phase 8 (R4) enables them, because they report the same long functions as R4.
 - `make lint-tui` uses the same `GOLANGCI_LINT` command as `make lint`.
 
 ## Consequences

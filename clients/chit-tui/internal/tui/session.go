@@ -125,15 +125,10 @@ func (m Model) resumeAfterReLogin(u *model.User) (tea.Model, tea.Cmd) {
 	if !same {
 		m = m.newSession()
 		m.appState = AppStateRunning
-		return m.Update(UserLoadedMsg{User: u})
+		return m.applyLoadedUser(u)
 	}
 
-	updated, cmd := m.Update(UserLoadedMsg{User: u})
-	next, ok := updated.(Model)
-	if !ok {
-		panic(fmt.Sprintf("tui: Update returned %T, want Model", updated))
-	}
-	m = next
+	m, cmd := m.applyLoadedUser(u)
 	if m.activeChan != nil {
 		cmd = tea.Batch(cmd, m.selectChannel(m.activeChan))
 	}

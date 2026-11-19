@@ -18,6 +18,11 @@ import (
 // and for colors with no RGB representation (ANSI palette indices), which
 // callers use to pass such colors through unmodified.
 func rgbComponents(c color.Color) (r, g, b uint8, ok bool) {
+	// A lipgloss.Color holds a hex string. Parse it first, so the switch
+	// below sees a color.RGBA (Power of 10 rule 1: no recursion).
+	if lc, isHex := c.(lipgloss.Color); isHex {
+		c = hexColor(string(lc))
+	}
 	if c == nil {
 		return 0, 0, 0, false
 	}
@@ -35,12 +40,6 @@ func rgbComponents(c color.Color) (r, g, b uint8, ok bool) {
 			return 0, 0, 0, false
 		}
 		return v.R, v.G, v.B, true
-	case lipgloss.Color:
-		parsed := hexColor(string(v))
-		if parsed == nil {
-			return 0, 0, 0, false
-		}
-		return rgbComponents(parsed)
 	}
 
 	// color.Color returns 16-bit alpha-premultiplied values.

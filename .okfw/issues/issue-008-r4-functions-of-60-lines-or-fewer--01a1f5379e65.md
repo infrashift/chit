@@ -24,6 +24,7 @@ Split each function that has more than 60 lines.
 ## Acceptance Criteria
 - [ ] No function has more than 60 lines.
 - [ ] `funlen` is on with 60 lines.
+- [ ] `gocognit` (20) and `nestif` (4) are on (moved from Phase 4).
 - [ ] NASA-P10-04 is not omitted.
 - [ ] `make check` passes.
 
