@@ -5,25 +5,25 @@ description: A terminal user interface for the Chit messaging server. Built with
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-A terminal client for Chit — real-time messaging, threaded conversations,
-markdown rendering, and customizable themes, all from your terminal. Built
-with Go and the Charmbracelet Bubble Tea ecosystem, living in the Chit
-monorepo under `clients/chit-tui`.
+A terminal client for Chit. It gives real-time messages, threaded
+conversations, Markdown rendering and themes that the user can change, all in
+the terminal. The TUI uses Go and the Charmbracelet Bubble Tea ecosystem. Its
+code is in the Chit monorepo under `clients/chit-tui`.
 
-The interface is a clean two-pane layout: chat history on top, message input
-below, and a clickable action bar along the bottom. All navigation flows
-through the unified palette — press `Ctrl+K` to jump between channels, find
-people, run slash commands, or search messages.
+The interface has a two-pane layout: the chat history on top, the message
+input below, and an action bar with clickable buttons along the bottom. All
+navigation goes through the unified palette. Press `Ctrl+K` to go to a
+channel, find a person, run a slash command or search the messages.
 
-Start with [Installation](/chit/tui/getting-started/installation/), or jump
-to the [Keybindings reference](/chit/tui/reference/keybindings/).
+To start, read [Install Chit TUI](/chit/tui/getting-started/installation/).
+The [Keybindings reference](/chit/tui/reference/keybindings/) lists all keys.
 
 <CardGrid>
   <Card title="Real-Time Messaging" icon="rocket">
-    WebSocket connectivity with keepalive pings and automatic reconnection with backoff. Messages appear instantly as they're posted, and the channel is re-read after a reconnect so nothing sent meanwhile is missed.
+    The TUI keeps the WebSocket open with keepalive pings. If the WebSocket closes, the TUI connects again automatically, with backoff. A message appears immediately when someone posts it. After each reconnect, the TUI reads the channel again, so it shows all messages sent during the gap.
   </Card>
   <Card title="Unified Palette" icon="magnifier">
-    One overlay for everything (Ctrl+K): jump to channels sorted by unread activity, find people with `@`, run slash commands with `/`, and search messages with `?` (or `??` for every channel).
+    One overlay (Ctrl+K) for all tasks. It sorts the channels by unread activity. Type `@` to find people, `/` to run slash commands, and `?` to search messages. Type `??` to search all channels.
   </Card>
   <Card title="Threaded Conversations" icon="comment">
     Press Enter on a post to open its thread full-screen. Reply from the regular input box; Esc returns to the channel.
@@ -35,7 +35,7 @@ to the [Keybindings reference](/chit/tui/reference/keybindings/).
     Posts rendered with Glamour for rich terminal output — code blocks, links, emphasis, and more.
   </Card>
   <Card title="Customizable Themes" icon="sun">
-    Eight bundled themes in dark and light pairs — Tokyo Night, Catppuccin, Kanagawa, and Nightfox — that can follow your terminal's appearance, plus your own TOML themes.
+    Eight bundled themes in dark and light pairs: Tokyo Night, Catppuccin, Kanagawa and Nightfox. The theme can follow the appearance of the terminal. The user can also add TOML themes.
   </Card>
   <Card title="Unread Badges" icon="information">
     Per-channel unread and mention counts surface in the palette, which sorts the most active channels to the top.
@@ -44,6 +44,6 @@ to the [Keybindings reference](/chit/tui/reference/keybindings/).
     Tag posts with `#tag` syntax or the tag picker overlay. Search by tags to find relevant conversations quickly.
   </Card>
   <Card title="Keyboard First" icon="laptop">
-    Every mouse action has a keybinding: copy with `y`, edit with `e`, delete with `d d`, pin with `p`. Press `?` for the built-in help overlay.
+    Every mouse action also has a key: copy with `y`, edit with `e`, delete with `d d`, pin with `p`. Press `?` for the built-in help overlay.
   </Card>
 </CardGrid>

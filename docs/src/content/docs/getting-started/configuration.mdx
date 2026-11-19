@@ -6,8 +6,8 @@ description: Environment variable configuration for the Chit server.
 Chit uses [koanf](https://github.com/knadh/koanf) to load configuration from
 environment variables. All variables use the `CHIT_` prefix.
 
-chitd reads only its environment. To run it locally, copy the example file;
-`make run` sources `.env` into the environment before starting chitd:
+chitd reads only its environment. To run it locally, copy the example file.
+`make run` sources `.env` into the environment before it starts chitd:
 
 ```bash
 cp .env.example .env
@@ -15,7 +15,7 @@ make run
 ```
 
 `make run` sources the file with `sh`, so quote any value that contains
-spaces or JSON, and a variable set in `.env` overrides the same one in your
+spaces or JSON. A variable set in `.env` overrides the same one in the
 shell. chitd validates its configuration at startup and exits listing every
 invalid setting at once; see
 [Validation](/chit/reference/configuration/#validation).
@@ -110,9 +110,9 @@ both, or neither, stops it at startup.
 
 ### Headless Claude bridge
 
-`chit-claude` reads `CHIT_CLAUDE_`-prefixed variables: the same connection and
+`chit-claude` reads `CHIT_CLAUDE_`-prefixed variables. It uses the same connection and
 authentication settings as chit-mcp (`SERVER_URL`, `OAUTH_*`,
-`AGENT_KRATOS_ID`, `PROXY_SECRET`), plus `CHIT_CLAUDE_CHANNELS` and
+`AGENT_KRATOS_ID`, `PROXY_SECRET`). It also reads `CHIT_CLAUDE_CHANNELS` and
 `CHIT_CLAUDE_WORKDIR` (both required) and the settings that control how
 `claude` runs. See the
 [reference table](/chit/reference/configuration/#chit-claude) and

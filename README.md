@@ -1,13 +1,13 @@
 # Chit
 
-A high-performance, text-only team chat server built with Go.
+A fast, text-only team chat server written in Go.
 
 Chit is a stripped-down alternative to Mattermost — no file uploads, no
-plugins. Just fast, searchable, threaded team messaging with zero-trust
-security via the Ory stack. Humans, AI agents, and bots are equal first-class
-actors: every user record carries an `actor_type` (`user`, `agent`, or `bot`),
-and AI agents connect through the bundled `chit-mcp` MCP server as ordinary
-users.
+plugins. It gives fast, searchable, threaded team chat with zero-trust
+security through the Ory stack. Humans, AI agents, and bots are equal
+first-class actors. Every user record has an `actor_type` (`user`, `agent`, or
+`bot`). AI agents connect as ordinary users through the bundled `chit-mcp` MCP
+server.
 
 ## Features
 
@@ -15,23 +15,23 @@ users.
   private, direct, and group channels
 - **Threaded conversations** — reply threads with follow/unfollow and unread
   tracking
-- **Markdown messages** — message content is stored as raw markdown text; the
-  server performs no rendering or HTML sanitization, so clients MUST sanitize
-  or escape content when rendering (treat it as untrusted input)
-- **AI agents & bots as first-class actors** — `actor_type` on every user,
-  MCP server (`chit-mcp`) for agent access, with a WebSocket-fed event
-  buffer agents can poll for new events
+- **Markdown messages** — chitd stores message content as raw Markdown text.
+  The server does no rendering and does not sanitize HTML. So clients MUST
+  sanitize or escape content for rendering (treat it as untrusted input)
+- **AI agents & bots as first-class actors** — `actor_type` on every user.
+  The MCP server (`chit-mcp`) gives agents access. It has an event buffer that
+  WebSocket events fill, and agents poll it for new events
 - **Full-text search** — per-channel and per-team queries in SQL, or in
-  ZincSearch when `CHIT_ZINCSEARCH_URL` is set (a background indexer keeps it
-  in sync)
+  ZincSearch when the operator sets `CHIT_ZINCSEARCH_URL` (a background indexer
+  keeps it in sync)
 - **Zero-trust auth** — Ory Kratos (identity), Hydra (OAuth2 tokens for
   machine actors), Oathkeeper (auth proxy), and Keto (slash-command
   authorization)
-- **Real-time WebSocket** — 14 event types with per-user hub; channel-targeted
-  events are delivered only to channel members. Fan-out is currently
+- **Real-time WebSocket** — 19 event types with per-user hub. The hub sends
+  channel-targeted events only to channel members. Fan-out is currently
   single-node (in-process); multi-node WebSocket fan-out is not yet
-  implemented. A pub/sub layer (PG LISTEN/NOTIFY or NATS) publishes thin event
-  envelopes on the `chit_events` topic for future multi-node fan-out
+  implemented. A pub/sub layer (PG `LISTEN`/`NOTIFY` or NATS) publishes thin
+  event envelopes on the `chit_events` topic for future multi-node fan-out
 - **Conversation tags** — label and filter posts with user-defined tags
 - **Message pinning** — pin important posts per channel
 - **@mention notifications** — real-time mention alerts via WebSocket
@@ -51,8 +51,9 @@ TUI Client ──► Ory Oathkeeper ──► REST API ──► App Layer ─�
 ```
 
 Layered design inspired by Mattermost: **API → App → Store → PostgreSQL**.
-Store decorators add caching, retry logic, and timing instrumentation
-transparently.
+The diagram shows the planned Store decorators. They do not exist yet: the
+only cache is the App-layer LRU of authenticated users, and the Store has no
+retry or timer decorators.
 
 The root module builds four binaries:
 
@@ -69,33 +70,34 @@ The root module builds four binaries:
 ## Clients
 
 - **`chit-tui`** ([clients/chit-tui](clients/chit-tui/)) — terminal client
-  built with Bubble Tea. Lives in its own nested Go module so the
-  charmbracelet dependency tree stays out of the server build; talks to chitd
-  exclusively over the REST API and WebSocket (`make build-tui`,
-  `make test-tui`).
+  built with Bubble Tea. It has its own nested Go module, so the charmbracelet
+  dependency tree stays out of the server build. It talks to chitd only over
+  the REST API and WebSocket (`make build-tui`, `make test-tui`).
 
 ## Security Model
 
-chitd trusts identity headers set by Oathkeeper: `X-Client-Id` for a machine
-actor whose Hydra `client_credentials` token was introspected, checked first,
-or `X-User-Id` for a person's Kratos session. A person's user record is
-created on their first request; a machine actor must be declared in
+chitd trusts the identity headers that Oathkeeper sets. It checks
+`X-Client-Id` first: this header names a machine actor after Oathkeeper
+introspects its Hydra `client_credentials` token. Then it checks `X-User-Id`
+for a person's Kratos session. chitd creates a person's user record on the
+first request. The operator must declare each machine actor in
 `CHIT_MACHINE_ACTORS`, and an unknown client gets 401.
 
-Authorization is enforced server-side. Reading or posting to a channel
-requires channel membership (the `channel_members` table in PostgreSQL);
-team members may see and join the open channels on their team. Editing or deleting a post
-requires being the author or a `system_admin`; renaming or deleting a team
-requires `team_admin` (granted to its creator) or `system_admin`. Leaving a
-team removes you from its channels. WebSocket events are delivered only to
-channel members. Ory Keto authorizes slash commands (namespace
-`chit/command`); channel tuples are mirrored into it but never consulted for
-access. Each user may make 10 requests a second (bursts of 50), and request
-bodies over 1 MiB are refused.
+chitd enforces authorization on the server. To read or post in a channel, a
+user must be a channel member (the `channel_members` table in PostgreSQL).
+Team members may see and join the open channels on their team. To edit or
+delete a post, a user must be the author or a `system_admin`. To rename or
+delete a team, a user needs `team_admin` (chitd gives it to the creator) or
+`system_admin`. When a user leaves a team, chitd removes the user from its
+channels. The hub sends WebSocket events only to channel members. Ory Keto
+authorizes slash commands (namespace `chit/command`). chitd mirrors channel
+tuples into Keto but never reads them for access. Each user may make 10
+requests a second (bursts of 50). chitd refuses request bodies over 1 MiB.
 
-For production deployments, set `CHIT_ALLOWED_ORIGINS` to an explicit origin
-allowlist and `CHIT_TRUSTED_PROXY_SECRET` so the backend only trusts the
-identity headers when Oathkeeper injects a matching `X-Proxy-Secret` header.
+Before real users connect, set `CHIT_ALLOWED_ORIGINS` to an explicit origin
+allowlist. Also set `CHIT_TRUSTED_PROXY_SECRET`. Then the backend trusts the
+identity headers only when Oathkeeper injects the same `X-Proxy-Secret`
+header.
 
 ## Quick Start
 
@@ -119,7 +121,7 @@ curl http://localhost:8065/api/v1/system/ping
 make kube-migrate
 ```
 
-To run your own build instead of the pod's, stop the pod's chitd so `:8065`
+To run a local build instead of the pod's, stop the pod's chitd so `:8065`
 is free, then run it locally; `make run` loads `.env`:
 
 ```bash
@@ -130,9 +132,9 @@ make run
 
 ## Configuration
 
-All settings are configured via environment variables with the `CHIT_` prefix
-using [koanf](https://github.com/knadh/koanf). chitd reads only its
-environment and validates it at startup; `CHIT_DATABASE_URL` is required. See
+chitd reads all settings from environment variables with the `CHIT_` prefix,
+through [koanf](https://github.com/knadh/koanf). chitd reads only its
+environment and validates it at startup. `CHIT_DATABASE_URL` is mandatory. See
 [`.env.example`](.env.example) for the variables and the
 [configuration reference](docs/src/content/docs/reference/configuration.mdx)
 for defaults and validation rules.
@@ -150,8 +152,8 @@ Requires Go 1.26.10 or later and Podman.
 
 ## API Documentation
 
-The REST API is defined in [`api/openapi.yaml`](api/openapi.yaml) — an
-OpenAPI 3.1 spec covering 10 resource tags and 40+ endpoints.
+[`api/openapi.yaml`](api/openapi.yaml) defines the REST API. It is an
+OpenAPI 3.1 document with 10 resource tags and 40+ endpoints.
 
 ## Documentation
 

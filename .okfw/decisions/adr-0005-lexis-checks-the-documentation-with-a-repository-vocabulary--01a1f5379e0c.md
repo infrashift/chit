@@ -30,6 +30,7 @@ The user requires ASD-STE100 Simplified Technical English for the documentation.
 - `docs-lexis` runs lexis only when `command -v` finds it. Otherwise it prints a note and passes. The variable `LEXIS` names the command.
 
 ## Consequences
+- On 2026-11-19, the gate checks 69 files with zero findings. The vocabulary holds 26 terms, each with a reason. Three agents wrote the other text again.
 - A new project term needs new text, or a vocabulary entry with a reason.
 - A changelog entry keeps its original words.
 

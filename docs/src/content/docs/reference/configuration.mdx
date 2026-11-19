@@ -3,8 +3,8 @@ title: Configuration Reference
 description: Complete list of all environment variables with types and defaults.
 ---
 
-All configuration is loaded from environment variables using
-[koanf](https://github.com/knadh/koanf) with the `CHIT_` prefix. chitd reads
+chitd loads all configuration from environment variables with the `CHIT_`
+prefix, through [koanf](https://github.com/knadh/koanf). chitd reads
 only its environment; `make run` sources `.env` into it first when that file
 exists.
 
@@ -48,8 +48,8 @@ exists.
 
 ### Validation
 
-chitd checks its configuration before opening any connection and, if anything
-is wrong, exits with every problem listed at once. It refuses to start when:
+chitd checks its configuration before it opens a connection. If something is
+wrong, chitd lists all the problems at one time and exits. It refuses to start when:
 
 - `CHIT_DATABASE_URL` is empty;
 - `CHIT_WS_PING_INTERVAL`, `CHIT_WS_WRITE_TIMEOUT`, `CHIT_CACHE_SIZE`,
@@ -62,15 +62,15 @@ is wrong, exits with every problem listed at once. It refuses to start when:
   `CHIT_LOG_FORMAT` is not `json` or `text`;
 - `CHIT_WEBHOOK_ENABLED=true` and `CHIT_WEBHOOK_URL` is empty, or the webhook
   worker count, queue size or timeout is not positive;
-- `CHIT_MACHINE_ACTORS` is not valid JSON or declares an invalid actor (checked
-  just after the database connects).
+- `CHIT_MACHINE_ACTORS` is not valid JSON or declares an invalid actor (chitd checks
+  this immediately after the database connects).
 
 ### Machine actors
 
-A machine actor is a non-human caller (an agent or a bot) that authenticates
-with an OAuth2 `client_credentials` token from Ory Hydra and has no Kratos
-identity or email. People are provisioned automatically on their first
-request; machines are not, so each one must be declared:
+A machine actor is a non-human caller (an agent or a bot). It authenticates
+with an OAuth2 `client_credentials` token from Ory Hydra, and has no Kratos
+identity or email. chitd provisions people automatically on their first
+request, but not machines. So the operator must declare each machine actor:
 
 ```bash
 CHIT_MACHINE_ACTORS='[
@@ -89,10 +89,10 @@ CHIT_MACHINE_ACTORS='[
 | `roles` | no | Space-separated; defaults to `system_user`. `system_admin` is a real grant. |
 
 At every boot, before it accepts requests, chitd creates each declared actor
-that does not exist and updates `username`, `display_name`, `roles` and
-`actor_type` on any that differ from the declaration. Removing an actor from
-the list does not delete its user. An invalid declaration stops chitd from
-starting.
+that does not exist. If an actor is different from its declaration, chitd
+updates its `username`, `display_name`, `roles` and `actor_type`. If the
+operator removes an actor from the list, chitd does not delete its user. An
+invalid declaration stops chitd at startup.
 
 ## chit-reconcile
 
@@ -105,14 +105,16 @@ them, and does not need `CHIT_DATABASE_URL`:
 | `CHIT_KETO_WRITE_URL` | `http://localhost:4467` | Keto write API the tuples are written to and revoked from |
 | `CHIT_COMMANDS_CUE_DIR` | `auth` | CUE definitions to load |
 
-It makes the `chit/command` namespace match the CUE exactly: it writes every
-declared grant and role membership, then deletes every other tuple in that
-namespace, so a command taken from a role or a role taken from an actor is
-revoked. Nothing else writes `chit/command`. If the namespace cannot be
-listed, it exits with an error and deletes nothing.
+It makes the `chit/command` namespace match the CUE exactly. It writes every
+declared grant and role membership. Then it deletes every other tuple in that
+namespace. So, if the operator removes a command from a role or a role from
+an actor, the reconciler revokes it. Nothing else writes `chit/command`. If
+the reconciler cannot list the namespace, it exits with an error and deletes
+nothing. The list stops after 1,000 pages of 500 tuples, and a longer
+namespace is an error.
 
 The other checks under [Validation](#validation), apart from the database URL,
-still apply to whatever values are set.
+still apply to the values that the operator sets.
 
 ## chit-mcp
 
@@ -130,9 +132,9 @@ still apply to whatever values are set.
 | `CHIT_MCP_AGENT_KRATOS_ID` | _(empty)_ | Kratos identity ID to act as, sent in `X-User-Id` (development) |
 | `CHIT_MCP_PROXY_SECRET` | _(empty)_ | Sent as `X-Proxy-Secret`; must match chitd's `CHIT_TRUSTED_PROXY_SECRET` |
 
-Exactly one authentication mode is required: `CHIT_MCP_OAUTH_CLIENT_ID`, with
-`CHIT_MCP_OAUTH_CLIENT_SECRET` and `CHIT_MCP_OAUTH_TOKEN_URL`, or
-`CHIT_MCP_AGENT_KRATOS_ID`. Setting both, or neither, stops chit-mcp at
+The operator must set exactly one authentication mode:
+`CHIT_MCP_OAUTH_CLIENT_ID`, with `CHIT_MCP_OAUTH_CLIENT_SECRET` and
+`CHIT_MCP_OAUTH_TOKEN_URL`, or `CHIT_MCP_AGENT_KRATOS_ID`. Setting both, or neither, stops chit-mcp at
 startup.
 
 ## chit-claude
@@ -184,6 +186,6 @@ stops the bridge at startup.
   the `chit_events` topic. Nothing subscribes to that topic yet: WebSocket
   fan-out is single-node and in-process, and `chit-mcp` gets its events from
   chitd's WebSocket.
-- Limits that are not configurable: each authenticated user may make 10
-  requests a second with bursts of 50 (beyond that, 429), and request bodies
-  over 1 MiB are refused with 413.
+- Some limits are not configurable. Each authenticated user may make 10
+  requests a second with bursts of 50 (more gets 429). chitd refuses request
+  bodies over 1 MiB with 413.

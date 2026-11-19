@@ -48,7 +48,7 @@ bridge.
 make kube-build
 ```
 
-This builds `localhost/chit:latest` from `deploy/Containerfile`, containing
+This builds `localhost/chit:latest` from `deploy/Containerfile`. The image contains
 `chitd` and `chit-reconcile` and the CUE definitions at `/etc/chit/auth`.
 `make kube-up` runs it first.
 
@@ -63,22 +63,22 @@ make check-deps         # dependency boundaries between the binaries
 ```
 
 `make test-integration` starts a disposable PostgreSQL 17 container (`PG_IMAGE`) in
-Podman on port `55432` (override with `ITEST_PORT`), runs every migration up,
-all the way down and up again, runs the `integration`-tagged tests in
+Podman on port `55432` (override with `ITEST_PORT`). It runs every migration up,
+all the way down and up again. Then it runs the `integration`-tagged tests in
 `internal/store/sqlstore` and `internal/pubsub`, and removes the container. The
 suite truncates every table, so never point it at a database you care about.
 
 ### In a container
 
 The test Containerfile builds a UBI9-based image with the Go toolchain and runs
-the unit tests inside it. No PostgreSQL or external services are required; the
-unit tests use in-memory fakes.
+the unit tests inside it. The unit tests need no PostgreSQL or external services. They
+use in-memory fakes.
 
 ```bash
 make test-container
 ```
 
-This builds the `chit-test:latest` image (compile-gating at build time) and then
+This builds the `chit-test:latest` image (a compile error stops the build) and then
 runs `go test -race -count=1 -v ./...` inside it.
 
 To run a specific test or package, override the default `CMD`:
@@ -96,7 +96,7 @@ podman build --build-arg GO_VERSION=1.26.10 \
 
 ## Verify the build
 
-chitd takes no command-line flags; running it starts the server, which exits at
+chitd takes no command-line flags. When you run it, it starts the server, which exits at
 once without `CHIT_DATABASE_URL`. To check the build, list the binaries:
 
 ```bash

@@ -5,15 +5,15 @@ description: Per-user hub design, client lifecycle, and event types.
 
 Chit uses WebSocket connections for real-time event delivery. The design
 centers on a per-user hub with a single event loop goroutine for thread-safe
-broadcast. The wire format is described in
-[WebSocket Protocol](/chit/api-reference/websocket-protocol/).
+broadcast. [WebSocket Protocol](/chit/api-reference/websocket-protocol/)
+tells the wire format.
 
 ## Hub Design
 
 The WebSocket hub (`internal/websocket`) maintains a map of connected users to
 their client connections, plus each connected user's channel and team
 memberships. A single goroutine processes all hub operations (register,
-unregister, broadcast, membership changes) so no locks are needed.
+unregister, broadcast, membership changes), so the hub needs no locks.
 
 ```
                     ┌──────────────────────────────┐
@@ -35,10 +35,10 @@ unregister, broadcast, membership changes) so no locks are needed.
 A user may hold several connections; each receives every event addressed to
 that user.
 
-Broadcasts are queued on a 256-slot channel. Once the hub has stopped (during
-shutdown), broadcasts, registrations and membership notifications return
-immediately instead of blocking the request that produced them; a connection
-registered after stop is closed at once.
+The hub queues broadcasts on a 256-slot channel. The hub stops during
+shutdown. After that, broadcasts, registrations and membership notifications
+return immediately. They do not block the request that produced them. The hub
+closes immediately a connection that registers after the stop.
 
 ## Client Lifecycle
 
@@ -51,29 +51,30 @@ Each WebSocket connection runs two goroutines:
 
 Connection lifecycle:
 
-1. Client connects to `/api/v1/websocket` and is authenticated like any API
-   request.
-2. Hub registers the client. Registration happens **before** the pumps
-   start, so a peer that hangs up immediately cannot be unregistered before it
-   was registered.
-3. On the user's first connection, the hub loads their channel and team IDs
-   in the background (10-second timeout). Channel- and team-targeted events
-   are held back from that user until the load completes; membership changes
-   that arrive meanwhile are queued and replayed on top of the load.
-4. The client receives events addressed to it, its channels or its teams.
-5. On disconnect, the hub unregisters the client. When a user's last
-   connection goes, their membership cache is dropped.
+1. Client connects to `/api/v1/websocket`. chitd authenticates it like any
+   API request.
+2. Hub registers the client **before** the pumps start. So a peer that
+   hangs up immediately cannot unregister before it registers.
+3. On the user's first connection, the hub loads the user's channel and team
+   IDs in the background (10-second timeout).
+   Until the load completes, the hub holds back channel- and team-targeted
+   events from that user.
+   The hub queues membership changes that arrive during the load. It applies
+   them again after the load.
+4. The client receives events for it, its channels or its teams.
+5. On disconnect, the hub unregisters the client. When the last connection of
+   a user closes, the hub drops the membership cache of that user.
 
 ### Slow consumers
 
-Each client has a 256-event send buffer. A client whose buffer is full when an
-event is broadcast is disconnected: the hub collects such clients during the
-broadcast and closes them after it, so the remaining connections still receive
-the event.
+Each client has a 256-event send buffer. If the buffer of a client is full
+during a broadcast, the hub disconnects that client. The hub collects such
+clients during the broadcast and closes them after it. So the other
+connections still receive the event.
 
 ## Event Types
 
-The server emits 15 event types:
+The server emits 19 event types:
 
 | Event | Description |
 |---|---|
@@ -90,11 +91,16 @@ The server emits 15 event types:
 | `user_removed` | A user left or was removed from a channel |
 | `thread_updated` | A thread's counters changed (reply added or deleted) |
 | `post_tags_updated` | A post's tags changed |
+| `channel_tags_updated` | A channel's own tags changed |
+| `tag_updated` | A tag was renamed |
+| `tag_deleted` | A tag was deleted |
 | `mentioned` | The connected user was @mentioned |
 | `command_response` | Ephemeral reply to the connected user's slash command |
+| `stream_status` | A member, or a client on behalf of one, is producing a reply (never stored) |
 
-Each event's payload is listed in the
-[protocol reference](/chit/api-reference/websocket-protocol/#server--client-event-types).
+The
+[protocol reference](/chit/api-reference/websocket-protocol/#server--client-event-types)
+lists the payload of each event.
 
 ## Broadcast Targeting
 
@@ -118,8 +124,8 @@ The hub applies the first rule that matches:
 | `team_id` | Connected members of the team |
 | none | Every connected client |
 
-An event with no `broadcast` object is dropped. Membership is enforced
-server-side from the hub's cache, so non-members never receive a channel's
+The hub drops an event with no `broadcast` object. The server enforces
+membership from the hub's cache, so non-members never receive a channel's
 events. `seq` is always `0`: chitd does not number events.
 
 Client-originated events (`typing`) go through `BroadcastFromUser`, which
@@ -128,8 +134,8 @@ drops them unless the sender is a member of the target channel.
 ## Single-Node Limitation
 
 WebSocket broadcast is **in-process only**: events reach clients connected to
-the same chitd instance. Multi-node fan-out (chitd consuming the pub/sub event
-topic to relay events across nodes) is not implemented. chitd does publish a
+the same chitd instance. Multi-node fan-out is not implemented: chitd does not
+read the pub/sub event topic to relay events across nodes. chitd does publish a
 thin envelope for most events on the pub/sub `chit_events` topic, but nothing
 subscribes to it; see [Pub/Sub](/chit/architecture/pubsub/). Headless agent
 processes (`chit-mcp`, `chit-claude`) and `chit-tui` receive events as ordinary

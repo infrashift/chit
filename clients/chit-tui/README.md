@@ -1,24 +1,24 @@
 # Chit TUI
 
-A terminal client for the [Chit](https://github.com/infrashift/chit) messaging server, built on the [Charmbracelet](https://charm.sh) Bubble Tea stack.
+A terminal client for the [Chit](https://github.com/infrashift/chit) server, built on the [Charmbracelet](https://charm.sh) Bubble Tea stack.
 
 Fuller documentation lives on the docs site, under [`docs/src/content/docs/tui/`](../../docs/src/content/docs/tui/).
 
 ## Features
 
-- **Palette-driven navigation** — one overlay (`Ctrl+K`) jumps to channels and DMs, sorted by mentions, then unread, then recency; `@` finds people, `/` lists commands, `?` searches this channel and `??` every channel
+- **Palette-driven navigation** — one overlay (`Ctrl+K`) goes to channels and DMs, sorted by mentions, then unread, then recency. `@` finds people, `/` lists commands, `?` searches this channel and `??` every channel
 - **Real-time updates** — a WebSocket connection that pings to detect dead links, reconnects with backoff, and reloads the open channel after a gap
-- **Threads** — `Enter` on a post opens its thread in the main pane; replies are written in the regular input, and `/threads` lists the threads you follow
-- **Editing and moderation** — edit (`e`), delete (`d d`) and pin (`p`) posts; tag them with `t` or by writing `#tags` (channel tags by default; `Ctrl+T` in the picker makes a private one)
+- **Threads** — `Enter` on a post opens its thread in the main pane. The user writes replies in the regular input. `/threads` lists the threads that you follow
+- **Edit and moderate** — edit (`e`), delete (`d d`) and pin (`p`) posts. Tag them with `t` or with `#tags` in the text. The picker makes channel tags by default; `Ctrl+T` in the picker makes a private tag
 - **History** — older messages load as you scroll up
 - **Copy** — `y` copies the selection or the selected post through OSC 52, which works over SSH
-- **Mouse** — wheel scrolling, clicks on the action bar and palette, drag to select; everything also works from the keyboard
-- **Themes** — eight bundled themes in dark and light pairs, following the terminal's appearance, plus your own TOML themes
+- **Mouse** — scroll with the wheel, click on the action bar and palette, drag to select; everything also works from the keyboard
+- **Themes** — eight bundled themes in dark and light pairs that follow the terminal's appearance, plus the user's own TOML themes
 
 ## Requirements
 
 - Go 1.26.10+
-- A running [Chit server](https://github.com/infrashift/chit)
+- A live [Chit server](https://github.com/infrashift/chit)
 
 ## Installation
 
@@ -31,7 +31,7 @@ make build   # binary at bin/chit-tui
 
 ## Configuration
 
-Settings are read from `~/.config/chit/config.toml` (set `CHIT_CONFIG_FILE` to use another path) and from the environment. An environment variable overrides the file, which overrides the built-in default. The file is checked against a schema (`internal/config/schema/config.cue`); an invalid setting is ignored with a warning rather than stopping the client.
+The client reads settings from `~/.config/chit/config.toml` (set `CHIT_CONFIG_FILE` to use another path) and from the environment. An environment variable overrides the file, which overrides the built-in default. The client checks the file against a schema (`internal/config/schema/config.cue`). The client ignores an invalid setting with a warning, and does not stop.
 
 | File key | Environment | Default | Meaning |
 |---|---|---|---|
@@ -63,11 +63,11 @@ theme_light = "kanagawa-lotus"
 
 Bundled: `tokyo-night` and `tokyo-night-day` (the defaults for dark and light terminals), `catppuccin`, `catppuccin-latte`, `kanagawa`, `kanagawa-lotus`, `nightfox`, `dayfox`.
 
-Pick one for the session with `/theme`. It is saved to the config file: as `theme`, or, if you have set `theme_dark` and `theme_light`, as the one for the current appearance, so switching keeps working.
+Pick one for the session with `/theme`. The client saves it to the config file as `theme`. If you set `theme_dark` and `theme_light`, the client saves it as the theme for the current appearance. This keeps the automatic change between dark and light.
 
 ### Your own themes
 
-A theme is a TOML file in `~/.config/chit/themes/`, named after the theme in lowercase, e.g. `my-theme.toml` for `--theme my-theme`. Every palette key is required; colors are hex values or terminal color names (`red`, `light_blue`, …), which follow your terminal's own palette.
+A theme is a TOML file in `~/.config/chit/themes/`, named after the theme in lowercase, e.g. `my-theme.toml` for `--theme my-theme`. A theme must set every palette key. Colors are hex values or terminal color names (`red`, `light_blue`, …), which follow the terminal's own palette.
 
 ```toml
 name   = "My Theme"
@@ -119,7 +119,7 @@ Press `?` in the history pane for the full list. The essentials:
 
 ### Commands
 
-These run in the client; any other `/command` is sent to the server, which decides what it means.
+These commands run in the client. The client sends any other `/command` to the server, which decides what it means.
 
 | Command | Action |
 |---|---|

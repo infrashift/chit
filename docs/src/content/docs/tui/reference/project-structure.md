@@ -27,16 +27,18 @@ clients/chit-tui/            (in the Chit monorepo)
 |------|---------|
 | `main.go` | Loads config, resolves the theme, restores the session, starts the program |
 | `flags.go` | `--theme`, `--appearance`, `--list-themes`; builds the theme request |
+| `input_filter.go` | `filterInput` — drops terminal reply sequences from key input, and marks a key of several runes as pasted |
+| `doc.go` | Package documentation |
 
-The theme is resolved here, before the Bubble Tea program starts: asking the
-terminal whether it is dark sends an escape sequence, and the reply would
-otherwise arrive as typed input.
+The command resolves the theme here, before the Bubble Tea program starts. To
+ask the terminal whether it is dark, the command sends an escape sequence. If
+the program runs at that time, the reply arrives as typed input.
 
 ## `internal/` Packages
 
 ### `config/`
 
-Configuration loading and validation.
+Loads and validates the configuration.
 
 | File | Purpose |
 |------|---------|
@@ -48,11 +50,11 @@ Configuration loading and validation.
 | `schema/config.cue` | Schema for `config.toml` |
 | `schema/theme.cue` | Schema for `themes/<name>.toml` |
 
-The schemas are embedded in the binary.
+The binary embeds the schemas.
 
 ### `model/`
 
-Data transfer objects mirroring the Chit server's JSON API. No server code is imported.
+Data transfer objects that mirror the Chit server's JSON API. The package does not import server code.
 
 | File | Types |
 |------|-------|
@@ -72,8 +74,8 @@ HTTP client for the Chit REST API.
 
 | File | Purpose |
 |------|---------|
-| `client.go` | `ChitClient` interface, `httpClient` struct, all endpoint methods, 30s `DefaultTimeout` |
-| `transport.go` | `authTransport` — injects the token under the configured header |
+| `client.go` | `ChitClient` interface, `httpClient` struct, `NewClient`, `NewClientWithHeader`, `NewClientWithTokenSource`, all endpoint methods, 30s `DefaultTimeout` |
+| `transport.go` | `TokenSource` interface, `authTransport` — injects the token under the configured header |
 | `errors.go` | `APIError`, `IsUnauthorized`, `parseErrorResponse` |
 
 ### `auth/`
@@ -88,7 +90,7 @@ Sign-in and session storage.
 
 ### `ws/`
 
-WebSocket client: one session per `Connect`, keepalive pings, and redialing.
+WebSocket client: one session per `Connect`, keepalive pings, and redial.
 
 | File | Purpose |
 |------|---------|
@@ -105,14 +107,14 @@ Shared test helpers.
 
 ### `tui/`
 
-The Bubble Tea TUI layer. The root `Model` is one type whose methods are
-split by concern across files; new handlers go beside the ones they resemble
-rather than growing `update.go`.
+The Bubble Tea TUI layer. The root `Model` is one type. Its methods are in
+different files, one file for each concern. Put each new handler beside the
+handlers that it resembles, and do not make `update.go` larger.
 
 | File | Purpose |
 |------|---------|
 | `model.go` | `Model` struct, `NewModel`, `Init`, focus areas, status messages |
-| `update.go` | `Update` — the top-level message dispatcher |
+| `update.go` | `Update` — the top-level message dispatcher, and the routers (`routeSessionMsg`, `routeChannelMsg`, `routePostMsg`, `routeTagMsg`, `routeLookupMsg`) that send each message to its handler |
 | `keys.go` | Key routing: overlays first, then global bindings, then the focused pane |
 | `mouse.go` | Mouse routing — wheel scroll, drag selection, action-bar and palette clicks |
 | `slash.go` | Client-side slash commands (`/theme`, `/group`, `/nick`, …) |
@@ -120,7 +122,8 @@ rather than growing `update.go`.
 | `focus.go` | Focus changes, focus cycling, delegating keys to the focused pane |
 | `channels.go` | Channel and DM bookkeeping |
 | `unread.go` | Unread and mention counts |
-| `history.go` | Channel history, threads, editing, loading older pages |
+| `history.go` | Channel history, send, edit, search hits, loading older pages, leaving a thread |
+| `threads.go` | Thread loading, the thread inbox (`/threads`), opening the thread of the selected post |
 | `users.go` | User lookups, mention autocomplete entries |
 | `tags.go` | Tag lookups and tagging posts |
 | `wsevents.go` | WebSocket events and connection-state changes |
@@ -133,15 +136,15 @@ rather than growing `update.go`.
 
 ### `tui/palette/`
 
-The unified palette overlay (Ctrl+K): jump to channels/DMs sorted by unread
-activity, `@` people search, `/` slash commands, `?` message search in the
-active channel, `??` everywhere. Includes a hand-rolled fuzzy subsequence
-matcher (`fuzzy.go`).
+The unified palette overlay (Ctrl+K). It goes to channels and DMs, sorted by
+unread activity. It also has `@` people search, `/` slash commands, `?`
+message search in the active channel, and `??` search everywhere. It includes
+a hand-rolled fuzzy matcher of letters in sequence (`fuzzy.go`).
 
 ### `tui/actionbar/`
 
 Bottom action/status bar: clickable buttons (hit-tested by cell span),
-active team/channel context, the editing indicator, transient errors, and the
+active team/channel context, the edit indicator, transient errors, and the
 WebSocket connection indicator.
 
 ### `tui/help/`
@@ -156,18 +159,18 @@ expires.
 
 ### `tui/viewport/`
 
-Post list viewport wrapping `bubbles/viewport`. Renders each post with the
-`post` component, vertically, and owns the post cursor, mouse line selection, and search-match
-highlighting.
+Post list viewport around `bubbles/viewport`. It renders each post with the
+`post` component, vertically. It owns the post cursor, the mouse line
+selection, and the highlights of search matches.
 
 ### `tui/input/`
 
-Message input wrapping `bubbles/textarea`. Detects `/` prefix for slash command triggers.
+Message input around `bubbles/textarea`. Detects `/` prefix for slash command triggers.
 
 ### `tui/thread/`
 
-Read-only thread view that swaps into the main pane; replies are composed in
-the regular input box.
+Read-only thread view that swaps into the main pane. The user writes replies
+in the regular input box.
 
 ### `tui/threadinbox/`
 
@@ -176,7 +179,7 @@ unfollow.
 
 ### `tui/post/`
 
-Single post renderer using Glamour markdown. Shows username, timestamp, pinned badge, edited badge, encrypted badge, reply count badge, and tag badges.
+Single post renderer with Glamour Markdown. Shows username, timestamp, pinned badge, edited badge, encrypted badge, reply count badge, and tag badges.
 
 ### `tui/mention/`
 
@@ -184,13 +187,13 @@ Single post renderer using Glamour markdown. Shows username, timestamp, pinned b
 
 ### `tui/dmpicker/`
 
-Member-selection overlay used when creating private channels and for `/group`
-(multi-select with Tab). Starting DMs is handled by the palette's `@` mode.
+Member-selection overlay for new private channels and for `/group`
+(multi-select with Tab). The `@` mode of the palette starts DMs.
 
 ### `tui/skinpicker/`
 
-Runtime theme switcher overlay (`/theme`). Lists bundled themes, your TOML
-themes, and legacy JSON skins for hot-swapping without restart.
+Runtime theme switcher overlay (`/theme`). Lists bundled themes, local TOML
+themes, and legacy JSON skins. The new theme applies without restart.
 
 ### `tui/chcreator/`
 
@@ -198,7 +201,7 @@ Channel creator overlay with display name, auto-slug, type toggle (Open/Private)
 
 ### `tui/tagpicker/`
 
-Tag picker overlay for managing post tags. Filter by prefix, toggle tags on/off, create new tags. Also provides `ExtractHashtags` and `StripHashtags` for `#tag` input parsing.
+Tag picker overlay for the tags of a post. Filter by prefix, toggle tags on/off, create new tags. Also provides `ExtractHashtags` and `StripHashtags`, which parse `#tag` input.
 
 ### `tui/ui/listwin/`
 
@@ -207,11 +210,11 @@ however long the list is. Shared by the pickers.
 
 ### `tui/ui/markdown/`
 
-Theme-aware Glamour style config builder. Maps theme colors to markdown heading, link, code, and syntax highlighting styles.
+Theme-aware Glamour style config builder. Maps theme colors to the Markdown styles of headings, links, code, and syntax highlights.
 
 ### `tui/ui/theme/`
 
-Theme definitions, loading, and resolution.
+Theme definitions, the theme loader, and resolution.
 
 | File | Purpose |
 |------|---------|
@@ -227,12 +230,12 @@ Lipgloss style constructors that accept a `Theme` and produce a `Styles` struct 
 
 ## Tests
 
-Unit tests sit beside the code they test. Functional flows that should run
-through a real Bubble Tea program are in `internal/tui/flow_test.go`, using
+Unit tests sit beside the code that they test. Functional flows that run
+through a real Bubble Tea program are in `internal/tui/flow_test.go`. They use
 [teatest](https://github.com/charmbracelet/x/tree/main/exp/teatest). Tests
-never touch your real home directory: packages that read or write config,
-sessions, or themes point `HOME`, `XDG_CONFIG_HOME`, and `CHIT_CONFIG_FILE` at
-a temporary directory first.
+never touch the real home directory. Packages that read or write config,
+sessions, or themes first point `HOME`, `XDG_CONFIG_HOME`, and
+`CHIT_CONFIG_FILE` at a temporary directory.
 
 `tests/e2e/` holds end-to-end tests of the API and WebSocket clients against a
 real Chit server. They carry the `e2e` build tag, so `make test` skips them;

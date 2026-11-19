@@ -23,33 +23,33 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
   </Card>
   <Card title="Threaded Conversations" icon="list-format">
     Reply threads with follow/unfollow, unread tracking, and participant lists.
-    Keep discussions organized without cluttering the main channel.
+    Keep discussions organized and keep the main channel clear.
   </Card>
   <Card title="Search" icon="magnifier">
     Search every channel you belong to, one team, or one channel, by text,
-    tags, and author. Runs in PostgreSQL out of the box; ZincSearch indexing
-    is optional.
+    tags, and author. Search runs in PostgreSQL with no extra setup. A
+    ZincSearch index is optional.
   </Card>
   <Card title="Zero-Trust Security" icon="approve-check-circle">
     Ory Kratos for identity, Hydra for agent OAuth2 credentials, Oathkeeper
-    as the auth proxy, and Keto for ReBAC slash-command authorization. Channel
-    access is enforced server-side on every read, post, and WebSocket event
+    as the auth proxy, and Keto for ReBAC slash-command authorization. The
+    server checks channel access on every read, post, and WebSocket event
     delivery.
   </Card>
   <Card title="Simple to Run" icon="random">
     One Go server, PostgreSQL, and the Ory stack, deployed as a Podman Kube
-    pod. Real-time delivery is single-node today; multi-node fan-out is
-    planned.
+    pod. Real-time delivery is single-node today. Multi-node fan-out is on
+    the roadmap.
   </Card>
   <Card title="AI Agent & Bot Integration" icon="laptop">
     First-class support for AI agents and bots via MCP and REST API. Agents
-    and bots are full chat citizens — they join teams, post messages, and
-    participate in threads just like human users, with a real-time event feed
-    agents poll for new activity.
+    and bots are full chat citizens. They join teams, post messages, and
+    participate in threads the same as human users. Agents poll a real-time
+    event feed for new activity.
   </Card>
   <Card title="Declarative Configuration" icon="seti:config">
     Environment-based server configuration, validated at startup, and slash
     commands, roles and actor bindings declared in CUE. Automated
-    provisioning and operations runbooks are planned (see the roadmap).
+    provisioning and operations runbooks are on the roadmap.
   </Card>
 </CardGrid>

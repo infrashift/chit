@@ -4,11 +4,11 @@
 
 - [x] Layered architecture scaffold (API → App → Store)
 - [x] PostgreSQL schema with UUIDv7 PKs and bigint timestamps
-- [x] OpenAPI 3.1 specification (40+ endpoints), served with a Swagger UI
-- [x] Podman Kube deployment manifest
+- [x] OpenAPI 3.1 document (40+ endpoints), served with a Swagger UI
+- [x] Podman Kube manifest to deploy the stack
 - [x] Ory stack configuration (Kratos, Oathkeeper, Keto, Hydra)
 - [x] WebSocket hub skeleton
-- [x] Pub/sub abstraction (PG LISTEN/NOTIFY + NATS)
+- [x] Pub/sub interface (PG `LISTEN`/`NOTIFY` + NATS)
 - [x] LRU user cache
 - [x] Search indexer skeleton
 - [x] MCP server
@@ -20,7 +20,7 @@
 - [x] Integration tests
 - [x] End-to-end (system) tests
 - [x] Search indexer worker (poll for new posts)
-- [x] Hub channel filtering (broadcast scoping to channel and team members)
+- [x] Hub channel filter (the hub broadcasts only to channel and team members)
 
 ## Phase 2 — Core Messaging
 
@@ -28,10 +28,10 @@
 - [x] Thread reply tracking and participant updates (`thread_updated` events)
 - [x] Thread inbox (followed threads with unread state and root post)
 - [x] Unread counts and channel view tracking
-- [x] @mention detection and notification events
+- [x] @mention notification events (chitd finds each @mention)
 - [x] Message pinning flow
-- [x] Tag CRUD, post-tag association, and batch tag lookup
-- [x] Profile editing (`PUT /users/me`)
+- [x] Tag CRUD, links between posts and tags, and batch tag lookup
+- [x] Profile edits (`PUT /users/me`)
 - [x] Slash commands framework (CUE-defined, Keto-authorized, audited)
 - [x] Slash command handlers: `/help`, `/invite`, `/kick`, `/topic`
 - [ ] `/summarize` handler (registered in CUE, no handler yet)
@@ -42,7 +42,7 @@
 
 ## Phase 3 — Auth & Security
 
-- [x] Oathkeeper in front of chitd (Kratos sessions, Hydra token introspection); chitd trusts its headers, optionally gated by `X-Proxy-Secret`
+- [x] Oathkeeper in front of chitd (it checks Kratos sessions and introspects Hydra tokens); chitd trusts its headers, optionally gated by `X-Proxy-Secret`
 - [x] OAuth2 agent authentication via Ory Hydra client credentials (`X-Client-Id`)
 - [x] Machine actors declared in `CHIT_MACHINE_ACTORS` (no Kratos identity)
 - [x] Channel authorization checks (Postgres membership source of truth, Keto best-effort mirror)
@@ -56,8 +56,8 @@
 - [x] ZincSearch indexer worker (async from PG, optional)
 - [x] Filtered search (everywhere, per-team, per-channel; author and tag filters; scoped to member channels before pagination)
 - [x] Indexes for the search indexer and thread inbox; batched mention and tag queries
-- [ ] Store query timing and retry decorators (not implemented; the only cache is the app-layer user LRU)
-- [ ] Connection pool tuning
+- [ ] Store decorators that time and retry queries (not implemented; the only cache is the app-layer user LRU)
+- [ ] Tune the connection pool
 
 ## Phase 5 — Testing & Benchmarks
 
@@ -68,14 +68,14 @@
 
 ## Phase 6 — Operations
 
-- [ ] Multi-node WebSocket fan-out (chitd consuming the pub/sub event topic)
+- [ ] Multi-node WebSocket fan-out (chitd reads the pub/sub event topic)
 - [ ] Automated provisioning via Ansible and Podman
 - [ ] Operations runbooks
-- [ ] Monitoring and alerting guidance
-- [ ] Horizontal scaling documentation
+- [ ] Guide to monitor chitd and send alerts
+- [ ] Documentation on how to scale horizontally
 
 ## Phase 7 — TUI Client
 
 - [x] Terminal UI client in this repository (`clients/chit-tui`, its own Go module)
 - [x] Real-time channel view with WebSocket integration
-- [x] Thread navigation and reply composition
+- [x] Thread navigation and a reply composer

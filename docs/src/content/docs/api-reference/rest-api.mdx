@@ -3,9 +3,9 @@ title: REST API
 description: Endpoint overview, authentication, authorization, limits, pagination, and error format.
 ---
 
-The Chit REST API is defined in [`api/openapi.yaml`](https://github.com/infrashift/chit/blob/main/api/openapi.yaml)
-as an OpenAPI 3.1 specification. A running chitd serves the same spec at
-`GET /api/v1/openapi.yaml` and a Swagger UI at `/api/v1/docs/`.
+[`api/openapi.yaml`](https://github.com/infrashift/chit/blob/main/api/openapi.yaml)
+defines the Chit REST API as an OpenAPI 3.1 document. chitd serves the same
+spec at `GET /api/v1/openapi.yaml` and a Swagger UI at `/api/v1/docs/`.
 
 ## Base URL
 
@@ -26,27 +26,29 @@ set:
 | `X-User-Id` | A person with a Kratos session | The Kratos identity ID. On first sight chitd provisions a local user from the identity's Kratos traits. Without a `username` trait the username is derived: the email's local part reduced to `a-z 0-9 . _ -`, then `-` and the first 8 hex digits of the Kratos ID (`user-` and 12 digits without an email); a taken name gets a longer suffix. |
 
 chitd validates no session or token itself; it trusts these headers. When
-`CHIT_TRUSTED_PROXY_SECRET` is set, every authenticated request must also carry
-a matching `X-Proxy-Secret` header, or it is refused with `401`. Header names
-are configurable (`CHIT_TRUSTED_PROXY_HEADER`, `CHIT_TRUSTED_CLIENT_HEADER`).
+the operator sets `CHIT_TRUSTED_PROXY_SECRET`, every authenticated request must
+also have an `X-Proxy-Secret` header with the same value. Else chitd refuses
+it with `401`. The operator can change the header names
+(`CHIT_TRUSTED_PROXY_HEADER`, `CHIT_TRUSTED_CLIENT_HEADER`).
 
 See [Ory Stack](/chit/deployment/ory-stack/) for the full authentication flow.
 
 ### On behalf of a person
 
 A machine actor whose OAuth2 client is in `CHIT_ON_BEHALF_OF_CLIENTS` may act
-as a person by naming them in `X-On-Behalf-Of`. The request is then
-authorized as the person, with every check the person would face, and the
-audit log records the client beside them. The value is one of:
+as a person. To do this, it names the person in `X-On-Behalf-Of`. chitd then
+authorizes the request as the person, with all the checks that apply to the
+person. The audit log records the client beside the person. The value is one
+of:
 
 - the person's Chit user ID;
 - `kratos:` and the person's Kratos identity ID, as a canonical (lowercase,
-  hyphenated) UUID. When the identity has no Chit user yet, chitd provisions
-  one from the Kratos traits, exactly as the person's first browser request
-  would, and writes a `user_provisioned` audit record.
+  hyphenated) UUID. If the identity has no Chit user yet, chitd provisions one
+  from the Kratos traits. It does exactly what it does on the first browser
+  request of the person. It also writes a `user_provisioned` audit record.
 
-The header is accepted only on these routes; on any other route it is a
-`400`:
+chitd accepts the header only on these routes. On all other routes, the header
+gives a `400`:
 
 | Method | Path | As the person |
 |---|---|---|
@@ -57,18 +59,25 @@ The header is accepted only on these routes; on any other route it is a
 | POST | `/channels/{id}/members` | Add a member; the person must be allowed to add one |
 | GET | `/users/me` | Return the person: how a client learns a `kratos:` person's user ID |
 
-Refused: a client not on the list, or a person's session, with the header
-(`403`); an empty or malformed value, an unknown user or Kratos identity, a
-deactivated person (in Chit, or inactive in Kratos), and an agent or bot
-(`400`). A machine actor learns its own user ID with `GET /users/me` and no
+chitd refuses the header with `403` from a client that is not on the list,
+and from a person's session. It refuses these values with `400`:
+
+- an empty or malformed value;
+- an unknown user or Kratos identity;
+- a deactivated person (in Chit, or inactive in Kratos);
+- an agent or bot.
+
+A machine actor gets its own user ID with `GET /users/me` and no
 `X-On-Behalf-Of`.
 
-HALO creates a Conversation this way: `GET /users/me` for the person
-(`kratos:<id>`), add the person to halod's team as halod
-(`POST /teams/{id}/members`), `POST /channels` with `"type": "P"` for the
-person, `POST /channels/{id}/members` with halod's user ID for the person,
-`POST /posts` for the person, and `GET /channels/{id}/posts` as halod, which
-is now a member.
+HALO creates a Conversation with these requests:
+
+1. `GET /users/me` for the person (`kratos:<id>`).
+2. `POST /teams/{id}/members` as halod, to add the person to halod's team.
+3. `POST /channels` with `"type": "P"` for the person.
+4. `POST /channels/{id}/members` with halod's user ID, for the person.
+5. `POST /posts` for the person.
+6. `GET /channels/{id}/posts` as halod, which is now a member.
 
 ## Limits
 
@@ -80,9 +89,9 @@ is now a member.
 | Post content | 65,535 bytes | `400` |
 | `POST /users/ids`, `POST /tags/posts` | 200 IDs per request | `400` |
 
-Requests are validated against the OpenAPI spec by default
-(`CHIT_ENABLE_OPENAPI_VALIDATION`), and a request the spec does not allow is
-rejected before it reaches a handler.
+By default, chitd validates each request against the OpenAPI spec
+(`CHIT_ENABLE_OPENAPI_VALIDATION`). chitd refuses a request that the spec does
+not allow before the request reaches a handler.
 
 ## Pagination
 
@@ -93,17 +102,17 @@ List endpoints accept query parameters:
 | `page` | int | `0` | Page number (0-indexed) |
 | `per_page` | int | `60` (`25` for the thread inbox) | Results per page |
 
-Values are clamped server-side: `page` is at least `0`, `per_page` is between
-1 and 200, and `page` is lowered so that `page * per_page` does not exceed
-100,000. Search takes the same two fields in its JSON body, clamped the same
-way.
+The server clamps the values. `page` is at least `0`, and `per_page` is
+between 1 and 200. The server also decreases `page` until `page * per_page` is
+not more than 100,000. Search takes the same two fields in its JSON body, and
+the server clamps them the same way.
 
 List endpoints return `[]`, never `null`, when there is nothing to list.
 
 ## ID Format
 
 All resource IDs are **UUIDv7** strings (e.g., `01912345-6789-7abc-8def-0123456789ab`).
-UUIDv7 encodes creation time, enabling natural chronological ordering.
+A UUIDv7 starts with a timestamp, so the IDs sort in time order.
 
 ## Timestamps
 
@@ -168,8 +177,8 @@ response) include them.
 | DELETE | `/channels/{id}/members/{user_id}` | Remove a member | The member themselves; `system_admin` for anyone else |
 | POST | `/channels/{id}/members/me/view` | Mark the channel read | Channel members |
 
-Direct and group channels can only be created through `/channels/direct` and
-`/channels/group`, and their membership is fixed.
+Only `/channels/direct` and `/channels/group` can create direct and group
+channels. Their membership cannot change.
 
 ### Posts
 
@@ -184,16 +193,16 @@ Direct and group channels can only be created through `/channels/direct` and
 | GET | `/channels/{id}/posts` | Posts in a channel, newest first | Channel members |
 | GET | `/channels/{id}/pinned` | Pinned posts in a channel | Channel members |
 
-A reply's `root_id` must name a root post (not a reply) in the same channel,
-or the request is a `400`. The server computes `props.mentions` from the
-content; a client-supplied value is discarded.
+A reply's `root_id` must name a root post (not a reply) in the same channel.
+Else the request gets a `400`. The server computes `props.mentions` from the
+content, and ignores a value from the client.
 
 `GET /channels/{id}/posts` also accepts a `since` query parameter (Unix
-milliseconds). When set, it returns posts created after that timestamp,
-ordered oldest-first, for incremental polling.
+milliseconds). With `since`, it returns the posts created after that time,
+oldest first. A client uses it to poll for new posts.
 
-A slash command (content matching `^/[a-z0-9-]+`) is executed rather than
-stored; the response is a stand-in post that is not persisted. See
+chitd runs a slash command (content that matches `^/[a-z0-9-]+`) and does not
+store it. The response is a stand-in post that chitd does not store. See
 [MCP and Slash Commands](/chit/reference/mcp-and-commands/#slash-commands).
 
 ### Threads
@@ -208,8 +217,9 @@ stored; the response is a stand-in post that is not persisted. See
 | PUT | `/users/me/threads/{id}/read` | As the team-scoped route, without a `team_id` (which that route ignores); use it for DM and group threads | Members of the root's channel |
 | PUT | `/users/me/threads/{id}/following` | As the team-scoped route, without a `team_id` | Members of the root's channel |
 
-Replying follows a thread. The root's author starts following it at its first
-reply, unless they already have a membership (for example, they unfollowed).
+A user who replies to a thread follows it. At the first reply, the root's
+author also follows the thread, unless the author already has a membership
+(for example, the author unfollowed).
 
 ### Tags
 
@@ -229,18 +239,18 @@ reply, unless they already have a membership (for example, they unfollowed).
 | POST | `/tags/channels` | The caller's channels that have **all** of up to 8 tags (`{"tag_ids", "team_id"}`), on the channel or one of its posts, each with its visible channel tags | Any user |
 | DELETE | `/users/{id}/tags` | Delete every tag the user owns (for deleting or anonymizing a person) | The user or a system_admin |
 
-**Scopes.** A `private` tag is its owner's alone: nobody else sees it, its
-name, or what it is on, in any list, read, search, filter or WebSocket event,
-and naming its ID answers 404 as for an unknown tag. A `channel` tag belongs
-to one channel: every member sees it and may apply or remove it there, and
-only there. Only the owner renames or deletes a tag. A name has 1 to 50
-characters (letters, digits, space, `-`, `_`, `.`) and is unique per owner
-(private) or per channel (channel) after NFKC normalization and simple
-lowercasing (so `ß` and `ss` are different names).
+**Scopes.** A `private` tag is its owner's alone. Nobody else sees it, its
+name, or what it is on, in a list, read, search, filter or WebSocket event. A
+request with its ID gets 404, as for an unknown tag. A `channel` tag belongs
+to one channel. Every member sees it and may apply or remove it in that
+channel, and only there. Only the owner renames or deletes a tag. A name has 1
+to 50 characters (letters, digits, space, `-`, `_`, `.`). It is unique per
+owner (private) or per channel (channel). To compare names, chitd applies NFKC
+and a simple change to lowercase (so `ß` and `ss` are different names).
 An item has at most 32 channel tags and 32 private tags of each owner; an
 owner owns at most 1024 tags. Each application records `applied_by`.
 
-**`profile/` is reserved** for HALO's Profile tags. A person cannot create,
+**Only HALO uses `profile/`**, for its Profile tags. A person cannot create,
 rename or apply such a tag (403). An OAuth2 client in
 `CHIT_ON_BEHALF_OF_CLIENTS` may create one and apply it with
 `X-On-Behalf-Of`, only as the person's private tag.
@@ -263,15 +273,15 @@ Request body:
 | `page` | int | Page number, default `0` |
 | `per_page` | int | Page size, default `60` |
 
-At least one of `terms` and `tag_ids` is required (`400`). The response is
-`{"order": [posts]}`. Scope, author and tags are applied before the page is
-cut, so a page is short only at the end of the results.
+The body must have `terms`, `tag_ids` or both (else `400`). The response is
+`{"order": [posts]}`. chitd applies scope, author and tags before it cuts the
+page. So a page is short only at the end of the results.
 
-With `CHIT_ZINCSEARCH_URL` unset (the default), search runs in PostgreSQL: a
-case-insensitive substring match on content (`%` and `_` are literal), newest
-first. With it set, term searches go to ZincSearch in relevance order; chitd
-filters the hits to the caller's scope and reads at most 1,000 hits per
-search. If ZincSearch fails, the search falls back to SQL.
+With `CHIT_ZINCSEARCH_URL` unset (the default), search runs in PostgreSQL. It
+does a case-insensitive match on a part of the content (`%` and `_` are
+literal), newest first. With `CHIT_ZINCSEARCH_URL` set, term searches go to
+ZincSearch, best match first. chitd filters the hits to the caller's scope
+and reads at most 1,000 hits per search. If ZincSearch fails, the search falls back to SQL.
 
 ### Commands
 
@@ -288,7 +298,7 @@ search. If ZincSearch fails, the search falls back to SQL.
 ## Responses
 
 Endpoints with nothing to return answer `200` with `{"status":"OK"}`.
-Creation endpoints answer `201` with the created resource.
+Endpoints that create a resource answer `201` with the new resource.
 
 ## Error Format
 
@@ -309,5 +319,5 @@ All error responses use the same JSON shape (`model.AppError`):
 | `detailed_error` | Extra detail for a 4xx, when there is any. Omitted when empty, and **never sent with a 5xx**: a server error's cause is logged, not returned. |
 | `status_code` | The HTTP status, repeated |
 
-Authorization failures are `403`; a missing or unknown resource is `404`;
-a conflict (such as a taken username) is `409`.
+Authorization failures are `403`. An absent or unknown resource is `404`.
+A conflict (such as a taken username) is `409`.

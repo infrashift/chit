@@ -7,7 +7,7 @@ tags:
   - "websocket"
 created: "2026-11-19T13:10:25-06:00"
 timestamp: "2026-11-19T13:10:25-06:00"
-description: "chitd sends 15 event types over /api/v1/websocket to the members of the channel or team of each event."
+description: "chitd sends 19 event types over /api/v1/websocket to the members of the channel or team of each event."
 ---
 
 # WebSocket events
@@ -26,6 +26,9 @@ A client connects to `/api/v1/websocket`. chitd authenticates the connection lik
 | `user_added`, `user_removed` | A channel got or lost a member. |
 | `thread_updated` | The counters of a thread changed. |
 | `post_tags_updated` | The tags of a post changed. |
+| `channel_tags_updated` | The tags of a channel changed. |
+| `tag_updated`, `tag_deleted` | A user renamed or deleted a tag. The owner gets a private tag event, and the channel gets a channel tag event. |
+| `stream_status` | A member, or an agent for a member, writes a reply. chitd sends it on and does not store it. |
 | `mentioned` | A post names the connected user with `@`. |
 | `command_response` | The reply to a slash command of the connected user. Only that user gets it. |
 

@@ -110,13 +110,10 @@ LEXIS ?= lexis
 DOCS_LEXIS_FLAGS := --ruleset ste-100 --ruleset vocabulary.cue --fail-on note \
 	--exclude 'changelog.mdx' --exclude 'index.md' --exclude 'log.md' \
 	--exclude 'daily' --exclude 'ephemeral'
-DOCS_LEXIS_PATHS := CLAUDE.md PLAN.md .okfw
-# Phase 10 of PLAN.md writes these files again and moves them into
-# DOCS_LEXIS_PATHS. At the end of Phase 10 this list is empty.
-DOCS_LEXIS_PENDING := README.md PRD.md PRD-SLASH-COMMANDS.md \
+DOCS_LEXIS_PATHS := README.md CLAUDE.md PLAN.md PRD.md PRD-SLASH-COMMANDS.md \
 	SPECS-SLASH-COMMANDS.md ROADMAP.md tests/e2e/README.md \
 	clients/chit-tui/README.md clients/chit-tui/CLAUDE.md clients/chit-tui/TODO.md \
-	docs/src/content/docs
+	docs/src/content/docs .okfw
 docs-lexis:
 	if command -v $(LEXIS) >/dev/null 2>&1; then $(LEXIS) scan $(DOCS_LEXIS_FLAGS) $(DOCS_LEXIS_PATHS); else echo "docs-lexis: $(LEXIS) not found, so nothing checks the style"; fi
 

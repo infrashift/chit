@@ -3,24 +3,24 @@ title: Architecture
 description: Technical architecture of Chit TUI.
 ---
 
-Chit TUI follows the **Elm Architecture** (Model-Update-View) using the [Bubble Tea](https://github.com/charmbracelet/bubbletea) framework.
+Chit TUI follows the **Elm Architecture** (Model-Update-View) with the [Bubble Tea](https://github.com/charmbracelet/bubbletea) framework.
 
 ## Elm Architecture
 
 Every component in Chit TUI implements three functions:
 
-- **Model** — A struct holding all component state
+- **Model** — A struct that holds all component state
 - **Update** — A pure function: `(Model, Msg) → (Model, Cmd)`
 - **View** — A pure function: `Model → string`
 
-The root model composes all sub-components and routes messages to the appropriate child.
-It is one `Model` type, but its methods are split by concern across files in
-`internal/tui` rather than kept in one large file:
+The root model composes all sub-components and routes messages to the applicable child.
+It is one `Model` type. Its methods are not in one large file. Each concern
+has its own file in `internal/tui`:
 
 | File | Concern |
 |------|---------|
 | `model.go` | The `Model` struct, `NewModel`, `Init`, transient status messages |
-| `update.go` | `Update`: the top-level message switch |
+| `update.go` | `Update`: the top-level message dispatcher, and the routers (`routeSessionMsg`, `routeChannelMsg`, `routePostMsg`, `routeTagMsg`, `routeLookupMsg`) that send each message to its handler |
 | `keys.go` | Key routing: overlays, global bindings, then the focused pane |
 | `mouse.go` | Mouse routing: wheel, clicks, drag selection |
 | `slash.go` | Client-side slash commands; everything else goes to the server |
@@ -28,7 +28,8 @@ It is one `Model` type, but its methods are split by concern across files in
 | `focus.go` | Focus changes and delegating keys to the focused pane |
 | `channels.go` | Channel and DM bookkeeping, selecting a channel |
 | `unread.go` | Unread and mention counts |
-| `history.go` | Loading history, threads, editing, older pages |
+| `history.go` | Loading history, send, edit, search hits, older pages, leaving a thread |
+| `threads.go` | Thread loading, the thread inbox, opening the thread of the selected post |
 | `users.go` | User lookups and mention autocomplete entries |
 | `tags.go` | Tag lookups and tagging posts |
 | `wsevents.go` | WebSocket events and connection state |
@@ -60,24 +61,27 @@ Root Model (internal/tui)
 ## Message Flow
 
 1. **User presses a key** → Bubble Tea delivers a `tea.KeyMsg`
-2. **Root Update** hands it to `handleKey` (`keys.go`), which routes it to a
-   visible overlay first (help, palette, pickers), then to the mention popup
-3. Otherwise checks global keybindings (Tab, Ctrl+K, Ctrl+S, …)
-4. If not a global key, **delegates** to the focused sub-component
-5. Sub-component returns a **tea.Cmd** (async operation) if needed
-6. Cmd executes and produces a **result Msg** (e.g. `PostsLoadedMsg`)
-7. Root Update handles the result, updating state and triggering new Cmds
+2. **Root Update** gives it to `handleKey` (`keys.go`). `handleKey` sends it
+   first to a visible overlay (help, palette, pickers), then to the mention popup
+3. If no overlay takes the key, `handleKey` checks the global keys (Tab, Ctrl+K, Ctrl+S, …)
+4. If it is not a global key, `handleKey` **delegates** it to the focused sub-component
+5. The sub-component returns a **tea.Cmd** (async operation) if necessary
+6. The Cmd executes and produces a **result Msg** (e.g. `PostsLoadedMsg`)
+7. Root Update handles the result. It updates the state and can start new Cmds
 
-Before any of that, `Update` checks whether the message reports a request the
-server rejected as unauthorized. A rejected session is the same problem
-whichever request noticed it, so it is caught once: the stored session is
-cleared and the login screen returns.
+Before all of these steps, `Update` checks whether the message reports a
+request that the server rejected as unauthorized. A rejected session is the
+same problem for each request, so `Update` catches it in one place. The TUI
+clears the stored session and shows the login screen again.
 
-Mouse events (`tea.MouseMsg`) are routed by `handleMouse` (`mouse.go`): the
-wheel scrolls the main pane or moves the palette cursor, press-and-drag in the
-history selects lines, and clicks are hit-tested against the action bar's
-button spans or the palette's rows. Every clickable action dispatches through
-the same code path as its keybinding.
+`handleMouse` (`mouse.go`) routes mouse events (`tea.MouseMsg`):
+
+- The wheel scrolls the main pane or moves the palette cursor.
+- Press-and-drag in the history selects lines.
+- `handleMouse` hit-tests each click against the button spans of the action
+  bar or the rows of the palette.
+
+Each clickable action goes through the same code path as its key.
 
 ## The Unified Palette
 
@@ -93,9 +97,10 @@ opened with `Ctrl+K`. The first character of the query selects the mode:
 | `??` | Message search | `SearchPostsEverywhere`, every channel the user belongs to |
 
 With an empty query, channels sort by **mentions → unread → most recent
-post**, so the channels needing attention are always on top. Unread `(N)` and
-mention `[@N]` badges render per row. The palette shares the root model's
-unread/mention maps by reference, so badge state needs no extra plumbing.
+post**, so the channels with new activity are always on top. Each row shows
+an unread `(N)` badge and a mention `[@N]` badge. The palette shares the root
+model's unread/mention maps by reference, so the badge state needs no extra
+code.
 
 ## API Integration
 
@@ -114,19 +119,22 @@ type ChitClient interface {
 }
 ```
 
-Authentication is handled by `authTransport`, an `http.RoundTripper` that
+`authTransport` does the authentication. It is an `http.RoundTripper` that
 injects the token into every request under the configured header
-(`auth_header`, default `X-Session-Token`). Every request times out after 30
-seconds, so a server that accepts a request and never answers produces an
-error instead of a command that waits forever.
+(`auth_header`, default `X-Session-Token`). `main` builds the client with
+`api.NewClientWithTokenSource` and an `*auth.TokenStore`. The transport reads
+the token from this `TokenSource` on every request, so a token that changes
+after sign-in takes effect at once. Every request times out after 30 seconds. As a result, a server
+that accepts a request and never answers causes an error, not a command that
+waits forever.
 
-On startup the TUI fetches channels for **every team** the user belongs to
-(`channelsByTeam` on the root model); the palette shows a `· team` suffix on
-channel rows when more than one team is loaded.
+When it starts, the TUI gets the channels of **every team** that the user
+belongs to (`channelsByTeam` on the root model). If the TUI loaded more than
+one team, the palette shows a `· team` suffix on channel rows.
 
 ### WebSocket Client
 
-The `WSClient` interface provides real-time event streaming:
+The `WSClient` interface gives a real-time stream of events:
 
 ```go
 type WSClient interface {
@@ -143,44 +151,43 @@ connection until it fails and then redials, until `Close` ends the session.
 `Close` is safe to call twice, and `Connect` may start a new session
 afterwards.
 
-- **Dead links are detected.** The client sends a ping every 25 seconds and
-  treats 60 seconds without any frame as a dead connection. Without a
-  deadline, a half-open TCP connection would block the reader forever.
-- **Redials back off.** Delays grow exponentially from 500ms to a 30s cap,
-  with up to a fifth shaved off at random so clients dropped by the same
-  server restart do not all redial in the same instant.
-- **A failed first dial is retried.** `Connect` returns the error so the UI
-  can show it, then keeps redialing in the background like after a drop.
-- **Rejected credentials stop the loop.** A handshake refused with 401 or 403
-  is reported as `ErrUnauthorized`, and the client stops redialing — retrying
-  cannot fix it. The TUI responds by returning to the login screen.
+- **The client finds dead links.** The client sends a ping every 25 seconds.
+  If no frame arrives for 60 seconds, it treats the connection as dead.
+  Without a deadline, a half-open TCP connection can block the reader forever.
+- **Redials back off.** Delays grow exponentially from 500ms to a 30s cap.
+  The client removes up to a fifth of each delay at random. As a result, the clients
+  that the same server restart dropped do not all redial at the same instant.
+- **The client tries a failed first dial again.** `Connect` returns the error
+  so the UI can show it. Then the client continues to redial in the
+  background, as after a drop.
+- **Rejected credentials stop the loop.** If the server refuses a handshake
+  with 401 or 403, the client reports `ErrUnauthorized` and does not redial.
+  A new try cannot fix the problem. The TUI then shows the login screen.
 
-Events are delivered through a buffered channel that the TUI reads via the
-`ListenWebSocket` tea.Cmd; connect and disconnect transitions come on the
-separate `State()` channel, read by `ListenWSState`, so server events and
-transport state never have to be told apart. The action bar shows a
-connection indicator (`●` connected / `○` disconnected).
+The TUI reads events from a buffered channel through the `ListenWebSocket`
+tea.Cmd. Connect and disconnect transitions come on the separate `State()`
+channel, which `ListenWSState` reads. As a result, the TUI never has to separate
+server events from transport state. The action bar shows a connection
+indicator (`●` connected / `○` disconnected).
 
-Events that arrive while the socket is down are gone for good — the stream
-has no replay — so on reconnecting the TUI re-reads the active channel. The
-same happens if the event buffer overflows while the socket stays up: the
-client reports the gap as a `Desynced` state, and the TUI reloads rather than
-silently showing a stale view.
+The TUI never gets the events that arrive while the socket is down, because
+the stream has no replay. For this reason, after each reconnect, the TUI reads the active
+channel again. The same occurs if the event buffer overflows while the socket
+stays up. The client reports the gap as a `Desynced` state, and the TUI loads
+the channel again. It does not silently show a stale view.
 
-### Stale Event Protection
+### Stale Response Protection
 
-The root model tracks a `lastWSSeq` counter. WebSocket events with a sequence number less than or equal to the last seen sequence are dropped, preventing duplicate or out-of-order message processing.
-
-REST responses get the same care. Requests run asynchronously, and the user
-may have moved on by the time one answers, so a late response is dropped
-unless it still matches what is on screen:
+Requests run asynchronously, and the user can move to a different view before
+a request answers. For this reason, the TUI drops a late REST response unless it still
+matches the screen:
 
 - channel history only if it is for the active channel
 - a thread only if that thread is still open
 - message or people search results only if they are for the latest query
 
-Applying one anyway would, for example, show one channel's history under
-another's name.
+If the TUI applied such a response, it could, for example, show the history
+of one channel under the name of a different channel.
 
 ## Focus and Panes
 
@@ -188,19 +195,19 @@ The root model owns a `FocusArea` enum. Only the focused component receives
 key messages. `Tab`/`Shift+Tab` toggle between the top pane (history, or the
 thread when one is open) and the input.
 
-The top pane is controlled by a `mainPane` enum:
+A `mainPane` enum controls the top pane:
 
 - **`paneChannel`** — the channel's post history (Viewport)
 - **`paneThread`** — a thread opened with Enter on a post; the input then
   composes replies to the thread root, and `Esc` returns to the channel
 
-Overlays (palette, help, pickers) intercept keys while visible and are
-composited over the layout in z-order through a single overlay table using a
-character-level, ANSI-aware `placeOverlay` function.
+Overlays (palette, help, pickers) intercept keys while they are visible.
+`View` composites them over the layout in z-order through a single overlay
+table. It uses the character-level, ANSI-aware `placeOverlay` function.
 
 ## Layout
 
-The view is composed with Lipgloss:
+`View` composes the screen with Lipgloss:
 
 ```
 ┌───────────────────────────────────────────────┐
@@ -214,13 +221,13 @@ The view is composed with Lipgloss:
 └───────────────────────────────────────────────┘
 ```
 
-In a thread the bar gains an `[esc Back]` button, and while the history pane
-is focused with a post selected it gains `[↵ Reply]`, which is also the hint
-that the pane has to be focused before `Enter` opens a thread.
+In a thread, the bar adds an `[esc Back]` button. When the history pane has
+focus and has a selected post, the bar adds `[↵ Reply]`. This button also shows
+that the pane must have focus before `Enter` opens a thread.
 
-Unread/mention state, DM display names, and the all-team channel lists are
-owned by the root model; the palette and action bar render from that state.
+The root model owns the unread/mention state, the DM display names, and the
+all-team channel lists. The palette and action bar render from that state.
 
 ## Own Model DTOs
 
-Chit TUI defines its own data transfer objects in the `model` package, mirroring the server's JSON shapes. This avoids importing the server codebase (and its dependencies like `pgx`, `chi`, etc.) into the TUI.
+Chit TUI defines its own data transfer objects in the `model` package. They mirror the server's JSON shapes. As a result, the TUI does not import the server codebase (and its dependencies like `pgx`, `chi`, etc.).

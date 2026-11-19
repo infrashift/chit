@@ -65,4 +65,4 @@ Tracking: [ISSUE-009](.okfw/issues/issue-009-r5-assertion-density--01a1f5379e6c.
 ## Phase 10: ASD-STE100 documentation
 Tracking: [ISSUE-010](.okfw/issues/issue-010-asd-ste100-documentation--01a1f5379e74.md)
 
-- [ ] Write the Markdown documentation again until `make docs-lexis` reports zero findings.
+- [x] Write the Markdown documentation again until `make docs-lexis` reports zero findings.
