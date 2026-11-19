@@ -40,22 +40,9 @@ func (a *App) CreateChannel(ctx context.Context, channel *model.Channel) (*model
 		return nil, err
 	}
 
-	// With the membership hook on, the team members of a new open channel
-	// are asked about first, the creator excepted, under the channel's ID
-	// to be. One refusal refuses the channel: nothing is saved.
-	var checked []string
-	if a.MembershipHook != nil && channel.Type == model.ChannelOpen {
-		channel.PreSave()
-		if err := channel.IsValid(); err != nil {
-			return nil, err
-		}
-		teamIDs, err := a.Store.Team().GetMemberIDs(ctx, channel.TeamID)
-		if err != nil {
-			return nil, err
-		}
-		if checked, err = a.checkMemberIDs(ctx, channel.ID, otherMembers(teamIDs, channel.CreatorID), channel.CreatorID); err != nil {
-			return nil, err
-		}
+	checked, err := a.checkOpenChannelMembers(ctx, channel)
+	if err != nil {
+		return nil, err
 	}
 
 	saved, err := a.Store.Channel().Save(ctx, channel)
@@ -72,20 +59,9 @@ func (a *App) CreateChannel(ctx context.Context, channel *model.Channel) (*model
 	assert.That(saved != nil && saved.ID != "", "App.CreateChannel: saved channel has no id")
 	members := []string{saved.CreatorID}
 
-	// For open channels, auto-add all team members so the channel appears
-	// in every member's sidebar via GetChannelsForUser. One INSERT ... SELECT,
-	// rather than reading up to 10,000 members (silently stopping there)
-	// and inserting them one by one inside the request.
-	// With the hook on, only the members it allowed are added; one who
-	// joined the team since was not asked, and can join the channel.
 	if saved.Type == model.ChannelOpen {
 		var added []string
-		if a.MembershipHook != nil {
-			added, err = a.Store.Channel().AddTeamMembersAmong(ctx, saved.ID, saved.TeamID, checked)
-		} else {
-			added, err = a.Store.Channel().AddTeamMembers(ctx, saved.ID, saved.TeamID)
-		}
-		if err != nil {
+		if added, err = a.addOpenChannelMembers(ctx, saved, checked); err != nil {
 			return nil, err
 		}
 		members = append(members, added...)
@@ -99,6 +75,43 @@ func (a *App) CreateChannel(ctx context.Context, channel *model.Channel) (*model
 
 	a.broadcastChannelEvent(ctx, model.WebSocketEventChannelCreated, saved)
 	return saved, nil
+}
+
+// checkOpenChannelMembers asks the membership hook about the team members
+// of a new open channel, the creator excepted, under the channel's ID to be,
+// and returns the IDs it allowed. One refusal refuses the channel: nothing is
+// saved. With the hook off, or for a private channel, it asks nothing and
+// returns nil.
+func (a *App) checkOpenChannelMembers(ctx context.Context, channel *model.Channel) ([]string, error) {
+	assert.That(channel != nil, "App.checkOpenChannelMembers: nil channel")
+	if a.MembershipHook == nil || channel.Type != model.ChannelOpen {
+		return nil, nil
+	}
+	channel.PreSave()
+	if err := channel.IsValid(); err != nil {
+		return nil, err
+	}
+	assert.That(channel.ID != "" && channel.CreatorID != "", "App.checkOpenChannelMembers: no channel id or creator")
+	teamIDs, err := a.Store.Team().GetMemberIDs(ctx, channel.TeamID)
+	if err != nil {
+		return nil, err
+	}
+	return a.checkMemberIDs(ctx, channel.ID, otherMembers(teamIDs, channel.CreatorID), channel.CreatorID)
+}
+
+// addOpenChannelMembers auto-adds the team members to a new open channel, so
+// the channel appears in every member's sidebar via GetChannelsForUser. One
+// INSERT ... SELECT, rather than reading up to 10,000 members (silently
+// stopping there) and inserting them one by one inside the request. With
+// the hook on, only the members it allowed (checked) are added; one who
+// joined the team since was not asked, and can join the channel.
+func (a *App) addOpenChannelMembers(ctx context.Context, saved *model.Channel, checked []string) ([]string, error) {
+	assert.That(saved != nil && saved.Type == model.ChannelOpen, "App.addOpenChannelMembers: not an open channel")
+	assert.That(saved.ID != "" && saved.TeamID != "", "App.addOpenChannelMembers: channel has no id or team")
+	if a.MembershipHook != nil {
+		return a.Store.Channel().AddTeamMembersAmong(ctx, saved.ID, saved.TeamID, checked)
+	}
+	return a.Store.Channel().AddTeamMembers(ctx, saved.ID, saved.TeamID)
 }
 
 // GetChannel retrieves a channel on behalf of actorID. Members may read any
@@ -346,6 +359,7 @@ func (a *App) CreateGroupChannel(ctx context.Context, actorID string, userIDs []
 // but actorID. It gives the channel its ID first, so that the hook is told
 // the ID the channel will have.
 func (a *App) checkNewChannelMembers(ctx context.Context, channel *model.Channel, members []string, actorID string) error {
+	assert.That(channel != nil && actorID != "", "App.checkNewChannelMembers: nil channel or empty actor id")
 	if a.MembershipHook == nil {
 		return nil
 	}
@@ -454,7 +468,13 @@ func (a *App) AddChannelMember(ctx context.Context, channelID, userID, actorID s
 	a.Hub.NotifyMembershipChanged(userID, channelID, true)
 
 	a.logKeto(a.keto.WriteRelation(ctx, model.KetoNamespaceChannel, channelID, model.KetoRelationMember, userID), channelID, userID)
+	a.publishUserAdded(ctx, channelID, userID)
+	return saved, nil
+}
 
+// publishUserAdded announces that userID joined channelID.
+func (a *App) publishUserAdded(ctx context.Context, channelID, userID string) {
+	assert.That(channelID != "" && userID != "", "App.publishUserAdded: empty channel or user id")
 	a.publishEvent(ctx, &model.WebSocketEvent{
 		Event: model.WebSocketEventUserAdded,
 		Data: map[string]any{
@@ -463,8 +483,6 @@ func (a *App) AddChannelMember(ctx context.Context, channelID, userID, actorID s
 		},
 		Broadcast: &model.WebSocketBroadcast{ChannelID: channelID},
 	}, &pubsub.EventEnvelope{Event: model.WebSocketEventUserAdded, ChannelID: channelID})
-
-	return saved, nil
 }
 
 // RemoveChannelMember removes a user from a channel on behalf of actorID.

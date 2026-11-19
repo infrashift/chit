@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/memberhook"
 	"github.com/infrashift/chit/internal/model"
 )
@@ -55,11 +56,17 @@ type viaActorKey struct{}
 // WithViaActor records in ctx the on-behalf-of client that acts for the
 // request's user, so that the membership hook can name it.
 func WithViaActor(ctx context.Context, actorID string) context.Context {
+	assert.That(ctx != nil, "WithViaActor: nil context")
+	assert.That(actorID != "", "WithViaActor: empty actor id")
 	return context.WithValue(ctx, viaActorKey{}, actorID)
 }
 
 func viaActor(ctx context.Context) string {
-	id, _ := ctx.Value(viaActorKey{}).(string)
+	assert.That(ctx != nil, "viaActor: nil context")
+	id, ok := ctx.Value(viaActorKey{}).(string)
+	if !ok {
+		return ""
+	}
 	return id
 }
 
@@ -82,6 +89,8 @@ func (a *App) checkMembership(ctx context.Context, channelID string, member *mod
 	if a.MembershipHook == nil {
 		return nil
 	}
+	assert.That(member != nil, "App.checkMembership: nil member")
+	assert.That(channelID != "" && addedBy != "", "App.checkMembership: empty channel id or adder")
 	req := &memberhook.Request{
 		ChannelID:        channelID,
 		UserID:           member.ID,
@@ -109,6 +118,7 @@ func (a *App) checkMembership(ctx context.Context, channelID string, member *mod
 }
 
 func (a *App) auditMembership(req *memberhook.Request, d memberhook.Decision) {
+	assert.That(req != nil, "App.auditMembership: nil request")
 	if a.AuditLogger == nil {
 		return
 	}
@@ -125,6 +135,8 @@ func (a *App) checkMemberIDs(ctx context.Context, channelID string, userIDs []st
 	if a.MembershipHook == nil || len(userIDs) == 0 {
 		return userIDs, nil
 	}
+	assert.That(a.Store != nil, "App.checkMemberIDs: nil store")
+	assert.That(channelID != "" && addedBy != "", "App.checkMemberIDs: empty channel id or adder")
 	users, err := a.Store.User().GetByIDs(ctx, userIDs)
 	if err != nil {
 		return nil, err
@@ -170,13 +182,16 @@ feed:
 	for _, u := range users {
 		checked = append(checked, u.ID)
 	}
+	assert.That(len(checked) == len(users), "App.checkMemberIDs: lost a checked id")
 	return checked, nil
 }
 
 // otherMembers returns ids without actorID: the members of a new channel
 // that its creator adds.
 func otherMembers(ids []string, actorID string) []string {
-	return slices.DeleteFunc(slices.Clone(ids), func(id string) bool { return id == actorID })
+	out := slices.DeleteFunc(slices.Clone(ids), func(id string) bool { return id == actorID })
+	assert.That(len(out) <= len(ids) && !slices.Contains(out, actorID), "otherMembers: the actor is still a member")
+	return out
 }
 
 // IsMembershipRefusal reports whether err is a refusal of the membership

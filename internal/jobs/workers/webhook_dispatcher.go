@@ -73,6 +73,7 @@ func (d *WebhookDispatcher) Start(ctx context.Context) error {
 // Stop signals all workers to drain and exit.
 func (d *WebhookDispatcher) Stop() {
 	assert.That(d.stop != nil, "WebhookDispatcher.Stop: not built by NewWebhookDispatcher")
+	assert.That(d.numWorkers > 0, "WebhookDispatcher.Stop: no workers")
 	close(d.stop)
 	d.wg.Wait()
 }

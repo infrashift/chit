@@ -21,6 +21,12 @@ exclude: docs: "the Astro docs site; no Go code"
 // and semscope already skips the _test.go files (ADR-0002, Scope).
 exclude: "internal/store/storetest": "in-memory Store fake; only tests import it"
 exclude: "clients/chit-tui/internal/testutil": "TUI test helpers; only tests import them"
+exclude: "internal/memberhook/memberhooktest": "membership hook fake; only tests import it"
+
+// The e2e stand-in for halod's membership hook. It runs in the dev stack
+// for tests/e2e/test_e2e.sh scenario 12 and is not part of a chit binary,
+// like the UAT seed tools in scripts.
+exclude: "tests/e2e/hookstub": "e2e stand-in for the membership hook; not shipped in a chit binary"
 
 // Refactor omissions. Each phase of PLAN.md fixes one rule and removes its
 // line. At the end of Phase 9 this list is empty.

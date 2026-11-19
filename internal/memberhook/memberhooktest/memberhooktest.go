@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/infrashift/chit/internal/assert"
+	"github.com/infrashift/chit/internal/errlog"
 	"github.com/infrashift/chit/internal/memberhook"
 )
 
@@ -26,12 +28,15 @@ type Answer struct {
 	Body   string
 }
 
-// Allow is the answer {"allow":true}.
-var Allow = Answer{Status: http.StatusOK, Body: `{"allow":true}`}
+// Allow returns the answer {"allow":true}.
+func Allow() Answer {
+	return Answer{Status: http.StatusOK, Body: `{"allow":true}`}
+}
 
 // Refuse returns the answer {"allow":false,"reason":...,"detail":...}.
 func Refuse(reason, detail string) Answer {
-	b, _ := json.Marshal(map[string]any{"allow": false, "reason": reason, "detail": detail})
+	b, err := json.Marshal(map[string]any{"allow": false, "reason": reason, "detail": detail})
+	assert.That(err == nil, "memberhooktest: a map of strings always marshals")
 	return Answer{Status: http.StatusOK, Body: string(b)}
 }
 
@@ -66,7 +71,7 @@ func RefuseUser(userID, reason, detail string) func(*memberhook.Request) Answer 
 		if r.UserID == userID {
 			return Refuse(reason, detail)
 		}
-		return Allow
+		return Allow()
 	}
 }
 
@@ -120,13 +125,17 @@ func (s *Server) Tokens() int {
 func (s *Server) serveToken(w http.ResponseWriter, r *http.Request) {
 	id, secret, ok := r.BasicAuth()
 	if !ok {
-		_ = r.ParseForm()
+		// A form that does not parse leaves no client_id: the request is
+		// refused below as an invalid client.
+		errlog.Debug(r.ParseForm(), "memberhooktest: parse token form")
 		id, secret = r.PostForm.Get("client_id"), r.PostForm.Get("client_secret")
 	}
 	if id != ClientID || secret != ClientSecret || r.FormValue("grant_type") != "client_credentials" {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"error":"invalid_client"}`))
+		if _, err := w.Write([]byte(`{"error":"invalid_client"}`)); err != nil {
+			errlog.Debug(err, "memberhooktest: write token refusal")
+		}
 		return
 	}
 	s.mu.Lock()
@@ -135,9 +144,11 @@ func (s *Server) serveToken(w http.ResponseWriter, r *http.Request) {
 	token := s.valid
 	s.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"access_token": token, "token_type": "bearer", "expires_in": 3600,
-	})
+	}); err != nil {
+		errlog.Debug(err, "memberhooktest: write token")
+	}
 }
 
 func (s *Server) serveHook(w http.ResponseWriter, r *http.Request) {
@@ -160,5 +171,7 @@ func (s *Server) serveHook(w http.ResponseWriter, r *http.Request) {
 	answer := policy(&req)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(answer.Status)
-	_, _ = w.Write([]byte(answer.Body))
+	if _, err := w.Write([]byte(answer.Body)); err != nil {
+		errlog.Debug(err, "memberhooktest: write hook answer")
+	}
 }

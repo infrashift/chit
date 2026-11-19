@@ -81,25 +81,27 @@ wrong, chitd lists all the problems at one time and exits. It refuses to start w
   `CHIT_LOG_FORMAT` is not `json` or `text`;
 - `CHIT_WEBHOOK_ENABLED=true` and `CHIT_WEBHOOK_URL` is empty, or the webhook
   worker count, queue size or timeout is not positive;
-- `CHIT_MEMBERSHIP_HOOK_URL` is set and the token URL, client ID or client
-  secret is empty, or `CHIT_MEMBERSHIP_HOOK_TIMEOUT` is not positive; or the
-  URL is not an absolute `http` or `https` URL (checked at start);
+- `CHIT_MEMBERSHIP_HOOK_URL` has a value and the token URL, client ID or
+  client secret is empty;
+- `CHIT_MEMBERSHIP_HOOK_TIMEOUT` is not positive;
+- `CHIT_MEMBERSHIP_HOOK_URL` is not an absolute `http` or `https` URL (chitd
+  checks this at start);
 - a `CHIT_RATE_LIMIT_*_PER_SECOND` is not more than 0 and at most 100,000, or
   a `CHIT_RATE_LIMIT_*_BURST` is not between 1 and 1,000,000. No value turns
   a limit off;
-- `CHIT_MACHINE_ACTORS` is not valid JSON or declares an invalid actor (checked
-  just after the database connects).
+- `CHIT_MACHINE_ACTORS` is not valid JSON or declares an invalid actor (chitd
+  checks this immediately after the database connects).
 
 ### Rate limits
 
-chitd keeps a token bucket for each caller and refuses a request over the
-limit with `429`, a `Retry-After` header (seconds, rounded up), and a
-`rate limit exceeded` warning in its log.
+chitd keeps a token bucket for each caller. It refuses a request over the
+limit with `429` and a `Retry-After` header (seconds, rounded up). It also
+writes a `rate limit exceeded` warning in its log.
 
-- **Per user.** A person, and a machine actor that is not in
-  `CHIT_ON_BEHALF_OF_CLIENTS`, has one bucket keyed by their user ID:
-  `CHIT_RATE_LIMIT_USER_PER_SECOND` (10) requests a second, in bursts of
-  `CHIT_RATE_LIMIT_USER_BURST` (50).
+- **Per user.** A person has one bucket, with their user ID as its key. A
+  machine actor that is not in `CHIT_ON_BEHALF_OF_CLIENTS` also has one. The
+  bucket allows `CHIT_RATE_LIMIT_USER_PER_SECOND` (10) requests a second, in
+  bursts of `CHIT_RATE_LIMIT_USER_BURST` (50).
 - **Per on-behalf-of client.** A client in `CHIT_ON_BEHALF_OF_CLIENTS` is one
   caller for many people, so it has an aggregate bucket instead:
   `CHIT_RATE_LIMIT_CLIENT_PER_SECOND` (1500) in bursts of
@@ -108,19 +110,23 @@ limit with `429`, a `Retry-After` header (seconds, rounded up), and a
 - **On behalf of a person.** A request with `X-On-Behalf-Of` also counts
   against the person's own per-user bucket, the one their browser requests
   use. Each person a client acts for has the normal per-user budget, and no
-  more: the client cannot be used to give anyone a larger one.
+  more: nobody can use the client to get a larger budget.
 
 A request needs a token from each of its buckets; one that a bucket refuses
 takes nothing from the other. The log line names the bucket (`user` or
-`client`), the method and path, and who: `user_id` for a person,
-`actor_id` and `client_id` for a client as itself, and `actor_id`,
-`client_id` and `principal_id` for a request on behalf of a person.
+`client`), the method and the path. It also names the caller:
+
+- `user_id` for a person;
+- `actor_id` and `client_id` for a client as itself;
+- `actor_id`, `client_id` and `principal_id` for a request on behalf of a
+  person.
+
 `POST /channels/{id}/stream_status` has its own limit as well (two events a
 second per sender and channel, in bursts of five).
 
-The client defaults are sized for HALO's `halod` with about 2000 Subjects,
-each sending about one Message a minute, with streamed replies. halod
-sends, per Message (a turn):
+The client defaults fit the `halod` of HALO with about 2000 Subjects. Each
+Subject sends about one Message a minute, and gets streamed replies. For each
+Message (a turn), halod sends:
 
 | Request | As | Per turn |
 |---|---|---|
@@ -134,20 +140,20 @@ sends, per Message (a turn):
 
 2000 Subjects at one Message a minute are 2000 / 60 = 33.3 turns a second,
 and 33.3 × 30 = 1000 requests a second. The default rate of 1500 is half
-again as much, room for replies of about 35 s on average or for Messages
-arriving half again as fast; the burst of 3000 is two seconds of it. Each
-Subject spends one or two requests a minute of their own per-user budget.
-Scale the client limit with the number of people a client serves, and keep
-it a limit: it is what stops a compromised or faulty client from flooding
-chitd.
+again as much. This gives room for replies of about 35 s on average. It also
+gives room for Messages that arrive half again as fast. The burst of 3000 is
+two seconds of the rate. Each Subject spends one or two requests a minute of
+their own per-user budget. Scale the client limit with the number of people
+that a client serves. Keep it a limit: the limit stops a compromised or faulty
+client that sends too many requests to chitd.
 
 ### Membership hook
 
-HALO records the Tools and OKF namespaces behind each Profile message, so a
-person added to a channel later could read output made with somebody else's
-access. The membership hook lets HALO's `halod` refuse such an add. When
-`CHIT_MEMBERSHIP_HOOK_URL` is set, chitd asks the hook before it adds a member
-on every path that adds one:
+HALO records the Tools and OKF namespaces behind each Profile message. So a
+person that a user adds to a channel later could read output made with the
+access of a different person. The membership hook lets the `halod` of HALO refuse such an add. When
+`CHIT_MEMBERSHIP_HOOK_URL` has a value, chitd asks the hook before it adds a
+member on every path that adds one:
 
 | Path | Who is checked |
 |---|---|
@@ -157,14 +163,17 @@ on every path that adds one:
 | `POST /channels/direct` and `POST /channels/group` (a new channel only) | Each member but the caller |
 | `/invite` | The user invited |
 
-Joining a team adds no channel memberships, so it asks nothing. An existing
-member, an existing direct or group channel, and an add that its own checks
-refuse ask nothing either.
+When a user joins a team, chitd adds no channel memberships, so it asks
+nothing. chitd also asks nothing in these cases:
+
+- the member is already in the channel;
+- the direct or group channel exists;
+- the usual checks of chitd refuse the add.
 
 The request is `POST <CHIT_MEMBERSHIP_HOOK_URL>` with
-`Authorization: Bearer <token>` (chitd's Hydra `client_credentials` token,
-kept until 30 seconds before it expires and fetched again once after a 401)
-and `Content-Type: application/json`:
+`Authorization: Bearer <token>` and `Content-Type: application/json`. The
+token is the Hydra `client_credentials` token of chitd. chitd keeps it until
+30 seconds before it expires, and gets it again one time after a 401.
 
 ```json
 {"channel_id": "<channel ID>", "user_id": "<user ID of the new member>",
@@ -185,9 +194,9 @@ hook fails closed. A refusal adds nothing and answers 403:
  "reason": "<the hook's code, or hook_unavailable>", "detail": "<the hook's text>"}
 ```
 
-A request that adds several members (an Open channel, a group) asks about
-each one, at most 8 at a time, and adds all or none: one refusal refuses the
-request. `/invite` answers with the reason and detail as its text. Each
+For a request that adds several members (an Open channel, a group), chitd
+asks about each one, at most 8 at a time. chitd adds all or none: one refusal
+refuses the request. `/invite` answers with the reason and detail as its text. Each
 answer is a `membership_check` record in the audit log, with the channel,
 the member, `added_by`, `via_actor_id`, `allowed` and `reason`.
 
@@ -312,6 +321,6 @@ stops the bridge at startup.
   the `chit_events` topic. Nothing subscribes to that topic yet: WebSocket
   fan-out is single-node and in-process, and `chit-mcp` gets its events from
   chitd's WebSocket.
-- A limit that is not configurable: request bodies over 1 MiB are refused
+- A limit that is not configurable: chitd refuses a request body over 1 MiB
   with 413. The request rate limits are configurable; see
   [Rate limits](#rate-limits).

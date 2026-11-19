@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/blob"
 	"github.com/infrashift/chit/internal/model"
 	"github.com/infrashift/chit/pkg/imagecheck"
@@ -90,19 +91,8 @@ func imageRefusal(err error) error {
 // uploader. actor is the allowlisted client uploading on the uploader's
 // behalf, or nil.
 func (a *App) UploadFile(ctx context.Context, up *FileUpload, uploader, actor *model.User) (*model.File, error) {
-	if err := a.requireAttachments(); err != nil {
-		return nil, err
-	}
-	if actor != nil && !a.OnBehalfOfAllowed(actor) {
-		return nil, model.NewForbiddenError("App.UploadFile", "this client may not act on behalf of a user")
-	}
-	if _, err := a.Store.Channel().Get(ctx, up.ChannelID); err != nil {
-		return nil, err
-	}
-	if err := a.requireChannelMember(ctx, up.ChannelID, uploader.ID); err != nil {
-		return nil, err
-	}
-	if err := model.ValidateAltText(up.AltText); err != nil {
+	assert.That(up != nil && uploader != nil, "App.UploadFile: nil upload or uploader")
+	if err := a.checkUploader(ctx, up, uploader, actor); err != nil {
 		return nil, err
 	}
 
@@ -110,17 +100,76 @@ func (a *App) UploadFile(ctx context.Context, up *FileUpload, uploader, actor *m
 	if err != nil {
 		return nil, imageRefusal(err)
 	}
+	assert.That(img != nil && img.SHA256 != "", "App.UploadFile: checked image has no digest")
+	if quotaErr := a.checkQuota(ctx, uploader.ID, len(img.Data)); quotaErr != nil {
+		return nil, quotaErr
+	}
 
-	used, err := a.Store.File().UsageBytes(ctx, uploader.ID)
+	f := newFile(up, uploader, actor, img)
+	stored, err := a.putObject(ctx, f, img)
 	if err != nil {
 		return nil, err
 	}
-	if quota := a.Config.FileQuotaBytes; used+int64(len(img.Data)) > quota {
-		return nil, fileError(FileErrQuota, fmt.Sprintf(
-			"storage quota exceeded: %d of %d bytes used, and this image is %d", used, quota, len(img.Data)),
+	saved, err := a.Store.File().Save(ctx, f)
+	if err != nil {
+		if stored {
+			// No row names the object, so the sweep would never find it.
+			if delErr := a.Blobs.Delete(context.WithoutCancel(ctx), f.S3Key); delErr != nil {
+				slog.Warn("file: could not remove the object of a failed upload", "key", f.S3Key, "error", delErr)
+			}
+		}
+		return nil, err
+	}
+	assert.That(saved != nil, "App.UploadFile: nil file without an error")
+	a.AuditOnBehalfOf(actor, "file_uploaded", uploader.ID, "file_id", saved.ID, "channel_id", saved.ChannelID)
+	return saved, nil
+}
+
+// checkUploader refuses an upload before its bytes are looked at: with
+// attachments off, from a client that may not act on behalf of a user, to a
+// channel that does not exist or the uploader is not a member of, or with
+// alt text that is too long.
+func (a *App) checkUploader(ctx context.Context, up *FileUpload, uploader, actor *model.User) error {
+	assert.That(a.Store != nil, "App.checkUploader: nil store")
+	assert.That(up != nil && uploader != nil, "App.checkUploader: nil upload or uploader")
+	if err := a.requireAttachments(); err != nil {
+		return err
+	}
+	if actor != nil && !a.OnBehalfOfAllowed(actor) {
+		return model.NewForbiddenError("App.UploadFile", "this client may not act on behalf of a user")
+	}
+	if _, err := a.Store.Channel().Get(ctx, up.ChannelID); err != nil {
+		return err
+	}
+	if err := a.requireChannelMember(ctx, up.ChannelID, uploader.ID); err != nil {
+		return err
+	}
+	if err := model.ValidateAltText(up.AltText); err != nil {
+		return err
+	}
+	return nil
+}
+
+// checkQuota refuses an image of size bytes that would take uploaderID past
+// Config.FileQuotaBytes.
+func (a *App) checkQuota(ctx context.Context, uploaderID string, size int) error {
+	assert.That(a.Store != nil && a.Config != nil, "App.checkQuota: nil store or config")
+	assert.That(uploaderID != "" && size > 0, "App.checkQuota: no uploader or an empty image")
+	used, err := a.Store.File().UsageBytes(ctx, uploaderID)
+	if err != nil {
+		return err
+	}
+	if quota := a.Config.FileQuotaBytes; used+int64(size) > quota {
+		return fileError(FileErrQuota, fmt.Sprintf(
+			"storage quota exceeded: %d of %d bytes used, and this image is %d", used, quota, size),
 			http.StatusRequestEntityTooLarge)
 	}
+	return nil
+}
 
+// newFile is the record of the checked image img, before it has an object.
+func newFile(up *FileUpload, uploader, actor *model.User, img *imagecheck.Image) *model.File {
+	assert.That(up != nil && uploader != nil && img != nil, "newFile: nil upload, uploader or image")
 	f := &model.File{
 		ID:          model.NewID(),
 		ChannelID:   up.ChannelID,
@@ -137,41 +186,38 @@ func (a *App) UploadFile(ctx context.Context, up *FileUpload, uploader, actor *m
 	if actor != nil {
 		f.ViaActorID = actor.ID
 	}
+	assert.That(f.ID != "" && f.CreateAt > 0, "newFile: no id or creation time")
+	return f
+}
 
-	// Deduplicate within this channel only.
-	stored := false
-	existing, lookupErr := a.Store.File().GetBySHA256(ctx, up.ChannelID, img.SHA256)
+// putObject gives f its object. Identical bytes are deduplicated within
+// f's channel only: a file with the same digest there lends f its object.
+// Otherwise the bytes are stored under a key of f's own, and stored is true.
+func (a *App) putObject(ctx context.Context, f *model.File, img *imagecheck.Image) (stored bool, err error) {
+	assert.That(a.Blobs != nil && a.Store != nil, "App.putObject: attachments are off")
+	assert.That(f != nil && img != nil && f.S3Key == "", "App.putObject: no file or image, or an object key already")
+	existing, lookupErr := a.Store.File().GetBySHA256(ctx, f.ChannelID, img.SHA256)
 	switch {
 	case lookupErr == nil:
 		f.S3Key = existing.S3Key
+		return false, nil
 	case isNotFound(lookupErr):
-		f.S3Key = model.FileObjectKey(up.ChannelID, f.ID)
+		f.S3Key = model.FileObjectKey(f.ChannelID, f.ID)
 		if putErr := a.Blobs.Put(ctx, f.S3Key, img.ContentType, img.Data); putErr != nil {
-			return nil, fmt.Errorf("store file: %w", putErr)
+			return false, fmt.Errorf("store file: %w", putErr)
 		}
-		stored = true
+		return true, nil
 	default:
-		return nil, lookupErr
+		return false, lookupErr
 	}
-
-	saved, err := a.Store.File().Save(ctx, f)
-	if err != nil {
-		if stored {
-			// No row names the object, so the sweep would never find it.
-			if delErr := a.Blobs.Delete(context.WithoutCancel(ctx), f.S3Key); delErr != nil {
-				slog.Warn("file: could not remove the object of a failed upload", "key", f.S3Key, "error", delErr)
-			}
-		}
-		return nil, err
-	}
-	a.AuditOnBehalfOf(actor, "file_uploaded", uploader.ID, "file_id", saved.ID, "channel_id", saved.ChannelID)
-	return saved, nil
 }
 
 // GetFile returns a file the reader may read: a member of its channel, and
 // before it is attached to a post, only its uploader. An unknown file is a
 // 404; a file the reader may not read is a 403, as for posts.
 func (a *App) GetFile(ctx context.Context, id string, reader *model.User) (*model.File, error) {
+	assert.That(reader != nil, "App.GetFile: nil reader")
+	assert.That(a.Store != nil, "App.GetFile: nil store")
 	if err := a.requireAttachments(); err != nil {
 		return nil, err
 	}
@@ -179,6 +225,7 @@ func (a *App) GetFile(ctx context.Context, id string, reader *model.User) (*mode
 	if err != nil {
 		return nil, err
 	}
+	assert.That(f != nil, "App.GetFile: nil file without an error")
 	if err := a.requireChannelMember(ctx, f.ChannelID, reader.ID); err != nil {
 		return nil, err
 	}
@@ -194,6 +241,7 @@ func (a *App) OpenFile(ctx context.Context, id string, reader *model.User) (*mod
 	if err != nil {
 		return nil, nil, 0, err
 	}
+	assert.That(a.Blobs != nil, "App.OpenFile: attachments are off after GetFile")
 	rc, size, err := a.Blobs.Get(ctx, f.S3Key)
 	if err != nil {
 		if errors.Is(err, blob.ErrNotFound) {
@@ -202,6 +250,7 @@ func (a *App) OpenFile(ctx context.Context, id string, reader *model.User) (*mod
 		}
 		return nil, nil, 0, err
 	}
+	assert.That(rc != nil, "App.OpenFile: nil reader without an error")
 	return f, rc, size, nil
 }
 
@@ -210,6 +259,7 @@ func (a *App) OpenFile(ctx context.Context, id string, reader *model.User) (*mod
 // post's channel, uploaded by the post's author, and attached nowhere yet.
 // Store().Post().Save checks the same again, atomically.
 func (a *App) checkAttachable(ctx context.Context, post *model.Post) error {
+	assert.That(post != nil, "App.checkAttachable: nil post")
 	if len(post.FileIDs) == 0 {
 		return nil
 	}
@@ -227,6 +277,7 @@ func (a *App) checkAttachable(ctx context.Context, post *model.Post) error {
 		}
 		seen[id] = true
 	}
+	assert.That(len(seen) == len(post.FileIDs), "App.checkAttachable: a duplicate id got through")
 	files, err := a.Store.File().GetByIDs(ctx, post.FileIDs)
 	if err != nil {
 		return err
@@ -254,6 +305,8 @@ func (a *App) checkAttachable(ctx context.Context, post *model.Post) error {
 // SearchFiles finds files by name or alt text in the reader's channels, or
 // in channelID only. Nothing derived from the image is searched.
 func (a *App) SearchFiles(ctx context.Context, reader *model.User, terms, channelID string, page, perPage int) ([]*model.File, error) {
+	assert.That(reader != nil && a.Store != nil, "App.SearchFiles: nil reader or store")
+	assert.That(page >= 0 && perPage > 0, "App.SearchFiles: pagination not clamped")
 	if err := a.requireAttachments(); err != nil {
 		return nil, err
 	}
@@ -296,9 +349,11 @@ func (a *App) SweepFiles(ctx context.Context) (expired, purged int, err error) {
 	if a.Blobs == nil {
 		return 0, 0, nil
 	}
+	assert.That(a.Store != nil && a.Config != nil, "App.SweepFiles: nil store or config")
 	now := model.GetMillis()
 	cutoff := now - a.Config.FileOrphanGrace.Milliseconds()
 	batch := a.Config.FileSweepBatch
+	assert.That(batch > 0, "App.SweepFiles: batch must be positive")
 
 	expired, err = a.Store.File().ExpireUnattached(ctx, cutoff, now, batch)
 	if err != nil {
@@ -324,5 +379,6 @@ func (a *App) SweepFiles(ctx context.Context) (expired, purged int, err error) {
 		}
 		purged++
 	}
+	assert.That(purged <= len(deleted), "App.SweepFiles: purged more files than were deleted")
 	return expired, purged, nil
 }

@@ -16,15 +16,25 @@ import (
 
 // The callers of the rate-limit tests. halod is on the on-behalf-of
 // allowlist; the bot is a machine actor that is not.
-var (
-	rlHalod  = &model.User{ID: "halod-user", OAuthClientID: "halod-client", ActorType: model.ActorTypeAgent}
-	rlBot    = &model.User{ID: "bot-user", OAuthClientID: "bot-client", ActorType: model.ActorTypeBot}
-	rlAlice  = &model.User{ID: "alice", ActorType: model.ActorTypeUser}
-	rlBob    = &model.User{ID: "bob", ActorType: model.ActorTypeUser}
-	rlCarol  = &model.User{ID: "carol", ActorType: model.ActorTypeUser}
-	rlDave   = &model.User{ID: "dave", ActorType: model.ActorTypeUser}
-	rlClient = func(u *model.User) bool { return u.OAuthClientID == rlHalod.OAuthClientID }
-)
+func rlHalod() *model.User {
+	return &model.User{ID: "halod-user", OAuthClientID: "halod-client", ActorType: model.ActorTypeAgent}
+}
+
+func rlBot() *model.User {
+	return &model.User{ID: "bot-user", OAuthClientID: "bot-client", ActorType: model.ActorTypeBot}
+}
+
+func rlAlice() *model.User { return &model.User{ID: "alice", ActorType: model.ActorTypeUser} }
+func rlBob() *model.User   { return &model.User{ID: "bob", ActorType: model.ActorTypeUser} }
+func rlCarol() *model.User { return &model.User{ID: "carol", ActorType: model.ActorTypeUser} }
+func rlDave() *model.User  { return &model.User{ID: "dave", ActorType: model.ActorTypeUser} }
+
+// rlClient puts halod, and only halod, on the on-behalf-of allowlist.
+type rlClient struct{}
+
+func (rlClient) OnBehalfOfAllowed(u *model.User) bool {
+	return u.OAuthClientID == rlHalod().OAuthClientID
+}
 
 // limiterRig drives the rate-limit middleware with a clock of its own.
 type limiterRig struct {
@@ -35,9 +45,12 @@ type limiterRig struct {
 func newLimiterRig(limits RateLimits) *limiterRig {
 	rig := &limiterRig{now: time.Unix(1_000_000, 0)}
 	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	rig.handler = rateLimit(limits, rlClient, func() time.Time { return rig.now })(ok)
+	rig.handler = newRateLimiter(limits, rlClient{}, rig).wrap(ok)
 	return rig
 }
+
+// Now is the rig's clock.
+func (rig *limiterRig) Now() time.Time { return rig.now }
 
 // as sends one request from user, on behalf of nobody.
 func (rig *limiterRig) as(t *testing.T, user *model.User) *httptest.ResponseRecorder {
@@ -83,17 +96,17 @@ func clientLimits(burst int) RateLimits {
 func TestRateLimit_APersonHasTheirOwnBucket(t *testing.T) {
 	rig := newLimiterRig(userLimits(2))
 	for range 2 {
-		wantCode(t, "within the burst", rig.as(t, rlAlice), http.StatusOK)
+		wantCode(t, "within the burst", rig.as(t, rlAlice()), http.StatusOK)
 	}
-	w := rig.as(t, rlAlice)
+	w := rig.as(t, rlAlice())
 	wantCode(t, "past the burst", w, http.StatusTooManyRequests)
 	if got := w.Header().Get("Retry-After"); got != "1" {
 		t.Fatalf("Retry-After = %q, want 1 (one token a second)", got)
 	}
-	wantCode(t, "another person", rig.as(t, rlBob), http.StatusOK)
+	wantCode(t, "another person", rig.as(t, rlBob()), http.StatusOK)
 
 	rig.now = rig.now.Add(time.Second)
-	wantCode(t, "a second later", rig.as(t, rlAlice), http.StatusOK)
+	wantCode(t, "a second later", rig.as(t, rlAlice()), http.StatusOK)
 }
 
 // The fix for P-CHIT-8: on behalf of a person, the client spends that
@@ -101,18 +114,18 @@ func TestRateLimit_APersonHasTheirOwnBucket(t *testing.T) {
 func TestRateLimit_OnBehalfOfIsKeyedByThePrincipal(t *testing.T) {
 	rig := newLimiterRig(userLimits(2))
 	for range 2 {
-		wantCode(t, "for alice", rig.forPerson(t, rlHalod, rlAlice), http.StatusOK)
+		wantCode(t, "for alice", rig.forPerson(t, rlHalod(), rlAlice()), http.StatusOK)
 	}
-	wantCode(t, "for alice past her burst", rig.forPerson(t, rlHalod, rlAlice), http.StatusTooManyRequests)
+	wantCode(t, "for alice past her burst", rig.forPerson(t, rlHalod(), rlAlice()), http.StatusTooManyRequests)
 	// Alice's own requests share her bucket: the client cannot be used to
 	// give anyone more than their own budget.
-	wantCode(t, "alice herself", rig.as(t, rlAlice), http.StatusTooManyRequests)
+	wantCode(t, "alice herself", rig.as(t, rlAlice()), http.StatusTooManyRequests)
 	for range 2 {
-		wantCode(t, "for bob", rig.forPerson(t, rlHalod, rlBob), http.StatusOK)
+		wantCode(t, "for bob", rig.forPerson(t, rlHalod(), rlBob()), http.StatusOK)
 	}
 	// Nor did the client's own requests come out of a per-user bucket.
 	for range 5 {
-		wantCode(t, "halod as itself", rig.as(t, rlHalod), http.StatusOK)
+		wantCode(t, "halod as itself", rig.as(t, rlHalod()), http.StatusOK)
 	}
 }
 
@@ -120,21 +133,21 @@ func TestRateLimit_OnBehalfOfIsKeyedByThePrincipal(t *testing.T) {
 // against its own bucket too.
 func TestRateLimit_OnBehalfOfCountsAgainstTheClient(t *testing.T) {
 	rig := newLimiterRig(clientLimits(3))
-	for _, p := range []*model.User{rlAlice, rlBob, rlCarol} {
-		wantCode(t, "for "+p.ID, rig.forPerson(t, rlHalod, p), http.StatusOK)
+	for _, p := range []*model.User{rlAlice(), rlBob(), rlCarol()} {
+		wantCode(t, "for "+p.ID, rig.forPerson(t, rlHalod(), p), http.StatusOK)
 	}
-	wantCode(t, "for dave, past the client's burst", rig.forPerson(t, rlHalod, rlDave), http.StatusTooManyRequests)
-	wantCode(t, "halod as itself, past its burst", rig.as(t, rlHalod), http.StatusTooManyRequests)
+	wantCode(t, "for dave, past the client's burst", rig.forPerson(t, rlHalod(), rlDave()), http.StatusTooManyRequests)
+	wantCode(t, "halod as itself, past its burst", rig.as(t, rlHalod()), http.StatusTooManyRequests)
 	// The people still have their own budgets for themselves.
-	wantCode(t, "dave himself", rig.as(t, rlDave), http.StatusOK)
+	wantCode(t, "dave himself", rig.as(t, rlDave()), http.StatusOK)
 }
 
 func TestRateLimit_AnAllowlistedClientAsItselfUsesTheAggregateBucket(t *testing.T) {
 	rig := newLimiterRig(RateLimits{UserPerSecond: 1, UserBurst: 2, ClientPerSecond: 1, ClientBurst: 10})
 	for range 10 {
-		wantCode(t, "halod as itself, within the aggregate burst", rig.as(t, rlHalod), http.StatusOK)
+		wantCode(t, "halod as itself, within the aggregate burst", rig.as(t, rlHalod()), http.StatusOK)
 	}
-	wantCode(t, "halod as itself, past it", rig.as(t, rlHalod), http.StatusTooManyRequests)
+	wantCode(t, "halod as itself, past it", rig.as(t, rlHalod()), http.StatusTooManyRequests)
 }
 
 // A machine actor that may not act on behalf of anyone is one caller, and
@@ -142,24 +155,24 @@ func TestRateLimit_AnAllowlistedClientAsItselfUsesTheAggregateBucket(t *testing.
 func TestRateLimit_AMachineActorNotAllowlistedKeepsThePerUserLimit(t *testing.T) {
 	rig := newLimiterRig(RateLimits{UserPerSecond: 1, UserBurst: 2, ClientPerSecond: 1, ClientBurst: 10})
 	for range 2 {
-		wantCode(t, "bot within the user burst", rig.as(t, rlBot), http.StatusOK)
+		wantCode(t, "bot within the user burst", rig.as(t, rlBot()), http.StatusOK)
 	}
-	wantCode(t, "bot past the user burst", rig.as(t, rlBot), http.StatusTooManyRequests)
+	wantCode(t, "bot past the user burst", rig.as(t, rlBot()), http.StatusTooManyRequests)
 }
 
 // A request one bucket refuses spends nothing from the other.
 func TestRateLimit_ARefusalSpendsNoOtherBucket(t *testing.T) {
 	t.Run("refused for the person, the client keeps its token", func(t *testing.T) {
 		rig := newLimiterRig(RateLimits{UserPerSecond: 1, UserBurst: 1, ClientPerSecond: 1, ClientBurst: 2})
-		wantCode(t, "for alice", rig.forPerson(t, rlHalod, rlAlice), http.StatusOK)
-		wantCode(t, "for alice again", rig.forPerson(t, rlHalod, rlAlice), http.StatusTooManyRequests)
-		wantCode(t, "halod's last token", rig.as(t, rlHalod), http.StatusOK)
+		wantCode(t, "for alice", rig.forPerson(t, rlHalod(), rlAlice()), http.StatusOK)
+		wantCode(t, "for alice again", rig.forPerson(t, rlHalod(), rlAlice()), http.StatusTooManyRequests)
+		wantCode(t, "halod's last token", rig.as(t, rlHalod()), http.StatusOK)
 	})
 	t.Run("refused for the client, the person keeps their token", func(t *testing.T) {
 		rig := newLimiterRig(RateLimits{UserPerSecond: 1, UserBurst: 1, ClientPerSecond: 1, ClientBurst: 1})
-		wantCode(t, "halod as itself", rig.as(t, rlHalod), http.StatusOK)
-		wantCode(t, "for alice", rig.forPerson(t, rlHalod, rlAlice), http.StatusTooManyRequests)
-		wantCode(t, "alice's own token", rig.as(t, rlAlice), http.StatusOK)
+		wantCode(t, "halod as itself", rig.as(t, rlHalod()), http.StatusOK)
+		wantCode(t, "for alice", rig.forPerson(t, rlHalod(), rlAlice()), http.StatusTooManyRequests)
+		wantCode(t, "alice's own token", rig.as(t, rlAlice()), http.StatusOK)
 	})
 }
 
@@ -173,11 +186,13 @@ func TestRateLimit_RetryAfter(t *testing.T) {
 		want   string
 	}{
 		{"person, 0.3 a second", RateLimits{UserPerSecond: 0.3, UserBurst: 1, ClientPerSecond: 100, ClientBurst: 100},
-			func(r *limiterRig, t *testing.T) *httptest.ResponseRecorder { return r.as(t, rlAlice) }, "4"},
+			func(r *limiterRig, t *testing.T) *httptest.ResponseRecorder { return r.as(t, rlAlice()) }, "4"},
 		{"client, 0.25 a second", RateLimits{UserPerSecond: 100, UserBurst: 100, ClientPerSecond: 0.25, ClientBurst: 1},
-			func(r *limiterRig, t *testing.T) *httptest.ResponseRecorder { return r.forPerson(t, rlHalod, rlAlice) }, "4"},
+			func(r *limiterRig, t *testing.T) *httptest.ResponseRecorder {
+				return r.forPerson(t, rlHalod(), rlAlice())
+			}, "4"},
 		{"client, 1500 a second", RateLimits{UserPerSecond: 100, UserBurst: 100, ClientPerSecond: 1500, ClientBurst: 1},
-			func(r *limiterRig, t *testing.T) *httptest.ResponseRecorder { return r.as(t, rlHalod) }, "1"},
+			func(r *limiterRig, t *testing.T) *httptest.ResponseRecorder { return r.as(t, rlHalod()) }, "1"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -194,7 +209,7 @@ func TestRateLimit_RetryAfter(t *testing.T) {
 
 func TestRateLimit_AnUnauthenticatedRequestIsLimitedByAddress(t *testing.T) {
 	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	handler := RateLimit(userLimits(1), rlClient)(ok)
+	handler := RateLimit(userLimits(1), rlClient{})(ok)
 	codes := make([]int, 0, 3)
 	for _, addr := range []string{"10.0.0.1:9999", "10.0.0.1:9999", "10.0.0.2:9999"} {
 		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
@@ -208,34 +223,44 @@ func TestRateLimit_AnUnauthenticatedRequestIsLimitedByAddress(t *testing.T) {
 	}
 }
 
-// Each refusal is logged with the bucket and who: for a request on behalf of
-// a person, the actor, its client ID and the principal.
-func TestRateLimit_LogsTheRefusal(t *testing.T) {
-	cases := []struct {
-		name   string
-		limits RateLimits
-		send   func(*limiterRig, *testing.T) *httptest.ResponseRecorder
-		want   map[string]any
-		absent []string
-	}{
+// refusalLogCase is one case of TestRateLimit_LogsTheRefusal.
+type refusalLogCase struct {
+	name   string
+	limits RateLimits
+	send   func(*limiterRig, *testing.T) *httptest.ResponseRecorder
+	want   map[string]any
+	absent []string
+}
+
+func refusalLogCases() []refusalLogCase {
+	return []refusalLogCase{
 		{"on behalf of, the person's bucket", userLimits(1),
-			func(r *limiterRig, t *testing.T) *httptest.ResponseRecorder { return r.forPerson(t, rlHalod, rlAlice) },
+			func(r *limiterRig, t *testing.T) *httptest.ResponseRecorder {
+				return r.forPerson(t, rlHalod(), rlAlice())
+			},
 			map[string]any{"bucket": "user", "actor_id": "halod-user", "client_id": "halod-client", "principal_id": "alice"},
 			[]string{"user_id"}},
 		{"on behalf of, the client's bucket", clientLimits(1),
-			func(r *limiterRig, t *testing.T) *httptest.ResponseRecorder { return r.forPerson(t, rlHalod, rlAlice) },
+			func(r *limiterRig, t *testing.T) *httptest.ResponseRecorder {
+				return r.forPerson(t, rlHalod(), rlAlice())
+			},
 			map[string]any{"bucket": "client", "actor_id": "halod-user", "client_id": "halod-client", "principal_id": "alice"},
 			[]string{"user_id"}},
 		{"the client as itself", clientLimits(1),
-			func(r *limiterRig, t *testing.T) *httptest.ResponseRecorder { return r.as(t, rlHalod) },
+			func(r *limiterRig, t *testing.T) *httptest.ResponseRecorder { return r.as(t, rlHalod()) },
 			map[string]any{"bucket": "client", "actor_id": "halod-user", "client_id": "halod-client"},
 			[]string{"principal_id", "user_id"}},
 		{"a person", userLimits(1),
-			func(r *limiterRig, t *testing.T) *httptest.ResponseRecorder { return r.as(t, rlAlice) },
+			func(r *limiterRig, t *testing.T) *httptest.ResponseRecorder { return r.as(t, rlAlice()) },
 			map[string]any{"bucket": "user", "user_id": "alice"},
 			[]string{"actor_id", "principal_id"}},
 	}
-	for _, tc := range cases {
+}
+
+// Each refusal is logged with the bucket and who: for a request on behalf of
+// a person, the actor, its client ID and the principal.
+func TestRateLimit_LogsTheRefusal(t *testing.T) {
+	for _, tc := range refusalLogCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
 			prev := slog.Default()
@@ -248,28 +273,33 @@ func TestRateLimit_LogsTheRefusal(t *testing.T) {
 				t.Fatalf("an allowed request was logged: %s", buf.String())
 			}
 			wantCode(t, "second", tc.send(rig, t), http.StatusTooManyRequests)
-
-			var line map[string]any
-			if err := json.Unmarshal(buf.Bytes(), &line); err != nil {
-				t.Fatalf("want one JSON log line, got %q", buf.String())
-			}
-			if line["level"] != "WARN" || line["msg"] != "rate limit exceeded" {
-				t.Fatalf("level %v, msg %v", line["level"], line["msg"])
-			}
-			for k, v := range tc.want {
-				if line[k] != v {
-					t.Errorf("%s = %v, want %v", k, line[k], v)
-				}
-			}
-			for _, k := range tc.absent {
-				if _, ok := line[k]; ok {
-					t.Errorf("%s = %v, want it absent", k, line[k])
-				}
-			}
-			if line["path"] != "/api/v1/posts" || line["method"] != http.MethodPost {
-				t.Errorf("method %v, path %v", line["method"], line["path"])
-			}
+			checkRefusalLog(t, buf.Bytes(), &tc)
 		})
+	}
+}
+
+// checkRefusalLog checks the one JSON log line of a refusal against tc.
+func checkRefusalLog(t *testing.T, logged []byte, tc *refusalLogCase) {
+	t.Helper()
+	var line map[string]any
+	if err := json.Unmarshal(logged, &line); err != nil {
+		t.Fatalf("want one JSON log line, got %q", logged)
+	}
+	if line["level"] != "WARN" || line["msg"] != "rate limit exceeded" {
+		t.Fatalf("level %v, msg %v", line["level"], line["msg"])
+	}
+	for k, v := range tc.want {
+		if line[k] != v {
+			t.Errorf("%s = %v, want %v", k, line[k], v)
+		}
+	}
+	for _, k := range tc.absent {
+		if _, ok := line[k]; ok {
+			t.Errorf("%s = %v, want it absent", k, line[k])
+		}
+	}
+	if line["path"] != "/api/v1/posts" || line["method"] != http.MethodPost {
+		t.Errorf("method %v, path %v", line["method"], line["path"])
 	}
 }
 

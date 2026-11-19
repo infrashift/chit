@@ -22,7 +22,12 @@ A machine actor can act as a person. halod, the HALO service, uses this to make 
 
 ## Rules
 - The client must be in `CHIT_ON_BEHALF_OF_CLIENTS`. A client that is not in the list gets 403. A person's session with the header gets 403.
-- The route must be in the allowlist: `POST /posts`, `POST /channels/{id}/stream_status`, `POST /tags`, `POST /posts/{id}/tags`, `POST /channels/{id}/tags`, `POST /channels`, `POST /channels/{id}/members`, `GET /users/me`.
+- The route must be in the allowlist of `onBehalfOfRoutes` in `internal/api/middleware.go`. A test keeps it the same as the header declarations in `api/openapi.yaml`.
+  - Posts: `POST /posts`, `POST /channels/{id}/stream_status`.
+  - Tags: `POST /tags`, `GET /tags`, `POST /posts/{id}/tags`, `DELETE /posts/{id}/tags/{tag_id}`, `POST /channels/{id}/tags`, `GET /channels/{id}/tags`, `DELETE /channels/{id}/tags/{tag_id}`, `POST /tags/posts`, `POST /tags/channels`.
+  - Attachments: `POST /channels/{id}/files`, `GET /files/{id}`.
+  - Conversations: `POST /channels`, `POST /channels/{id}/members`, `GET /users/me`.
+- A request on behalf of a person counts against the limit of the person and the aggregate limit of the client.
 - For `kratos:<id>`, chitd checks the form before it asks Kratos. It then provisions the person on the same path as a browser request. Provisioning writes an `on_behalf_of` audit record with the action `user_provisioned`.
 - chitd refuses with 400: a malformed value, an identity that Kratos does not know, an inactive identity and a deactivated chit user.
 - `GET /users/me` with the header returns the person. Without the header, it returns the machine actor.

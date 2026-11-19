@@ -91,7 +91,7 @@ func main() {
 			http.Error(w, "the Hydra client is not registered yet", http.StatusServiceUnavailable)
 			return
 		}
-		_, _ = w.Write([]byte("ok\n"))
+		write(w, []byte("ok\n"))
 	})
 	addr := env("HOOKSTUB_LISTEN", "127.0.0.1:4490")
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
@@ -105,10 +105,15 @@ func main() {
 // registerClient creates chitd's client in Hydra, or resets its secret when
 // it exists, retrying until Hydra answers.
 func (s *stub) registerClient(ctx context.Context) {
-	body, _ := json.Marshal(map[string]any{
+	body, err := json.Marshal(map[string]any{
 		"client_id": s.clientID, "client_secret": s.clientSecret,
 		"grant_types": []string{"client_credentials"}, "token_endpoint_auth_method": "client_secret_basic",
 	})
+	if err != nil {
+		// Not reachable for a map of strings; /healthz stays 503.
+		slog.Error("encode the hydra client", "error", err)
+		return
+	}
 	for {
 		err := s.putClient(ctx, body)
 		if err == nil {
@@ -148,7 +153,9 @@ func (s *stub) send(ctx context.Context, method, target string, body []byte) (in
 	if err != nil {
 		return 0, err
 	}
-	_ = resp.Body.Close()
+	if err := resp.Body.Close(); err != nil {
+		slog.Debug("close the hydra response body", "error", err)
+	}
 	return resp.StatusCode, nil
 }
 
@@ -164,7 +171,11 @@ func (s *stub) introspect(ctx context.Context, token string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			slog.Debug("close the introspection response body", "error", err)
+		}
+	}()
 	if resp.StatusCode != http.StatusOK {
 		return false, fmt.Errorf("introspection answered %d", resp.StatusCode)
 	}
@@ -219,13 +230,28 @@ func (s *stub) check(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case ctl.Fail:
 		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"error":"the e2e asked for a failure"}`))
+		write(w, []byte(`{"error":"the e2e asked for a failure"}`))
 	case ctl.RefuseUserID != "" && req.UserID == ctl.RefuseUserID:
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		encode(w, map[string]any{
 			"allow": false, "reason": "e2e_refused", "detail": "The e2e stub hook refuses this user.",
 		})
 	default:
-		_, _ = w.Write([]byte(`{"allow":true}`))
+		write(w, []byte(`{"allow":true}`))
+	}
+}
+
+// write sends b; a failure means the client left, so it is only logged.
+func write(w http.ResponseWriter, b []byte) {
+	if _, err := w.Write(b); err != nil {
+		slog.Debug("write the response", "error", err)
+	}
+}
+
+// encode sends v as JSON; a failure means the client left, so it is only
+// logged.
+func encode(w http.ResponseWriter, v any) {
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Debug("encode the response", "error", err)
 	}
 }
 
@@ -247,5 +273,5 @@ func (s *stub) listCalls(w http.ResponseWriter, _ *http.Request) {
 	copy(calls, s.calls)
 	s.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(calls)
+	encode(w, calls)
 }

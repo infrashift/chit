@@ -115,23 +115,29 @@ func TestOnBehalfOf_TagRoutes(t *testing.T) {
 			if code != http.StatusOK {
 				t.Fatalf("the allowlisted client: %d %s", code, out)
 			}
-			// What the person's own Tag did shows that it ran as them.
-			switch req.method {
-			case http.MethodGet:
-				if !strings.Contains(out, e.mine.ID) {
-					t.Fatalf("the person's private tag is missing: %s", out)
-				}
-			case http.MethodDelete:
-				_, after := e.call(t, http.MethodGet, strings.Replace(req.path, "/"+e.mine.ID, "", 1), "user:"+aliceKratos, "", nil)
-				if strings.Contains(after, e.mine.ID) {
-					t.Fatalf("the tag is still there: %s", after)
-				}
-			default:
-				if !strings.Contains(out, e.mine.ID) && !strings.Contains(out, testChannelID) {
-					t.Fatalf("the result does not reflect the person's tag: %s", out)
-				}
-			}
+			e.checkRanAsPerson(t, req, out)
 		})
+	}
+}
+
+// checkRanAsPerson checks that what the person's own Tag did shows that the
+// request ran as them; out is the response body of the request.
+func (e *tagRouteEnv) checkRanAsPerson(t *testing.T, req oboRequest, out string) {
+	t.Helper()
+	switch req.method {
+	case http.MethodGet:
+		if !strings.Contains(out, e.mine.ID) {
+			t.Fatalf("the person's private tag is missing: %s", out)
+		}
+	case http.MethodDelete:
+		_, after := e.call(t, http.MethodGet, strings.Replace(req.path, "/"+e.mine.ID, "", 1), "user:"+aliceKratos, "", nil)
+		if strings.Contains(after, e.mine.ID) {
+			t.Fatalf("the tag is still there: %s", after)
+		}
+	default:
+		if !strings.Contains(out, e.mine.ID) && !strings.Contains(out, testChannelID) {
+			t.Fatalf("the result does not reflect the person's tag: %s", out)
+		}
 	}
 }
 

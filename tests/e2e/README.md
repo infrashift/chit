@@ -43,60 +43,78 @@ Created/Modified Files
   1. tests/e2e/test_e2e.sh
 
   Executable bash script with:
-  - Setup: Health checks for all 6 services (PG, Kratos, Oathkeeper, Keto, ZincSearch, chitd; SeaweedFS is checked in scenario 11) and the membership hook stub (waited for up to 3 minutes while it compiles), creates 3 test users via Kratos Admin API, logs in each via API flow to get session tokens
-  - Scenario 1: User provisioning — system ping/config at chitd and 401 through the gateway, auto-provision on first /users/me, user lookup by ID/username, user search, unauthenticated 401, idempotent provisioning
-  - Scenario 2: Team & channel lifecycle — team creation with auto team_admin role, adding members, public/private channels, Keto relation tuple verification (write & delete), "my channels" filtering, updates
-  - Scenario 3: Channel messaging — posting, pagination, get/edit/pin/unpin/delete posts, mark channel viewed
-  - Scenario 4: DM & group channels — DM creation (type "D", null team_id, 2 members), Keto DM relations, group channel (type "G", 3 members), cross-user message reading
-  - Scenario 5: Threading — replies with root_id, thread retrieval, followed threads, mark read, unfollow/re-follow, standalone post thread
-  - Scenario 6: Tags & search — create/list tags, tag/untag posts, team/channel search. The script still indexes two posts into ZincSearch by hand; that predates chitd's indexer, which now syncs posts itself every 5 seconds when `CHIT_ZINCSEARCH_URL` is set.
+  - Setup: The script checks the health of all 6 services (PG, Kratos, Oathkeeper, Keto, ZincSearch, chitd).
+    Scenario 11 checks SeaweedFS.
+    The script also waits up to 3 minutes for the membership hook stub, because the stub compiles first.
+    Then it creates 3 test users through the Kratos Admin API.
+    It logs in each user through the API flow to get a session token.
+  - Scenario 1: User provisioning — system ping and config at chitd, and 401 through the gateway.
+    Automatic provisioning on the first /users/me, user lookup by ID and username, user search.
+    Unauthenticated 401, idempotent provisioning.
+  - Scenario 2: Team & channel lifecycle — create a team (the creator gets the team_admin role), add members, public and private channels.
+    Keto relation tuples (write and delete), the "my channels" filter, updates.
+  - Scenario 3: Channel posts — create posts, pagination, get, edit, pin, unpin and delete posts, mark a channel as viewed.
+  - Scenario 4: DM & group channels — create a DM (type "D", null team_id, 2 members), Keto DM relations.
+    Group channel (type "G", 3 members), and users that read the posts of other users.
+  - Scenario 5: Threads — replies with root_id, get a thread, followed threads, mark read, unfollow and follow again, a thread of a standalone post.
+  - Scenario 6: Tags & search — create and list tags, tag and untag posts, team and channel search.
+    The script still indexes two posts into ZincSearch by hand.
+    This step is older than the indexer of chitd.
+    When `CHIT_ZINCSEARCH_URL` has a value, the indexer of chitd now syncs posts itself every 5 seconds.
   - Scenario 7: @mentions
   - Scenario 8: Slash commands
-  - Scenario 9: Authorization enforcement
-  - Scenario 10: On behalf of a Kratos identity (HALO P-CHIT-8) — creates the
-    Hydra client `chit-e2e-halod` (declared for chitd in `deploy/chit.kube.yml`),
-    takes a `client_credentials` token, and through Oathkeeper: reads halod's
-    own user, refuses a malformed, unknown and session `X-On-Behalf-Of`,
-    provisions a never-seen Kratos identity with `kratos:<id>`, creates her
-    private channel and adds halod as her, posts as her, reads as halod, and
-    checks that her own first login finds the same user; then provisions an
-    identity of the `email-only` Kratos schema (like HALO's) and checks its
-    derived username
-  - Scenario 11: Attachments (HALO P-CHIT-5) — checks that SeaweedFS's S3
-    gateway refuses an anonymous request; as halod on behalf of Erin, uploads
-    a PNG to her Conversation (uploader and `via_actor_id`, nosniff and
-    sandbox headers), fetches it as her before it is attached and is refused
-    as itself, posts it as her and reads it as a member, and checks that Bob,
-    not a member, gets 403; finds it by alt text; refuses SVG, a PNG/HTML
-    polyglot and a declared/sniffed mismatch; refuses on-behalf-of upload and
-    download from a person's session and from `chit-e2e-bot`, a machine actor
-    not on `CHIT_ON_BEHALF_OF_CLIENTS`; checks in PostgreSQL that the same
-    bytes share one object within a channel and get their own in another;
-    and that deleting the post deletes the file
-  - Scenario 12: Membership policy hook (HALO P-CHIT-2) — chitd asks the
-    `memberhook-stub` container of `deploy/chit.kube.yml`
-    (`tests/e2e/hookstub`, a stand-in for halod on 127.0.0.1:4490) before
-    every channel add, with the Hydra client `chit-e2e-memberhook` that the
-    stub registers and checks by introspection. Checks that the stub refuses
-    a token Hydra did not issue to chitd; that scenario 10's on-behalf-of add
-    of halod asked about halod (an agent, added by Erin, via halod) and not
-    about Erin, the creator; the request body of an allowed add; that a
-    refused user (Charlie) gets 403 `channel.membership_refused` with the
-    hook's `reason` and `detail` on `POST /channels/{id}/members`, `/invite`
-    (with a temporary Keto grant), an Open channel's creation (no channel is
-    created), joining `general`, a DM and a group; that a failing hook
-    refuses with `hook_unavailable`; and that the audit log records the
-    answers. `HOOK_STUB` and `E2E_AUDIT` point the scenario at another stub
-    or pod.
-  - Scenario 13: Rate limits (HALO P-CHIT-8) — sends 120 requests at once, 16
-    in parallel: as halod itself, all are served (its aggregate limit, not
-    the per-user burst of 50); on behalf of Erin, some are refused with 429
-    and `Retry-After: 1` (her own per-user budget), while halod as itself
-    and Alice are still served; as `chit-e2e-bot`, a machine actor not on
-    `CHIT_ON_BEHALF_OF_CLIENTS`, some are refused (the per-user limit). Then
-    checks chitd's log for the `rate limit exceeded` lines: the bucket, the
-    actor and client ID, and Erin as the principal. `E2E_CHITD_LOG` points
-    it at another pod.
+  - Scenario 9: Authorization checks
+  - Scenario 10: On behalf of a Kratos identity (HALO P-CHIT-8) — the script creates the
+    Hydra client `chit-e2e-halod` (`deploy/chit.kube.yml` declares it for chitd).
+    It gets a `client_credentials` token.
+    Through Oathkeeper, it reads the user of halod.
+    It sends a malformed, an unknown and a session `X-On-Behalf-Of`, and chitd refuses each.
+    It provisions a Kratos identity that chitd does not know, with `kratos:<id>`.
+    As her, it creates her private channel, adds halod, and posts.
+    It reads as halod.
+    It checks that her own first login finds the same user.
+    Then it provisions an identity of the `email-only` Kratos schema (like the schema of HALO).
+    It checks the username that chitd makes from that identity.
+  - Scenario 11: Attachments (HALO P-CHIT-5) — the script checks that the S3
+    gateway of SeaweedFS refuses an anonymous request.
+    As halod on behalf of Erin, it uploads a PNG to her Conversation.
+    It checks the uploader, `via_actor_id`, and the nosniff and sandbox headers.
+    Before the post contains the file, halod gets the file on behalf of Erin.
+    chitd refuses the same request from halod as itself.
+    It posts the file as Erin and reads it as a member.
+    It checks that Bob, who is not a member, gets 403.
+    It finds the file by its alt text.
+    chitd refuses an SVG, a PNG/HTML polyglot, and a file whose declared type and sniffed type are different.
+    chitd refuses an on-behalf-of upload and download from the session of a person.
+    chitd also refuses them from `chit-e2e-bot`, a machine actor that is not on `CHIT_ON_BEHALF_OF_CLIENTS`.
+    In PostgreSQL, it checks that the same bytes share one object in one channel, and get a different object in another channel.
+    It checks that when it deletes the post, chitd deletes the file.
+  - Scenario 12: Membership policy hook (HALO P-CHIT-2) — before each channel add, chitd asks the
+    `memberhook-stub` container of `deploy/chit.kube.yml`.
+    The stub is `tests/e2e/hookstub`, a stand-in for halod on 127.0.0.1:4490.
+    chitd uses the Hydra client `chit-e2e-memberhook`.
+    The stub registers this client and checks its tokens through the Hydra introspect endpoint.
+    The scenario checks these items:
+    the stub refuses a token that Hydra did not issue to chitd.
+    For the on-behalf-of add of halod in scenario 10, chitd asked about halod (an agent, added by Erin, via halod).
+    chitd did not ask about Erin, the creator.
+    The request body of an allowed add.
+    A refused user (Charlie) gets 403 `channel.membership_refused` with the `reason` and `detail` of the hook.
+    This occurs on `POST /channels/{id}/members` and on `/invite` (with a temporary Keto grant).
+    It also occurs when a user creates an Open channel in a team that has Charlie (chitd does not create the channel).
+    It also occurs when Charlie joins `general`, and for a DM and a group with Charlie.
+    When the hook fails, chitd refuses with `hook_unavailable`.
+    The audit log records the answers.
+    `HOOK_STUB` and `E2E_AUDIT` point the scenario at a different stub or pod.
+  - Scenario 13: Rate limits (HALO P-CHIT-8) — the script sends 120 requests at the same time, 16
+    in parallel.
+    As halod itself, chitd serves all of them (the aggregate limit of halod applies, not the per-user burst of 50).
+    On behalf of Erin, chitd refuses some with 429 and `Retry-After: 1` (her own per-user budget).
+    At the same time, chitd still serves halod as itself and Alice.
+    As `chit-e2e-bot`, a machine actor that is not on `CHIT_ON_BEHALF_OF_CLIENTS`, chitd refuses some (the per-user limit).
+    Then the script checks the log of chitd for the `rate limit exceeded` lines: the bucket, the
+    actor and client ID, and Erin as the principal.
+    `E2E_CHITD_LOG` points the scenario at a different pod.
 
   The Keto checks in scenarios 2 and 4 read `chit/channel` tuples. chitd
   writes these tuples best-effort. For the members of a new channel, chitd

@@ -43,8 +43,11 @@ chit-tui ──► Oathkeeper ──► REST API ──► App ──► Store �
 | `internal/store` | The `Store` interface and the PostgreSQL implementation (pgx). `storetest` is an in-memory fake for tests. |
 | `internal/websocket` | The hub: one event loop goroutine and one read pump and one write pump for each connection. |
 | `internal/pubsub` | Thin event envelopes on the topic `chit_events`, with PG LISTEN/NOTIFY or NATS ([ADR-0007](/decisions/adr-0007-thin-pub-sub-envelopes-with-pg-listen-notify-by-default--01a1f5379e1a.md)). |
-| `internal/jobs` | Background workers: the search indexer (ZincSearch) and the webhook dispatcher (CloudEvents). |
+| `internal/jobs` | Background workers: the search indexer (ZincSearch), the webhook dispatcher (CloudEvents) and the file sweep. |
 | `internal/keto` | The Keto client: slash-command permission and the channel tuple mirror. |
+| `internal/blob` | A small S3 client with SigV4. It keeps the bytes of the attachments in SeaweedFS. |
+| `pkg/imagecheck` | Checks and encodes again each uploaded image. It has no chit dependencies, so HALO can use it too. |
+| `internal/memberhook` | Asks the membership policy hook before each channel add, with a Hydra token. |
 | `internal/command` | The slash-command parser and the CUE command definitions. |
 | `internal/mcp`, `internal/chitclient` | The tools of chit-mcp and its REST and WebSocket client. |
 | `internal/bridge` | The chit-claude bridge. |
@@ -58,7 +61,9 @@ chitd checks permissions itself. PostgreSQL holds the channel membership. Keto a
 
 ## Limits
 - A request body has a maximum of 1 MiB.
-- Each user can make 10 requests each second, with bursts of 50.
+- Each person, and each machine actor that is not in `CHIT_ON_BEHALF_OF_CLIENTS`, can make 10 requests each second, with bursts of 50. `CHIT_RATE_LIMIT_USER_*` changes these values.
+- An on-behalf-of client has an aggregate limit: 1,500 requests each second, with bursts of 3,000. `CHIT_RATE_LIMIT_CLIENT_*` changes these values.
+- An upload has a maximum of 10 MiB. Each person has a quota of 1 GiB (`CHIT_FILE_QUOTA_BYTES`).
 - A client WebSocket message has a maximum of 4096 bytes. Each connection has a send buffer of 256 events. The hub closes a client with a full buffer.
 - The hub queue holds 256 broadcasts.
 

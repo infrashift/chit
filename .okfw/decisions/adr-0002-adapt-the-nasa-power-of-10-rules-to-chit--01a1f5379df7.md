@@ -38,7 +38,7 @@ The user requires the Power of 10 rules. The rules are for C. chit is a Go serve
 
 **Suppression:** `// semscope: allow(NASA-P10-NN) <reason>` on the line or the line above. Each suppression has a reason.
 
-**Scope:** semscope scans the server module and `clients/chit-tui`. It skips the test files and `scripts/`, the UAT seed tools. It also skips two packages of test doubles: `internal/store/storetest` and `clients/chit-tui/internal/testutil`. Only test files import them. golangci-lint checks all of these files.
+**Scope:** semscope scans the server module and `clients/chit-tui`. It skips the test files and `scripts/`, the UAT seed tools. It also skips three packages of test doubles: `internal/store/storetest`, `internal/memberhook/memberhooktest` and `clients/chit-tui/internal/testutil`. Only test files import them. It skips `tests/e2e/hookstub`, the e2e stand-in for the membership hook. golangci-lint checks all of these files.
 
 ## Consequences
 - The code is longer: explicit bounds, small functions and assertions.

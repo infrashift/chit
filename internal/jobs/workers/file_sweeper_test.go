@@ -7,15 +7,22 @@ import (
 	"time"
 )
 
+// countingSweeper counts its passes.
+type countingSweeper struct{ calls *atomic.Int32 }
+
+func (c countingSweeper) SweepFiles(context.Context) (expired, purged int, err error) {
+	c.calls.Add(1)
+	return 0, 0, nil
+}
+
 func TestFileSweeper_RunsEachIntervalUntilStopped(t *testing.T) {
 	var calls atomic.Int32
-	fs := NewFileSweeper(func(context.Context) (int, int, error) {
-		calls.Add(1)
-		return 0, 0, nil
-	}, 5*time.Millisecond)
+	fs := NewFileSweeper(countingSweeper{calls: &calls}, 5*time.Millisecond)
 	done := make(chan struct{})
 	go func() {
-		_ = fs.Start(t.Context())
+		if err := fs.Start(t.Context()); err != nil {
+			t.Errorf("Start: %v", err)
+		}
 		close(done)
 	}()
 	deadline := time.Now().Add(2 * time.Second)

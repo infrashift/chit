@@ -64,15 +64,20 @@ gives a `400`:
 | POST | `/channels/{id}/members` | Add a member; the person must be allowed to add one |
 | GET | `/users/me` | Return the person: how a client learns a `kratos:` person's user ID |
 
-A request on behalf of a person counts against the person's per-user rate
-limit and the client's aggregate one; what the client does as itself counts
-against its aggregate limit only (see
+A request on behalf of a person counts against the per-user rate limit of
+the person and the aggregate limit of the client. A request that the client
+sends as itself counts against its aggregate limit only (see
 [Rate limits](/chit/reference/configuration/#rate-limits)).
 
-Refused: a client not on the list, or a person's session, with the header
-(`403`); an empty or malformed value, an unknown user or Kratos identity, a
-deactivated person (in Chit, or inactive in Kratos), and an agent or bot
-(`400`). A machine actor learns its own user ID with `GET /users/me` and no
+chitd refuses these requests:
+
+- with the header, from a client not on the list or from the session of a
+  person (`403`);
+- an empty or malformed value, or an unknown user or Kratos identity (`400`);
+- a deactivated person (in Chit, or inactive in Kratos), and an agent or bot
+  (`400`).
+
+A machine actor learns its own user ID with `GET /users/me` and no
 `X-On-Behalf-Of`.
 
 HALO creates a Conversation with these requests:
@@ -86,13 +91,17 @@ HALO creates a Conversation with these requests:
 
 ### Membership hook
 
-When `CHIT_MEMBERSHIP_HOOK_URL` is set, chitd asks the hook before it adds a
-member to a channel: `POST /channels/{id}/members` (a join and an
-on-behalf-of add included), the team members of a new Open channel, the
-other members of a new direct or group channel, and `/invite`. The creator of
-a new channel is not asked about. Any answer but `{"allow": true}` refuses
-the add, a failed or slow hook included. A refused request adds nobody,
-however many members it adds, and answers `403`:
+When `CHIT_MEMBERSHIP_HOOK_URL` has a value, chitd asks the hook before it
+adds a member to a channel through these paths:
+
+- `POST /channels/{id}/members`, a join and an on-behalf-of add included;
+- the team members of a new Open channel;
+- the other members of a new direct or group channel;
+- `/invite`.
+
+chitd does not ask about the creator of a new channel. Any answer but
+`{"allow": true}` refuses the add, a failed or slow hook included. A refused
+request adds nobody, however many members it adds, and answers `403`:
 
 ```json
 {"id": "channel.membership_refused", "status_code": 403,
@@ -231,14 +240,15 @@ content, and ignores a value from the client.
 milliseconds). With `since`, it returns the posts created after that time,
 oldest first. A client uses it to poll for new posts.
 
-`file_ids` attaches up to 4 files the author uploaded to the same channel
-and has not attached elsewhere (otherwise `400`; `409` if one was attached
-meanwhile). A post with files needs no `content`, and is never run as a slash
-command. Posts read back with `file_ids` in order. Deleting a post deletes its
-files.
+`file_ids` attaches up to 4 files. The author uploaded each file to the same
+channel and has not attached it to a different post. Else the request gets
+`400`. If a different post got one of the files in the meantime, the request
+gets `409`. A post with files needs no `content`, and chitd never runs it as a
+slash command. Posts read back with `file_ids` in order. When chitd deletes a
+post, it deletes the files of the post.
 
-A slash command (content matching `^/[a-z0-9-]+`) is executed rather than
-stored; the response is a stand-in post that is not persisted. See
+chitd runs a slash command (content that matches `^/[a-z0-9-]+`) and does not
+store it. The response is a stand-in post that chitd does not persist. See
 [MCP and Slash Commands](/chit/reference/mcp-and-commands/#slash-commands).
 
 ### Threads
@@ -293,8 +303,9 @@ rename or apply such a tag (403). An OAuth2 client in
 
 ### Files
 
-Image attachments (HALO P-CHIT-5). Off unless `CHIT_S3_ENDPOINT` is set: then
-every file route, and `file_ids` on a post, answer `503`.
+Image attachments (HALO P-CHIT-5). This feature is off when
+`CHIT_S3_ENDPOINT` is empty. Then every file route, and `file_ids` on a post,
+answer `503`.
 
 | Method | Path | Summary | Who may call |
 |---|---|---|---|
@@ -303,16 +314,24 @@ every file route, and `file_ids` on a post, answer `503`.
 | GET | `/files/{id}/info` | The `File` | As `GET /files/{id}` |
 | POST | `/files/search` | Files whose name or alt text contains `terms` (`{"terms", "channel_id", "page", "per_page"}`), newest first | Any user, over their channels |
 
-**Validation.** The `file` part's `Content-Type` is the declared type and its
-filename the name. Chit accepts only `image/png`, `image/jpeg`, `image/webp`
-and `image/gif` (the first frame only); refuses SVG; refuses a declared type
-that is not the type of the magic bytes, and a polyglot (bytes after the end
-of the image, or markup in its metadata); reads the size with
-`image.DecodeConfig` and refuses more than 40,000,000 pixels before decoding;
-then decodes and re-encodes the image in pure Go, JPEG as JPEG and the others
-as PNG, so no EXIF, text chunk or trailing byte is stored. The rules are in
-the package `github.com/infrashift/chit/pkg/imagecheck`, which has no Chit
-dependencies, so HALO applies the same ones to generated images.
+**Validation.** The `Content-Type` of the `file` part is the declared type,
+and its filename is the name. Chit does these checks:
+
+1. It accepts only `image/png`, `image/jpeg`, `image/webp` and `image/gif`
+   (the first frame only).
+2. It refuses SVG.
+3. It refuses a declared type that is not the type of the magic bytes.
+4. It refuses a polyglot (bytes after the end of the image, or markup in its
+   metadata).
+5. It reads the size with `image.DecodeConfig`. It refuses more than
+   40,000,000 pixels before it decodes the image.
+6. It decodes and re-encodes the image in pure Go, JPEG as JPEG and the
+   others as PNG.
+
+So Chit stores no EXIF, no text chunk and no byte after the end of the image.
+The rules are in the package `github.com/infrashift/chit/pkg/imagecheck`. This
+package has no Chit dependencies, so HALO applies the same rules to generated
+images.
 
 | Refusal | Status | `id` |
 |---|---|---|
@@ -325,14 +344,14 @@ dependencies, so HALO applies the same ones to generated images.
 | More than 40,000,000 pixels | `422` | `file.too_many_pixels` |
 | Does not decode | `422` | `file.malformed` |
 
-**Storage.** The bytes are stored in the S3 bucket `CHIT_S3_BUCKET`
-(`chit-files`) under `<channel_id>/<file_id>`. An upload with the bytes of a
-live file in the same channel gets its own file (its own ID, uploader and alt
-text) that shares that object; another channel never shares it. An upload
-attached to no post after `CHIT_FILE_ORPHAN_GRACE` (24 h) is deleted, and a
-deleted file's object is removed that long after, unless a live file still
-uses it, by a sweep of at most `CHIT_FILE_SWEEP_BATCH` files every
-`CHIT_FILE_SWEEP_INTERVAL`.
+**Storage.** Chit stores the bytes in the S3 bucket `CHIT_S3_BUCKET`
+(`chit-files`) under `<channel_id>/<file_id>`. An upload can have the bytes of
+a live file in the same channel. Then the upload gets its own file (its own
+ID, uploader and alt text) that shares that object. A different channel never
+shares it. A sweep deletes an upload that no post has after
+`CHIT_FILE_ORPHAN_GRACE` (24 h). The sweep removes the object of a deleted file
+the same time after the delete, unless a live file still uses it. Each sweep
+handles at most `CHIT_FILE_SWEEP_BATCH` files every `CHIT_FILE_SWEEP_INTERVAL`.
 
 **Headers.** Every response of these routes, refusals included, carries
 `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox` and
@@ -341,8 +360,8 @@ download also has `Cache-Control: private, no-store` and the SHA-256 as its
 `ETag`. There are no public or presigned URLs.
 
 **Search** matches the file name and the alt text the person wrote, never the
-image or anything derived from it. A file not yet attached is found only by
-its uploader.
+image or anything derived from it. Only its uploader can find a file that no
+post has yet.
 
 ### Search
 

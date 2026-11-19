@@ -8,11 +8,17 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 )
 
 type SqlFileStore struct {
 	sqlStore *SqlStore
+}
+
+// ready reports whether s was built by SqlStore.File.
+func (s *SqlFileStore) ready() bool {
+	return s.sqlStore != nil && s.sqlStore.pool != nil
 }
 
 // fileColumns reads a file under the alias f, with the post it is attached
@@ -22,6 +28,7 @@ const fileColumns = `f.id, f.channel_id, f.uploader_actor_id, COALESCE(f.via_act
 	COALESCE((SELECT pf.post_id::text FROM post_files pf WHERE pf.file_id = f.id), '')`
 
 func scanFile(row pgx.Row) (*model.File, error) {
+	assert.That(row != nil, "scanFile: nil row")
 	f := &model.File{}
 	err := row.Scan(&f.ID, &f.ChannelID, &f.UploaderID, &f.ViaActorID, &f.Name,
 		&f.SHA256, &f.ContentType, &f.SizeBytes, &f.Width, &f.Height, &f.AltText, &f.S3Key, &f.CreateAt, &f.DeleteAt,
@@ -30,6 +37,7 @@ func scanFile(row pgx.Row) (*model.File, error) {
 }
 
 func collectFiles(rows pgx.Rows) ([]*model.File, error) {
+	assert.That(rows != nil, "collectFiles: nil rows")
 	defer rows.Close()
 	var out []*model.File
 	for rows.Next() {
@@ -43,6 +51,9 @@ func collectFiles(rows pgx.Rows) ([]*model.File, error) {
 }
 
 func (s *SqlFileStore) Save(ctx context.Context, f *model.File) (*model.File, error) {
+	assert.That(s.ready(), "SqlFileStore.Save: nil store")
+	assert.That(f != nil, "SqlFileStore.Save: nil file")
+	assert.That(f.ID != "" && f.S3Key != "", "SqlFileStore.Save: file has no id or object key")
 	_, err := s.sqlStore.pool.Exec(ctx,
 		`INSERT INTO files (id, channel_id, uploader_actor_id, via_actor_id, name, sha256, content_type,
 			size_bytes, width, height, alt_text, s3_key, create_at, delete_at)
@@ -56,6 +67,7 @@ func (s *SqlFileStore) Save(ctx context.Context, f *model.File) (*model.File, er
 }
 
 func (s *SqlFileStore) Get(ctx context.Context, id string) (*model.File, error) {
+	assert.That(s.ready(), "SqlFileStore.Get: nil store")
 	if !validIDs(id) {
 		return nil, model.NewNotFoundError("SqlFileStore.Get", id)
 	}
@@ -75,16 +87,22 @@ func (s *SqlFileStore) GetByIDs(ctx context.Context, ids []string) ([]*model.Fil
 	if len(ids) == 0 {
 		return nil, nil
 	}
+	assert.That(s.ready(), "SqlFileStore.GetByIDs: nil store")
 	rows, err := s.sqlStore.pool.Query(ctx,
 		`SELECT `+fileColumns+` FROM files f WHERE f.id = ANY($1::uuid[]) AND f.delete_at = 0`, ids)
 	if err != nil {
 		return nil, fmt.Errorf("get files by ids: %w", err)
 	}
-	return collectFiles(rows)
+	files, err := collectFiles(rows)
+	// One row for each distinct id at most.
+	assert.That(len(files) <= len(ids), "SqlFileStore.GetByIDs: more files than ids")
+	return files, err
 }
 
 // GetBySHA256 returns the oldest live file with these bytes in the channel.
 func (s *SqlFileStore) GetBySHA256(ctx context.Context, channelID, sha256 string) (*model.File, error) {
+	assert.That(s.ready(), "SqlFileStore.GetBySHA256: nil store")
+	assert.That(sha256 != "", "SqlFileStore.GetBySHA256: empty digest")
 	if !validIDs(channelID) {
 		return nil, model.NewNotFoundError("SqlFileStore.GetBySHA256", sha256)
 	}
@@ -102,6 +120,7 @@ func (s *SqlFileStore) GetBySHA256(ctx context.Context, channelID, sha256 string
 }
 
 func (s *SqlFileStore) UsageBytes(ctx context.Context, uploaderID string) (int64, error) {
+	assert.That(s.ready(), "SqlFileStore.UsageBytes: nil store")
 	if !validIDs(uploaderID) {
 		return 0, nil
 	}
@@ -118,6 +137,9 @@ func (s *SqlFileStore) UsageBytes(ctx context.Context, uploaderID string) (int64
 // Search matches the name or the alt text, never anything derived from the
 // image. Every filter is in the query, before LIMIT.
 func (s *SqlFileStore) Search(ctx context.Context, q *model.FileSearch) ([]*model.File, error) {
+	assert.That(s.ready(), "SqlFileStore.Search: nil store")
+	assert.That(q != nil, "SqlFileStore.Search: nil query")
+	assert.That(q.Page >= 0 && q.PerPage > 0, "SqlFileStore.Search: pagination not clamped")
 	if len(q.ChannelIDs) == 0 || !validIDs(q.ReaderID) {
 		return nil, nil
 	}
@@ -137,6 +159,8 @@ func (s *SqlFileStore) Search(ctx context.Context, q *model.FileSearch) ([]*mode
 }
 
 func (s *SqlFileStore) ExpireUnattached(ctx context.Context, createdBefore, deleteAt int64, limit int) (int, error) {
+	assert.That(s.ready(), "SqlFileStore.ExpireUnattached: nil store")
+	assert.That(limit > 0, "SqlFileStore.ExpireUnattached: limit must be positive")
 	tag, err := s.sqlStore.pool.Exec(ctx,
 		`UPDATE files SET delete_at = $2
 		 WHERE id IN (
@@ -153,6 +177,8 @@ func (s *SqlFileStore) ExpireUnattached(ctx context.Context, createdBefore, dele
 }
 
 func (s *SqlFileStore) Deleted(ctx context.Context, deletedBefore int64, limit int) ([]*model.File, error) {
+	assert.That(s.ready(), "SqlFileStore.Deleted: nil store")
+	assert.That(limit > 0, "SqlFileStore.Deleted: limit must be positive")
 	rows, err := s.sqlStore.pool.Query(ctx,
 		`SELECT `+fileColumns+` FROM files f
 		 WHERE f.delete_at > 0 AND f.delete_at < $1
@@ -165,6 +191,7 @@ func (s *SqlFileStore) Deleted(ctx context.Context, deletedBefore int64, limit i
 }
 
 func (s *SqlFileStore) ObjectInUse(ctx context.Context, s3Key string) (bool, error) {
+	assert.That(s.ready(), "SqlFileStore.ObjectInUse: nil store")
 	var inUse bool
 	err := s.sqlStore.pool.QueryRow(ctx,
 		`SELECT EXISTS (SELECT 1 FROM files WHERE s3_key = $1 AND delete_at = 0)`, s3Key).Scan(&inUse)
@@ -176,6 +203,7 @@ func (s *SqlFileStore) ObjectInUse(ctx context.Context, s3Key string) (bool, err
 
 // Purge removes a soft-deleted file. A live one is left alone.
 func (s *SqlFileStore) Purge(ctx context.Context, id string) error {
+	assert.That(s.ready(), "SqlFileStore.Purge: nil store")
 	if _, err := s.sqlStore.pool.Exec(ctx, `DELETE FROM files WHERE id = $1 AND delete_at > 0`, id); err != nil {
 		return fmt.Errorf("purge file: %w", err)
 	}

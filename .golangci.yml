@@ -58,6 +58,8 @@ linters:
     rules:
       - path: internal/assert/assert\.go
         linters: [forbidigo]
+      - path: pkg/imagecheck/internal/assert/assert\.go
+        linters: [forbidigo]
       - path: _test\.go
         linters: [forbidigo]
     paths:

@@ -195,6 +195,7 @@ func (s *Server) initApp() {
 // starting beside chitd (the deploy manifests run SeaweedFS in the same
 // pod), so it is retried for blobStartTimeout before chitd gives up.
 func (s *Server) initBlobs() error {
+	assert.That(s.config != nil && s.app != nil, "Server.initBlobs: app not built")
 	if s.config.S3Endpoint == "" {
 		slog.Info("attachments are off: CHIT_S3_ENDPOINT is not set")
 		return nil
@@ -209,13 +210,11 @@ func (s *Server) initBlobs() error {
 	if err != nil {
 		return err
 	}
+	assert.That(store != nil, "Server.initBlobs: nil object store without an error")
 	ctx, cancel := context.WithTimeout(context.Background(), blobStartTimeout)
 	defer cancel()
-	for {
-		err = store.EnsureBucket(ctx)
-		if err == nil {
-			break
-		}
+	// Bounded by blobStartTimeout: ctx ends the loop.
+	for err = store.EnsureBucket(ctx); err != nil; err = store.EnsureBucket(ctx) {
 		slog.Warn("attachments: object store not ready; retrying", "endpoint", s.config.S3Endpoint, "error", err)
 		select {
 		case <-ctx.Done():
@@ -232,6 +231,7 @@ func (s *Server) initBlobs() error {
 // CHIT_MEMBERSHIP_HOOK_URL is set. Its answers are audited, so it makes sure
 // there is an audit log even when slash commands, which open it, are off.
 func (s *Server) initMembershipHook() error {
+	assert.That(s.config != nil && s.app != nil, "Server.initMembershipHook: app not built")
 	if s.config.MembershipHookURL == "" {
 		slog.Info("membership hook is off: CHIT_MEMBERSHIP_HOOK_URL is not set")
 		return nil
@@ -247,12 +247,16 @@ func (s *Server) initMembershipHook() error {
 	if err != nil {
 		return err
 	}
+	assert.That(hook != nil, "Server.initMembershipHook: nil hook without an error")
 	s.app.MembershipHook = hook
 	if s.app.AuditLogger == nil {
 		al, err := command.NewAuditLogger(s.config.AuditLogPath)
 		if err != nil {
 			slog.Warn("failed to create audit logger, using stderr", "error", err)
-			al, _ = command.NewAuditLogger("-")
+			// As in initCommands: the stderr logger opens no file and cannot
+			// fail; if it did, al stays nil and the answers are not audited.
+			al, err = command.NewAuditLogger("-")
+			errlog.Warn(err, "create stderr audit logger")
 		}
 		s.app.AuditLogger = al
 	}
@@ -326,7 +330,7 @@ func (s *Server) initJobs() {
 	}
 
 	if s.app.Blobs != nil {
-		s.scheduler.AddWorker(workers.NewFileSweeper(s.app.SweepFiles, s.config.FileSweepInterval))
+		s.scheduler.AddWorker(workers.NewFileSweeper(s.app, s.config.FileSweepInterval))
 	}
 
 	if s.webhookCh != nil {

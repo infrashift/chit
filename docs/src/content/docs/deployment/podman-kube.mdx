@@ -42,23 +42,29 @@ Then the services:
 | **memberhook-stub** | `golang:1.26-alpine` (the builder image of `deploy/Containerfile`) | 4490 on 127.0.0.1 | A stub of HALO's membership hook for the stack e2e, `go run` from `tests/e2e/hookstub` in the checkout. It registers chitd's Hydra client `chit-e2e-memberhook` and allows every member until the e2e names one to refuse. Test only. |
 | **chitd** | `localhost/chit:latest` | 8065 | The Chit server |
 
-The chitd container is configured in the manifest with the database URL, the
-Kratos and Keto URLs, the ZincSearch URL and credentials, and the SeaweedFS
-endpoint and its dev S3 key (`CHIT_S3_*`), the e2e machine actors, and the
-membership hook (`CHIT_MEMBERSHIP_HOOK_*`, pointing at `memberhook-stub`);
-everything else takes chitd's defaults. To set more (for example `CHIT_MACHINE_ACTORS` or
-`CHIT_TRUSTED_PROXY_SECRET`), add it to the `chitd` container's `env` and run
-`make kube-restart`, or run chitd locally with `.env` (see
-[Startup Order](#startup-order)).
+The manifest gives the chitd container these settings:
+
+- the database URL;
+- the Kratos and Keto URLs;
+- the ZincSearch URL and credentials;
+- the SeaweedFS endpoint and its dev S3 key (`CHIT_S3_*`);
+- the e2e machine actors;
+- the membership hook (`CHIT_MEMBERSHIP_HOOK_*`, which points at
+  `memberhook-stub`).
+
+All other settings take the defaults of chitd. To set more (for example
+`CHIT_MACHINE_ACTORS` or `CHIT_TRUSTED_PROXY_SECRET`), add it to the `env` of
+the `chitd` container and run `make kube-restart`. Alternatively, run chitd
+locally with `.env` (see [Startup Order](#startup-order)).
 
 Podman names each container `<pod>-<container>`, e.g. `chit-app-chitd`.
 
-Every image is pinned by digest in the manifest. "TSC" is
+The manifest pins every image by digest. "TSC" is
 `ghcr.io/infrashift/trusted-service-containers`; SeaweedFS is its
 `trusted/seaweedfs`, built from source on UBI9 Micro. PostgreSQL is its
 `trusted/postgresql17`: the signed PGDG RPMs, contrib included, on UBI9
-Minimal. It runs as UID 26 with primary group 0, refuses to run as root, and
-keeps the `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` contract of
+Minimal. It runs as UID 26 with primary group 0, and refuses to run as root.
+It keeps the `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` contract of
 the Docker images. ZincSearch,
 `migrate/migrate` and the Go builder image are not in TSC and come from
 their upstream registries.
@@ -87,8 +93,9 @@ the same way it builds the Ory images.
 ### Upgrading from the DHI PostgreSQL image
 
 Before the switch to `trusted/postgresql17`, `chit-pgdata` held a cluster of
-the DHI `postgres:17-debian` mirror: owned by UID 70, at
-`/var/lib/postgresql/17/data`, with the glibc `en_US.UTF-8` collation. The new
+the DHI `postgres:17-debian` mirror. UID 70 owns this cluster. It is at
+`/var/lib/postgresql/17/data`, and its `LC_COLLATE` is the glibc
+`en_US.UTF-8` locale. The new
 image cannot start on that volume, and it has no `en_US.UTF-8` locale, so move
 the data with a dump and a restore:
 
@@ -118,13 +125,13 @@ make kube-up
 
 The restore prints `ERROR: role "chit" already exists` and one
 `ERROR: invalid LC_COLLATE locale name: "en_US.UTF-8"` for each database. Both
-are expected: the role and the databases already exist, and the rest of the
-dump goes into them. Any other error needs a look before you serve traffic.
-The restored databases use the builtin `C.UTF-8` collation, and every index is
-built again under it.
+are normal: the role and the databases already exist, and the rest of the
+dump goes into them. Examine any other error before you serve traffic.
+The restored databases sort text with the builtin `C.UTF-8` locale, and
+PostgreSQL builds every index again with it.
 
-A volume with nothing to keep must still be created again: run
-`make kube-clean` (or `make uat-clean` for the UAT stack) once, and the next
+If the volume has no data to keep, you must still create it again. Run
+`make kube-clean` (or `make uat-clean` for the UAT stack) one time. The next
 `make kube-up` (or `make uat-up`) initialises an empty volume.
 
 ## Networking

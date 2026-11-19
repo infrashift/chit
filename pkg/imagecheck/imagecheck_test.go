@@ -82,7 +82,7 @@ func pngChunk(typ string, body []byte) []byte {
 
 // insertPNGChunk puts a chunk right after IHDR.
 func insertPNGChunk(src, chunk []byte) []byte {
-	ihdrEnd := len(pngSignature) + 12 + 13
+	ihdrEnd := len(pngSignature()) + 12 + 13
 	out := append([]byte{}, src[:ihdrEnd]...)
 	out = append(out, chunk...)
 	return append(out, src[ihdrEnd:]...)
@@ -154,23 +154,30 @@ func TestCheck_AcceptsEachType(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if img.ContentType != tc.wantOut {
-				t.Errorf("content type %s, want %s", img.ContentType, tc.wantOut)
-			}
-			if Sniff(img.Data) != tc.wantOut {
-				t.Errorf("output sniffs as %q, want %s", Sniff(img.Data), tc.wantOut)
-			}
-			if tc.w != 0 && (img.Width != tc.w || img.Height != tc.h) {
-				t.Errorf("%d×%d, want %d×%d", img.Width, img.Height, tc.w, tc.h)
-			}
-			if len(img.SHA256) != 64 {
-				t.Errorf("sha256 %q", img.SHA256)
-			}
-			// The output passes the same checks.
-			if _, err := Check(img.ContentType, img.Data, DefaultLimits()); err != nil {
-				t.Errorf("the re-encoded image is refused: %v", err)
-			}
+			wantAccepted(t, img, tc.wantOut, tc.w, tc.h)
 		})
+	}
+}
+
+// wantAccepted checks an accepted image: its output type, its size (unless
+// w is 0), its digest, and that the output passes the same checks.
+func wantAccepted(t *testing.T, img *Image, wantOut string, w, h int) {
+	t.Helper()
+	if img.ContentType != wantOut {
+		t.Errorf("content type %s, want %s", img.ContentType, wantOut)
+	}
+	if Sniff(img.Data) != wantOut {
+		t.Errorf("output sniffs as %q, want %s", Sniff(img.Data), wantOut)
+	}
+	if w != 0 && (img.Width != w || img.Height != h) {
+		t.Errorf("%d×%d, want %d×%d", img.Width, img.Height, w, h)
+	}
+	if len(img.SHA256) != 64 {
+		t.Errorf("sha256 %q", img.SHA256)
+	}
+	// The output passes the same checks.
+	if _, err := Check(img.ContentType, img.Data, DefaultLimits()); err != nil {
+		t.Errorf("the re-encoded image is refused: %v", err)
 	}
 }
 
@@ -305,7 +312,7 @@ func TestCheck_RefusesTooManyPixelsFromTheHeader(t *testing.T) {
 	ihdr := binary.BigEndian.AppendUint32(nil, 10000)
 	ihdr = binary.BigEndian.AppendUint32(ihdr, 10000)
 	ihdr = append(ihdr, 8, 2, 0, 0, 0) // 8-bit RGB
-	data := append([]byte{}, pngSignature...)
+	data := append([]byte{}, pngSignature()...)
 	data = append(data, pngChunk("IHDR", ihdr)...)
 	data = append(data, pngChunk("IDAT", []byte{0x78, 0x9c, 0x03, 0x00})...)
 	data = append(data, pngChunk("IEND", nil)...)

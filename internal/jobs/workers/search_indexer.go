@@ -66,7 +66,7 @@ func (systemClock) Now() time.Time { return time.Now() }
 
 // NewSearchIndexer creates a new search indexer worker.
 func NewSearchIndexer(zincURL, zincUser, zincPass string) *SearchIndexer {
-	return &SearchIndexer{
+	si := &SearchIndexer{
 		zincURL:  zincURL,
 		zincUser: zincUser,
 		zincPass: zincPass,
@@ -75,12 +75,16 @@ func NewSearchIndexer(zincURL, zincUser, zincPass string) *SearchIndexer {
 		failures: map[string]int{},
 		clock:    systemClock{},
 	}
+	assert.That(si.client != nil && si.stop != nil, "NewSearchIndexer: no client or stop channel")
+	assert.That(si.failures != nil && si.clock != nil, "NewSearchIndexer: no failure map or clock")
+	return si
 }
 
 // WithPostStore enables the background indexing loop by giving the worker a
 // source of posts to poll.
 func (si *SearchIndexer) WithPostStore(ps PostSource) *SearchIndexer {
 	assert.That(ps != nil, "SearchIndexer.WithPostStore: nil post source")
+	assert.That(si.posts == nil, "SearchIndexer.WithPostStore: post source already set")
 	si.posts = ps
 	return si
 }
@@ -95,6 +99,7 @@ func (si *SearchIndexer) Start(ctx context.Context) error {
 	}
 	slog.Info("search indexer started")
 	assert.That(si.stop != nil, "SearchIndexer.Start: not built by NewSearchIndexer")
+	assert.That(si.clock != nil && si.failures != nil, "SearchIndexer.Start: no clock or failure map")
 
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -124,6 +129,7 @@ func (si *SearchIndexer) runOnce(ctx context.Context) {
 			slog.Warn("search indexer: failed to fetch posts", "error", err)
 			return
 		}
+		assert.That(len(posts) <= indexBatchSize, "SearchIndexer.runOnce: more posts than the batch size")
 
 		for _, p := range posts {
 			if err := si.sync(ctx, p); err != nil {
@@ -149,6 +155,7 @@ func (si *SearchIndexer) runOnce(ctx context.Context) {
 // sync writes one post's current state to the index.
 func (si *SearchIndexer) sync(ctx context.Context, p *model.Post) error {
 	assert.That(p != nil, "SearchIndexer.sync: nil post")
+	assert.That(si.client != nil, "SearchIndexer.sync: nil HTTP client")
 	if p.DeleteAt > 0 {
 		return si.DeletePost(ctx, p.ID)
 	}
@@ -171,6 +178,7 @@ func (si *SearchIndexer) Stop() {
 func (si *SearchIndexer) IndexPost(ctx context.Context, id string, doc map[string]any) error {
 	assert.That(si.client != nil, "SearchIndexer.IndexPost: nil HTTP client")
 	assert.That(doc != nil, "SearchIndexer.IndexPost: nil document")
+	assert.That(ctx != nil, "SearchIndexer.IndexPost: nil context")
 	body, err := json.Marshal(doc)
 	if err != nil {
 		return fmt.Errorf("marshal document: %w", err)
@@ -202,6 +210,7 @@ func (si *SearchIndexer) IndexPost(ctx context.Context, id string, doc map[strin
 // that as 400 ("id not found") rather than 404, so both are tolerated.
 func (si *SearchIndexer) DeletePost(ctx context.Context, id string) error {
 	assert.That(si.client != nil, "SearchIndexer.DeletePost: nil HTTP client")
+	assert.That(ctx != nil, "SearchIndexer.DeletePost: nil context")
 	url := fmt.Sprintf("%s/api/%s/_doc/%s", si.zincURL, "chit-posts", id)
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, http.NoBody)
 	if err != nil {

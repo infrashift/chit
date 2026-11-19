@@ -66,3 +66,11 @@ Tracking: [ISSUE-009](.okfw/issues/issue-009-r5-assertion-density--01a1f5379e6c.
 Tracking: [ISSUE-010](.okfw/issues/issue-010-asd-ste100-documentation--01a1f5379e74.md)
 
 - [x] Write the Markdown documentation again until `make docs-lexis` reports zero findings.
+
+## Phase 11: Merge main and bring its new code under the gates
+Tracking: [ISSUE-014](.okfw/issues/issue-014-merge-main-and-bring-its-new-code-under-the-gates--01a1f5dc77bc.md)
+
+- [x] Merge origin/main and resolve the conflicts.
+- [x] Make the new code pass semscope and golangci-lint, with assertions.
+- [x] Write the new docs in STE, and update the wiki.
+- [x] Run every gate and every e2e suite, then push and open the pull request.

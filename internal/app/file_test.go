@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"errors"
 	"image"
 	"image/png"
 	"net/http"
@@ -48,8 +49,8 @@ func TestUploadFile_RefusesAClientNotOnTheAllowlist(t *testing.T) {
 }
 
 func isStatus(err error, status int) bool {
-	appErr, ok := err.(*model.AppError)
-	return ok && appErr.StatusCode == status
+	var appErr *model.AppError
+	return errors.As(err, &appErr) && appErr.StatusCode == status
 }
 
 // The app refuses a fifth attachment before it looks any file up.

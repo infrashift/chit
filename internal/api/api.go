@@ -98,7 +98,7 @@ func useAuthenticated(r chi.Router, a *app.App) {
 		UserBurst:       a.Config.RateLimitUserBurst,
 		ClientPerSecond: a.Config.RateLimitClientPerSecond,
 		ClientBurst:     a.Config.RateLimitClientBurst,
-	}, a.OnBehalfOfAllowed))
+	}, a))
 
 	// OpenAPI request validation (optional)
 	if a.Config.EnableOpenAPIValidation {

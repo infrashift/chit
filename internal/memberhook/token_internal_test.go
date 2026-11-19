@@ -36,11 +36,15 @@ func TestAccessToken_RefetchedNearExpiry(t *testing.T) {
 	token := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		tokens.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "t", "token_type": "bearer", "expires_in": 3600})
+		if err := json.NewEncoder(w).Encode(map[string]any{"access_token": "t", "token_type": "bearer", "expires_in": 3600}); err != nil {
+			t.Errorf("write the token: %v", err)
+		}
 	}))
 	defer token.Close()
 	hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, `{"allow":true}`)
+		if _, err := io.WriteString(w, `{"allow":true}`); err != nil {
+			t.Errorf("write the hook answer: %v", err)
+		}
 	}))
 	defer hook.Close()
 	h, err := New(&Config{URL: hook.URL, Timeout: time.Second, TokenURL: token.URL, ClientID: "c", ClientSecret: "s"})
