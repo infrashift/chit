@@ -28,10 +28,13 @@ const (
 	ProvenanceMaxModelLen = 200
 )
 
+// semscope: allow(NASA-P10-06) compiled once, never changed
 var sha256HexRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
-// provenanceIDFields are the provenance fields that hold UUID lists.
-var provenanceIDFields = []string{"tool_ids", "okf_namespace_ids", "attachment_ids"}
+// provenanceIDFields returns the provenance fields that hold UUID lists.
+func provenanceIDFields() []string {
+	return []string{"tool_ids", "okf_namespace_ids", "attachment_ids"}
+}
 
 // ValidateProvenance checks a props.provenance value, as decoded from JSON.
 // It is an object with only these optional fields:
@@ -76,7 +79,7 @@ func ValidateProvenance(v any) *AppError {
 				return bad("model must be a string of 1 to %d characters", ProvenanceMaxModelLen)
 			}
 		default:
-			return bad("unknown field %q (allowed: %v, okf_blob_sha256, model)", key, provenanceIDFields)
+			return bad("unknown field %q (allowed: %v, okf_blob_sha256, model)", key, provenanceIDFields())
 		}
 	}
 	return nil

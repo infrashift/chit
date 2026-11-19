@@ -2,7 +2,6 @@ package theme
 
 import (
 	"image/color"
-	"slices"
 	"strings"
 )
 
@@ -150,19 +149,6 @@ func Dayfox() Theme {
 	})
 }
 
-// builtinNames lists the bundled themes in sorted order. builtinTheme must
-// build every one of them.
-var builtinNames = []string{
-	"catppuccin",
-	"catppuccin-latte",
-	"dayfox",
-	"kanagawa",
-	"kanagawa-lotus",
-	"nightfox",
-	"tokyo-night",
-	"tokyo-night-day",
-}
-
 // builtinTheme builds the bundled theme with the exact name given. Each call
 // builds a fresh Theme so callers can mutate what they get back.
 func builtinTheme(name string) (Theme, bool) {
@@ -195,7 +181,17 @@ func Lookup(name string) (Theme, bool) {
 	return builtinTheme(strings.ToLower(strings.TrimSpace(name)))
 }
 
-// BuiltinNames returns the bundled theme names in sorted order.
+// BuiltinNames returns the bundled theme names in sorted order. builtinTheme
+// must build every one of them. Each call returns a new slice.
 func BuiltinNames() []string {
-	return slices.Clone(builtinNames)
+	return []string{
+		"catppuccin",
+		"catppuccin-latte",
+		"dayfox",
+		"kanagawa",
+		"kanagawa-lotus",
+		"nightfox",
+		"tokyo-night",
+		"tokyo-night-day",
+	}
 }

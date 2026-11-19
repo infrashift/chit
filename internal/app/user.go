@@ -25,6 +25,8 @@ func (a *App) ProvisionUser(ctx context.Context, kratosID string) (*model.User, 
 
 // errUserDeactivated is provisionUser's error for a Kratos identity whose
 // user is deactivated.
+//
+// semscope: allow(NASA-P10-06) sentinel error: errors.Is needs one identity
 var errUserDeactivated = errors.New("user is deactivated")
 
 // provisionUser is ProvisionUser, and also reports whether it created the

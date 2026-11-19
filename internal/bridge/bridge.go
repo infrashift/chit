@@ -65,6 +65,8 @@ const idleWorkerTimeout = 10 * time.Minute
 const replyTimeout = 15 * time.Second
 
 // errShuttingDown is returned for a post the bridge stopped before running.
+//
+// semscope: allow(NASA-P10-06) sentinel error: errors.Is needs one identity
 var errShuttingDown = errors.New("the bridge is shutting down")
 
 // shutdownNotice answers posts a shutting-down bridge did not get to.

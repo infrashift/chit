@@ -62,20 +62,22 @@ func viewPostList(list *model.PostList) *postListView {
 	return viewPosts(list.Order)
 }
 
-// defaultEventTypes are the events get_new_events returns when the caller
-// names none: the ones that change what was said. Typing, read state,
+// defaultEventTypes returns the events get_new_events returns when the
+// caller names none: the ones that change what was said. Typing, read state,
 // membership and the rest are discarded unless asked for.
-var defaultEventTypes = []string{
-	model.WebSocketEventPosted,
-	model.WebSocketEventPostEdited,
-	model.WebSocketEventPostDeleted,
+func defaultEventTypes() []string {
+	return []string{
+		model.WebSocketEventPosted,
+		model.WebSocketEventPostEdited,
+		model.WebSocketEventPostDeleted,
+	}
 }
 
 // viewEvents keeps the events of the wanted types, slimming the post that
 // posted and post_edited events carry whole.
 func viewEvents(events []*model.WebSocketEvent, types []string) []*model.WebSocketEvent {
 	if len(types) == 0 {
-		types = defaultEventTypes
+		types = defaultEventTypes()
 	}
 	var out []*model.WebSocketEvent
 	for _, e := range events {

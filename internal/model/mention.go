@@ -9,6 +9,8 @@ import (
 // character set as validUsernameRe. chitd resolves mentions with it and the
 // chit-claude bridge decides whether it was named with it, so the two cannot
 // disagree about what counts as a mention.
+//
+// semscope: allow(NASA-P10-06) compiled once, never changed
 var mentionRe = regexp.MustCompile(`(?i)(?:^|[^a-zA-Z0-9])@([a-z0-9][a-z0-9._-]{0,62}[a-z0-9])`)
 
 // ParseMentions extracts deduplicated, lowercased usernames from content.

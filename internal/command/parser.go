@@ -2,6 +2,7 @@ package command
 
 import "regexp"
 
+// semscope: allow(NASA-P10-06) compiled once, never changed
 var slashCmdRe = regexp.MustCompile(`^/([a-z0-9-]+)(\s+.*)?$`)
 
 // ParseResult holds the parsed slug and arguments from a slash command.

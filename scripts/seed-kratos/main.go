@@ -26,13 +26,16 @@ type seedIdentity struct {
 	Password    string
 }
 
-// The password for all UAT users is "Password1!" — suitable for manual testing only.
-var identities = []seedIdentity{
-	{"alice@example.com", "alice", "Alice Anderson", "Password1!"},
-	{"bob@example.com", "bob", "Bob Baker", "Password1!"},
-	{"chad@example.com", "chad", "Chad Cooper", "Password1!"},
-	{"diana@example.com", "diana", "Diana Drake", "Password1!"},
-	{"eve@example.com", "eve", "Eve Ellis", "Password1!"},
+// seedIdentities returns the identities to seed. The password for all UAT
+// users is "Password1!" — suitable for manual testing only.
+func seedIdentities() []seedIdentity {
+	return []seedIdentity{
+		{"alice@example.com", "alice", "Alice Anderson", "Password1!"},
+		{"bob@example.com", "bob", "Bob Baker", "Password1!"},
+		{"chad@example.com", "chad", "Chad Cooper", "Password1!"},
+		{"diana@example.com", "diana", "Diana Drake", "Password1!"},
+		{"eve@example.com", "eve", "Eve Ellis", "Password1!"},
+	}
 }
 
 func main() {
@@ -44,6 +47,7 @@ func main() {
 // run does the seeding; it is split from main so the deferred db.Close runs
 // on every exit path, including failures.
 func run(ctx context.Context) error {
+	identities := seedIdentities()
 	kratosAdminURL := os.Getenv("KRATOS_ADMIN_URL")
 	if kratosAdminURL == "" {
 		kratosAdminURL = "http://localhost:4434"

@@ -56,50 +56,60 @@ type binding struct {
 	desc string
 }
 
-var keyBindings = []binding{
-	{"ctrl+k", "open palette: jump to channels and DMs"},
-	{"  @ / ?", "palette modes: people, commands, message search"},
-	{"  ??", "search every channel, not just this one"},
-	{"ctrl+s", "search messages in the active channel"},
-	{"ctrl+d", "find people / start a DM"},
-	{"ctrl+n", "create a channel"},
-	{"tab", "switch between panes"},
-	{"enter", "history: reply in thread · input: send"},
-	{"j / k", "history: move between posts"},
-	{"t", "tag a post (history pane, or a thread's root); new tags are the channel's, ctrl+t in the picker for private"},
-	{"y", "copy the selection, or the selected post"},
-	{"e", "edit your own post (history pane)"},
-	{"d d", "delete your own post, pressing d twice (history pane)"},
-	{"p", "pin or unpin a post (history pane)"},
-	{"esc", "close overlay / leave thread / back to history"},
-	{"?", "this help (history or thread pane)"},
-	{"ctrl+c", "quit"},
+// keyBindings lists the keyboard shortcuts, in the order shown.
+func keyBindings() []binding {
+	return []binding{
+		{"ctrl+k", "open palette: jump to channels and DMs"},
+		{"  @ / ?", "palette modes: people, commands, message search"},
+		{"  ??", "search every channel, not just this one"},
+		{"ctrl+s", "search messages in the active channel"},
+		{"ctrl+d", "find people / start a DM"},
+		{"ctrl+n", "create a channel"},
+		{"tab", "switch between panes"},
+		{"enter", "history: reply in thread · input: send"},
+		{"j / k", "history: move between posts"},
+		{"t", "tag a post (history pane, or a thread's root); new tags are the channel's, ctrl+t in the picker for private"},
+		{"y", "copy the selection, or the selected post"},
+		{"e", "edit your own post (history pane)"},
+		{"d d", "delete your own post, pressing d twice (history pane)"},
+		{"p", "pin or unpin a post (history pane)"},
+		{"esc", "close overlay / leave thread / back to history"},
+		{"?", "this help (history or thread pane)"},
+		{"ctrl+c", "quit"},
+	}
 }
 
-// Replying is the capability people most often miss: the history pane has to
-// be focused before enter opens a thread, since enter sends the message while
-// the input is focused.
-var hints = []string{
-	"To reply: press tab to focus the history pane, pick a post with j/k, then enter.",
+// hints are tips shown below the bindings. Replying is the capability people
+// most often miss: the history pane has to be focused before enter opens a
+// thread, since enter sends the message while the input is focused.
+func hints() []string {
+	return []string{
+		"To reply: press tab to focus the history pane, pick a post with j/k, then enter.",
+	}
 }
 
 // clientCommands are handled by chit-tui itself and never reach the server.
 // Everything else typed with a leading slash is sent as a message, and the
 // server decides whether it is a command.
-var clientCommands = []binding{
-	{"/theme", "choose a theme (alias: /skin)"},
-	{"/group", "start a group conversation with three or more people"},
-	{"/nick", "change your display name"},
-	{"/username", "change your username (breaks existing @mentions)"},
-	{"/threads", "threads you follow, in this team and in DMs"},
-	{"/leave", "leave the current channel"},
-	{"/logout", "sign out and clear the stored session"},
+func clientCommands() []binding {
+	return []binding{
+		{"/theme", "choose a theme (alias: /skin)"},
+		{"/group", "start a group conversation with three or more people"},
+		{"/nick", "change your display name"},
+		{"/username", "change your username (breaks existing @mentions)"},
+		{"/threads", "threads you follow, in this team and in DMs"},
+		{"/leave", "leave the current channel"},
+		{"/logout", "sign out and clear the stored session"},
+	}
 }
 
-var mouseBindings = []binding{
-	{"wheel", "scroll history / move palette cursor"},
-	{"click", "action-bar buttons, palette rows, pick a post"},
-	{"drag", "select lines in the history; y copies them"},
+// mouseBindings lists what the mouse does.
+func mouseBindings() []binding {
+	return []binding{
+		{"wheel", "scroll history / move palette cursor"},
+		{"click", "action-bar buttons, palette rows, pick a post"},
+		{"drag", "select lines in the history; y copies them"},
+	}
 }
 
 // View renders the help overlay.
@@ -110,11 +120,11 @@ func (m Model) View() string {
 
 	header := m.styles.ListItemActive.Render("Keyboard")
 	items := []string{header}
-	for _, b := range keyBindings {
+	for _, b := range keyBindings() {
 		items = append(items, m.renderBinding(b))
 	}
 	items = append(items, "", m.styles.ListItemActive.Render("Commands"))
-	for _, b := range clientCommands {
+	for _, b := range clientCommands() {
 		items = append(items, m.renderBinding(b))
 	}
 	items = append(items, m.renderBinding(binding{
@@ -122,11 +132,11 @@ func (m Model) View() string {
 	}))
 
 	items = append(items, "", m.styles.ListItemActive.Render("Mouse"))
-	for _, b := range mouseBindings {
+	for _, b := range mouseBindings() {
 		items = append(items, m.renderBinding(b))
 	}
 
-	for _, h := range hints {
+	for _, h := range hints() {
 		items = append(items, "", m.styles.Timestamp.Render("  "+h))
 	}
 	items = append(items, "", m.styles.Timestamp.Render("press any key to close"))

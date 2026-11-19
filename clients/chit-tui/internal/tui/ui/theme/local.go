@@ -15,42 +15,54 @@ import (
 // ErrLocalThemeNotFound reports that no user theme file exists under the themes
 // directory. Callers distinguish it from a file that exists but is broken: the
 // first means "try somewhere else", the second means "tell the user".
+//
+// semscope: allow(NASA-P10-06) sentinel error: errors.Is needs one identity
 var ErrLocalThemeNotFound = errors.New("local theme not found")
 
-// namedTermColors maps the names a theme file may use to ANSI palette indices.
+// namedTermColor maps the names a theme file may use to ANSI palette indices.
 // A named color renders as whatever the user's terminal sets that slot to, so
 // a theme can inherit an existing color scheme instead of overriding it.
 //
 // Two names are deliberately counter-intuitive, matching the ratatui palette
 // these names come from: "gray" is ANSI 7 (the terminal's normal white) and
 // "white" is ANSI 15 (bright white).
-var namedTermColors = map[string]lipgloss.Color{
-	"black":         lipgloss.Color("0"),
-	"red":           lipgloss.Color("1"),
-	"green":         lipgloss.Color("2"),
-	"yellow":        lipgloss.Color("3"),
-	"blue":          lipgloss.Color("4"),
-	"magenta":       lipgloss.Color("5"),
-	"cyan":          lipgloss.Color("6"),
-	"gray":          lipgloss.Color("7"),
-	"grey":          lipgloss.Color("7"),
-	"darkgray":      lipgloss.Color("8"),
-	"dark_gray":     lipgloss.Color("8"),
-	"darkgrey":      lipgloss.Color("8"),
-	"dark_grey":     lipgloss.Color("8"),
-	"lightred":      lipgloss.Color("9"),
-	"light_red":     lipgloss.Color("9"),
-	"lightgreen":    lipgloss.Color("10"),
-	"light_green":   lipgloss.Color("10"),
-	"lightyellow":   lipgloss.Color("11"),
-	"light_yellow":  lipgloss.Color("11"),
-	"lightblue":     lipgloss.Color("12"),
-	"light_blue":    lipgloss.Color("12"),
-	"lightmagenta":  lipgloss.Color("13"),
-	"light_magenta": lipgloss.Color("13"),
-	"lightcyan":     lipgloss.Color("14"),
-	"light_cyan":    lipgloss.Color("14"),
-	"white":         lipgloss.Color("15"),
+func namedTermColor(name string) (lipgloss.Color, bool) {
+	switch name {
+	case "black":
+		return lipgloss.Color("0"), true
+	case "red":
+		return lipgloss.Color("1"), true
+	case "green":
+		return lipgloss.Color("2"), true
+	case "yellow":
+		return lipgloss.Color("3"), true
+	case "blue":
+		return lipgloss.Color("4"), true
+	case "magenta":
+		return lipgloss.Color("5"), true
+	case "cyan":
+		return lipgloss.Color("6"), true
+	case "gray", "grey":
+		return lipgloss.Color("7"), true
+	case "darkgray", "dark_gray", "darkgrey", "dark_grey":
+		return lipgloss.Color("8"), true
+	case "lightred", "light_red":
+		return lipgloss.Color("9"), true
+	case "lightgreen", "light_green":
+		return lipgloss.Color("10"), true
+	case "lightyellow", "light_yellow":
+		return lipgloss.Color("11"), true
+	case "lightblue", "light_blue":
+		return lipgloss.Color("12"), true
+	case "lightmagenta", "light_magenta":
+		return lipgloss.Color("13"), true
+	case "lightcyan", "light_cyan":
+		return lipgloss.Color("14"), true
+	case "white":
+		return lipgloss.Color("15"), true
+	default:
+		return "", false
+	}
 }
 
 // parseThemeColor turns a validated theme-file value into a color. The schema
@@ -65,7 +77,7 @@ func parseThemeColor(value string) color.Color {
 	if strings.HasPrefix(value, "#") {
 		return hexColor(value)
 	}
-	if c, ok := namedTermColors[strings.ToLower(value)]; ok {
+	if c, ok := namedTermColor(strings.ToLower(value)); ok {
 		return c
 	}
 	return nil

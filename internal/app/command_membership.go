@@ -14,7 +14,7 @@ import (
 // are echoed to the invoker verbatim, so they read as instructions.
 //
 //nolint:staticcheck // ST1005: shown to the user as-is, so it is prose, not a wrapped error.
-var errCommandUsage = errors.New("Usage: specify a username, for example `bob`")
+var errCommandUsage = errors.New("Usage: specify a username, for example `bob`") // semscope: allow(NASA-P10-06) sentinel error: errors.Is needs one identity
 
 // HandleInvite implements /invite <user>, adding a user to the current
 // channel. Authorization is left to AddChannelMember, which already enforces

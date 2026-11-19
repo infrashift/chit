@@ -24,6 +24,8 @@ type MentionSpan struct {
 
 // mentionRe matches @name. A name may contain dots and dashes but not end in
 // one, so the full stop closing "thanks @bob." is not part of the name.
+//
+// semscope: allow(NASA-P10-06) compiled once, never changed
 var mentionRe = regexp.MustCompile(`@([a-zA-Z0-9_](?:[a-zA-Z0-9_.\-]*[a-zA-Z0-9_])?)`)
 
 // ExtractMentionPrefix scans backward from cursorCol in text to find an @mention prefix.

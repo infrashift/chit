@@ -14,42 +14,49 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// ThemeColorKeys is the canonical palette key list for a theme file. It must
-// stay in step with the Theme struct, the #Theme definition in
+// ThemeColorKeys returns the canonical palette key list for a theme file. It
+// must stay in step with the Theme struct, the #Theme definition in
 // schema/theme.cue, and the loader that reads these keys back out.
-// TestThemeColorKeysMatchSchema guards that correspondence.
-var ThemeColorKeys = []string{
-	"background",
-	"foreground",
-	"subtle",
-	"accent",
-	"error",
-	"success",
-	"warning",
-	"border",
-	"active_border",
-	"highlight",
-	"muted",
-	"username",
-	"timestamp",
-	"unread_badge",
-	"pin_badge",
-	"channel_active",
-	"mention_badge",
-	"mention_text",
-	"mention_self_bg",
-	"tag_badge",
+// TestThemeColorKeysMatchSchema guards that correspondence. Each call returns
+// a new slice.
+func ThemeColorKeys() []string {
+	return []string{
+		"background",
+		"foreground",
+		"subtle",
+		"accent",
+		"error",
+		"success",
+		"warning",
+		"border",
+		"active_border",
+		"highlight",
+		"muted",
+		"username",
+		"timestamp",
+		"unread_badge",
+		"pin_badge",
+		"channel_active",
+		"mention_badge",
+		"mention_text",
+		"mention_self_bg",
+		"tag_badge",
+	}
 }
 
-// ThemeDerivedKeys are optional; when a file omits them they are computed from
-// the palette.
-var ThemeDerivedKeys = []string{"selection", "search_match", "search_match_active"}
+// ThemeDerivedKeys returns the optional color keys; when a file omits them
+// they are computed from the palette. Each call returns a new slice.
+func ThemeDerivedKeys() []string {
+	return []string{"selection", "search_match", "search_match_active"}
+}
 
-// ThemeMeta are the non-color keys.
-var ThemeMeta = []string{"name", "author"}
+// ThemeMeta returns the non-color keys. Each call returns a new slice.
+func ThemeMeta() []string { return []string{"name", "author"} }
 
 // ErrThemeNotFound reports that no theme file exists at the given path, which
 // callers distinguish from a file that exists but is broken.
+//
+// semscope: allow(NASA-P10-06) sentinel error: errors.Is needs one identity
 var ErrThemeNotFound = errors.New("theme file not found")
 
 // ValidateThemeTOML reads a theme file and returns its keys as raw strings for
@@ -95,14 +102,15 @@ func ValidateThemeTOML(path string) (values map[string]string, warnings []string
 }
 
 func knownThemeKeys() map[string]bool {
-	known := make(map[string]bool, len(ThemeColorKeys)+len(ThemeDerivedKeys)+len(ThemeMeta))
-	for _, k := range ThemeColorKeys {
+	colors, derived, meta := ThemeColorKeys(), ThemeDerivedKeys(), ThemeMeta()
+	known := make(map[string]bool, len(colors)+len(derived)+len(meta))
+	for _, k := range colors {
 		known[k] = true
 	}
-	for _, k := range ThemeDerivedKeys {
+	for _, k := range derived {
 		known[k] = true
 	}
-	for _, k := range ThemeMeta {
+	for _, k := range meta {
 		known[k] = true
 	}
 	return known
@@ -135,7 +143,7 @@ func missingThemeKeys(raw map[string]any) []string {
 	if _, ok := raw["name"]; !ok {
 		missing = append(missing, "key `name` is required")
 	}
-	for _, k := range ThemeColorKeys {
+	for _, k := range ThemeColorKeys() {
 		if _, ok := raw[k]; !ok {
 			missing = append(missing, fmt.Sprintf("key `%s` is required", k))
 		}
@@ -166,11 +174,12 @@ func validateThemeValues(raw map[string]any) []string {
 // themeErrorMessages renders one message per offending key, deduplicated —
 // CUE frequently reports the same key from several constraint branches.
 func themeErrorMessages(raw map[string]any, verr error) []string {
-	colorKeys := make(map[string]bool, len(ThemeColorKeys)+len(ThemeDerivedKeys))
-	for _, k := range ThemeColorKeys {
+	colors, derived := ThemeColorKeys(), ThemeDerivedKeys()
+	colorKeys := make(map[string]bool, len(colors)+len(derived))
+	for _, k := range colors {
 		colorKeys[k] = true
 	}
-	for _, k := range ThemeDerivedKeys {
+	for _, k := range derived {
 		colorKeys[k] = true
 	}
 

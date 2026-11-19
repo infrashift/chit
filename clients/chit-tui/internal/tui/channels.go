@@ -13,8 +13,12 @@ import (
 // conversation is a DM, which has its own flow.
 const minGroupChannelMembers = 3
 
-var errGroupTooSmall = errors.New(
-	"a group needs at least three people — pick two others, or start a DM with @")
+// errGroupTooSmall explains why a group with fewer than three people was not
+// created.
+func errGroupTooSmall() error {
+	return errors.New(
+		"a group needs at least three people — pick two others, or start a DM with @")
+}
 
 // selectChannel makes ch the active channel: marks the previous channel as
 // viewed, loads posts, resets thread state, and derives the active team.
@@ -217,13 +221,13 @@ func (m *Model) removeChannel(channelID string) []tea.Cmd {
 		if len(m.channels) > 0 {
 			cmds = append(cmds, m.selectChannel(m.channels[0]))
 		}
-		cmds = append(cmds, m.setError(errChannelGone))
+		cmds = append(cmds, m.setError(errChannelGone()))
 	}
 	return cmds
 }
 
 // errChannelGone explains why the view moved on its own.
-var errChannelGone = errors.New("this channel is no longer available")
+func errChannelGone() error { return errors.New("this channel is no longer available") }
 
 // channelByID finds a channel across the team lists and DMs. A search that
 // spans every channel can return a hit from any of them.
@@ -287,7 +291,7 @@ func (m Model) handleMembersPicked(msg dmpicker.MembersPickedMsg) (tea.Model, te
 			}
 		}
 		if len(ids) < minGroupChannelMembers {
-			cmds = append(cmds, m.setError(errGroupTooSmall))
+			cmds = append(cmds, m.setError(errGroupTooSmall()))
 			return m, tea.Batch(cmds...)
 		}
 		cmds = append(cmds, CreateGroupChannel(m.reqCtx(), m.client, ids))

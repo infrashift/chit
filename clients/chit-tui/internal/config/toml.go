@@ -27,21 +27,23 @@ type FileSettings struct {
 	Appearance  string
 }
 
-// fileKeys is the set of recognized TOML keys; anything absent from it is
+// fileKeys returns the recognized TOML keys; anything absent from them is
 // reported and dropped. setFileKey must handle every one of them.
-var fileKeys = []string{
-	"server_url",
-	"ws_scheme",
-	"auth_header",
-	"session_file",
-	"theme",
-	"theme_dark",
-	"theme_light",
-	"appearance",
+func fileKeys() []string {
+	return []string{
+		"server_url",
+		"ws_scheme",
+		"auth_header",
+		"session_file",
+		"theme",
+		"theme_dark",
+		"theme_light",
+		"appearance",
+	}
 }
 
 // isFileKey reports whether key is a recognized setting.
-func isFileKey(key string) bool { return slices.Contains(fileKeys, key) }
+func isFileKey(key string) bool { return slices.Contains(fileKeys(), key) }
 
 // setFileKey stores v in the FileSettings field key names. It reports false
 // for a key that is not a recognized setting and leaves s unchanged.
@@ -136,7 +138,7 @@ func stripUnknownKeys(raw map[string]any, warnings *[]string) {
 // apply copies validated values onto settings. Anything that survived vetting
 // is known to be a string, so a non-string here is simply skipped.
 func apply(raw map[string]any, settings *FileSettings) {
-	for _, key := range fileKeys {
+	for _, key := range fileKeys() {
 		v, ok := raw[key]
 		if !ok {
 			continue

@@ -2,13 +2,11 @@ package tui_test
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/adrg/xdg"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui"
 )
 
 // TestMain moves every user directory into a temporary one. The model writes
@@ -46,7 +44,6 @@ func run(m *testing.M) int {
 	}
 	// xdg resolves its directories once, at init, before TestMain runs.
 	xdg.Reload()
-	tui.SetClipboardOutput(io.Discard)
 
 	return m.Run()
 }

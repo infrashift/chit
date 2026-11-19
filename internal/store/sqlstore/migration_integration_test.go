@@ -190,17 +190,19 @@ func TestMigration000008_ScopedTags(t *testing.T) {
 	}
 }
 
-// tagKeyCases are names on which a Go key and a SQL key could part: letters
-// with special case rules, compatibility forms that NFKC rewrites, and the
-// reserved prefix in disguise.
-var tagKeyCases = []string{
-	"Straße", "STRASSE", // ß: lowercasing keeps it, folding would make ss
-	"Ｆｕｌｌｗｉｄｔｈ", "ﬁle", "Ⅻ", "K", // full width, ligature, Roman numeral, Kelvin sign
-	"İstanbul", "ISTANBUL", "ıi", // Turkish dotted capital I and dotless i
-	"ΣΊΣΥΦΟΣ", "σίσυφος", "ς", // Greek capital sigma, and the final sigma
-	"é", "É", "É", // combining acute accent and the precomposed form
-	"Ǆ", "ǅ", // a digraph with a titlecase form
-	"PROFILE/Coder", "ＰＲＯＦＩＬＥ/x", "Profile/x", // the reserved prefix
+// tagKeyCases returns names on which a Go key and a SQL key could part:
+// letters with special case rules, compatibility forms that NFKC rewrites,
+// and the reserved prefix in disguise.
+func tagKeyCases() []string {
+	return []string{
+		"Straße", "STRASSE", // ß: lowercasing keeps it, folding would make ss
+		"Ｆｕｌｌｗｉｄｔｈ", "ﬁle", "Ⅻ", "K", // full width, ligature, Roman numeral, Kelvin sign
+		"İstanbul", "ISTANBUL", "ıi", // Turkish dotted capital I and dotless i
+		"ΣΊΣΥΦΟΣ", "σίσυφος", "ς", // Greek capital sigma, and the final sigma
+		"é", "É", "É", // combining acute accent and the precomposed form
+		"Ǆ", "ǅ", // a digraph with a titlecase form
+		"PROFILE/Coder", "ＰＲＯＦＩＬＥ/x", "Profile/x", // the reserved prefix
+	}
 }
 
 // TestTagNameKey_AgreesWithPostgres holds the Go key (model.TagNameKey) and
@@ -210,6 +212,7 @@ var tagKeyCases = []string{
 func TestTagNameKey_AgreesWithPostgres(t *testing.T) {
 	ctx := context.Background()
 	db := migrationDB(t, 8)
+	cases := tagKeyCases()
 	user, team := model.NewID(), model.NewID()
 	exec := func(q string, args ...any) {
 		t.Helper()
@@ -221,7 +224,7 @@ func TestTagNameKey_AgreesWithPostgres(t *testing.T) {
 	exec(`INSERT INTO teams (id, name, display_name, creator_id, create_at, update_at) VALUES ($1, 't', 'T', $2, 1, 1)`, team, user)
 	// Each name in a channel of its own: names that share a key in one
 	// channel merge, which TestMigration000008_ScopedTags covers.
-	for i, name := range tagKeyCases {
+	for i, name := range cases {
 		channel, post, id := model.NewID(), model.NewID(), model.NewID()
 		exec(`INSERT INTO channels (id, team_id, creator_id, name, display_name, type, create_at, update_at) VALUES ($1, $2, $3, $4, 'C', 'O', 1, 1)`,
 			channel, team, user, fmt.Sprintf("c%d", i))
@@ -232,7 +235,7 @@ func TestTagNameKey_AgreesWithPostgres(t *testing.T) {
 
 	applyMigration(t, db, 8, "up")
 
-	for _, name := range tagKeyCases {
+	for _, name := range cases {
 		var sqlKey string
 		if err := db.QueryRow(ctx, `SELECT name_key FROM tags WHERE name = $1`, name).Scan(&sqlKey); err != nil {
 			t.Fatalf("%q: %v", name, err)

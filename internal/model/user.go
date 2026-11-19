@@ -6,6 +6,7 @@ import (
 	"strings"
 )
 
+// semscope: allow(NASA-P10-06) compiled once, never changed
 var validUsernameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}[a-z0-9]$`)
 
 // Actor types. Humans, AI agents, and bots are all equal users; actor_type

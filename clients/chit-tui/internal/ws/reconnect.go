@@ -8,10 +8,14 @@ import (
 )
 
 // ErrNotConnected is returned when an operation requires an active connection.
+//
+// semscope: allow(NASA-P10-06) sentinel error: errors.Is needs one identity
 var ErrNotConnected = errors.New("ws: not connected")
 
 // ErrUnauthorized marks a handshake the server rejected for its credentials.
 // Redialing cannot fix it; the user has to sign in again.
+//
+// semscope: allow(NASA-P10-06) sentinel error: errors.Is needs one identity
 var ErrUnauthorized = errors.New("unauthorized")
 
 // Backoff computes exponential backoff durations with a maximum cap.

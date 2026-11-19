@@ -48,7 +48,7 @@ func TestValidateThemeTOML_Complete(t *testing.T) {
 	if len(warnings) != 0 {
 		t.Errorf("valid theme warned: %v", warnings)
 	}
-	for _, key := range config.ThemeColorKeys {
+	for _, key := range config.ThemeColorKeys() {
 		if values[key] == "" {
 			t.Errorf("key %s missing from the returned values", key)
 		}
@@ -87,7 +87,7 @@ background = "#000000"
 	}
 
 	msg := err.Error()
-	for _, key := range config.ThemeColorKeys {
+	for _, key := range config.ThemeColorKeys() {
 		if key == "background" {
 			continue
 		}
@@ -237,12 +237,12 @@ func TestThemeColorKeysMatchSchema(t *testing.T) {
 	}
 	src := string(data)
 
-	for _, key := range config.ThemeColorKeys {
+	for _, key := range config.ThemeColorKeys() {
 		if !strings.Contains(src, key+"!:") {
 			t.Errorf("key %q is in ThemeColorKeys but not required by schema/theme.cue", key)
 		}
 	}
-	for _, key := range config.ThemeDerivedKeys {
+	for _, key := range config.ThemeDerivedKeys() {
 		if !strings.Contains(src, key+"?:") {
 			t.Errorf("key %q is in ThemeDerivedKeys but not optional in schema/theme.cue", key)
 		}
@@ -250,7 +250,7 @@ func TestThemeColorKeysMatchSchema(t *testing.T) {
 
 	// name is required too, so the schema should hold exactly the palette keys
 	// plus name as required fields.
-	if got, want := strings.Count(src, "!:"), len(config.ThemeColorKeys)+1; got != want {
+	if got, want := strings.Count(src, "!:"), len(config.ThemeColorKeys())+1; got != want {
 		t.Errorf("schema has %d required keys, want %d (palette + name); "+
 			"a key was added to the schema without updating ThemeColorKeys", got, want)
 	}

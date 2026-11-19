@@ -3,6 +3,7 @@ package tui_test
 import (
 	"context"
 	"errors"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -20,30 +21,30 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
 
-var (
-	alice = &model.User{ID: "u1", Username: "alice"}
-	bob   = &model.User{ID: "u2", Username: "bob"}
-)
+// alice and bob are the two users who take turns signing in.
+func alice() *model.User { return &model.User{ID: "u1", Username: "alice"} }
+func bob() *model.User   { return &model.User{ID: "u2", Username: "bob"} }
 
 const aliceHistory = "something only alice should see"
 
 // signedInAsAlice is a running session with a channel open and a post in it.
 func signedInAsAlice(t *testing.T) (tui.Model, *mockClient, *mockWSClient) {
 	t.Helper()
-	client := &mockClient{me: alice}
+	client := &mockClient{me: alice()}
 	wsc := newMockWSClient()
 	m := tui.NewModel(&config.Config{ServerURL: "http://localhost:8065"}, client, wsc,
 		styles.New(theme.TokyoNight()), nil, nil, nil)
+	m.SetClipboardOutput(io.Discard)
 
 	for _, msg := range []tea.Msg{
 		tea.WindowSizeMsg{Width: 120, Height: 40},
-		tui.UserLoadedMsg{User: alice},
+		tui.UserLoadedMsg{User: alice()},
 		tui.TeamsLoadedMsg{Teams: []*model.Team{{ID: "t1", DisplayName: "Engineering"}}},
 		tui.ChannelsLoadedMsg{TeamID: "t1", Channels: []*model.Channel{{ID: "c1", TeamID: "t1", DisplayName: "Secret Plans"}}},
 		tui.PostsLoadedMsg{ChannelID: "c1", Posts: &model.PostList{Order: []*model.Post{
 			{ID: "p1", ChannelID: "c1", UserID: "u1", Content: aliceHistory, CreateAt: 1700000000000},
 		}}},
-		tui.UsersLoadedMsg{Users: []*model.User{alice}},
+		tui.UsersLoadedMsg{Users: []*model.User{alice()}},
 	} {
 		updated, _ := m.Update(msg)
 		m = asModel(t, updated)
@@ -85,7 +86,7 @@ func TestModel_SignOutForgetsTheSession(t *testing.T) {
 
 	m = signOut(t, m)
 	m, _ = step(t, m, login.LoginSuccessMsg{Token: "bob-token"})
-	m, _ = step(t, m, tui.UserLoadedMsg{User: bob})
+	m, _ = step(t, m, tui.UserLoadedMsg{User: bob()})
 
 	view := testutil.StripANSI(m.View())
 	for _, leaked := range []string{aliceHistory, "Secret Plans"} {
@@ -115,7 +116,7 @@ func TestModel_ReLoginAfterExpiryReloadsTheChannel(t *testing.T) {
 	m = expire(t, m)
 	m, _ = step(t, m, login.LoginSuccessMsg{Token: "renewed"})
 	client.postsFetched = nil
-	m, cmd := step(t, m, tui.UserLoadedMsg{User: alice})
+	m, cmd := step(t, m, tui.UserLoadedMsg{User: alice()})
 	drain(cmd)
 
 	if !slices.Contains(client.postsFetched, "c1") {
@@ -133,7 +134,7 @@ func TestModel_ReLoginAsSomeoneElseForgetsTheSession(t *testing.T) {
 
 	m = expire(t, m)
 	m, _ = step(t, m, login.LoginSuccessMsg{Token: "bob-token"})
-	m, _ = step(t, m, tui.UserLoadedMsg{User: bob})
+	m, _ = step(t, m, tui.UserLoadedMsg{User: bob()})
 
 	if view := testutil.StripANSI(m.View()); strings.Contains(view, aliceHistory) {
 		t.Errorf("bob's session shows alice's history:\n%s", view)
@@ -184,7 +185,7 @@ func TestModel_CommandAuthorSurvivesAUserLoad(t *testing.T) {
 	m := setupModel(t)
 
 	m, _ = step(t, m, commandResponse("help", "the help text"))
-	m, _ = step(t, m, tui.UsersLoadedMsg{Users: []*model.User{bob}})
+	m, _ = step(t, m, tui.UsersLoadedMsg{Users: []*model.User{bob()}})
 
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "/help") {

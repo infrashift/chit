@@ -15,11 +15,13 @@ import (
 const threadInboxPageSize = 50
 
 // errNotSent reports a message typed before there was anywhere to send it.
-var errNotSent = errors.New("not sent: no channel is open yet")
+func errNotSent() error { return errors.New("not sent: no channel is open yet") }
 
 // errSearchHitNotLoaded reports a result that is outside the loaded history.
-var errSearchHitNotLoaded = errors.New(
-	"that message is older than the loaded history; scroll back to reach it")
+func errSearchHitNotLoaded() error {
+	return errors.New(
+		"that message is older than the loaded history; scroll back to reach it")
+}
 
 // closeThread returns from the thread pane to the channel view.
 // clearSearchHighlight removes match highlighting. A highlight that outlives
@@ -65,11 +67,13 @@ func (m *Model) cancelEdit() {
 }
 
 // errSearchHitElsewhere explains why the view changed channel.
-var errSearchHitElsewhere = errors.New("opened the channel containing that message")
+func errSearchHitElsewhere() error {
+	return errors.New("opened the channel containing that message")
+}
 
 // errLoadingOlder is a notice, not a failure: fetching a page of older
 // history can take a moment and the view does not otherwise change.
-var errLoadingOlder = errors.New("loading older messages…")
+func errLoadingOlder() error { return errors.New("loading older messages…") }
 
 // postTypeCommandResponse marks the synthetic post the server returns when a
 // message turns out to be a slash command. It is delivered separately as an
@@ -95,7 +99,7 @@ func (m *Model) maybeLoadOlder() tea.Cmd {
 	m.loadingOlder = true
 	return tea.Batch(
 		FetchOlderPosts(m.reqCtx(), m.client, m.activeChan.ID, m.historyPage+1, historyPageSize),
-		m.setError(errLoadingOlder),
+		m.setError(errLoadingOlder()),
 	)
 }
 
@@ -141,7 +145,7 @@ func (m Model) handleSend(msg input.SendMsg) (tea.Model, tea.Cmd) {
 		// The input has already cleared; put the text back so it is
 		// not lost, and say why it went nowhere.
 		m.input.SetValue(msg.Content)
-		return m, m.setError(errNotSent)
+		return m, m.setError(errNotSent())
 	}
 	// In the thread pane the input composes a reply to the thread root.
 	// The root's ID is known from the moment the thread opens, so a
@@ -210,7 +214,7 @@ func (m Model) handlePostsLoaded(msg PostsLoadedMsg) (tea.Model, tea.Cmd) {
 		m.pendingJumpID = ""
 		m.viewport.SetSearchTerm(m.searchTerm)
 		if !m.viewport.ScrollToPost(id) {
-			return m, tea.Batch(load, m.setError(errSearchHitNotLoaded))
+			return m, tea.Batch(load, m.setError(errSearchHitNotLoaded()))
 		}
 	}
 	return m, load
@@ -295,14 +299,14 @@ func (m Model) handleSearchHit(msg palette.PostChosenMsg) (tea.Model, tea.Cmd) {
 				open := m.selectChannel(ch)
 				// The hit is selected once the channel's history arrives.
 				m.pendingJumpID = msg.Post.ID
-				return m, tea.Batch(cmd, open, m.setError(errSearchHitElsewhere))
+				return m, tea.Batch(cmd, open, m.setError(errSearchHitElsewhere()))
 			}
 		}
 		m.viewport.SetSearchTerm(m.searchTerm)
 		if !m.viewport.ScrollToPost(msg.Post.ID) {
 			// The hit is older than the posts held in memory. Say so
 			// rather than silently doing nothing.
-			return m, tea.Batch(cmd, m.setError(errSearchHitNotLoaded))
+			return m, tea.Batch(cmd, m.setError(errSearchHitNotLoaded()))
 		}
 	}
 	return m, cmd

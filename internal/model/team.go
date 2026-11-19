@@ -12,6 +12,7 @@ const (
 	TeamInviteOnly = "I"
 )
 
+// semscope: allow(NASA-P10-06) compiled once, never changed
 var validTeamNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$`)
 
 type Team struct {

@@ -6,7 +6,7 @@ import (
 )
 
 func TestBuiltinsPopulateDerivedSlots(t *testing.T) {
-	for _, name := range builtinNames {
+	for _, name := range BuiltinNames() {
 		t.Run(name, func(t *testing.T) {
 			th, ok := builtinTheme(name)
 			if !ok {
@@ -29,7 +29,7 @@ func TestBuiltinsPopulateDerivedSlots(t *testing.T) {
 // The active match must be visually distinct from an inactive one, otherwise
 // "next match" navigation gives the user no feedback.
 func TestSearchMatchActiveDiffersFromSearchMatch(t *testing.T) {
-	for _, name := range builtinNames {
+	for _, name := range BuiltinNames() {
 		t.Run(name, func(t *testing.T) {
 			th, ok := builtinTheme(name)
 			if !ok {

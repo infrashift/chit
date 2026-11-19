@@ -1,6 +1,7 @@
 package tui_test
 
 import (
+	"io"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -100,6 +101,7 @@ func TestModel_MentionInTheOpenChannelIsNotCounted(t *testing.T) {
 func TestModel_DMBadgesAfterTheUserLoadsLate(t *testing.T) {
 	cfgClient := &mockClient{}
 	m := tui.NewModel(nil, cfgClient, nil, testutil.Styles(), nil, nil, nil)
+	m.SetClipboardOutput(io.Discard)
 	m, _ = step(t, m, tui.DMChannelsLoadedMsg{Channels: []*model.Channel{
 		{ID: "d1", Type: model.ChannelDirect, Name: "u1__u2", TotalMsgCount: 3},
 	}})

@@ -45,8 +45,8 @@ Tracking: [ISSUE-006](.okfw/issues/issue-006-r9-no-function-types-in-chit-code--
 ## Phase 7: R6, no mutable package variables
 Tracking: [ISSUE-007](.okfw/issues/issue-007-r6-no-mutable-package-variables--01a1f5379e5d.md)
 
-- [ ] Move or remove the package variables.
-- [ ] Remove the NASA-P10-06 omission. Turn on `gochecknoglobals`.
+- [x] Move or remove the package variables.
+- [x] Remove the NASA-P10-06 omission. Turn on `gochecknoglobals`.
 
 ## Phase 8: R4, functions of 60 lines or fewer
 Tracking: [ISSUE-008](.okfw/issues/issue-008-r4-functions-of-60-lines-or-fewer--01a1f5379e65.md)

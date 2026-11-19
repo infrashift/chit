@@ -2,6 +2,7 @@ package tui_test
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -33,6 +34,7 @@ func runningProgram(t *testing.T) *teatest.TestModel {
 	}
 	m := tui.NewModel(&config.Config{ServerURL: "http://localhost:8065"}, client, nil,
 		testutil.Styles(), nil, nil, nil)
+	m.SetClipboardOutput(io.Discard)
 	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(120, 40))
 	t.Cleanup(func() {
 		if err := tm.Quit(); err != nil {

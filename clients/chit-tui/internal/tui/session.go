@@ -137,13 +137,15 @@ func (m Model) resumeAfterReLogin(u *model.User) (tea.Model, tea.Cmd) {
 
 // newSession returns a model with nothing from the signed-in session: no
 // user, channels, history, caches or half-finished edits. It keeps only what
-// outlives a session — clients, stores, theme, window size, the status line,
-// and the WebSocket listeners, which keep reading the same channels.
+// outlives a session — clients, stores, theme, clipboard output, window size,
+// the status line, and the WebSocket listeners, which keep reading the same
+// channels.
 func (m Model) newSession() Model {
 	fresh := NewModel(m.cfg, m.client, m.wsClient, m.styles, m.tokenStore, m.kratosClient, m.sessionStore)
 	fresh.appState = m.appState
 	fresh.wsListening = m.wsListening
 	fresh.themeSetting = m.themeSetting
+	fresh.clipboardOut = m.clipboardOut
 	fresh.err, fresh.errSeq = m.err, m.errSeq
 	fresh.width, fresh.height = m.width, m.height
 	fresh.loginModel.SetSize(m.width, m.height)

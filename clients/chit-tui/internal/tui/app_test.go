@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -43,7 +44,9 @@ func testModel() tui.Model {
 		commands: []*model.Command{{ID: "cmd1", Slug: "remind", Description: "Set reminder"}},
 		users:    []*model.User{{ID: "u1", Username: "alice"}},
 	}
-	return tui.NewModel(cfg, client, nil, s, nil, nil, nil)
+	m := tui.NewModel(cfg, client, nil, s, nil, nil, nil)
+	m.SetClipboardOutput(io.Discard)
+	return m
 }
 
 // asModel returns the tui.Model that Update produced. Update always returns
@@ -64,6 +67,7 @@ func modelWithClient(t *testing.T, client api.ChitClient) tui.Model {
 
 	cfg := &config.Config{ServerURL: "http://localhost:8065"}
 	m := tui.NewModel(cfg, client, nil, styles.New(theme.TokyoNight()), nil, nil, nil)
+	m.SetClipboardOutput(io.Discard)
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m = asModel(t, updated)
@@ -330,6 +334,7 @@ func TestModel_SendMsgInThreadPaneCreatesReply(t *testing.T) {
 	}
 	cfg := &config.Config{ServerURL: "http://localhost:8065", SessionToken: "test-token", WSScheme: "ws"}
 	m := tui.NewModel(cfg, client, nil, styles.New(theme.TokyoNight()), nil, nil, nil)
+	m.SetClipboardOutput(io.Discard)
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m = asModel(t, updated)
 	updated, _ = m.Update(tui.UserLoadedMsg{User: &model.User{ID: "u1", Username: "alice"}})
@@ -547,6 +552,7 @@ func TestModel_WSConnectedStartsListening(t *testing.T) {
 	}
 	wsClient := newMockWSClient()
 	m := tui.NewModel(cfg, client, wsClient, s, nil, nil, nil)
+	m.SetClipboardOutput(io.Discard)
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m = asModel(t, updated)
@@ -1592,6 +1598,7 @@ func TestModel_SendMsg_HashtagOnlyPreservesContent(t *testing.T) {
 	}
 	s := styles.New(theme.TokyoNight())
 	m := tui.NewModel(cfg, client, nil, s, nil, nil, nil)
+	m.SetClipboardOutput(io.Discard)
 
 	// Setup model state
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
@@ -1645,6 +1652,7 @@ func TestModel_SendMsg_HashtagWithTextStripsCorrectly(t *testing.T) {
 	}
 	s := styles.New(theme.TokyoNight())
 	m := tui.NewModel(cfg, client, nil, s, nil, nil, nil)
+	m.SetClipboardOutput(io.Discard)
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m = asModel(t, updated)
@@ -1879,6 +1887,7 @@ func setupModelWithWS(t *testing.T) (tui.Model, *mockWSClient) {
 	wsc := newMockWSClient()
 	cfg := &config.Config{ServerURL: "http://localhost:8065"}
 	m := tui.NewModel(cfg, &mockClient{}, wsc, styles.New(theme.TokyoNight()), nil, nil, nil)
+	m.SetClipboardOutput(io.Discard)
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m = asModel(t, updated)
 	updated, _ = m.Update(tui.UserLoadedMsg{User: &model.User{ID: "u1", Username: "alice"}})

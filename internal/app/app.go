@@ -135,11 +135,15 @@ func New(s store.Store, hub *websocket.Hub, ps pubsub.PubSub, cfg *config.Config
 
 // ErrKratosIdentityNotFound is FetchKratosIdentity's error when Kratos has
 // no identity with the ID (Kratos answers 404).
+//
+// semscope: allow(NASA-P10-06) sentinel error: errors.Is needs one identity
 var ErrKratosIdentityNotFound = errors.New("kratos identity not found")
 
 // ErrKratosIdentityInactive is FetchKratosIdentity's error when the identity
 // is not active. Kratos gives such an identity no session, so it cannot reach
 // chitd from a browser; it must not be provisioned another way either.
+//
+// semscope: allow(NASA-P10-06) sentinel error: errors.Is needs one identity
 var ErrKratosIdentityInactive = errors.New("kratos identity is not active")
 
 // FetchKratosIdentity retrieves identity traits from Kratos Admin API.

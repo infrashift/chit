@@ -10,12 +10,17 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/errlog"
 )
 
-// themeSettingRe matches an existing top-level assignment of each theme
-// setting. Only these keys are ever rewritten.
-var themeSettingRe = map[string]*regexp.Regexp{
-	"theme":       regexp.MustCompile(`(?m)^\s*theme\s*=.*$`),
-	"theme_dark":  regexp.MustCompile(`(?m)^\s*theme_dark\s*=.*$`),
-	"theme_light": regexp.MustCompile(`(?m)^\s*theme_light\s*=.*$`),
+// themeSettingRe matches an existing top-level assignment of the theme
+// setting key. Only these keys are ever rewritten: it reports false for any
+// other key. It is compiled per call; a theme is saved only when the user
+// picks one.
+func themeSettingRe(key string) (*regexp.Regexp, bool) {
+	switch key {
+	case "theme", "theme_dark", "theme_light":
+		return regexp.MustCompile(`(?m)^\s*` + key + `\s*=.*$`), true
+	default:
+		return nil, false
+	}
 }
 
 // SaveTheme records a theme choice in the config file so it survives a restart.
@@ -28,7 +33,7 @@ func SaveTheme(name string) error { return SaveThemeSetting("theme", name) }
 // round-trip through the TOML encoder would silently discard the user's
 // comments and key ordering, which is a poor trade for persisting one setting.
 func SaveThemeSetting(key, name string) error {
-	themeLineRe, ok := themeSettingRe[key]
+	themeLineRe, ok := themeSettingRe(key)
 	if !ok {
 		return fmt.Errorf("%q is not a theme setting", key)
 	}
@@ -52,7 +57,8 @@ func SaveThemeSetting(key, name string) error {
 	body := string(existing)
 	switch {
 	case themeLineRe.MatchString(body):
-		body = themeLineRe.ReplaceAllString(body, line)
+		// Literal: a "$" in the theme name is text, not a group reference.
+		body = themeLineRe.ReplaceAllLiteralString(body, line)
 	case strings.HasSuffix(body, "\n") || body == "":
 		body += line + "\n"
 	default:

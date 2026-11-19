@@ -7,6 +7,8 @@ import (
 
 // hashtagRe matches a #tag at the start of a line or after a space or tab.
 // A tag needs a letter, so "#123" stays an issue or PR reference.
+//
+// semscope: allow(NASA-P10-06) compiled once, never changed
 var hashtagRe = regexp.MustCompile(`(^|[ \t])#([a-zA-Z0-9_-]*[a-zA-Z][a-zA-Z0-9_-]*)`)
 
 // ExtractHashtags returns tag names found in content, lowercased and

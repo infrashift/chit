@@ -71,21 +71,25 @@ func (f *fakeKeto) keys() []string {
 	return ks
 }
 
-var adminAndUser = &CUEConfig{
-	Commands: []*Command{{ID: "help", Slug: "help"}, {ID: "kick", Slug: "kick"}},
-	Roles: []CUERole{
-		{Name: "admin", AllowedCommands: []string{"help", "kick"}},
-		{Name: "user", AllowedCommands: []string{"help"}},
-	},
-	Actors: []CUEActor{
-		{ID: "alice-uuid", Roles: []string{"admin"}},
-		{ID: "bob-uuid", Roles: []string{"user"}},
-	},
+// adminAndUser returns a config with an admin, who may run help and kick,
+// and a user, who may run help.
+func adminAndUser() *CUEConfig {
+	return &CUEConfig{
+		Commands: []*Command{{ID: "help", Slug: "help"}, {ID: "kick", Slug: "kick"}},
+		Roles: []CUERole{
+			{Name: "admin", AllowedCommands: []string{"help", "kick"}},
+			{Name: "user", AllowedCommands: []string{"help"}},
+		},
+		Actors: []CUEActor{
+			{ID: "alice-uuid", Roles: []string{"admin"}},
+			{ID: "bob-uuid", Roles: []string{"user"}},
+		},
+	}
 }
 
 func TestReconcile(t *testing.T) {
 	k := newFakeKeto()
-	if err := NewReconciler(k).Reconcile(context.Background(), adminAndUser); err != nil {
+	if err := NewReconciler(k).Reconcile(context.Background(), adminAndUser()); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
@@ -107,12 +111,12 @@ func TestReconcile(t *testing.T) {
 // role taken away from an actor, in the CUE stayed granted in Keto.
 func TestReconcileRevokesWhatIsNoLongerDeclared(t *testing.T) {
 	k := newFakeKeto()
-	if err := NewReconciler(k).Reconcile(context.Background(), adminAndUser); err != nil {
+	if err := NewReconciler(k).Reconcile(context.Background(), adminAndUser()); err != nil {
 		t.Fatal(err)
 	}
 
 	narrowed := &CUEConfig{
-		Commands: adminAndUser.Commands,
+		Commands: adminAndUser().Commands,
 		Roles: []CUERole{
 			{Name: "admin", AllowedCommands: []string{"help"}}, // kick taken away
 			{Name: "user", AllowedCommands: []string{"help"}},
@@ -137,7 +141,7 @@ func TestReconcileRevokesWhatIsNoLongerDeclared(t *testing.T) {
 func TestReconcileLeavesOtherNamespacesAlone(t *testing.T) {
 	channel := keto.Tuple{Namespace: "chit/channel", Object: "c1", Relation: "member", SubjectID: "u1"}
 	k := newFakeKeto(channel)
-	if err := NewReconciler(k).Reconcile(context.Background(), adminAndUser); err != nil {
+	if err := NewReconciler(k).Reconcile(context.Background(), adminAndUser()); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := k.tuples[channel.String()]; !ok {
@@ -151,7 +155,7 @@ func TestReconcileDeletesNothingWhenListingFails(t *testing.T) {
 	k := newFakeKeto(stale)
 	k.listErr = errors.New("keto read API unreachable")
 
-	if err := NewReconciler(k).Reconcile(context.Background(), adminAndUser); err == nil {
+	if err := NewReconciler(k).Reconcile(context.Background(), adminAndUser()); err == nil {
 		t.Fatal("expected the listing error")
 	}
 	if _, ok := k.tuples[stale.String()]; !ok {

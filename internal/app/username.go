@@ -28,9 +28,9 @@ import (
 
 const maxUsernameLen = 64
 
-// usernameSuffixLens are the suffix lengths, in hex digits, of the candidates
-// for an identity with an email; an identity without one starts at 12.
-var usernameSuffixLens = []int{8, 12, 16, 32}
+// usernameSuffixLens returns the suffix lengths, in hex digits, of the
+// candidates for an identity with an email; an identity without one starts at 12.
+func usernameSuffixLens() []int { return []int{8, 12, 16, 32} }
 
 // usernameCandidates returns the usernames to try, in order, for a new user
 // of the Kratos identity kratosID. An explicit trait username is the only
@@ -42,7 +42,7 @@ func usernameCandidates(traitUsername, email, kratosID string) []string {
 	digits := kratosHexDigits(kratosID)
 	local := sanitizeLocalPart(email)
 	var out []string
-	for _, n := range usernameSuffixLens {
+	for _, n := range usernameSuffixLens() {
 		suffix := digits[:n]
 		if local == "" {
 			if n < 12 {

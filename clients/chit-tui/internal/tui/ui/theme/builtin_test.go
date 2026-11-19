@@ -109,7 +109,7 @@ func TestLegacyThemesAreUnchanged(t *testing.T) {
 }
 
 func TestEveryBuiltinPopulatesEverySlot(t *testing.T) {
-	for _, name := range builtinNames {
+	for _, name := range BuiltinNames() {
 		t.Run(name, func(t *testing.T) {
 			th, ok := builtinTheme(name)
 			if !ok {

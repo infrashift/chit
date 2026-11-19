@@ -266,9 +266,8 @@ func (f *fakeChit) pushEvent(ev *model.WebSocketEvent) {
 	}
 }
 
-var upgrader = websocket.Upgrader{}
-
 func (f *fakeChit) handleWS(w http.ResponseWriter, req *http.Request) {
+	upgrader := websocket.Upgrader{}
 	conn, err := upgrader.Upgrade(w, req, nil)
 	if err != nil {
 		return

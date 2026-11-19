@@ -61,9 +61,9 @@ func TestWarnKey(t *testing.T) {
 // Every key the schema accepts needs a human message, or a user hitting it
 // gets the bare fallback text instead of an explanation.
 func TestEveryFileKeyHasAMessage(t *testing.T) {
-	for _, key := range fileKeys {
-		if _, ok := keyMessages[key]; !ok {
-			t.Errorf("key %q is accepted by the schema but has no entry in keyMessages", key)
+	for _, key := range fileKeys() {
+		if _, ok := keyMessage(key); !ok {
+			t.Errorf("key %q is accepted by the schema but has no entry in keyMessage", key)
 		}
 	}
 }
@@ -72,7 +72,7 @@ func TestEveryFileKeyHasAMessage(t *testing.T) {
 // switch would be accepted and then silently dropped.
 func TestEveryFileKeyIsSet(t *testing.T) {
 	seen := make(map[FileSettings]string)
-	for _, key := range fileKeys {
+	for _, key := range fileKeys() {
 		var s FileSettings
 		if !setFileKey(&s, key, "v") {
 			t.Errorf("setFileKey does not handle recognized key %q", key)
@@ -183,7 +183,7 @@ func TestStripUnknownThemeKeysSortsWarnings(t *testing.T) {
 
 func TestKnownThemeKeysCoversEveryList(t *testing.T) {
 	known := knownThemeKeys()
-	for _, group := range [][]string{ThemeColorKeys, ThemeDerivedKeys, ThemeMeta} {
+	for _, group := range [][]string{ThemeColorKeys(), ThemeDerivedKeys(), ThemeMeta()} {
 		for _, key := range group {
 			if !known[key] {
 				t.Errorf("key %q is not in knownThemeKeys", key)

@@ -52,6 +52,26 @@ func TestSaveTheme_ReplacesExistingKey(t *testing.T) {
 	}
 }
 
+// A theme name is data, not a replacement template: "$1" or "${x}" in the
+// name must reach the file as written.
+func TestSaveTheme_ReplacesWithDollarInName(t *testing.T) {
+	path := writeFile(t, "config.toml", "theme = \"nightfox\"\n")
+	t.Setenv("CHIT_CONFIG_FILE", path)
+
+	const name = "my$1theme${x}"
+	if err := config.SaveTheme(name); err != nil {
+		t.Fatalf("SaveTheme: %v", err)
+	}
+
+	settings, warnings := config.LoadFile(path)
+	if len(warnings) != 0 {
+		t.Errorf("saved config does not load cleanly: %v", warnings)
+	}
+	if settings.Theme != name {
+		t.Errorf("Theme = %q, want %q", settings.Theme, name)
+	}
+}
+
 // A round-trip through the TOML encoder would drop comments, so the file is
 // edited line by line instead. This is the test that pins that decision.
 func TestSaveTheme_PreservesComments(t *testing.T) {

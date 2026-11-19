@@ -26,6 +26,9 @@ import (
 //
 // semscope: allow(NASA-P10-09) chi's Router.Use requires func(http.Handler) http.Handler.
 func AuthExtract(a *app.App) func(http.Handler) http.Handler {
+	// The routes are compiled once, here, and shared by every request.
+	routes := onBehalfOfRoutes()
+	routeList := onBehalfOfRouteList(routes)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if secret := a.Config.TrustedProxySecret; secret != "" {
@@ -49,9 +52,9 @@ func AuthExtract(a *app.App) func(http.Handler) http.Handler {
 					return
 				}
 				if principalID, ok := onBehalfOf(r); ok {
-					if !onBehalfOfRoute(r) {
+					if !onBehalfOfRoute(routes, r) {
 						WriteError(w, model.NewBadRequestError("AuthExtract",
-							OnBehalfOfHeader+" is accepted only on "+onBehalfOfRouteList))
+							OnBehalfOfHeader+" is accepted only on "+routeList))
 						return
 					}
 					principal, err := a.ResolvePrincipal(r.Context(), user, principalID)
@@ -115,39 +118,46 @@ func onBehalfOf(r *http.Request) (string, bool) {
 	return values[0], true
 }
 
-// onBehalfOfRoutes are the only requests that may act on behalf of a person.
-// Everything else a client does, it does as itself. Keep in step with the
-// routes in api.go and with OnBehalfOfHeader in api/openapi.yaml.
-var onBehalfOfRoutes = []struct {
+// onBehalfOfRouteSpec is one route on which a client may act for a person.
+type onBehalfOfRouteSpec struct {
 	method, name string
 	path         *regexp.Regexp
-}{
-	// Posting, and saying that a reply is being produced.
-	{http.MethodPost, "POST /posts", regexp.MustCompile(`^/api/v1/posts$`)},
-	{http.MethodPost, "POST /channels/{id}/stream_status", regexp.MustCompile(`^/api/v1/channels/[^/]+/stream_status$`)},
-	// Tags: halod creates and applies a person's profile/ Tags for them.
-	{http.MethodPost, "POST /tags", regexp.MustCompile(`^/api/v1/tags$`)},
-	{http.MethodPost, "POST /posts/{id}/tags", regexp.MustCompile(`^/api/v1/posts/[^/]+/tags$`)},
-	{http.MethodPost, "POST /channels/{id}/tags", regexp.MustCompile(`^/api/v1/channels/[^/]+/tags$`)},
-	// Conversations: halod creates a person's private channel and adds
-	// itself to it, as the person. GET /users/me returns the person, which
-	// is how halod learns the user ID of a kratos: principal.
-	{http.MethodPost, "POST /channels", regexp.MustCompile(`^/api/v1/channels$`)},
-	{http.MethodPost, "POST /channels/{id}/members", regexp.MustCompile(`^/api/v1/channels/[^/]+/members$`)},
-	{http.MethodGet, "GET /users/me", regexp.MustCompile(`^/api/v1/users/me$`)},
+}
+
+// onBehalfOfRoutes returns the only requests that may act on behalf of a
+// person. Everything else a client does, it does as itself. Keep in step with
+// the routes in api.go and with OnBehalfOfHeader in api/openapi.yaml.
+// It compiles each pattern; call it once, when the middleware is built.
+func onBehalfOfRoutes() []onBehalfOfRouteSpec {
+	return []onBehalfOfRouteSpec{
+		// Posting, and saying that a reply is being produced.
+		{http.MethodPost, "POST /posts", regexp.MustCompile(`^/api/v1/posts$`)},
+		{http.MethodPost, "POST /channels/{id}/stream_status", regexp.MustCompile(`^/api/v1/channels/[^/]+/stream_status$`)},
+		// Tags: halod creates and applies a person's profile/ Tags for them.
+		{http.MethodPost, "POST /tags", regexp.MustCompile(`^/api/v1/tags$`)},
+		{http.MethodPost, "POST /posts/{id}/tags", regexp.MustCompile(`^/api/v1/posts/[^/]+/tags$`)},
+		{http.MethodPost, "POST /channels/{id}/tags", regexp.MustCompile(`^/api/v1/channels/[^/]+/tags$`)},
+		// Conversations: halod creates a person's private channel and adds
+		// itself to it, as the person. GET /users/me returns the person, which
+		// is how halod learns the user ID of a kratos: principal.
+		{http.MethodPost, "POST /channels", regexp.MustCompile(`^/api/v1/channels$`)},
+		{http.MethodPost, "POST /channels/{id}/members", regexp.MustCompile(`^/api/v1/channels/[^/]+/members$`)},
+		{http.MethodGet, "GET /users/me", regexp.MustCompile(`^/api/v1/users/me$`)},
+	}
 }
 
 // onBehalfOfRouteList names the routes, for the refusal message.
-var onBehalfOfRouteList = func() string {
-	names := make([]string, len(onBehalfOfRoutes))
-	for i, route := range onBehalfOfRoutes {
+func onBehalfOfRouteList(routes []onBehalfOfRouteSpec) string {
+	names := make([]string, len(routes))
+	for i, route := range routes {
 		names[i] = route.name
 	}
 	return strings.Join(names, ", ")
-}()
+}
 
-func onBehalfOfRoute(r *http.Request) bool {
-	for _, route := range onBehalfOfRoutes {
+// onBehalfOfRoute reports whether r is one of routes.
+func onBehalfOfRoute(routes []onBehalfOfRouteSpec, r *http.Request) bool {
+	for _, route := range routes {
 		if r.Method == route.method && route.path.MatchString(r.URL.Path) {
 			return true
 		}

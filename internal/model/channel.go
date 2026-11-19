@@ -12,6 +12,7 @@ const (
 	ChannelGroup   = "G"
 )
 
+// semscope: allow(NASA-P10-06) compiled once, never changed
 var validChannelNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$`)
 
 type Channel struct {

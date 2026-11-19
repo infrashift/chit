@@ -102,7 +102,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if text != "" {
-			return m, copyToClipboard(text)
+			return m, copyToClipboard(m.clipboardOut, text)
 		}
 	}
 

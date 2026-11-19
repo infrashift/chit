@@ -17,12 +17,15 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/ws"
 )
 
-var upgrader = websocket.Upgrader{CheckOrigin: func(_ *http.Request) bool { return true }}
+// newUpgrader accepts a WebSocket handshake from any origin.
+func newUpgrader() *websocket.Upgrader {
+	return &websocket.Upgrader{CheckOrigin: func(_ *http.Request) bool { return true }}
+}
 
 func newTestWSServer(t *testing.T, handler func(*websocket.Conn)) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
+		conn, err := newUpgrader().Upgrade(w, r, nil)
 		if err != nil {
 			t.Logf("upgrade error: %v", err)
 			return
@@ -550,7 +553,7 @@ func TestWSClient_RetriesWhenTheFirstDialFails(t *testing.T) {
 			http.Error(w, "starting", http.StatusServiceUnavailable)
 			return
 		}
-		conn, err := upgrader.Upgrade(w, r, nil)
+		conn, err := newUpgrader().Upgrade(w, r, nil)
 		if err != nil {
 			return
 		}
@@ -650,7 +653,7 @@ func TestWSClient_RedialsWithTheCurrentTokenAndHeader(t *testing.T) {
 	tokens := make(chan string, 4)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tokens <- r.Header.Get("X-Custom-Auth")
-		conn, err := upgrader.Upgrade(w, r, nil)
+		conn, err := newUpgrader().Upgrade(w, r, nil)
 		if err != nil {
 			return
 		}

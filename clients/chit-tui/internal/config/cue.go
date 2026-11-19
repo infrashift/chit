@@ -11,10 +11,10 @@ import (
 )
 
 //go:embed schema/config.cue
-var configSchemaSrc string
+var configSchemaSrc string // semscope: allow(NASA-P10-06) go:embed requires a package variable
 
 //go:embed schema/theme.cue
-var themeSchemaSrc string
+var themeSchemaSrc string // semscope: allow(NASA-P10-06) go:embed requires a package variable
 
 // maxVetPasses bounds the delete-and-revalidate loop. CUE reports every error
 // at once but a unification cannot be partially accepted, so an offending key
@@ -22,18 +22,21 @@ var themeSchemaSrc string
 // a schema that somehow never converges.
 const maxVetPasses = 64
 
-// keyMessages gives every config key a hand-written explanation. CUE's own
+// keyMessage gives every config key a hand-written explanation. CUE's own
 // error text names internal paths and constraint syntax, which is meaningless
-// to someone editing a TOML file, so it is never shown.
-var keyMessages = map[string]string{
-	"server_url":   "must be a string",
-	"ws_scheme":    `must be "ws" or "wss"`,
-	"auth_header":  "must be a string",
-	"session_file": "must be a string",
-	"theme":        "must be a string",
-	"theme_dark":   "must be a string",
-	"theme_light":  "must be a string",
-	"appearance":   `must be "dark", "light", or "system"`,
+// to someone editing a TOML file, so it is never shown. It reports false for a
+// key with no message.
+func keyMessage(key string) (string, bool) {
+	switch key {
+	case "server_url", "auth_header", "session_file", "theme", "theme_dark", "theme_light":
+		return "must be a string", true
+	case "ws_scheme":
+		return `must be "ws" or "wss"`, true
+	case "appearance":
+		return `must be "dark", "light", or "system"`, true
+	default:
+		return "", false
+	}
 }
 
 // compileSchema compiles an embedded schema and returns the named definition.
@@ -122,7 +125,7 @@ func trimDefinitionPrefix(path []string) string {
 
 // warnKey renders the user-facing message for a rejected key.
 func warnKey(key string) string {
-	if msg, ok := keyMessages[key]; ok {
+	if msg, ok := keyMessage(key); ok {
 		return fmt.Sprintf("config %q: %s — ignored", key, msg)
 	}
 	return fmt.Sprintf("config %q: not a recognized setting — ignored", key)

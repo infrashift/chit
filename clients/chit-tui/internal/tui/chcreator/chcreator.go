@@ -12,6 +12,10 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 )
 
+// nameRegex is the allowed shape of a channel name: lowercase
+// letters, digits and inner dashes, 2 to 64 characters.
+//
+// semscope: allow(NASA-P10-06) compiled once, never changed
 var nameRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$`)
 
 const (

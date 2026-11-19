@@ -16,6 +16,8 @@ import (
 // validTopicRe restricts topics to safe PostgreSQL channel identifiers.
 // LISTEN cannot take bind parameters, so the topic is interpolated into the
 // statement (quoted via pgx.Identifier) and must be validated first.
+//
+// semscope: allow(NASA-P10-06) compiled once, never changed
 var validTopicRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]{0,62}$`)
 
 // waitInterval bounds WaitForNotification so the listener loop can pick up

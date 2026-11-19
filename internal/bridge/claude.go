@@ -57,6 +57,8 @@ func (u ClaudeUsage) ContextTokens() int64 {
 // ErrSessionNotFound is returned when --resume names a session the CLI has no
 // transcript for: the bridge's WORKDIR or ~/.claude changed since the thread
 // started, or the session was never written.
+//
+// semscope: allow(NASA-P10-06) sentinel error: errors.Is needs one identity
 var ErrSessionNotFound = errors.New("claude session not found")
 
 // RunError is a failed run. Summary is safe to show in the channel; Detail

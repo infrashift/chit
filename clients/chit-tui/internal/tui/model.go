@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"io"
+	"os"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -135,6 +137,10 @@ type Model struct {
 	// themeSetting is the config key a theme picked in the client is saved
 	// under; see config.Config.ThemeSettingKey.
 	themeSetting string
+	// clipboardOut is where copying writes its OSC 52 sequence: the
+	// terminal, except in tests, which would otherwise write escape
+	// sequences into their output.
+	clipboardOut io.Writer
 	// usersRequested marks user IDs already looked up.
 	usersRequested map[string]bool
 	// commandAuthors names the pseudo-author of each command's output, by
@@ -197,6 +203,7 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 		commandAuthors: make(map[string]string),
 		usersRequested: make(map[string]bool),
 		themeSetting:   "theme",
+		clipboardOut:   os.Stdout,
 		appState:       state,
 		tokenStore:     tokenStore,
 		kratosClient:   kratosClient,

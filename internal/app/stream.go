@@ -7,6 +7,7 @@ import (
 	"github.com/infrashift/chit/internal/model"
 )
 
+// semscope: allow(NASA-P10-06) compiled once, never changed
 var streamIDRe = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,64}$`)
 
 // SendStreamStatus relays a stream_status event to the members of a channel:

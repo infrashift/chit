@@ -26,4 +26,3 @@ exclude: "clients/chit-tui/internal/testutil": "TUI test helpers; only tests imp
 // line. At the end of Phase 9 this list is empty.
 rules: "NASA-P10-04": enabled: false // Phase 8
 rules: "NASA-P10-05": enabled: false // Phase 9
-rules: "NASA-P10-06": enabled: false // Phase 7

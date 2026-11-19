@@ -27,6 +27,8 @@ const (
 )
 
 // errStopped is the cause given to a run cancelled by !stop.
+//
+// semscope: allow(NASA-P10-06) sentinel error: errors.Is needs one identity
 var errStopped = errors.New("stopped on request")
 
 // runState is the thread's run in progress, for !stop and !status.

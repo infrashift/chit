@@ -78,8 +78,10 @@ func listThemes(out io.Writer) {
 }
 
 // resolveTheme turns the command line and configuration into a theme.
-func resolveTheme(opts options, cfg *config.Config) (theme.Theme, []string, error) {
-	req, err := themeRequest(opts, cfg)
+// system answers whether the terminal is dark when the appearance is
+// "system".
+func resolveTheme(opts options, cfg *config.Config, system theme.DarkDetector) (theme.Theme, []string, error) {
+	req, err := themeRequest(opts, cfg, system)
 	if err != nil {
 		return theme.Theme{}, nil, err
 	}
@@ -88,15 +90,15 @@ func resolveTheme(opts options, cfg *config.Config) (theme.Theme, []string, erro
 
 // themeSetting is the config key a theme picked in the client is saved under,
 // which depends on the appearance in effect.
-func themeSetting(opts options, cfg *config.Config) string {
-	req, err := themeRequest(opts, cfg)
+func themeSetting(opts options, cfg *config.Config, system theme.DarkDetector) string {
+	req, err := themeRequest(opts, cfg, system)
 	if err != nil {
 		return "theme"
 	}
 	return cfg.ThemeSettingKey(req.Dark())
 }
 
-func themeRequest(opts options, cfg *config.Config) (theme.Request, error) {
+func themeRequest(opts options, cfg *config.Config, system theme.DarkDetector) (theme.Request, error) {
 	flagAppearance, err := theme.ParseAppearance(opts.appearance)
 	if err != nil {
 		return theme.Request{}, err
@@ -117,15 +119,25 @@ func themeRequest(opts options, cfg *config.Config) (theme.Request, error) {
 		FlagAppearance:   flagAppearance,
 		ConfigAppearance: cfgAppearance,
 		ThemesDir:        config.ThemesDir(),
-		System:           terminalBackground{},
+		System:           system,
 	}, nil
 }
 
-// terminalBackground is the theme.DarkDetector for the real terminal.
-type terminalBackground struct{}
+// terminalBackground is the theme.DarkDetector for the real terminal. main
+// makes one and hands it to every theme lookup, so the terminal is asked at
+// most once: both the theme and where a picked theme is saved depend on the
+// answer, and the two must agree.
+type terminalBackground struct {
+	once sync.Once
+	dark bool
+}
 
-// IsDark reports whether the terminal has a dark background.
-func (terminalBackground) IsDark() bool { return detectSystemDark() }
+// IsDark reports whether the terminal has a dark background. The first call
+// asks the terminal; later calls return the same answer.
+func (b *terminalBackground) IsDark() bool {
+	b.once.Do(func() { b.dark = detectSystemDark() })
+	return b.dark
+}
 
 // detectSystemDark asks the terminal whether it has a dark background.
 //
@@ -133,12 +145,9 @@ func (terminalBackground) IsDark() bool { return detectSystemDark() }
 // escape sequence and its reply would otherwise arrive as input, which is the
 // same class of leakage termResponseRe exists to filter. When stdin or stdout
 // is not a terminal there is nobody to ask, and dark is the safer assumption.
-//
-// It asks once: both the theme and where a picked theme is saved depend on
-// the answer.
-var detectSystemDark = sync.OnceValue(func() bool {
+func detectSystemDark() bool {
 	if !isatty.IsTerminal(os.Stdin.Fd()) || !isatty.IsTerminal(os.Stdout.Fd()) {
 		return true
 	}
 	return lipgloss.HasDarkBackground()
-})
+}

@@ -3,6 +3,7 @@ package tui
 import (
 	"bytes"
 	"encoding/base64"
+	"io"
 	"strings"
 	"testing"
 )
@@ -29,18 +30,14 @@ func TestCountLines(t *testing.T) {
 
 // Copying nothing must not emit an escape sequence or claim a copy happened.
 func TestCopyToClipboardIgnoresEmpty(t *testing.T) {
-	if msg := copyToClipboard("")(); msg != nil {
+	if msg := copyToClipboard(io.Discard, "")(); msg != nil {
 		t.Errorf("copying an empty string returned %v, want nil", msg)
 	}
 }
 
 func TestCopyToClipboardWritesOSC52(t *testing.T) {
 	var out bytes.Buffer
-	prev := clipboardOut
-	clipboardOut = &out
-	t.Cleanup(func() { clipboardOut = prev })
-
-	msg := copyToClipboard("one\ntwo")()
+	msg := copyToClipboard(&out, "one\ntwo")()
 
 	want := "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte("one\ntwo"))
 	if !strings.HasPrefix(out.String(), want) {

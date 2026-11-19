@@ -20,16 +20,19 @@ type seedUser struct {
 	ActorType   string
 }
 
-var users = []seedUser{
-	{"alice", "Alice Anderson", "alice@example.com", "a11ce000-0000-4000-a000-000000000001", "system_admin", model.ActorTypeUser},
-	{"bob", "Bob Baker", "bob@example.com", "b0b00000-0000-4000-a000-000000000002", "system_user", model.ActorTypeUser},
-	{"chad", "Chad Cooper", "chad@example.com", "c4ad0000-0000-4000-a000-000000000003", "system_user", model.ActorTypeUser},
-	{"diana", "Diana Drake", "diana@example.com", "d1a4a000-0000-4000-a000-000000000004", "system_user", model.ActorTypeUser},
-	{"eve", "Eve Ellis", "eve@example.com", "e0e00000-0000-4000-a000-000000000005", "system_user", model.ActorTypeUser},
-	// The MCP agent is an equal actor: a normal user row with actor_type=agent,
-	// added to the same team and channel. Point CHIT_MCP_AGENT_KRATOS_ID at its
-	// Kratos ID.
-	{"chit-agent", "Chit Agent", "agent@example.com", "a9e47000-0000-4000-a000-000000000006", "system_user", model.ActorTypeAgent},
+// seedUsers returns the users to seed.
+func seedUsers() []seedUser {
+	return []seedUser{
+		{"alice", "Alice Anderson", "alice@example.com", "a11ce000-0000-4000-a000-000000000001", "system_admin", model.ActorTypeUser},
+		{"bob", "Bob Baker", "bob@example.com", "b0b00000-0000-4000-a000-000000000002", "system_user", model.ActorTypeUser},
+		{"chad", "Chad Cooper", "chad@example.com", "c4ad0000-0000-4000-a000-000000000003", "system_user", model.ActorTypeUser},
+		{"diana", "Diana Drake", "diana@example.com", "d1a4a000-0000-4000-a000-000000000004", "system_user", model.ActorTypeUser},
+		{"eve", "Eve Ellis", "eve@example.com", "e0e00000-0000-4000-a000-000000000005", "system_user", model.ActorTypeUser},
+		// The MCP agent is an equal actor: a normal user row with actor_type=agent,
+		// added to the same team and channel. Point CHIT_MCP_AGENT_KRATOS_ID at its
+		// Kratos ID.
+		{"chit-agent", "Chit Agent", "agent@example.com", "a9e47000-0000-4000-a000-000000000006", "system_user", model.ActorTypeAgent},
+	}
 }
 
 func isNotFound(err error) bool {
@@ -46,6 +49,7 @@ func main() {
 // run does the seeding; it is split from main so the deferred store.Close
 // runs on every exit path, including failures.
 func run(ctx context.Context) error {
+	users := seedUsers()
 	dbURL := os.Getenv("CHIT_DATABASE_URL")
 	if dbURL == "" {
 		return errors.New("CHIT_DATABASE_URL is not set")

@@ -3,6 +3,7 @@ linters:
   enable:
     - bodyclose
     - errorlint # R7: wrap and compare errors correctly (ADR-0004)
+    - gochecknoglobals # R6: no mutable package state (ADR-0004)
     - gocritic
     - misspell
     - noctx

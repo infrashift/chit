@@ -89,7 +89,7 @@ func TestListThemes(t *testing.T) {
 func TestResolveTheme_FlagWins(t *testing.T) {
 	cfg := &config.Config{ThemeName: "kanagawa"}
 
-	got, _, err := resolveTheme(options{theme: "dayfox"}, cfg)
+	got, _, err := resolveTheme(options{theme: "dayfox"}, cfg, &terminalBackground{})
 	if err != nil {
 		t.Fatalf("resolveTheme: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestResolveTheme_FlagWins(t *testing.T) {
 func TestResolveTheme_UsesConfigWhenNoFlag(t *testing.T) {
 	cfg := &config.Config{ThemeName: "kanagawa"}
 
-	got, _, err := resolveTheme(options{}, cfg)
+	got, _, err := resolveTheme(options{}, cfg, &terminalBackground{})
 	if err != nil {
 		t.Fatalf("resolveTheme: %v", err)
 	}
@@ -111,13 +111,13 @@ func TestResolveTheme_UsesConfigWhenNoFlag(t *testing.T) {
 }
 
 func TestResolveTheme_UnknownFlagThemeIsFatal(t *testing.T) {
-	if _, _, err := resolveTheme(options{theme: "nope"}, &config.Config{}); err == nil {
+	if _, _, err := resolveTheme(options{theme: "nope"}, &config.Config{}, &terminalBackground{}); err == nil {
 		t.Error("an unknown --theme should be an error")
 	}
 }
 
 func TestResolveTheme_InvalidAppearanceIsFatal(t *testing.T) {
-	_, _, err := resolveTheme(options{appearance: "purple"}, &config.Config{})
+	_, _, err := resolveTheme(options{appearance: "purple"}, &config.Config{}, &terminalBackground{})
 	if err == nil {
 		t.Fatal("an invalid --appearance should be an error")
 	}
@@ -131,7 +131,7 @@ func TestResolveTheme_InvalidAppearanceIsFatal(t *testing.T) {
 func TestResolveTheme_InvalidConfigAppearanceIsIgnored(t *testing.T) {
 	cfg := &config.Config{Appearance: "purple", ThemeName: "kanagawa"}
 
-	if _, _, err := resolveTheme(options{}, cfg); err != nil {
+	if _, _, err := resolveTheme(options{}, cfg, &terminalBackground{}); err != nil {
 		t.Errorf("a bad appearance in config should not be fatal: %v", err)
 	}
 }
@@ -140,7 +140,7 @@ func TestResolveTheme_AppearanceSelectsPair(t *testing.T) {
 	cfg := &config.Config{ThemeDark: "nightfox", ThemeLight: "dayfox"}
 
 	t.Run("dark", func(t *testing.T) {
-		got, _, err := resolveTheme(options{appearance: "dark"}, cfg)
+		got, _, err := resolveTheme(options{appearance: "dark"}, cfg, &terminalBackground{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -150,7 +150,7 @@ func TestResolveTheme_AppearanceSelectsPair(t *testing.T) {
 	})
 
 	t.Run("light", func(t *testing.T) {
-		got, _, err := resolveTheme(options{appearance: "light"}, cfg)
+		got, _, err := resolveTheme(options{appearance: "light"}, cfg, &terminalBackground{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -166,8 +166,13 @@ func TestDetectSystemDarkWithoutTerminal(t *testing.T) {
 	if !detectSystemDark() {
 		t.Error("want dark when stdin/stdout are not terminals")
 	}
-	if !(terminalBackground{}).IsDark() {
+	background := &terminalBackground{}
+	if !background.IsDark() {
 		t.Error("terminalBackground: want dark when stdin/stdout are not terminals")
+	}
+	// The answer is kept: a second call does not ask again.
+	if !background.IsDark() {
+		t.Error("terminalBackground: second call changed the answer")
 	}
 }
 
@@ -175,13 +180,13 @@ func TestDetectSystemDarkWithoutTerminal(t *testing.T) {
 // saved for the appearance in effect, not as a fixed theme over both.
 func TestThemeSetting(t *testing.T) {
 	perAppearance := &config.Config{ThemeDark: "nightfox", ThemeLight: "dayfox"}
-	if got := themeSetting(options{appearance: "light"}, perAppearance); got != "theme_light" {
+	if got := themeSetting(options{appearance: "light"}, perAppearance, &terminalBackground{}); got != "theme_light" {
 		t.Errorf("light: got %q, want theme_light", got)
 	}
-	if got := themeSetting(options{appearance: "dark"}, perAppearance); got != "theme_dark" {
+	if got := themeSetting(options{appearance: "dark"}, perAppearance, &terminalBackground{}); got != "theme_dark" {
 		t.Errorf("dark: got %q, want theme_dark", got)
 	}
-	if got := themeSetting(options{}, &config.Config{}); got != "theme" {
+	if got := themeSetting(options{}, &config.Config{}, &terminalBackground{}); got != "theme" {
 		t.Errorf("unconfigured: got %q, want theme", got)
 	}
 }

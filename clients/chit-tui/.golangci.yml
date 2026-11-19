@@ -2,6 +2,7 @@ version: "2"
 linters:
   enable:
     - errorlint # R7: wrap and compare errors correctly (ADR-0004)
+    - gochecknoglobals # R6: no mutable package state (ADR-0004)
     - misspell
   settings:
     # R7 (ADR-0002, ADR-0004): no error goes to the blank identifier, and

@@ -2,7 +2,6 @@ package tui
 
 import (
 	"io"
-	"os"
 
 	"github.com/aymanbagabas/go-osc52/v2"
 	tea "github.com/charmbracelet/bubbletea"
@@ -10,18 +9,15 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/errlog"
 )
 
-// clipboardOut is where the OSC 52 sequence goes: the terminal, except in
-// tests, which would otherwise write escape sequences into their output.
-var clipboardOut io.Writer = os.Stdout
-
-// copyToClipboard writes text to the system clipboard using OSC 52.
+// copyToClipboard writes text to the system clipboard using OSC 52, sending
+// the sequence to out (the terminal; the Model's clipboardOut).
 //
 // OSC 52 is an escape sequence the terminal itself acts on, which is what
 // makes it work over SSH and inside multiplexers where a local clipboard API
 // would only reach the remote machine. Support is not universal — Terminal.app
 // ignores it, and tmux and screen need it enabled — so a copy can silently do
 // nothing, which is why the UI confirms it rather than staying quiet.
-func copyToClipboard(text string) tea.Cmd {
+func copyToClipboard(out io.Writer, text string) tea.Cmd {
 	return func() tea.Msg {
 		if text == "" {
 			return nil
@@ -31,7 +27,7 @@ func copyToClipboard(text string) tea.Cmd {
 		// A failed write means the terminal did not receive the sequence;
 		// there is no recovery and no channel to report it on, and the
 		// acknowledgement below is already best-effort for the same reason.
-		if _, err := osc52.New(text).WriteTo(clipboardOut); err != nil {
+		if _, err := osc52.New(text).WriteTo(out); err != nil {
 			errlog.Debug(err, "write OSC 52 clipboard sequence")
 		}
 		return clipboardCopiedMsg{lines: countLines(text)}

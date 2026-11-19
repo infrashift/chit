@@ -329,25 +329,33 @@ func (m *Model) ScrollBy(lines int) {
 }
 
 // Bindings owned by this pane. They are exported so the root model's help
-// overlay describes the same keys the pane actually handles, rather than a
+// overlay can describe the same keys the pane actually handles, rather than a
 // hand-maintained copy that can drift.
-var (
-	// ReplyKey opens the selected post as a thread, which is how a reply is
-	// written.
-	ReplyKey = key.NewBinding(
+
+// ReplyKey opens the selected post as a thread, which is how a reply is
+// written.
+func ReplyKey() key.Binding {
+	return key.NewBinding(
 		key.WithKeys("enter"),
 		key.WithHelp("enter", "reply in thread"),
 	)
-	// PrevPostKey and NextPostKey move the post cursor.
-	PrevPostKey = key.NewBinding(
+}
+
+// PrevPostKey moves the post cursor up.
+func PrevPostKey() key.Binding {
+	return key.NewBinding(
 		key.WithKeys("k", "up"),
 		key.WithHelp("k/↑", "previous post"),
 	)
-	NextPostKey = key.NewBinding(
+}
+
+// NextPostKey moves the post cursor down.
+func NextPostKey() key.Binding {
+	return key.NewBinding(
 		key.WithKeys("j", "down"),
 		key.WithHelp("j/↓", "next post"),
 	)
-)
+}
 
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
@@ -363,21 +371,21 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	}
 
 	switch {
-	case key.Matches(keyMsg, PrevPostKey):
+	case key.Matches(keyMsg, PrevPostKey()):
 		if m.cursor > 0 {
 			m.cursor--
 			m.updateContent()
 			m.scrollToCursor()
 		}
 		return m, nil
-	case key.Matches(keyMsg, NextPostKey):
+	case key.Matches(keyMsg, NextPostKey()):
 		if m.cursor < len(m.posts)-1 {
 			m.cursor++
 			m.updateContent()
 			m.scrollToCursor()
 		}
 		return m, nil
-	case key.Matches(keyMsg, ReplyKey):
+	case key.Matches(keyMsg, ReplyKey()):
 		p := m.SelectedPost()
 		if p != nil {
 			return m, func() tea.Msg { return PostSelectedMsg{Post: p} }

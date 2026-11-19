@@ -18,6 +18,8 @@ import (
 // termResponseRe matches terminal response sequences that leak into the input
 // as KeyRunes messages: OSC replies (]11;rgb:...), cursor position reports
 // (\d;\dR), and escape sequence fragments.
+//
+// semscope: allow(NASA-P10-06) compiled once, never changed
 var termResponseRe = regexp.MustCompile(
 	`^\]\d|;rgb:|^\d+;\d+R$|^[0-9a-f]{4}\\\\$`,
 )
@@ -52,7 +54,9 @@ func main() {
 
 	// Resolved before the program starts: detecting terminal darkness queries
 	// the terminal, and the reply would land in the input stream otherwise.
-	activeTheme, themeWarnings, err := resolveTheme(opts, cfg)
+	// The one detector is shared so the terminal is asked at most once.
+	background := &terminalBackground{}
+	activeTheme, themeWarnings, err := resolveTheme(opts, cfg, background)
 	for _, w := range themeWarnings {
 		stderr.Printf("warning: %s\n", w)
 	}
@@ -78,7 +82,7 @@ func main() {
 
 	s := styles.New(activeTheme)
 	m := tui.NewModel(cfg, client, wsClient, s, tokenStore, kratosClient, sessionStore)
-	m.SetThemeSetting(themeSetting(opts, cfg))
+	m.SetThemeSetting(themeSetting(opts, cfg, background))
 
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg { return filterInput(msg) }))
 	if _, err := p.Run(); err != nil {
