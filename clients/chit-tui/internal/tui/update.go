@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/charmbracelet/bubbles/cursor"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/api"
 	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
@@ -42,6 +43,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if err := msgError(msg); err != nil && api.IsUnauthorized(err) {
 		return m.handleAuthExpired()
 	}
+	if blink, ok := msg.(cursor.BlinkMsg); ok {
+		return m.routeBlink(blink)
+	}
 
 	if next, cmd, ok := m.routeSessionMsg(msg); ok {
 		return next, cmd
@@ -59,6 +63,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return next, cmd
 	}
 	return m, nil
+}
+
+// routeBlink gives a cursor blink to each editor (ISSUE-013). A cursor
+// answers only a blink with its own ID, and an editor without focus
+// ignores it, so the one editor that owns the blink schedules the next.
+func (m Model) routeBlink(blink cursor.BlinkMsg) (tea.Model, tea.Cmd) {
+	assert.That(m.appState == AppStateRunning, "routeBlink: not signed in")
+	cmds := make([]tea.Cmd, 0, 5)
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(blink)
+	cmds = append(cmds, cmd)
+	m.palette, cmd = m.palette.Update(blink)
+	cmds = append(cmds, cmd)
+	m.dmPicker, cmd = m.dmPicker.Update(blink)
+	cmds = append(cmds, cmd)
+	m.tagPicker, cmd = m.tagPicker.Update(blink)
+	cmds = append(cmds, cmd)
+	m.chCreator, cmd = m.chCreator.Update(blink)
+	cmds = append(cmds, cmd)
+	assert.That(len(cmds) == 5, "routeBlink: one command for each editor")
+	return m, tea.Batch(cmds...)
 }
 
 // handled marks a message as consumed by one of the routers below, which
@@ -258,9 +283,9 @@ func (m Model) routeLookupMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		m.mention.Hide()
 		return m, nil, true
 	case mention.UserSelectedMsg:
-		m.input.ReplaceAtMention(msg.StartCol, msg.Username)
+		blink := m.input.ReplaceAtMention(msg.StartCol, msg.Username)
 		m.mention.Hide()
-		return m, nil, true
+		return m, blink, true
 	case UsersLoadedMsg:
 		return handled(m.handleUsersLoaded(msg))
 	case UserSearchResultsMsg:

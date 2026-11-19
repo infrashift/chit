@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The cursor never blinked** — the root model dropped every cursor blink, so the input cursor stayed a steady block. Each editor now gets its blinks, and a blink does not run the `@` mention detection or clear the channel form's validation error
 - **Selection in an emptied channel** — a mouse selection that stayed active while the channel emptied (a switch, or a delete of the last post) crashed the client on the next render
 - **Older history in a fresh view** — loading older posts into a view with no posts could move the cursor one past the last post; a new view now starts with no post selected
 - **Thread inbox team count** — opening the thread inbox kept the count of the team from the last time it was open

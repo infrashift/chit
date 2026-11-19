@@ -5,6 +5,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -229,6 +230,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if blink, ok := msg.(cursor.BlinkMsg); ok {
+		return m.blink(blink)
+	}
 	keyMsg, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return m, nil
@@ -303,6 +307,24 @@ func (m Model) submit() (Model, tea.Cmd) {
 }
 
 // updateField gives msg to the active text input.
+// blink gives a cursor blink to the active text field. Unlike updateField,
+// it keeps the validation error and the slug, because a blink is no edit.
+func (m Model) blink(msg cursor.BlinkMsg) (Model, tea.Cmd) {
+	assert.That(m.activeField >= 0 && m.activeField < fieldCount, "Model.blink: active field out of range")
+	before := m.validErr
+	var cmd tea.Cmd
+	switch m.activeField {
+	case fieldDisplayName:
+		m.displayName, cmd = m.displayName.Update(msg)
+	case fieldName:
+		m.name, cmd = m.name.Update(msg)
+	case fieldPurpose:
+		m.purpose, cmd = m.purpose.Update(msg)
+	}
+	assert.That(m.validErr == before, "Model.blink: a blink changed the validation error")
+	return m, cmd
+}
+
 func (m Model) updateField(msg tea.Msg) (Model, tea.Cmd) {
 	assert.That(m.activeField >= 0 && m.activeField < fieldCount, "Model.updateField: active field out of range")
 	var cmd tea.Cmd

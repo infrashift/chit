@@ -208,7 +208,13 @@ func (m Model) applyLoadedUser(u *model.User) (Model, tea.Cmd) {
 		}
 	}
 	assert.That(m.me == u, "applyLoadedUser: user not applied")
-	return m, m.fetchMissingUsers()
+	cmd := m.fetchMissingUsers()
+	// The first user of a session starts the cursor blink of the focused
+	// input, which NewModel could not run (ISSUE-013).
+	if firstLoad && m.focus == FocusInput {
+		cmd = tea.Batch(cmd, m.input.Focus())
+	}
+	return m, cmd
 }
 
 func (m Model) handleProfileUpdated(msg ProfileUpdatedMsg) (tea.Model, tea.Cmd) {

@@ -16,5 +16,5 @@
 * [ISSUE-010: ASD-STE100 documentation](issue-010-asd-ste100-documentation--01a1f5379e74.md) - The Markdown documentation and the wiki give zero lexis findings.
 * [ISSUE-011: The TUI acceptance tutorial and README describe the old repository layout](issue-011-the-tui-acceptance-tutorial-and-readme-describe-the-old-repository-layout--01a1f5750c6d.md) - The TUI acceptance tutorial describes a separate chit-tui repository, and the README file tree omits newer files.
 * [ISSUE-012: ValidateTagName cuts the reserved prefix at the wrong byte](issue-012-validatetagname-cuts-the-reserved-prefix-at-the-wrong-byte--01a1f5857d5f.md) - A profile/ tag name that spells the prefix with a character whose lowercase is shorter, for example İ, keeps the slash after the cut, and chitd refuses it.
-* [ISSUE-013: The cursor stops blinking after a mention pick](issue-013-the-cursor-stops-blinking-after-a-mention-pick--01a1f5ad4c0f.md) - The root model of chit-tui drops each cursor blink message, so the input cursor never blinks; the blink commands of the input are dead code.
+* [ISSUE-013: The input cursor of chit-tui never blinks](issue-013-the-cursor-stops-blinking-after-a-mention-pick--01a1f5ad4c0f.md) - The root model of chit-tui drops each cursor blink message, so the input cursor never blinks; the blink commands of the input are dead code.
 

@@ -214,10 +214,10 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 	// root-side updates are visible without further plumbing.
 	m.palette.SetCounts(m.unread, m.mentions)
 	m.palette.SetDMDisplayNames(m.dmDisplayNames)
-	// Focus returns the cursor's first blink. NewModel cannot run a
-	// command and Init has never scheduled this one, so it is not run.
+	// Focus also returns the first blink, but NewModel cannot run a
+	// command. applyLoadedUser starts the blink when the session starts.
 	firstBlink := m.input.Focus()
-	_ = firstBlink
+	assert.That(firstBlink != nil, "NewModel: focused input without a blink")
 	assert.That(m.scope != nil, "NewModel: nil request scope")
 	assert.That(m.sessionStore != nil, "NewModel: nil session store")
 	assert.That(m.appState != AppStateReLogin, "NewModel: a new model starts in re-login")

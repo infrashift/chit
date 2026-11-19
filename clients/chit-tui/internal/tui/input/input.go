@@ -4,6 +4,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
@@ -112,6 +113,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	}
 	assert.That(m.textarea.Focused(), "Model.Update: focused input with a blurred textarea")
 
+	// A blink changes only the cursor. It must not run the @ detection, or
+	// each blink sends the mention trigger again (ISSUE-013).
+	if blink, ok := msg.(cursor.BlinkMsg); ok {
+		var cmd tea.Cmd
+		m.textarea, cmd = m.textarea.Update(blink)
+		return m, cmd
+	}
+
 	keyMsg, ok := msg.(tea.KeyMsg)
 	if ok {
 		switch keyMsg.Type {
@@ -185,20 +194,23 @@ func (m *Model) detectAtTrigger() tea.Cmd {
 // position with @username followed by a trailing space. startCol counts
 // characters. The typed prefix is deleted at the cursor and the name
 // inserted there, so the cursor ends up after it on whichever line it is.
-func (m *Model) ReplaceAtMention(startCol int, username string) {
-	// Each backspace returns a command that restarts the cursor blink. A
-	// mention pick has never scheduled it, so it is not run.
+//
+// It returns the command that keeps the cursor blinking. Each backspace
+// starts a new blink cycle and makes the pending blink stale, so the caller
+// must run the command of the last one (ISSUE-013). It is nil when nothing
+// was deleted, and the old cycle goes on.
+func (m *Model) ReplaceAtMention(startCol int, username string) tea.Cmd {
 	assert.That(startCol >= 0, "Model.ReplaceAtMention: negative start column")
 	var restartBlink tea.Cmd
 	before := m.cursorCol()
 	for range max(before-startCol, 0) {
 		m.textarea, restartBlink = m.textarea.Update(tea.KeyMsg{Type: tea.KeyBackspace})
 	}
-	_ = restartBlink
 	assert.That(m.cursorCol() == min(before, startCol), "Model.ReplaceAtMention: prefix not deleted back to the @")
 	m.textarea.InsertString("@" + username + " ")
 	assert.That(utf8.RuneCountInString(m.textarea.Value()) <= m.textarea.CharLimit, "Model.ReplaceAtMention: text over the character limit")
 	assert.That(m.textarea.Line() < m.textarea.LineCount(), "Model.ReplaceAtMention: cursor past the last line")
+	return restartBlink
 }
 
 // cursorCol is the cursor's position in its line, in characters.
