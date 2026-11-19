@@ -20,15 +20,17 @@ Before you begin, make sure you have:
 
 - **Podman** installed and available on the `PATH`
 - **Go 1.26.10 or later** installed
-- The **Chit server** repository cloned as a sibling directory:
+- The **Chit** repository cloned. chit-tui is in its `clients/chit-tui`
+  directory:
 
 ```
-parent/
-├── chit/          # github.com/infrashift/chit
-└── chit-tui/      # github.com/infrashift/chit-tui  (you are here)
+chit/                  # github.com/infrashift/chit: the server
+└── clients/
+    └── chit-tui/      # the TUI (you are here)
 ```
 
-If the Chit server repo is in a different location, override `CHIT_SRC`:
+The TUI Makefile finds the server source at `../..`. To use another server
+checkout, set `CHIT_SRC`:
 
 ```bash
 make test-e2e CHIT_SRC=/path/to/chit
@@ -153,15 +155,16 @@ live UAT server. Then you manually try every feature.
 
 ### Step 1: Start the UAT Server
 
-From the **Chit server** repository, start the UAT environment:
+From `clients/chit-tui`, go to the root of the Chit repository and start the
+UAT environment:
 
 ```bash
-cd ../chit
+cd ../..
 make uat-up
 ```
 
-This creates Podman pods with PostgreSQL, the Chit server, and the full Ory
-stack (Kratos, Oathkeeper, Keto, Vault, Zincsearch). Wait for services to be
+This creates Podman pods with PostgreSQL, the Chit server, Kratos, Oathkeeper,
+Keto and ZincSearch. Wait for services to be
 ready:
 
 ```bash
@@ -563,10 +566,11 @@ clicks, wheel scroll), the help overlay, keyboard/mouse parity.
 
 ### Step 4: Tear Down the UAT Server
 
-When you finish the tests, stop the UAT environment from the Chit server repo:
+When you finish the tests, stop the UAT environment from the root of the Chit
+repository:
 
 ```bash
-cd ../chit
+cd ../..
 make uat-down
 ```
 
@@ -583,7 +587,7 @@ pod, and you do not have to do manual steps.
 The `make test-e2e` target automates the entire pipeline. Under the hood it:
 
 1. **Builds the e2e test image** (`chit-tui-e2e:latest`) from `Containerfiles/Containerfile.e2e`
-2. **Builds the Chit server image** (`chit-e2e:latest`) from the server repo's `Containerfiles/Containerfile.e2e`
+2. **Builds the Chit server image** (`chit-e2e:latest`) from `Containerfiles/Containerfile.e2e` at the root of the repository (`CHIT_SRC`)
 3. **Creates a Podman pod** (`chit-tui-e2e`) with a shared network namespace
 4. **Starts PostgreSQL** — the trusted-service-containers `postgres:17-debian` image with database `chit`
 5. **Starts the Chit server** — waits for Postgres, runs migrations, seeds UAT data, starts `chitd`

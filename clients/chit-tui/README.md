@@ -139,18 +139,22 @@ The client follows the Elm architecture (model, update, view) through [Bubble Te
 cmd/chit-tui/          Entry point, flags, theme resolution
 internal/
 ├── api/               HTTP client for the Chit REST API
+├── assert/            Run-time assertions (Power of 10 rule 5)
 ├── auth/              Kratos sign-in, token and session storage
 ├── config/            config.toml loading, CUE schemas, saving the theme
+├── errlog/            Logs the errors that a caller cannot return
 ├── model/             DTOs mirroring the server's JSON
 ├── ws/                WebSocket client: one session per Connect, pings, backoff
 ├── testutil/          Shared test helpers
 └── tui/               Root model, split by concern:
+    ├── doc.go             Package doc: which file holds which handlers
     ├── model.go           Model, NewModel, Init
-    ├── update.go          Update: the message dispatcher
-    ├── keys.go, mouse.go  Keyboard and mouse input
+    ├── update.go          Update and the route*Msg routers
+    ├── keys.go, keymap.go, mouse.go   Keyboard and mouse input
     ├── view.go            View, overlay layout
     ├── focus.go           Focus between panes and overlays
-    ├── channels.go, unread.go, history.go, users.go, tags.go
+    ├── channels.go, unread.go, history.go, threads.go, users.go, tags.go
+    ├── clipboard.go       Copy through OSC 52
     ├── slash.go           Client-side slash commands
     ├── wsevents.go        WebSocket events and connection state
     ├── session.go         Sign-in, sign-out, session expiry
