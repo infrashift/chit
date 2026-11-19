@@ -155,11 +155,12 @@ func ValidateTagName(raw string) *AppError {
 		return NewBadRequestError("Tag.IsValid", "name must be 1 to 50 characters")
 	}
 	rest := name
-	if IsReservedTagName(name) {
-		// The prefix is ASCII in the key; in the NFKC name it may differ in
-		// case only, so it has the same byte length.
-		assert.That(len(name) >= len(ReservedTagPrefix), "ValidateTagName: reserved name shorter than its prefix")
-		rest = name[len(ReservedTagPrefix):]
+	// Lowercase name itself, so rune i of the key is rune i of name.
+	// Lowercasing maps each rune to one rune, but not each byte to one byte:
+	// "İ" (two bytes) becomes "i" (one byte). So the prefix is cut by runes,
+	// not by bytes (ISSUE-012).
+	if strings.HasPrefix(strings.ToLower(name), ReservedTagPrefix) {
+		rest = dropRunes(name, utf8.RuneCountInString(ReservedTagPrefix))
 		if rest == "" {
 			return NewBadRequestError("Tag.IsValid", "a profile/ tag needs a name after the prefix")
 		}
@@ -170,6 +171,20 @@ func ValidateTagName(raw string) *AppError {
 		}
 	}
 	return nil
+}
+
+// dropRunes returns s without its first n runes, or "" when s has n runes
+// or fewer.
+func dropRunes(s string, n int) string {
+	assert.That(n >= 0, "dropRunes: negative rune count")
+	for i := range s {
+		if n == 0 {
+			return s[i:]
+		}
+		n--
+	}
+	assert.That(n >= 0, "dropRunes: more runes dropped than asked")
+	return ""
 }
 
 // MessageTag is a Tag applied to a post (message_tags).

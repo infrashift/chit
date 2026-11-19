@@ -436,6 +436,10 @@ Behaviour changes an operator must act on or know about:
 
 ### Fixed
 
+- A `profile/` tag name that spells the prefix with a letter whose lowercase
+  is shorter in UTF-8, such as `profİle/coder`, was refused with `400`: the
+  prefix was cut from the name by its byte length in the key. It is now cut
+  by runes.
 - The Keto integration test cleanup used `t.Context()`, which is already
   cancelled when cleanups run, so its deletes never happened.
 - `chit-claude` no longer answers another agent as a human after one failed

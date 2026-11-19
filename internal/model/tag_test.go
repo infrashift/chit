@@ -71,13 +71,17 @@ func TestTagNameKey_NFKCAndLowercase(t *testing.T) {
 
 func TestValidateTagName(t *testing.T) {
 	valid := []string{"a", "bug fix", "v1.2", "snake_case", "kebab-case", "Résumé", "日本語", strings.Repeat("é", MaxTagLength),
-		"profile/coder", "Profile/Coder"}
+		"profile/coder", "Profile/Coder",
+		// U+0130 (İ) lowercases to the one-byte "i", so the prefix is shorter
+		// in the key than in the name (ISSUE-012).
+		"profİle/coder", "PROFİLE/İstanbul"}
 	for _, name := range valid {
 		if err := ValidateTagName(name); err != nil {
 			t.Errorf("ValidateTagName(%q) = %v, want valid", name, err)
 		}
 	}
-	invalid := []string{"", "   ", strings.Repeat("x", MaxTagLength+1), "a/b", "#tag", "tag!", "profile/", "profile/a/b", "emoji 🙂"}
+	invalid := []string{"", "   ", strings.Repeat("x", MaxTagLength+1), "a/b", "#tag", "tag!", "profile/", "profile/a/b", "emoji 🙂",
+		"profİle/", "profİle/a/b"}
 	for _, name := range invalid {
 		if err := ValidateTagName(name); err == nil {
 			t.Errorf("ValidateTagName(%q) = nil, want an error", name)
@@ -87,7 +91,7 @@ func TestValidateTagName(t *testing.T) {
 
 func TestIsReservedTagName(t *testing.T) {
 	for name, want := range map[string]bool{
-		"profile/coder": true, "PROFILE/coder": true, "ｐｒｏｆｉｌｅ/coder": true,
+		"profile/coder": true, "PROFILE/coder": true, "ｐｒｏｆｉｌｅ/coder": true, "profİle/coder": true,
 		"profiles": false, "my profile/x": false, "profile": false,
 	} {
 		if got := IsReservedTagName(name); got != want {
