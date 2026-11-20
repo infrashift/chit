@@ -3,6 +3,8 @@
 package sqlstore
 
 import (
+	"errors"
+	"net/http"
 	"testing"
 
 	"github.com/infrashift/chit/internal/model"
@@ -182,4 +184,42 @@ func TestTeamStoreIntegration_SaveMemberKeepsRoles(t *testing.T) {
 	if !stored.IsTeamAdmin() {
 		t.Errorf("stored roles %q, want team_admin kept", stored.Roles)
 	}
+}
+
+// wantConflict fails t unless err is a 409 AppError with the store error ID
+// where.
+func wantConflict(t *testing.T, err error, where string) {
+	t.Helper()
+	var appErr *model.AppError
+	if !errors.As(err, &appErr) || appErr.StatusCode != http.StatusConflict || appErr.ID != where {
+		t.Fatalf("got %v, want a 409 with id %q", err, where)
+	}
+}
+
+// A second team with a taken name is a 409, not a 500 (ISSUE-016). The
+// name stays taken after the team is deleted: teams.name is UNIQUE over all
+// rows.
+func TestTeamStoreIntegration_SaveTakenNameIsConflict(t *testing.T) {
+	ss := testStore(t)
+	user, err := ss.User().Save(t.Context(), newTestUser("dupteamowner"))
+	if err != nil {
+		t.Fatalf("save user: %v", err)
+	}
+	team := func() (*model.Team, error) {
+		return ss.Team().Save(t.Context(), &model.Team{
+			Name: "dup-team", DisplayName: "Dup", Type: model.TeamOpen, CreatorID: user.ID,
+		})
+	}
+	first, err := team()
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	_, err = team()
+	wantConflict(t, err, "SqlTeamStore.Save")
+
+	if err = ss.Team().Delete(t.Context(), first.ID, model.GetMillis()); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	_, err = team()
+	wantConflict(t, err, "SqlTeamStore.Save")
 }

@@ -39,6 +39,10 @@ func (s *SqlChannelStore) Save(ctx context.Context, channel *model.Channel) (*mo
 		channel.LastPostAt, channel.CreateAt, channel.UpdateAt, channel.DeleteAt,
 	)
 	if err != nil {
+		if isUniqueViolation(err) {
+			// idx_channels_team_name_unique: one live channel per name in a team.
+			return nil, model.NewConflictError("SqlChannelStore.Save", "channel name is already taken in this team")
+		}
 		return nil, fmt.Errorf("save channel: %w", err)
 	}
 

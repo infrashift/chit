@@ -461,3 +461,36 @@ func TestChannelStoreIntegration_GetMembersForUser(t *testing.T) {
 		t.Errorf("MentionCount = %d, want 2", members[0].MentionCount)
 	}
 }
+
+// A second live channel with a taken name in the same team is a 409, not a
+// 500 (ISSUE-016). Another team may use the name, and so may a new channel
+// after the old one is deleted: idx_channels_team_name_unique covers only
+// live channels in one team.
+func TestChannelStoreIntegration_SaveTakenNameIsConflict(t *testing.T) {
+	ss := testStore(t)
+	user, first := newTestChannelFixture(t, ss)
+	channel := func(teamID string) (*model.Channel, error) {
+		return ss.Channel().Save(t.Context(), &model.Channel{
+			TeamID: teamID, Name: first.Name, DisplayName: "Dup", Type: model.ChannelOpen, CreatorID: user.ID,
+		})
+	}
+	_, err := channel(first.TeamID)
+	wantConflict(t, err, "SqlChannelStore.Save")
+
+	other, err := ss.Team().Save(t.Context(), &model.Team{
+		Name: "other-team", DisplayName: "Other", Type: model.TeamOpen, CreatorID: user.ID,
+	})
+	if err != nil {
+		t.Fatalf("save team: %v", err)
+	}
+	if _, err = channel(other.ID); err != nil {
+		t.Errorf("same name in another team: %v", err)
+	}
+
+	if err = ss.Channel().Delete(t.Context(), first.ID, model.GetMillis()); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, err = channel(first.TeamID); err != nil {
+		t.Errorf("name of a deleted channel: %v", err)
+	}
+}

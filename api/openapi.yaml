@@ -354,7 +354,8 @@ paths:
       description: |
         Creates a new team. The authenticated user becomes the team creator
         and is automatically added as a team member with `team_admin team_user`
-        roles.
+        roles. A team name is unique, and a deleted team keeps its name: a
+        taken name is a 409.
       tags: [Teams]
       requestBody:
         required: true
@@ -373,6 +374,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
     get:
       operationId: get_all_teams
       summary: List teams
@@ -595,7 +598,8 @@ paths:
         also gets every team member. Direct and group channels are created with
         `/channels/direct` and `/channels/group`, not here. A
         `channel_created` WebSocket event is broadcast (to the team for an
-        Open channel, otherwise to the channel).
+        Open channel, otherwise to the channel). A name is unique among the
+        live channels of a team: a taken name is a 409.
 
         **Membership hook.** When it is on, each team member that an Open
         channel adds is checked first; one refusal is a 403
@@ -628,6 +632,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /channels/{id}:
     get:
