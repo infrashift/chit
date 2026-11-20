@@ -122,6 +122,6 @@ Tracking: [ISSUE-023](.okfw/issues/issue-023-the-tui-cannot-attach-or-save-files
 ## Phase 18: Verify the TUI against the HALO stack
 Tracking: [ISSUE-024](.okfw/issues/issue-024-the-tui-e2e-suite-and-the-live-run-do-not-cover-the-halo-features--01a1f77112ef.md)
 
-- [ ] Add the TUI e2e tests for the HALO routes and events.
-- [ ] Do a live run through Oathkeeper.
-- [ ] Update the verify skill, the UAT tutorial and the changelogs.
+- [x] Add the TUI e2e tests for the HALO routes and events.
+- [x] Do a live run through Oathkeeper.
+- [x] Update the verify skill, the UAT tutorial and the changelogs.
