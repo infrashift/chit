@@ -28,6 +28,14 @@ To test a locally built chitd instead of the image, stop the pod's chitd
 `cp .env.example .env && make run`. Oathkeeper forwards to whatever listens
 there.
 
+### Run again on the same volume
+
+A run does not need a new `chit-pgdata` volume. Scenario 2 uses `test-team`,
+`general` and `secret-ops` again when they exist. Scenarios 10 to 12 need
+people and channels that are new, so each run adds a random `RUN_ID` to
+those names. For example, Erin is `erin-<RUN_ID>` and the HALO team is
+`halo-e2e-<RUN_ID>`.
+
 ### Unauthenticated checks
 
 Through the gateway every `/api/v1` route needs a session or token, ping

@@ -534,6 +534,10 @@ Behaviour changes an operator must act on or know about:
 
 ### Fixed
 
+- `tests/e2e/test_e2e.sh` passed only on a new `chit-pgdata` volume.
+  Scenarios 10 to 12 now add a random run ID to the names of the people,
+  the team and the channels that must be new, so a second run on the same
+  volume passes (ISSUE-017).
 - Creating a team with a taken name, or a channel with a name that a live
   channel in the same team already has, gave `500`. The store now maps the
   unique violation to `409` with the ID `SqlTeamStore.Save` or

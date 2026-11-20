@@ -37,6 +37,10 @@ E2E_AUDIT="${E2E_AUDIT:-podman exec chit-app-chitd cat /var/log/chit/audit.log}"
 # chitd's own log (stderr), for scenario 13; for another pod,
 # E2E_CHITD_LOG="podman logs <pod>-chitd".
 E2E_CHITD_LOG="${E2E_CHITD_LOG:-podman logs chit-app-chitd}"
+# RUN_ID makes the names that a run needs to be new: Erin and Frank, whom
+# chit has not seen, the HALO team and the channels of scenario 12. With it,
+# a second run on the same volume does not find the objects of the first.
+RUN_ID=$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')
 
 # ---------------------------------------------------------------------------
 # Counters
@@ -1379,9 +1383,10 @@ assert_json "10.1 halod is an agent" ".actor_type" "agent" "$LAST_BODY"
 HALOD_USER_ID=$(echo "$LAST_BODY" | jq -r '.id')
 
 # 10.2 A person Kratos knows and Chit has never seen.
-kratos_create_identity "erin@test.local" "erin" "Erin Example" "TestPass1234"
+ERIN_USERNAME="erin-${RUN_ID}"
+kratos_create_identity "${ERIN_USERNAME}@test.local" "$ERIN_USERNAME" "Erin Example" "TestPass1234"
 ERIN_KRATOS_ID="$IDENTITY_ID"
-halod_api GET "/users/username/erin"
+halod_api GET "/users/username/${ERIN_USERNAME}"
 assert_status "10.2 Chit has no user for Erin yet" 404 "$LAST_STATUS" "$LAST_BODY"
 
 # 10.3 Refusals: malformed, unknown to Kratos, a person's session.
@@ -1392,19 +1397,19 @@ assert_status "10.3b identity unknown to Kratos" 400 "$LAST_STATUS" "$LAST_BODY"
 STATUS=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Session-Token: ${ALICE_TOKEN}" \
   -H "X-On-Behalf-Of: kratos:${ERIN_KRATOS_ID}" "${API}/users/me")
 assert_status "10.3c a person's session may not act on behalf" 403 "$STATUS"
-halod_api GET "/users/username/erin"
+halod_api GET "/users/username/${ERIN_USERNAME}"
 assert_status "10.3d the refusals provisioned nobody" 404 "$LAST_STATUS" "$LAST_BODY"
 
 # 10.4 kratos:<id> provisions Erin, as her first browser visit would.
 halod_api GET "/users/me" "" "kratos:${ERIN_KRATOS_ID}"
 assert_status "10.4 halod provisions Erin" 200 "$LAST_STATUS" "$LAST_BODY"
 assert_json "10.4 Erin's kratos_id" ".kratos_id" "$ERIN_KRATOS_ID" "$LAST_BODY"
-assert_json "10.4 Erin's username from Kratos" ".username" "erin" "$LAST_BODY"
+assert_json "10.4 Erin's username from Kratos" ".username" "$ERIN_USERNAME" "$LAST_BODY"
 assert_json "10.4 Erin is a person" ".actor_type" "user" "$LAST_BODY"
 ERIN_ID=$(echo "$LAST_BODY" | jq -r '.id')
 
 # 10.5 halod's team: halod creates it as itself and adds Erin.
-halod_api POST "/teams" '{"name":"halo-e2e","display_name":"HALO e2e","type":"I"}'
+halod_api POST "/teams" "{\"name\":\"halo-e2e-${RUN_ID}\",\"display_name\":\"HALO e2e\",\"type\":\"I\"}"
 assert_status "10.5 halod creates its team" 201 "$LAST_STATUS" "$LAST_BODY"
 HALO_TEAM_ID=$(echo "$LAST_BODY" | jq -r '.id')
 halod_api POST "/teams/${HALO_TEAM_ID}/members" "{\"user_id\":\"${ERIN_ID}\"}"
@@ -1442,7 +1447,7 @@ curl_api_full GET "/channels/${CONV_ID}/posts"
 assert_status "10.10 a non-member cannot read it" 403 "$LAST_STATUS" "$LAST_BODY"
 
 # 10.11 Erin's own first login finds the same user.
-kratos_login "erin@test.local" "TestPass1234"
+kratos_login "${ERIN_USERNAME}@test.local" "TestPass1234"
 CURRENT_TOKEN="$SESSION_TOKEN"
 curl_api_full GET "/users/me"
 assert_json "10.11 Erin's session is the provisioned user" ".id" "$ERIN_ID" "$LAST_BODY"
@@ -1452,11 +1457,8 @@ assert_status "10.11 Erin reads her conversation" 200 "$LAST_STATUS" "$LAST_BODY
 # 10.12 An identity with only an email (HALO's schema has no username or
 # name trait): Chit derives the username from the email and the Kratos ID.
 FRANK_KRATOS_ID=$(curl -s -X POST "${KRATOS_ADMIN}/admin/identities" -H "Content-Type: application/json" \
-  -d '{"schema_id":"email-only","traits":{"email":"Frank.Only+halo@test.local"}}' | jq -r '.id')
-if [[ -z "$FRANK_KRATOS_ID" || "$FRANK_KRATOS_ID" == "null" ]]; then
-  FRANK_KRATOS_ID=$(curl -s "${KRATOS_ADMIN}/admin/identities?credentials_identifier=frank.only%2Bhalo@test.local" | jq -r '.[0].id')
-fi
-FRANK_USERNAME="frank.only-halo-$(echo "$FRANK_KRATOS_ID" | tr -d '-' | cut -c1-8)"
+  -d "{\"schema_id\":\"email-only\",\"traits\":{\"email\":\"Frank.Only+halo-${RUN_ID}@test.local\"}}" | jq -r '.id')
+FRANK_USERNAME="frank.only-halo-${RUN_ID}-$(echo "$FRANK_KRATOS_ID" | tr -d '-' | cut -c1-8)"
 halod_api GET "/users/me" "" "kratos:${FRANK_KRATOS_ID}"
 assert_status "10.12 provision an email-only identity" 200 "$LAST_STATUS" "$LAST_BODY"
 assert_json "10.12 derived username" ".username" "$FRANK_USERNAME" "$LAST_BODY"
@@ -1467,6 +1469,7 @@ assert_status "10.12 halod adds Frank to its team" 201 "$LAST_STATUS" "$LAST_BOD
 halod_api POST "/channels" "{\"team_id\":\"${HALO_TEAM_ID}\",\"name\":\"conversation-frank\",\"display_name\":\"Conversation\",\"type\":\"P\"}" "kratos:${FRANK_KRATOS_ID}"
 assert_status "10.12 create a channel on behalf of Frank" 201 "$LAST_STATUS" "$LAST_BODY"
 assert_json "10.12 Frank is the creator" ".creator_id" "$FRANK_ID" "$LAST_BODY"
+FRANK_CONV_ID=$(echo "$LAST_BODY" | jq -r '.id')
 
 # ============================================================================
 # SCENARIO 11: Attachments (HALO P-CHIT-5)
@@ -1605,14 +1608,13 @@ assert_status "11.7 nor may it download on behalf" 403 "$LAST_STATUS"
 # channel they share one.
 upload_file "$HALOD_TOKEN" "$CONV_ID" "${E2E_TMP}/dot.png" image/png "again" "kratos:${ERIN_KRATOS_ID}"
 assert_status "11.8 the same image again, same channel" 201 "$LAST_STATUS" "$LAST_BODY"
-FRANK_CONV_ID=$($E2E_PSQL "SELECT id FROM channels WHERE name = 'conversation-frank'" | tr -d '[:space:]')
 upload_file "$HALOD_TOKEN" "$FRANK_CONV_ID" "${E2E_TMP}/dot.png" image/png "" "kratos:${FRANK_KRATOS_ID}"
 assert_status "11.8 the same image in Frank's channel" 201 "$LAST_STATUS" "$LAST_BODY"
-OBJECTS=$($E2E_PSQL "SELECT channel_id || ':' || count(DISTINCT s3_key) || ':' || bool_and(s3_key LIKE channel_id || '/%') FROM files WHERE sha256 = '${FILE_SHA}' GROUP BY channel_id ORDER BY channel_id = '${CONV_ID}' DESC" | tr -d ' ' | tr '\n' ' ')
+OBJECTS=$($E2E_PSQL "SELECT channel_id || ':' || count(DISTINCT s3_key) || ':' || bool_and(s3_key LIKE channel_id || '/%') FROM files WHERE sha256 = '${FILE_SHA}' AND channel_id IN ('${CONV_ID}', '${FRANK_CONV_ID}') GROUP BY channel_id ORDER BY channel_id = '${CONV_ID}' DESC" | tr -d ' ' | tr '\n' ' ')
 assert_json "11.8 one object per channel, each under its own channel" "." "${CONV_ID}:1:true ${FRANK_CONV_ID}:1:true " "\"${OBJECTS}\""
 
 # 11.9 Deleting the post deletes its file.
-kratos_login "erin@test.local" "TestPass1234"
+kratos_login "${ERIN_USERNAME}@test.local" "TestPass1234"
 STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "X-Session-Token: ${SESSION_TOKEN}" "${API}/posts/${FILE_POST_ID}")
 assert_status "11.9 Erin deletes her post" 200 "$STATUS"
 get_file "$HALOD_TOKEN" "$FILE_ID" "${E2E_TMP}/got.png" "kratos:${ERIN_KRATOS_ID}"
@@ -1660,7 +1662,7 @@ assert_json "12.2 the creator of the Conversation was not asked about" \
 
 # 12.3 A private channel: its creator is not asked about.
 CURRENT_TOKEN="$ALICE_TOKEN"
-curl_api_full POST "/channels" "{\"team_id\":\"${TEAM_ID}\",\"name\":\"hook-e2e\",\"display_name\":\"Hook e2e\",\"type\":\"P\"}"
+curl_api_full POST "/channels" "{\"team_id\":\"${TEAM_ID}\",\"name\":\"hook-e2e-${RUN_ID}\",\"display_name\":\"Hook e2e\",\"type\":\"P\"}"
 assert_status "12.3 Alice creates a private channel" 201 "$LAST_STATUS" "$LAST_BODY"
 HOOK_CHANNEL_ID=$(echo "$LAST_BODY" | jq -r '.id')
 assert_json "12.3 nobody was asked about" "[.[] | select(.channel_id == \"${HOOK_CHANNEL_ID}\")] | length" "0" "$(hook_calls)"
@@ -1702,11 +1704,11 @@ curl -s -o /dev/null -X DELETE "${KETO_WRITE}/admin/relation-tuples?namespace=ch
 
 # 12.7 An Open channel adds the whole team, Charlie included: one refusal
 # refuses the request, and no channel is created.
-curl_api_full POST "/channels" "{\"team_id\":\"${TEAM_ID}\",\"name\":\"hook-open\",\"display_name\":\"Hook open\",\"type\":\"O\"}"
+curl_api_full POST "/channels" "{\"team_id\":\"${TEAM_ID}\",\"name\":\"hook-open-${RUN_ID}\",\"display_name\":\"Hook open\",\"type\":\"O\"}"
 assert_status "12.7 an Open channel with a refused team member" 403 "$LAST_STATUS" "$LAST_BODY"
 assert_json "12.7 error id" ".id" "channel.membership_refused" "$LAST_BODY"
 assert_json "12.7 no channel was created" "." "0" \
-  "$($E2E_PSQL "SELECT count(*) FROM channels WHERE name = 'hook-open'" | tr -d '[:space:]')"
+  "$($E2E_PSQL "SELECT count(*) FROM channels WHERE name = 'hook-open-${RUN_ID}'" | tr -d '[:space:]')"
 
 # 12.8 Joining an Open channel asks the hook: Charlie leaves general, and
 # may not join it again.
