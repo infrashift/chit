@@ -70,6 +70,7 @@ export default defineConfig({
             { label: 'Themes', slug: 'tui/guides/themes' },
             { label: 'Custom Themes', slug: 'tui/guides/custom-themes' },
             { label: 'Agents and Bots', slug: 'tui/guides/agents-and-bots' },
+            { label: 'Tags', slug: 'tui/guides/tags' },
             { label: 'User Acceptance Testing', slug: 'tui/tutorials/user-acceptance-testing' },
             { label: 'Keybindings', slug: 'tui/reference/keybindings' },
             { label: 'Architecture', slug: 'tui/reference/architecture' },

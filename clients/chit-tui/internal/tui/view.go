@@ -34,9 +34,14 @@ func (m Model) View() string {
 		m.input.View(),
 	)
 	layout = m.placeActivity(layout)
+	layout = m.placeChannelTags(layout)
 
-	// Composite the centered floating overlays.
-	for _, o := range m.overlays() {
+	// Composite the centered floating overlays. The first overlay of the
+	// table takes the keys first, so it is drawn last, on top: the rename
+	// prompt over the tag picker.
+	refs := m.overlays()
+	for i := len(refs) - 1; i >= 0; i-- {
+		o := refs[i]
 		if !o.visible() {
 			continue
 		}
@@ -91,13 +96,14 @@ const focusKeep FocusArea = -1
 type overlayID int
 
 const (
-	overlayDMPicker overlayID = iota
+	overlayTagPrompt overlayID = iota
+	overlayDMPicker
 	overlayThreadInbox
 	overlaySkinPicker
 	overlayChannelCreator
 	overlayTagPicker
 	overlayPalette
-	overlayPostInfo
+	overlayInfoBox
 	overlayHelp
 )
 
@@ -173,14 +179,16 @@ func (m *Model) overlays() []overlayRef {
 		tagPickerReturn = FocusThread
 	}
 	refs := []overlayRef{
+		// The rename prompt opens over the tag picker, so it is first.
+		{id: overlayTagPrompt, model: &m.tagPrompt, closeFocus: focusKeep},
 		{id: overlayDMPicker, model: &m.dmPicker, closeFocus: FocusInput},
 		{id: overlayThreadInbox, model: &m.threadInbox, closeFocus: FocusInput},
 		{id: overlaySkinPicker, model: &m.skinPicker, closeFocus: FocusInput},
 		{id: overlayChannelCreator, model: &m.chCreator, closeFocus: FocusInput},
 		{id: overlayTagPicker, model: &m.tagPicker, closeFocus: tagPickerReturn},
 		{id: overlayPalette, model: &m.palette, closeFocus: FocusInput},
-		{id: overlayPostInfo, model: &m.postInfo, closeFocus: focusKeep}, // takes no focus, as help
-		{id: overlayHelp, model: &m.help, closeFocus: focusKeep},         // help never takes focus
+		{id: overlayInfoBox, model: &m.infoBox, closeFocus: focusKeep}, // takes no focus, as help
+		{id: overlayHelp, model: &m.help, closeFocus: focusKeep},       // help never takes focus
 	}
 	assert.That(len(refs) == int(overlayHelp)+1, "overlays: an overlay is missing from the table")
 	assert.That(tagPickerReturn == FocusViewport || tagPickerReturn == FocusThread, "overlays: tag picker returns to no pane")
@@ -191,10 +199,12 @@ func (m *Model) overlays() []overlayRef {
 // in the Model.
 func (m *Model) updateOverlay(id overlayID, msg tea.KeyMsg) tea.Cmd {
 	assert.That(m != nil, "updateOverlay: nil model")
-	assert.That(id >= overlayDMPicker, "updateOverlay: overlay ID before the first")
+	assert.That(id >= overlayTagPrompt, "updateOverlay: overlay ID before the first")
 	assert.That(id <= overlayHelp, "updateOverlay: overlay ID past the last")
 	var cmd tea.Cmd
 	switch id {
+	case overlayTagPrompt:
+		m.tagPrompt, cmd = m.tagPrompt.Update(msg)
 	case overlayDMPicker:
 		m.dmPicker, cmd = m.dmPicker.Update(msg)
 	case overlayThreadInbox:
@@ -207,8 +217,8 @@ func (m *Model) updateOverlay(id overlayID, msg tea.KeyMsg) tea.Cmd {
 		m.tagPicker, cmd = m.tagPicker.Update(msg)
 	case overlayPalette:
 		m.palette, cmd = m.palette.Update(msg)
-	case overlayPostInfo:
-		m.postInfo, cmd = m.postInfo.Update(msg)
+	case overlayInfoBox:
+		m.infoBox, cmd = m.infoBox.Update(msg)
 	case overlayHelp:
 		m.help, cmd = m.help.Update(msg)
 	}

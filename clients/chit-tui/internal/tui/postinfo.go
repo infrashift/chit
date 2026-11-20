@@ -19,6 +19,8 @@ const subjectPostInfo = "post:"
 
 // selectedPost returns the post that a key in the focused pane acts on.
 func (m Model) selectedPost() *model.Post {
+	assert.That(m.focus >= FocusViewport && m.focus <= FocusThreadInbox, "selectedPost: unknown focus")
+	assert.That(m.appState == AppStateRunning, "selectedPost: not signed in")
 	switch m.focus {
 	case FocusViewport:
 		return m.viewport.SelectedPost()
@@ -31,17 +33,19 @@ func (m Model) selectedPost() *model.Post {
 // openPostInfo opens the overlay on the selected post. It reports false,
 // and the key goes on, when no post is selected.
 func (m *Model) openPostInfo() (tea.Cmd, bool) {
+	assert.That(m.appState == AppStateRunning, "openPostInfo: not signed in")
 	p := m.selectedPost()
 	if p == nil {
 		return nil, false
 	}
-	m.postInfo.Open(subjectPostInfo+p.ID, "Post details", m.postInfoRows(p), m.postInfoActions(p))
-	assert.That(m.postInfo.Visible(), "openPostInfo: overlay not open")
+	m.infoBox.Open(subjectPostInfo+p.ID, "Post details", m.postInfoRows(p), m.postInfoActions(p))
+	assert.That(m.infoBox.Visible(), "openPostInfo: overlay not open")
 	return nil, true
 }
 
 // postInfoActions are the keys that the overlay offers for p.
 func (m Model) postInfoActions(p *model.Post) []infobox.Action {
+	assert.That(len(p.FileIDs) <= model.MaxPostFiles, "postInfoActions: more files than a post can carry")
 	assert.That(p != nil, "postInfoActions: nil post")
 	return nil
 }
@@ -77,6 +81,7 @@ func (m Model) postInfoRows(p *model.Post) []infobox.Row {
 
 // provenanceRows lists what produced an agent's message.
 func provenanceRows(p *model.Post) []infobox.Row {
+	assert.That(p != nil, "provenanceRows: nil post")
 	pv, ok := p.Provenance()
 	if !ok {
 		return nil

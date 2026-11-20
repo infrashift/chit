@@ -20,6 +20,7 @@ const (
 // streamKey names one stream of one sender. The sender comes first, so a
 // post of the sender can clear each of its streams.
 func streamKey(userID, streamID string) string {
+	assert.That(len(streamID) <= 64, "streamKey: stream ID longer than the server allows")
 	assert.That(userID != "", "streamKey: empty user ID")
 	return userID + "/" + streamID
 }
@@ -27,6 +28,7 @@ func streamKey(userID, streamID string) string {
 // onStreamStatus shows, refreshes or clears the indicator of a stream in
 // the open channel.
 func (m *Model) onStreamStatus(evt model.WebSocketEvent) []tea.Cmd {
+	assert.That(evt.Event == model.WebSocketEventStreamStatus, "onStreamStatus: another event")
 	assert.That(m.appState == AppStateRunning, "onStreamStatus: not signed in")
 	channelID := dataString(evt.Data, "channel_id")
 	userID := dataString(evt.Data, "user_id")
@@ -50,6 +52,7 @@ func (m *Model) onStreamStatus(evt model.WebSocketEvent) []tea.Cmd {
 
 // endStreamsOf clears each indicator of userID: the reply has arrived.
 func (m *Model) endStreamsOf(userID string) {
+	assert.That(m.appState == AppStateRunning, "endStreamsOf: not signed in")
 	if userID != "" {
 		m.activity.ClearPrefix(userID + "/")
 	}

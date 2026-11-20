@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tag names checked first** — the TUI refuses a tag name that the server refuses, and tells why
 - **HALO contract** — the models and the API client know attachments, provenance, on-behalf-of posts, actor types, tag rename and delete, and channel tags
 - **Unicode #tags** — a `#tag` can hold the letters and digits of each script
+- **Tag parity** — `tag_updated`, `tag_deleted` and `channel_tags_updated` apply at once. `Ctrl+R` renames and `Ctrl+X` deletes your own tag in the picker (`ui/prompt`, `ui/confirm`). The tags of the open channel show on the upper border, and `/chtag add`, `rm` and `find` change and find them (`ui/chips`, `ui/infobox`)
 - **Agents and bots** — `[agent]`/`[bot]` badges on posts and in the people lists, `[via @client]` for an on-behalf-of post, `[provenance]`, a line for each attached file (records fetched 40 at a time, waiting out a 429), `i` opens the post details (`ui/infobox`), and `stream_status` shows `… is responding` on the lower border of the main pane (`ui/activity`)
 - **Thread authors load** — the authors of thread replies are looked up, so they no longer show as an ID
 - **Runtime themes** — `Ctrl+T` opens the theme picker, which shows each theme as the cursor moves; `Esc` undoes the preview. `/theme <name>` and `/theme reload`. An edited local theme file applies by itself (`theme_watch`). The terminal's own colors follow the theme (`theme_paint`, OSC 10/11)

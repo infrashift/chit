@@ -12,6 +12,7 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/tagpicker"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/threadinbox"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/infobox"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/prompt"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
@@ -22,6 +23,8 @@ import (
 func modelWithEveryOverlayOpen() Model {
 	s := styles.New(theme.TokyoNight())
 	var m Model
+	m.tagPrompt = prompt.New(s, 50)
+	m.tagPrompt.Open("rename-tag:t1", "Rename #x", "x", "")
 	m.dmPicker = dmpicker.New(s)
 	m.dmPicker.OpenForMembers()
 	m.threadInbox = threadinbox.New(s)
@@ -34,8 +37,8 @@ func modelWithEveryOverlayOpen() Model {
 	m.tagPicker.Open("post-1", nil, nil)
 	m.palette = palette.New(s)
 	m.palette.Open("")
-	m.postInfo = infobox.New(s)
-	m.postInfo.Open("post:p1", "Post details", nil, nil)
+	m.infoBox = infobox.New(s)
+	m.infoBox.Open("post:p1", "Post details", nil, nil)
 	m.help = help.New(s)
 	m.help.Open()
 	return m

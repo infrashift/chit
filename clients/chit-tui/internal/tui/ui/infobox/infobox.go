@@ -161,7 +161,9 @@ func (m Model) View() string {
 func (m Model) hints(end int) string {
 	var parts []string
 	for _, a := range m.actions {
-		parts = append(parts, a.Key+" "+a.Label)
+		if a.Label != "" {
+			parts = append(parts, a.Key+" "+a.Label)
+		}
 	}
 	if m.offset > 0 || end < len(m.rows) {
 		parts = append(parts, "↑/↓ scroll")

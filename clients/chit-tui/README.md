@@ -9,7 +9,7 @@ Fuller documentation lives on the docs site, under [`docs/src/content/docs/tui/`
 - **Palette-driven navigation** — one overlay (`Ctrl+K`) goes to channels and DMs, sorted by mentions, then unread, then recency. `@` finds people, `/` lists commands, `?` searches this channel and `??` every channel
 - **Real-time updates** — a WebSocket connection that pings to detect dead links, reconnects with backoff, and reloads the open channel after a gap
 - **Threads** — `Enter` on a post opens its thread in the main pane. The user writes replies in the regular input. `/threads` lists the threads that you follow
-- **Edit and moderate** — edit (`e`), delete (`d d`) and pin (`p`) posts. Tag them with `t` or with `#tags` in the text. The picker makes channel tags by default; `Ctrl+T` in the picker makes a private tag
+- **Edit and moderate** — edit (`e`), delete (`d d`) and pin (`p`) posts. Tag them with `t` or with `#tags` in the text. The picker makes channel tags by default; `Ctrl+T` in the picker makes a private tag. `Ctrl+R` and `Ctrl+X` rename and delete the tags that you own, and `/chtag` tags the channel
 - **History** — older messages load as you scroll up
 - **Copy** — `y` copies the selection or the selected post through OSC 52, which works over SSH
 - **Mouse** — scroll with the wheel, click on the action bar and palette, drag to select; everything also works from the keyboard

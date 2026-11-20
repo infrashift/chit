@@ -156,6 +156,7 @@ chit-tui itself runs these commands, and they never reach the server:
 | `/theme` (alias `/skin`) | Open the theme picker (see [Themes](/chit/tui/guides/themes/)) |
 | `/theme <name>` | Apply and save one theme |
 | `/theme reload` | Read the active theme file again |
+| `/chtag add <name>`, `rm <name>`, `find <name>…` | Change or find the tags of channels (see [Tags](/chit/tui/guides/tags/)) |
 | `/group` | Start a group conversation with three or more people |
 | `/nick <display name>` | Change your display name |
 | `/username <handle>` | Change your username (breaks existing @mentions) |
@@ -222,6 +223,8 @@ When the tag picker overlay is open (`t` from the history or thread pane):
 | `Enter` | Toggle tag on/off for the selected post |
 | `Ctrl+N` | Create a new tag from the filter text, and apply it |
 | `Ctrl+T` | Switch what `Ctrl+N` creates: a **channel** tag (the default), shared with the channel's members, or a **private** tag that only you see |
+| `Ctrl+R` | Rename the tag under the cursor (your own tags only) |
+| `Ctrl+X` | Delete the tag under the cursor; push `Ctrl+X` again to confirm (your own tags only) |
 | `Esc` | Close tag picker |
 
 The picker lists the channel's tags and the private tags of the user, which it marks

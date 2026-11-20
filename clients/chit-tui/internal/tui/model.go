@@ -26,8 +26,10 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/thread"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/threadinbox"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/activity"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/chips"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/confirm"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/infobox"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/prompt"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/viewport"
@@ -170,8 +172,15 @@ type Model struct {
 	fileFetching   bool
 	// activity shows the stream_status indicators (stream.go).
 	activity activity.Model
-	// postInfo is the post detail overlay (postinfo.go).
-	postInfo infobox.Model
+	// The tag rename prompt and the channel tags (tagmanage.go,
+	// chantags.go).
+	tagPrompt     prompt.Model
+	channelTags   []*model.Tag
+	chanChips     chips.Model
+	foundChannels []*model.Channel
+	// infoBox shows facts in an overlay: the post details (postinfo.go) and
+	// the channels that /chtag find found (chantags.go).
+	infoBox infobox.Model
 	// commandAuthors names the pseudo-author of each command's output, by
 	// user ID; commandResponses numbers the outputs so each has its own ID.
 	commandAuthors   map[string]string
@@ -224,7 +233,9 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 		tagPicker:    tagpicker.New(s),
 		confirm:      confirm.New(s, questionTTL),
 		activity:     activity.New(s, maxStreams, streamTTL),
-		postInfo:     infobox.New(s),
+		infoBox:      infobox.New(s),
+		tagPrompt:    prompt.New(s, model.MaxTagLength),
+		chanChips:    chips.New(s, chips.RoleTag, maxChannelTags),
 		loginModel:   login.New(s, kratosClient),
 		themeSetting: "theme",
 		themeWatch:   cfg != nil && cfg.ThemeWatch,

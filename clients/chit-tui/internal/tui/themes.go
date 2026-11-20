@@ -65,6 +65,7 @@ func (m *Model) restyle(s styles.Styles) tea.Cmd {
 	m.loginModel.SetStyles(s)
 	m.confirm.SetStyles(s)
 	m.activity.SetStyles(s)
+	m.chanChips.SetStyles(s)
 	for _, o := range m.overlays() {
 		o.setStyles(s)
 	}
@@ -74,6 +75,7 @@ func (m *Model) restyle(s styles.Styles) tea.Cmd {
 
 // applyTheme makes t the active theme, without a save.
 func (m *Model) applyTheme(t theme.Theme) tea.Cmd {
+	assert.That(t.Name != "", "applyTheme: theme without a name")
 	assert.That(t.Key != "", "applyTheme: theme without a key")
 	cmd := m.restyle(styles.New(t))
 	pathChanged := t.Path != m.themePath
@@ -105,6 +107,7 @@ func (m *Model) resolveTheme(name string) (theme.Theme, error) {
 // openThemePicker opens the picker on the active theme and starts a picker
 // session.
 func (m *Model) openThemePicker() tea.Cmd {
+	assert.That(m.appState == AppStateRunning, "openThemePicker: not signed in")
 	m.themeCache = make(map[string]theme.Theme)
 	m.previewFrom = nil
 	m.skinPicker.SetSkins(theme.ListAvailable(config.ThemesDir()))
@@ -116,6 +119,7 @@ func (m *Model) openThemePicker() tea.Cmd {
 
 // endThemeSession forgets the preview and the cache of the picker session.
 func (m *Model) endThemeSession() {
+	assert.That(m != nil, "endThemeSession: nil model")
 	m.previewFrom, m.themeCache = nil, nil
 	assert.That(m.previewFrom == nil, "endThemeSession: preview kept")
 }
@@ -165,6 +169,7 @@ func (m Model) handleThemePreview(msg skinpicker.SkinPreviewMsg) (tea.Model, tea
 
 // handleThemeCancelled puts back the theme from before the previews.
 func (m Model) handleThemeCancelled() (tea.Model, tea.Cmd) {
+	assert.That(m.appState == AppStateRunning, "handleThemeCancelled: not signed in")
 	from := m.previewFrom
 	m.endThemeSession()
 	focus := m.setFocus(FocusInput)
@@ -184,6 +189,7 @@ func (m Model) handleThemeCancelled() (tea.Model, tea.Cmd) {
 // themeCommand runs /theme: no argument opens the picker, "reload" reads
 // the active theme again, and a name applies and saves that theme.
 func (m Model) themeCommand(args string) (tea.Model, tea.Cmd) {
+	assert.That(len(args) < 4096, "themeCommand: argument longer than a message")
 	assert.That(m.appState == AppStateRunning, "themeCommand: not signed in")
 	name := strings.ToLower(strings.TrimSpace(args))
 	switch name {
@@ -203,6 +209,7 @@ func (m Model) themeCommand(args string) (tea.Model, tea.Cmd) {
 
 // reloadTheme reads the active theme from its file again.
 func (m Model) reloadTheme() (tea.Model, tea.Cmd) {
+	assert.That(m.scope != nil, "reloadTheme: nil request scope")
 	assert.That(m.appState == AppStateRunning, "reloadTheme: not signed in")
 	if m.themeKey == "" {
 		return m, m.setError(errors.New("no theme to reload"))
@@ -218,6 +225,7 @@ func (m Model) reloadTheme() (tea.Model, tea.Cmd) {
 // unknownTheme explains why name did not load, with the theme names that
 // hold it, when it names no theme at all.
 func unknownTheme(name string, err error) error {
+	assert.That(name == strings.ToLower(name), "unknownTheme: name not lowercased")
 	assert.That(name != "" && err != nil, "unknownTheme: empty name or nil error")
 	if !errors.Is(err, theme.ErrLocalThemeNotFound) {
 		return fmt.Errorf("theme %q: %w", name, err)
@@ -237,6 +245,7 @@ func unknownTheme(name string, err error) error {
 // restartThemeWatch starts a new watch loop and ends the old one at its
 // next tick. It returns nil when nothing is to be watched.
 func (m *Model) restartThemeWatch() tea.Cmd {
+	assert.That(m != nil, "restartThemeWatch: nil model")
 	m.watchSeq++
 	assert.That(m.watchSeq > 0, "restartThemeWatch: sequence wrapped")
 	return m.watchTick(m.watchSeq)
@@ -245,6 +254,7 @@ func (m *Model) restartThemeWatch() tea.Cmd {
 // watchTick returns the next tick of loop seq, or nil when the watch is
 // off or the active theme has no file.
 func (m Model) watchTick(seq uint64) tea.Cmd {
+	assert.That(seq <= m.watchSeq, "watchTick: a loop from the future")
 	if !m.themeWatch || m.themePath == "" {
 		return nil
 	}
@@ -255,6 +265,7 @@ func (m Model) watchTick(seq uint64) tea.Cmd {
 // handleThemeWatch reloads the active theme file when its mod time
 // changed. A file that does not load shows its error, and the theme stays.
 func (m Model) handleThemeWatch(msg themeWatchMsg) (tea.Model, tea.Cmd) {
+	assert.That(msg.seq <= m.watchSeq, "handleThemeWatch: a tick from the future")
 	if msg.seq != m.watchSeq || m.themePath == "" || !m.themeWatch {
 		return m, nil
 	}
@@ -275,6 +286,7 @@ func (m Model) handleThemeWatch(msg themeWatchMsg) (tea.Model, tea.Cmd) {
 // modTime returns the mod time of path, or the zero time when path is ""
 // or cannot be read.
 func modTime(path string) time.Time {
+	assert.That(path == "" || strings.HasSuffix(path, ".toml") || strings.HasSuffix(path, ".json"), "modTime: not a theme file")
 	if path == "" {
 		return time.Time{}
 	}
@@ -288,6 +300,7 @@ func modTime(path string) time.Time {
 // paintCmd sets the terminal's default colors to the theme's, when
 // theme_paint is on.
 func (m Model) paintCmd() tea.Cmd {
+	assert.That(len(m.styles.TermBackground) == 0 || len(m.styles.TermBackground) == 7, "paintCmd: background not #rrggbb")
 	if !m.themePaint || m.clipboardOut == nil {
 		return nil
 	}
@@ -305,6 +318,7 @@ func (m Model) paintCmd() tea.Cmd {
 // color to the terminal's own (OSC 110, OSC 111). A cell that nothing draws
 // on, and each cell after a reset, shows these colors.
 func TerminalColors(fg, bg string) string {
+	assert.That(len(fg) == 0 || len(fg) == 7, "TerminalColors: foreground not #rrggbb")
 	var b strings.Builder
 	if fg == "" {
 		b.WriteString("\x1b]110\x1b\\")
@@ -332,6 +346,7 @@ func ResetTerminalColors(out io.Writer) {
 // clipboard does: it is not content, so it skips the renderer. A failed
 // write has no channel to report on.
 func writeTerminal(out io.Writer, seq string) {
+	assert.That(strings.HasPrefix(seq, "\x1b]"), "writeTerminal: not an OSC sequence")
 	assert.That(out != nil && seq != "", "writeTerminal: nil writer or empty sequence")
 	if _, err := io.WriteString(out, seq); err != nil {
 		errlog.Debug(err, "write terminal color sequence")

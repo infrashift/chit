@@ -73,7 +73,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // ignores it, so the one editor that owns the blink schedules the next.
 func (m Model) routeBlink(blink cursor.BlinkMsg) (tea.Model, tea.Cmd) {
 	assert.That(m.appState == AppStateRunning, "routeBlink: not signed in")
-	cmds := make([]tea.Cmd, 0, 5)
+	cmds := make([]tea.Cmd, 0, 6)
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(blink)
 	cmds = append(cmds, cmd)
@@ -85,7 +85,9 @@ func (m Model) routeBlink(blink cursor.BlinkMsg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 	m.chCreator, cmd = m.chCreator.Update(blink)
 	cmds = append(cmds, cmd)
-	assert.That(len(cmds) == 5, "routeBlink: one command for each editor")
+	m.tagPrompt, cmd = m.tagPrompt.Update(blink)
+	cmds = append(cmds, cmd)
+	assert.That(len(cmds) == 6, "routeBlink: one command for each editor")
 	return m, tea.Batch(cmds...)
 }
 
@@ -258,7 +260,7 @@ func (m Model) routeTagMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	case TagRemovedFromPostMsg:
 		return handled(m.handleTagRemovedFromPost(msg))
 	}
-	return m, nil, false
+	return m.routeTagManageMsg(msg)
 }
 
 // routeLookupMsg routes the palette, search, mention and user-search

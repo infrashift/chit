@@ -25,7 +25,8 @@ var (
 // palette on the server's list alone and these were absent from it.
 func clientCommands() []*model.Command {
 	cmds := []*model.Command{
-		{Slug: "theme", Description: "choose a theme (alias: /skin)"},
+		{Slug: "theme", Description: "choose a theme; /theme <name>, /theme reload (alias: /skin)"},
+		{Slug: "chtag", Description: "channel tags: /chtag add <name>, rm <name>, find <name>…"},
 		{Slug: "group", Description: "start a group conversation with three or more people"},
 		{Slug: "nick", Description: "change your display name"},
 		{Slug: "username", Description: "change your username (breaks existing @mentions)"},
@@ -103,6 +104,8 @@ func (m Model) runClientCommand(verb, args string) (tea.Model, tea.Cmd, bool) {
 	switch verb {
 	case "/skin", "/theme":
 		return handled(m.themeCommand(args))
+	case "/chtag":
+		return handled(m.chtagCommand(args))
 	case "/logout":
 		return handled(m.handleLogout())
 	case "/group":

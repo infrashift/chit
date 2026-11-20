@@ -83,6 +83,7 @@ func (m *Model) queuePostFiles(posts []*model.Post) {
 
 // fetchMissingFiles starts the next batch, unless one is in flight.
 func (m *Model) fetchMissingFiles() tea.Cmd {
+	assert.That(len(m.fileQueue) <= maxFileQueue, "fetchMissingFiles: queue over its cap")
 	if m.fileFetching || len(m.fileQueue) == 0 {
 		return nil
 	}
@@ -97,6 +98,7 @@ func (m *Model) fetchMissingFiles() tea.Cmd {
 // handleFileInfosLoaded keeps the records, gives them to the panes, and
 // starts the next batch: at once, or after the wait of a 429.
 func (m Model) handleFileInfosLoaded(msg FileInfosLoadedMsg) (tea.Model, tea.Cmd) {
+	assert.That(len(msg.Files)+len(msg.Left) <= maxFileBatch, "handleFileInfosLoaded: batch larger than the cap")
 	assert.That(m.files != nil, "handleFileInfosLoaded: nil file cache")
 	m.fileFetching = false
 	for _, f := range msg.Files {
@@ -118,6 +120,7 @@ func (m Model) handleFileInfosLoaded(msg FileInfosLoadedMsg) (tea.Model, tea.Cmd
 // pushFiles gives a copy of the records to both panes. A copy, so that a
 // pane can tell its old records from the new ones.
 func (m *Model) pushFiles() {
+	assert.That(len(m.files) <= maxFileCache, "pushFiles: cache over its cap")
 	files := maps.Clone(m.files)
 	m.viewport.SetFiles(files)
 	m.thread.SetFiles(maps.Clone(files))

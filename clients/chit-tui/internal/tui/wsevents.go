@@ -35,6 +35,9 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 func (m *Model) applyWSEvent(evt model.WebSocketEvent) []tea.Cmd {
 	assert.That(m != nil, "applyWSEvent: nil model")
 	assert.That(m.appState == AppStateRunning, "applyWSEvent: not signed in")
+	if m.applyTagEvent(evt) {
+		return nil
+	}
 	switch evt.Event {
 	case model.WebSocketEventPosted:
 		return m.onPosted(evt)
@@ -60,8 +63,6 @@ func (m *Model) applyWSEvent(evt model.WebSocketEvent) []tea.Cmd {
 		return m.onUserRemoved(evt)
 	case model.WebSocketEventCommandResponse:
 		m.onCommandResponse(evt)
-	case model.WebSocketEventPostTagsUpdated:
-		m.onPostTagsUpdated(evt)
 	case model.WebSocketEventThreadUpdated:
 		m.onThreadUpdated(evt)
 	case model.WebSocketEventMentioned:

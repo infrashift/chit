@@ -130,6 +130,7 @@ func hints() []string {
 func clientCommands() []binding {
 	bs := []binding{
 		{"/theme", "choose a theme; /theme <name> sets one, /theme reload reads it again (alias: /skin)"},
+		{"/chtag", "channel tags: add <name>, rm <name>, find <name>…"},
 		{"/group", "start a group conversation with three or more people"},
 		{"/nick", "change your display name"},
 		{"/username", "change your username (breaks existing @mentions)"},

@@ -25,14 +25,20 @@ import (
 // tuiAsAlice starts the TUI for alice and opens town-square.
 func tuiAsAlice(t *testing.T) *teatest.TestModel {
 	t.Helper()
-	alice := newTestClient(aliceKratosID)
-	channelID := mustGetTownSquareID(t, alice)
-	ch, err := channelOf(alice, channelID)
+	return tuiAs(t, aliceKratosID)
+}
+
+// tuiAs starts the TUI for the user kratosID and opens town-square.
+func tuiAs(t *testing.T, kratosID string) *teatest.TestModel {
+	t.Helper()
+	client := newTestClient(kratosID)
+	channelID := mustGetTownSquareID(t, client)
+	ch, err := channelOf(client, channelID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg := &config.Config{ServerURL: serverURL()}
-	m := tui.NewModel(cfg, alice, newTestWSClient(aliceKratosID, 256), testutil.Styles(), nil, nil, nil)
+	m := tui.NewModel(cfg, client, newTestWSClient(kratosID, 256), testutil.Styles(), nil, nil, nil)
 	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(160, 50))
 	t.Cleanup(func() {
 		if err := tm.Quit(); err != nil {
@@ -115,4 +121,55 @@ func TestTUI_ShowsTheHALOData(t *testing.T) {
 		t.Fatalf("stream_status: %d %s", status, body)
 	}
 	waitScreen(t, tm, "chit-agent is responding…")
+}
+
+// Bob's TUI sees alice's tag changes as they happen: a channel tag on the
+// border and on a post, its rename (tag_updated), and its delete
+// (tag_deleted, with no post_tags_updated after it).
+func TestTUI_TagChangesArriveLive(t *testing.T) {
+	ctx := context.Background()
+	alice := newTestClient(aliceKratosID)
+	channelID := mustGetTownSquareID(t, alice)
+	name := strings.ReplaceAll(unique("live"), "-", "")
+	tag, err := alice.CreateTag(ctx, name, model.TagScopeChannel, channelID)
+	if err != nil {
+		t.Fatalf("CreateTag: %v", err)
+	}
+	post, err := alice.CreatePost(ctx, &model.Post{ChannelID: channelID, Content: unique("tagged")})
+	if err != nil {
+		t.Fatalf("CreatePost: %v", err)
+	}
+	if err := alice.AddTagToPost(ctx, post.ID, tag.ID); err != nil {
+		t.Fatalf("AddTagToPost: %v", err)
+	}
+
+	tm := tuiAs(t, bobKratosID)
+	waitScreen(t, tm, "#"+name)
+
+	if err := alice.AddChannelTag(ctx, channelID, tag.ID); err != nil {
+		t.Fatalf("AddChannelTag: %v", err)
+	}
+	waitScreen(t, tm, "── #"+name)
+
+	renamed := name + "x"
+	if _, err := alice.RenameTag(ctx, tag.ID, renamed); err != nil {
+		t.Fatalf("RenameTag: %v", err)
+	}
+	waitScreen(t, tm, "#"+renamed)
+
+	if err := alice.DeleteTag(ctx, tag.ID); err != nil {
+		t.Fatalf("DeleteTag: %v", err)
+	}
+	marker := unique("after the delete")
+	if _, err := alice.CreatePost(ctx, &model.Post{ChannelID: channelID, Content: marker}); err != nil {
+		t.Fatalf("CreatePost: %v", err)
+	}
+	waitScreen(t, tm, marker)
+	if err := tm.Quit(); err != nil {
+		t.Fatal(err)
+	}
+	final := testutil.StripANSI(tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second)).View())
+	if strings.Contains(final, "#"+renamed) {
+		t.Errorf("a deleted tag still shows:\n%s", final)
+	}
 }

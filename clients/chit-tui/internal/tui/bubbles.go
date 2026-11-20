@@ -48,6 +48,12 @@ func (m *Model) answerQuestion(msg tea.KeyMsg) (tea.Cmd, bool) {
 	if id, ok := strings.CutPrefix(subject, subjectDeletePost); ok {
 		return m.deleteConfirmedPost(id)
 	}
+	if id, ok := strings.CutPrefix(subject, subjectDeleteTag); ok {
+		return DeleteTagCmd(m.reqCtx(), m.client, id), true
+	}
+	if ref, ok := strings.CutPrefix(subject, subjectRemoveChannelTag); ok {
+		return m.removeConfirmedChannelTag(ref)
+	}
 	return nil, false
 }
 

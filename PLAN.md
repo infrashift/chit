@@ -109,9 +109,9 @@ Tracking: [ISSUE-021](.okfw/issues/issue-021-the-tui-does-not-show-agents-proven
 ## Phase 16: Tag parity
 Tracking: [ISSUE-022](.okfw/issues/issue-022-the-tui-does-not-manage-tags-as-the-halo-server-permits--01a1f77112db.md)
 
-- [ ] Handle tag_updated, tag_deleted and channel_tags_updated.
-- [ ] Rename and delete a tag from the tag picker.
-- [ ] Show the channel tags, and add /chtag.
+- [x] Handle tag_updated, tag_deleted and channel_tags_updated.
+- [x] Rename and delete a tag from the tag picker.
+- [x] Show the channel tags, and add /chtag.
 
 ## Phase 17: Attachments
 Tracking: [ISSUE-023](.okfw/issues/issue-023-the-tui-cannot-attach-or-save-files--01a1f77112e5.md)
