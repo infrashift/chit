@@ -78,6 +78,22 @@ func (m *Model) Clear(key string) bool {
 	return true
 }
 
+// ClearPrefix removes each item whose key starts with prefix, and returns
+// the count that it removed.
+func (m *Model) ClearPrefix(prefix string) int {
+	assert.That(prefix != "", "activity.ClearPrefix: empty prefix")
+	kept := m.items[:0]
+	for _, it := range m.items {
+		if !strings.HasPrefix(it.key, prefix) {
+			kept = append(kept, it)
+		}
+	}
+	n := len(m.items) - len(kept)
+	m.items = kept
+	assert.That(n >= 0, "activity.ClearPrefix: negative count")
+	return n
+}
+
 // ClearAll removes each item.
 func (m *Model) ClearAll() { m.items = nil }
 

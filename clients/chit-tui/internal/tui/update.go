@@ -288,6 +288,10 @@ func (m Model) routeLookupMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return handled(m.handleSearchHit(msg))
 	case input.AtTriggerMsg:
 		return handled(m.handleAtTrigger(msg))
+	case FileInfosLoadedMsg:
+		return handled(m.handleFileInfosLoaded(msg))
+	case fileRetryMsg:
+		return m, m.fetchMissingFiles(), true
 	case input.AtDismissMsg:
 		m.mention.Hide()
 		return m, nil, true

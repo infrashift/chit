@@ -69,6 +69,7 @@ export default defineConfig({
             { label: 'Quick Start', slug: 'tui/getting-started/quick-start' },
             { label: 'Themes', slug: 'tui/guides/themes' },
             { label: 'Custom Themes', slug: 'tui/guides/custom-themes' },
+            { label: 'Agents and Bots', slug: 'tui/guides/agents-and-bots' },
             { label: 'User Acceptance Testing', slug: 'tui/tutorials/user-acceptance-testing' },
             { label: 'Keybindings', slug: 'tui/reference/keybindings' },
             { label: 'Architecture', slug: 'tui/reference/architecture' },

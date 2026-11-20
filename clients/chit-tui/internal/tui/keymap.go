@@ -15,6 +15,7 @@ type KeyMap struct {
 	NewDM      key.Binding
 	NewChannel key.Binding
 	Theme      key.Binding
+	Info       key.Binding
 	TagPicker  key.Binding
 	Copy       key.Binding
 	Edit       key.Binding
@@ -36,6 +37,7 @@ func DefaultKeyMap() KeyMap {
 		NewChannel: bind("ctrl+n", "new channel"),
 		Theme:      bind("ctrl+t", "themes"),
 		TagPicker:  bind("t", "tag post"),
+		Info:       bind("i", "post details"),
 		Copy:       bind("y", "copy selection"),
 		Edit:       bind("e", "edit your post"),
 		Delete:     bindHelp("d", "d d", "delete your post"),

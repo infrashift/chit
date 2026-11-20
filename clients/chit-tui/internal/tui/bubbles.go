@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/activity"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/confirm"
 )
 
@@ -26,6 +27,9 @@ func (m Model) routeBubbleMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case confirm.ExpiredMsg:
 		m.confirm.Expire(msg)
+		return m, nil, true
+	case activity.ExpiredMsg:
+		m.activity.Expire(msg)
 		return m, nil, true
 	}
 	return m, nil, false

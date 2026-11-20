@@ -33,6 +33,7 @@ func (m Model) View() string {
 		top,
 		m.input.View(),
 	)
+	layout = m.placeActivity(layout)
 
 	// Composite the centered floating overlays.
 	for _, o := range m.overlays() {
@@ -62,6 +63,21 @@ func (m Model) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, layout, m.actionBar.View())
 }
 
+// placeActivity draws the stream indicators on the lower border of the
+// main pane, just above the input. An overlay draws over them.
+func (m Model) placeActivity(layout string) string {
+	line := m.activity.View(max(m.width-8, 0))
+	if line == "" {
+		return layout
+	}
+	y := m.height - inputHeight - 2
+	assert.That(y < m.height, "placeActivity: row below the screen")
+	if y < 0 {
+		return layout
+	}
+	return placeOverlay(3, y, " "+line+" ", layout)
+}
+
 // overlayY is the row where centered floating overlays are anchored.
 const overlayY = 2
 
@@ -81,6 +97,7 @@ const (
 	overlayChannelCreator
 	overlayTagPicker
 	overlayPalette
+	overlayPostInfo
 	overlayHelp
 )
 
@@ -162,7 +179,8 @@ func (m *Model) overlays() []overlayRef {
 		{id: overlayChannelCreator, model: &m.chCreator, closeFocus: FocusInput},
 		{id: overlayTagPicker, model: &m.tagPicker, closeFocus: tagPickerReturn},
 		{id: overlayPalette, model: &m.palette, closeFocus: FocusInput},
-		{id: overlayHelp, model: &m.help, closeFocus: focusKeep}, // help never takes focus
+		{id: overlayPostInfo, model: &m.postInfo, closeFocus: focusKeep}, // takes no focus, as help
+		{id: overlayHelp, model: &m.help, closeFocus: focusKeep},         // help never takes focus
 	}
 	assert.That(len(refs) == int(overlayHelp)+1, "overlays: an overlay is missing from the table")
 	assert.That(tagPickerReturn == FocusViewport || tagPickerReturn == FocusThread, "overlays: tag picker returns to no pane")
@@ -189,6 +207,8 @@ func (m *Model) updateOverlay(id overlayID, msg tea.KeyMsg) tea.Cmd {
 		m.tagPicker, cmd = m.tagPicker.Update(msg)
 	case overlayPalette:
 		m.palette, cmd = m.palette.Update(msg)
+	case overlayPostInfo:
+		m.postInfo, cmd = m.postInfo.Update(msg)
 	case overlayHelp:
 		m.help, cmd = m.help.Update(msg)
 	}

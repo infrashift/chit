@@ -565,7 +565,7 @@ func (m Model) userRows() []row {
 		if u.DisplayName != "" {
 			label += " (" + u.DisplayName + ")"
 		}
-		rows[i] = row{label: label, user: u}
+		rows[i] = row{label: label + u.KindMark(), user: u}
 	}
 	assert.That(len(rows) == len(m.users), "palette.userRows: one row per user")
 	return rows

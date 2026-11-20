@@ -25,7 +25,9 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/tagpicker"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/thread"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/threadinbox"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/activity"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/confirm"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/infobox"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/viewport"
@@ -161,6 +163,15 @@ type Model struct {
 	clipboardOut io.Writer
 	// usersRequested marks user IDs already looked up.
 	usersRequested map[string]bool
+	// The file records that posts show (files.go).
+	files          map[string]*model.File
+	filesRequested map[string]bool
+	fileQueue      []string
+	fileFetching   bool
+	// activity shows the stream_status indicators (stream.go).
+	activity activity.Model
+	// postInfo is the post detail overlay (postinfo.go).
+	postInfo infobox.Model
 	// commandAuthors names the pseudo-author of each command's output, by
 	// user ID; commandResponses numbers the outputs so each has its own ID.
 	commandAuthors   map[string]string
@@ -212,6 +223,8 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 		chCreator:    chcreator.New(s),
 		tagPicker:    tagpicker.New(s),
 		confirm:      confirm.New(s, questionTTL),
+		activity:     activity.New(s, maxStreams, streamTTL),
+		postInfo:     infobox.New(s),
 		loginModel:   login.New(s, kratosClient),
 		themeSetting: "theme",
 		themeWatch:   cfg != nil && cfg.ThemeWatch,
@@ -226,14 +239,7 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 		styles:       s,
 	}
 	m.makeCaches()
-	// Seed the client-local commands rather than waiting for the server
-	// registry, which never contains them and may never arrive at all.
-	m.palette.SetCommands(clientCommands())
-
-	// The palette shares the root's badge and DM-name maps by reference, so
-	// root-side updates are visible without further plumbing.
-	m.palette.SetCounts(m.unread, m.mentions)
-	m.palette.SetDMDisplayNames(m.dmDisplayNames)
+	m.seedPalette()
 	// Focus also returns the first blink, but NewModel cannot run a
 	// command. applyLoadedUser starts the blink when the session starts.
 	firstBlink := m.input.Focus()
@@ -243,6 +249,18 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 	assert.That(m.appState != AppStateReLogin, "NewModel: a new model starts in re-login")
 	assert.That(m.focus == FocusInput, "NewModel: input does not start focused")
 	return m
+}
+
+// seedPalette gives a new palette the client commands and the shared maps.
+func (m *Model) seedPalette() {
+	assert.That(m.unread != nil && m.mentions != nil, "seedPalette: caches not made")
+	// Seed the client-local commands rather than waiting for the server
+	// registry, which never contains them and may never arrive at all.
+	m.palette.SetCommands(clientCommands())
+	// The palette shares the root's badge and DM-name maps by reference, so
+	// root-side updates are visible without further plumbing.
+	m.palette.SetCounts(m.unread, m.mentions)
+	m.palette.SetDMDisplayNames(m.dmDisplayNames)
 }
 
 // makeCaches gives a new model the empty maps its session fills in.
@@ -259,6 +277,9 @@ func (m *Model) makeCaches() {
 	m.postTags = make(map[string][]*model.Tag)
 	m.commandAuthors = make(map[string]string)
 	m.usersRequested = make(map[string]bool)
+	m.files = make(map[string]*model.File)
+	m.filesRequested = make(map[string]bool)
+	m.fileQueue = nil
 	assert.That(len(m.users) == 0, "makeCaches: users cache not empty")
 	assert.That(len(m.commandAuthors) == 0, "makeCaches: command authors not empty")
 }

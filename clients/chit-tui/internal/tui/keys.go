@@ -35,6 +35,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	}
+	if key.Matches(msg, m.keys.Info) {
+		if cmd, ok := m.openPostInfo(); ok {
+			return m, cmd
+		}
+	}
 
 	if key.Matches(msg, m.keys.Tab) {
 		return m, m.cycleFocus(1)

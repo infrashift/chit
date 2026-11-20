@@ -101,10 +101,10 @@ Tracking: [ISSUE-020](.okfw/issues/issue-020-a-theme-change-does-not-restyle-all
 ## Phase 15: Show the HALO data
 Tracking: [ISSUE-021](.okfw/issues/issue-021-the-tui-does-not-show-agents-provenance-attachments-or-stream-status--01a1f77112d1.md)
 
-- [ ] Show the actor, via and provenance badges, and the attachment lines.
-- [ ] Get file information in batches that obey the rate limit.
-- [ ] Show stream_status above the input.
-- [ ] Add the post detail overlay.
+- [x] Show the actor, via and provenance badges, and the attachment lines.
+- [x] Get file information in batches that obey the rate limit.
+- [x] Show stream_status above the input.
+- [x] Add the post detail overlay.
 
 ## Phase 16: Tag parity
 Tracking: [ISSUE-022](.okfw/issues/issue-022-the-tui-does-not-manage-tags-as-the-halo-server-permits--01a1f77112db.md)

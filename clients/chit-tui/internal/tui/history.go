@@ -151,13 +151,11 @@ func (m *Model) afterPostsLoaded(posts []*model.Post) tea.Cmd {
 	assert.That(m.scope != nil, "afterPostsLoaded: nil request scope")
 	assert.That(m.users != nil, "afterPostsLoaded: nil users cache")
 	var cmds []tea.Cmd
-	m.resolvePostUsers(posts)
+	m.notePosts(posts)
 	if ids := postIDs(posts); len(ids) > 0 {
 		cmds = append(cmds, FetchPostsTags(m.reqCtx(), m.client, ids))
 	}
-	if fetchCmd := m.fetchMissingUsers(); fetchCmd != nil {
-		cmds = append(cmds, fetchCmd)
-	}
+	cmds = append(cmds, m.fetchMissingRefs())
 	return tea.Batch(cmds...)
 }
 
@@ -308,10 +306,8 @@ func (m Model) handlePostCreated(msg PostCreatedMsg) (tea.Model, tea.Cmd) {
 		m.activeChan != nil && msg.Post.ChannelID == m.activeChan.ID &&
 		!m.viewport.HasPost(msg.Post.ID) {
 		m.viewport.AppendPost(msg.Post)
-		m.resolvePostUsers([]*model.Post{msg.Post})
-		if fetchCmd := m.fetchMissingUsers(); fetchCmd != nil {
-			cmds = append(cmds, fetchCmd)
-		}
+		m.notePosts([]*model.Post{msg.Post})
+		cmds = append(cmds, m.fetchMissingRefs())
 	}
 
 	// Likewise a reply in the open thread: the echo is not guaranteed.

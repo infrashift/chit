@@ -13,6 +13,7 @@ Fuller documentation lives on the docs site, under [`docs/src/content/docs/tui/`
 - **History** — older messages load as you scroll up
 - **Copy** — `y` copies the selection or the selected post through OSC 52, which works over SSH
 - **Mouse** — scroll with the wheel, click on the action bar and palette, drag to select; everything also works from the keyboard
+- **Agents and bots** — badges mark agents and bots, a post that a client made for a person (`[via @client]`), and provenance. Each attached file has a line. `i` opens the post details. A line shows when an agent writes a reply
 - **Themes** — eight bundled themes in dark and light pairs that follow the terminal's appearance, plus the user's own TOML themes
 
 ## Requirements

@@ -22,6 +22,15 @@ type User struct {
 	DeleteAt    int64  `json:"delete_at"`
 }
 
+// KindMark returns " [agent]" or " [bot]" for a machine, and "" for a
+// person. The lists of people append it to a name.
+func (u *User) KindMark() string {
+	if !u.IsMachine() {
+		return ""
+	}
+	return " [" + u.ActorType + "]"
+}
+
 // IsMachine reports whether the user is an agent or a bot, not a person.
 func (u *User) IsMachine() bool {
 	return u != nil && (u.ActorType == ActorTypeAgent || u.ActorType == ActorTypeBot)

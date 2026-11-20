@@ -64,6 +64,7 @@ func (m *Model) restyle(s styles.Styles) tea.Cmd {
 	m.actionBar.SetStyles(s)
 	m.loginModel.SetStyles(s)
 	m.confirm.SetStyles(s)
+	m.activity.SetStyles(s)
 	for _, o := range m.overlays() {
 		o.setStyles(s)
 	}

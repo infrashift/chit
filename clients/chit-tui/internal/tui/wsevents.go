@@ -70,6 +70,8 @@ func (m *Model) applyWSEvent(evt model.WebSocketEvent) []tea.Cmd {
 		return m.onUserAdded(evt)
 	case model.WebSocketEventChannelCreated:
 		return m.onChannelCreated(evt)
+	case model.WebSocketEventStreamStatus:
+		return m.onStreamStatus(evt)
 	}
 	return nil
 }
@@ -103,6 +105,8 @@ func (m *Model) appendLivePost(p *model.Post) []tea.Cmd {
 	assert.That(p.ID != "", "appendLivePost: post without ID")
 	assert.That(m.activeChan != nil, "appendLivePost: no channel open")
 	assert.That(p.ChannelID == m.activeChan.ID, "appendLivePost: post from another channel")
+	// The reply of a streamed answer has arrived.
+	m.endStreamsOf(p.UserID)
 	// Reply counts are left to thread_updated, which carries the
 	// server's total; counting here as well over-counted each reply.
 	if p.RootID != "" && m.mainPane == paneThread && p.RootID == m.threadRootID {
@@ -113,12 +117,9 @@ func (m *Model) appendLivePost(p *model.Post) []tea.Cmd {
 		return nil
 	}
 	m.viewport.AppendPost(p)
-	m.resolvePostUsers([]*model.Post{p})
+	m.notePosts([]*model.Post{p})
 	assert.That(m.viewport.HasPost(p.ID), "appendLivePost: post not shown")
-	if fetchCmd := m.fetchMissingUsers(); fetchCmd != nil {
-		return []tea.Cmd{fetchCmd}
-	}
-	return nil
+	return []tea.Cmd{m.fetchMissingRefs()}
 }
 
 func (m *Model) onPostEdited(evt model.WebSocketEvent) {
@@ -213,7 +214,7 @@ func (m *Model) onCommandResponse(evt model.WebSocketEvent) {
 		Content:   text,
 		CreateAt:  time.Now().UnixMilli(),
 	})
-	m.viewport.SetUsernames(m.usernameMap())
+	m.pushPeople()
 }
 
 func (m *Model) onPostTagsUpdated(evt model.WebSocketEvent) {

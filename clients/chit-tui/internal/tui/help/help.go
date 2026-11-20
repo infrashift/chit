@@ -95,6 +95,7 @@ func keyBindings() []binding {
 		{"esc", "close overlay / leave thread / back to history"},
 		{"?", "this help (history or thread pane)"},
 		{"ctrl+t", "themes: up/down shows each one, enter keeps it, esc undoes"},
+		{"i", "post details: agent, on behalf of, provenance, files"},
 		{"ctrl+c", "quit"},
 	}
 	assert.That(len(bs) > 0, "keyBindings: no bindings")

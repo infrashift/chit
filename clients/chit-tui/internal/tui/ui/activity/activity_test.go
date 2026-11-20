@@ -78,3 +78,16 @@ func TestActivity_ViewCutsToWidth(t *testing.T) {
 		t.Error("a zero width drew something")
 	}
 }
+
+func TestActivity_ClearPrefix(t *testing.T) {
+	m := activity.New(testutil.Styles(), 4, time.Second)
+	m.Set("u1/a", "A")
+	m.Set("u2/b", "B")
+	m.Set("u1/c", "C")
+	if n := m.ClearPrefix("u1/"); n != 2 || !slices.Equal(m.Labels(), []string{"B"}) {
+		t.Errorf("ClearPrefix removed %d, left %v", n, m.Labels())
+	}
+	if n := m.ClearPrefix("zz"); n != 0 {
+		t.Errorf("ClearPrefix of no match removed %d", n)
+	}
+}

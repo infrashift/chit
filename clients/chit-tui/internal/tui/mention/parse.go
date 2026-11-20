@@ -15,6 +15,8 @@ type MentionEntry struct {
 	DisplayName string
 	UserID      string
 	Special     bool // true for @all, @channel, @here
+	// Kind is the actor type of an agent or a bot, or "" for a person.
+	Kind string
 }
 
 // MentionSpan represents a mention's position in text.

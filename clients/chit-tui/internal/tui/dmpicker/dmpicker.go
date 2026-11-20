@@ -329,6 +329,7 @@ func (m Model) View() string {
 		if u.DisplayName != "" {
 			label += fmt.Sprintf(" (%s)", u.DisplayName)
 		}
+		label += u.KindMark()
 		if m.isSelected(u.ID) {
 			label = "[x] " + label
 		} else {

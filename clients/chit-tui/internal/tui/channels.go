@@ -37,6 +37,8 @@ func (m *Model) selectChannel(ch *model.Channel) tea.Cmd {
 	}
 	m.activeChan = ch
 	m.channelAutoSelected = true
+	// A stream indicator names the channel that it came from.
+	m.activity.ClearAll()
 	m.pendingJumpID = ""
 	m.cancelEdit()
 	// A highlight from a search in the previous channel would otherwise

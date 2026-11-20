@@ -81,6 +81,7 @@ When the message history has focus:
 | `k` / `↑` | Move post selection up |
 | `Enter` | Open the thread for the selected post (fills the main pane) |
 | `t` | Open tag picker for the selected post |
+| `i` | Open the details of the selected post (see [Agents and Bots](/chit/tui/guides/agents-and-bots/)) |
 | `y` | Copy the mouse selection, or the selected post if nothing is selected |
 | `e` | Edit the selected post (your own posts only) |
 | `d` `d` | Delete the selected post (your own posts only); press `d` twice |

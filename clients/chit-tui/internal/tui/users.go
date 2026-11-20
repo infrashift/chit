@@ -19,35 +19,80 @@ func (m Model) buildMentionEntries() []mention.MentionEntry {
 		mention.MentionEntry{Username: "channel", Special: true},
 		mention.MentionEntry{Username: "here", Special: true},
 	)
-	// Add channel members
-	if m.activeChan != nil {
-		members := m.channelMembers[m.activeChan.ID]
-		for _, mem := range members {
-			if m.me != nil && mem.UserID == m.me.ID {
-				continue // skip self
-			}
-			u := m.users[mem.UserID]
-			if u != nil {
-				entries = append(entries, mention.MentionEntry{
-					Username:    u.Username,
-					DisplayName: u.DisplayName,
-					UserID:      u.ID,
-				})
-			}
-		}
-	}
+	entries = append(entries, m.memberMentionEntries()...)
 	assert.That(len(entries) >= 3, "buildMentionEntries: special mentions missing")
 	return entries
 }
 
+// memberMentionEntries lists the other loaded members of the open channel.
+func (m Model) memberMentionEntries() []mention.MentionEntry {
+	if m.activeChan == nil {
+		return nil
+	}
+	var entries []mention.MentionEntry
+	for _, mem := range m.channelMembers[m.activeChan.ID] {
+		u := m.users[mem.UserID]
+		if u == nil || (m.me != nil && mem.UserID == m.me.ID) {
+			continue // not loaded, or self
+		}
+		entry := mention.MentionEntry{Username: u.Username, DisplayName: u.DisplayName, UserID: u.ID}
+		if u.IsMachine() {
+			entry.Kind = u.ActorType
+		}
+		entries = append(entries, entry)
+	}
+	assert.That(len(entries) <= len(m.channelMembers[m.activeChan.ID]), "memberMentionEntries: more entries than members")
+	return entries
+}
+
+// resolvePostUsers marks the authors of posts, and the clients that posted
+// for them, as users to look up.
 func (m *Model) resolvePostUsers(posts []*model.Post) {
 	assert.That(m != nil, "resolvePostUsers: nil model")
 	assert.That(m.users != nil, "resolvePostUsers: nil users cache")
 	for _, p := range posts {
-		if _, ok := m.users[p.UserID]; !ok {
-			m.users[p.UserID] = nil // placeholder
+		for _, id := range []string{p.UserID, p.OnBehalfOf()} {
+			if _, ok := m.users[id]; !ok && id != "" {
+				m.users[id] = nil // placeholder
+			}
 		}
 	}
+}
+
+// notePosts marks what new posts name and the client must look up: their
+// authors, the clients that posted for them, and their files.
+func (m *Model) notePosts(posts []*model.Post) {
+	assert.That(m.files != nil, "notePosts: nil file cache")
+	m.resolvePostUsers(posts)
+	m.queuePostFiles(posts)
+}
+
+// fetchMissingRefs looks up the users and the files that notePosts marked.
+func (m *Model) fetchMissingRefs() tea.Cmd {
+	assert.That(m.client != nil, "fetchMissingRefs: nil client")
+	return tea.Batch(m.fetchMissingUsers(), m.fetchMissingFiles())
+}
+
+// kindMap maps each known agent and bot to its actor type.
+func (m Model) kindMap() map[string]string {
+	kinds := make(map[string]string)
+	for id, u := range m.users {
+		if u.IsMachine() {
+			kinds[id] = u.ActorType
+		}
+	}
+	assert.That(len(kinds) <= len(m.users), "kindMap: more kinds than users")
+	return kinds
+}
+
+// pushPeople gives the names and the actor types to both panes.
+func (m *Model) pushPeople() {
+	names, kinds := m.usernameMap(), m.kindMap()
+	m.viewport.SetUsernames(names)
+	m.viewport.SetUserKinds(kinds)
+	m.thread.SetUsernames(m.usernameMap())
+	m.thread.SetUserKinds(m.kindMap())
+	assert.That(len(kinds) <= len(names), "pushPeople: a kind without a name")
 }
 
 // fetchMissingUsers looks up the authors still unknown. Each is asked for
@@ -119,8 +164,7 @@ func (m *Model) applyMe(u *model.User) {
 	// The panes only learn names from here or from a user lookup, and the
 	// signed-in user is never looked up, so their own posts showed their ID
 	// until some other author happened to load.
-	m.viewport.SetUsernames(m.usernameMap())
-	m.thread.SetUsernames(m.usernameMap())
+	m.pushPeople()
 	m.resolveDMDisplayNames()
 	assert.That(m.me == u, "applyMe: user not recorded")
 	assert.That(m.users[u.ID] == u, "applyMe: user missing from the cache")
@@ -173,8 +217,7 @@ func (m Model) handleUsersLoaded(msg UsersLoadedMsg) (tea.Model, tea.Cmd) {
 	for _, u := range msg.Users {
 		m.users[u.ID] = u
 	}
-	m.viewport.SetUsernames(m.usernameMap())
-	m.thread.SetUsernames(m.usernameMap())
+	m.pushPeople()
 	m.resolveDMDisplayNames()
 	return m, nil
 }

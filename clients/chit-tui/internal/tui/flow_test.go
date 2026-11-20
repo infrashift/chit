@@ -205,3 +205,28 @@ func TestFlow_ThemePreviewAndUndo(t *testing.T) {
 		t.Errorf("Esc left the theme picker open:\n%s", view)
 	}
 }
+
+// An agent post with provenance and a file, in a real program: the badges
+// show, the file record loads, and a stream shows its indicator.
+func TestFlow_AgentPostFileAndStream(t *testing.T) {
+	client := flowClient()
+	client.users = append(client.users, &model.User{ID: "agent1", Username: "chit-agent", ActorType: model.ActorTypeAgent})
+	client.posts = &model.PostList{Order: []*model.Post{{
+		ID: "p1", ChannelID: "c1", UserID: "agent1", Content: "the chart", FileIDs: []string{"file-1"}, CreateAt: 1700000000000,
+		Props: map[string]any{model.PropProvenance: map[string]any{"model": "m"}},
+	}}}
+	client.files = map[string]*model.File{"file-1": {ID: "file-1", Name: "chart.png", ContentType: "image/png", SizeBytes: 10}}
+	tm := programWith(t, client)
+	teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
+		plain := testutil.StripANSI(string(out))
+		return strings.Contains(plain, "[file] chart.png") && strings.Contains(plain, "chit-agent [agent]")
+	}, teatest.WithDuration(5*time.Second))
+
+	tm.Send(tui.WebSocketEventMsg{Event: model.WebSocketEvent{Event: model.WebSocketEventStreamStatus, Data: map[string]any{
+		"channel_id": "c1", "user_id": "agent1", "status": model.StreamStarted, "stream_id": "s1",
+	}}})
+	view := finalViewAfter(t, tm, "is responding")
+	if !strings.Contains(view, "chit-agent is responding…") || !strings.Contains(view, "[provenance]") {
+		t.Errorf("no indicator or badge:\n%s", view)
+	}
+}
