@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/infrashift/chit/clients/chit-tui/internal/api"
 	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/config"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/skinpicker"
@@ -215,7 +216,7 @@ func (m *Model) syncActionBar() {
 	}
 	errStr := ""
 	if m.err != nil {
-		errStr = m.err.Error()
+		errStr = api.UserMessage(m.err)
 	}
 	m.actionBar.SetContext(team, m.activeChannelDisplayName(), user)
 	m.actionBar.SetError(errStr)

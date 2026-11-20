@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/api"
@@ -439,6 +440,10 @@ func CreateTagAndApplyCmd(ctx context.Context, client api.ChitClient, name, post
 			scope, channelID = model.TagScopePrivate, ""
 		}
 		assert.That(scope == model.TagScopePrivate || channelID != "", "CreateTagAndApplyCmd: a channel tag without a channel")
+		// The server refuses a bad name with a 400; say why first.
+		if err := model.ValidTagName(name); err != nil {
+			return TagCreatedMsg{Tag: nil, Err: fmt.Errorf("tag %q: %w", name, err)}
+		}
 		tag, err := client.CreateTag(ctx, name, scope, channelID)
 		if err != nil {
 			return TagCreatedMsg{Tag: nil, Err: err}

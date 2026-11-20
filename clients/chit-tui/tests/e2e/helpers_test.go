@@ -17,6 +17,12 @@ const (
 	aliceKratosID = "a11ce000-0000-4000-a000-000000000001"
 	bobKratosID   = "b0b00000-0000-4000-a000-000000000002"
 	chadKratosID  = "c4ad0000-0000-4000-a000-000000000003"
+	dianaKratosID = "d1a4a000-0000-4000-a000-000000000004"
+	// agentKratosID is chit-agent, a user with actor_type "agent".
+	agentKratosID = "a9e47000-0000-4000-a000-000000000006"
+	// halodClientID is the machine actor that the TUI Makefile allows to
+	// post on behalf of a person (CHIT_ON_BEHALF_OF_CLIENTS).
+	halodClientID = "tui-e2e-halod"
 )
 
 func serverURL() string {

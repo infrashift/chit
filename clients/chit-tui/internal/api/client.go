@@ -66,6 +66,17 @@ type ChitClient interface {
 	RemoveTagFromPost(ctx context.Context, postID, tagID string) error
 	AddChannelMember(ctx context.Context, channelID, userID string) error
 	RemoveChannelMember(ctx context.Context, channelID, userID string) error
+	// GetTags returns the tags the caller can see in one channel.
+	GetTags(ctx context.Context, channelID string) ([]*model.Tag, error)
+	RenameTag(ctx context.Context, tagID, name string) (*model.Tag, error)
+	DeleteTag(ctx context.Context, tagID string) error
+	GetChannelTags(ctx context.Context, channelID string) ([]*model.Tag, error)
+	AddChannelTag(ctx context.Context, channelID, tagID string) error
+	RemoveChannelTag(ctx context.Context, channelID, tagID string) error
+	FindChannelsByTags(ctx context.Context, tagIDs []string, teamID string) ([]*model.TaggedChannel, error)
+	GetFileInfo(ctx context.Context, fileID string) (*model.File, error)
+	UploadFile(ctx context.Context, channelID, name, contentType, altText string, r io.Reader) (*model.File, error)
+	DownloadFile(ctx context.Context, fileID string, w io.Writer, limit int64) (int64, error)
 }
 
 type httpClient struct {

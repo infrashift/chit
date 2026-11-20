@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Clear server errors** — the action bar tells the cause of a `429` (with the wait from `Retry-After`), a `409`, a membership refusal (with its detail) and each attachment refusal
+- **Tag names checked first** — the TUI refuses a tag name that the server refuses, and tells why
+- **HALO contract** — the models and the API client know attachments, provenance, on-behalf-of posts, actor types, tag rename and delete, and channel tags
+- **Unicode #tags** — a `#tag` can hold the letters and digits of each script
+
 - **Config file** — `~/.config/chit/config.toml` (or `CHIT_CONFIG_FILE`), checked against a CUE schema; an invalid setting is a warning, not a failure. The environment still overrides the file
 - **Theme flags and appearance** — `--theme`, `--appearance` and `--list-themes`; `theme_dark` and `theme_light` choose a theme by the terminal's appearance
 - **Light themes** — `tokyo-night-day`, `catppuccin-latte`, `kanagawa-lotus` and `dayfox` join the four dark themes

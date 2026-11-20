@@ -21,6 +21,24 @@ const (
 	// WebSocketEventPostTagsUpdated carries a post's whole tag list after a
 	// tag is added or removed.
 	WebSocketEventPostTagsUpdated = "post_tags_updated"
+	// WebSocketEventStreamStatus tells that a sender starts, continues or
+	// ends a streamed reply in a channel.
+	WebSocketEventStreamStatus = "stream_status"
+	// WebSocketEventTagUpdated carries a renamed tag.
+	WebSocketEventTagUpdated = "tag_updated"
+	// WebSocketEventTagDeleted carries the ID of a deleted tag. No
+	// post_tags_updated follows it.
+	WebSocketEventTagDeleted = "tag_deleted"
+	// WebSocketEventChannelTagsUpdated carries a channel's whole tag list,
+	// as the receiver can see it.
+	WebSocketEventChannelTagsUpdated = "channel_tags_updated"
+)
+
+// Stream states of a stream_status event.
+const (
+	StreamStarted  = "started"
+	StreamProgress = "progress"
+	StreamFinished = "finished"
 )
 
 // WebSocketEvent mirrors the server's WebSocketEvent model.
@@ -51,6 +69,11 @@ type AppError struct {
 	Message       string `json:"message"`
 	DetailedError string `json:"detailed_error,omitempty"`
 	StatusCode    int    `json:"status_code"`
+	// Reason and Detail carry a policy's own refusal: a short stable code
+	// and a text for a person. The server sets them only on
+	// channel.membership_refused.
+	Reason string `json:"reason,omitempty"`
+	Detail string `json:"detail,omitempty"`
 }
 
 func (e *AppError) Error() string {

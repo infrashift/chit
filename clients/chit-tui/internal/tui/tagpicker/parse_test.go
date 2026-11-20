@@ -151,3 +151,19 @@ func TestExtractHashtags_SkipsNumbersAndCode(t *testing.T) {
 		t.Errorf("tags = %v, want [ok]", tags)
 	}
 }
+
+// The server takes letters and digits of each script in a tag name, so a
+// #tag in any script is a tag. A tag still needs a letter, and it stops at
+// '.', so a sentence-ending period is not part of it.
+func TestExtractHashtags_Unicode(t *testing.T) {
+	got := tagpicker.ExtractHashtags("#Résumé and #日本語 and #été2 and #123 then #docs.")
+	want := []string{"résumé", "日本語", "été2", "docs"}
+	if len(got) != len(want) {
+		t.Fatalf("ExtractHashtags = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("tag %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
