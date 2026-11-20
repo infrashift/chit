@@ -14,6 +14,16 @@ type SkinSelectedMsg struct {
 	Name string
 }
 
+// SkinPreviewMsg is sent when the cursor moves to a theme. The parent shows
+// the theme and does not save it.
+type SkinPreviewMsg struct {
+	Name string
+}
+
+// SkinCancelledMsg is sent when Esc closes the picker. The parent goes back
+// to the theme that was active before the previews.
+type SkinCancelledMsg struct{}
+
 // Model is the skin picker overlay component.
 type Model struct {
 	skins   []string
@@ -43,11 +53,18 @@ func (m *Model) SetSkins(names []string) {
 	m.cursor = 0
 }
 
-// Open shows the skin picker overlay.
-func (m *Model) Open() {
+// Open shows the skin picker overlay with the cursor on current, or on the
+// first theme when the list does not hold current.
+func (m *Model) Open(current string) {
 	m.visible = true
 	m.focused = true
 	m.cursor = 0
+	for i, n := range m.skins {
+		if n == current {
+			m.cursor = i
+		}
+	}
+	assert.That(len(m.skins) == 0 || m.cursor < len(m.skins), "skinpicker.Open: cursor past the list")
 }
 
 // Close hides the skin picker overlay.
@@ -95,7 +112,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch {
 	case keyMsg.Type == tea.KeyEscape:
 		m.Close()
-		return m, nil
+		return m, func() tea.Msg { return SkinCancelledMsg{} }
 	case keyMsg.Type == tea.KeyEnter:
 		if len(m.skins) > 0 && m.cursor < len(m.skins) {
 			name := m.skins[m.cursor]
@@ -106,20 +123,26 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		return m, nil
 	case key.Matches(keyMsg, key.NewBinding(key.WithKeys("up", "k"))):
-		if m.cursor > 0 {
-			m.cursor--
-		}
-		assert.That(m.cursor >= 0, "skinpicker.Update: cursor moved above the list")
-		return m, nil
+		return m.move(-1)
 	case key.Matches(keyMsg, key.NewBinding(key.WithKeys("down", "j"))):
-		if m.cursor < len(m.skins)-1 {
-			m.cursor++
-		}
-		assert.That(len(m.skins) == 0 || m.cursor < len(m.skins), "skinpicker.Update: cursor moved below the list")
-		return m, nil
+		return m.move(1)
 	}
 
 	return m, nil
+}
+
+// move moves the cursor by delta within the list. A move to another theme
+// sends SkinPreviewMsg for it.
+func (m Model) move(delta int) (Model, tea.Cmd) {
+	assert.That(delta == -1 || delta == 1, "skinpicker.move: a move of more than one row")
+	next := min(max(m.cursor+delta, 0), max(len(m.skins)-1, 0))
+	if next == m.cursor || len(m.skins) == 0 {
+		return m, nil
+	}
+	m.cursor = next
+	name := m.skins[next]
+	assert.That(name != "", "skinpicker.move: an empty theme name")
+	return m, func() tea.Msg { return SkinPreviewMsg{Name: name} }
 }
 
 // View renders the skin picker overlay.
@@ -132,7 +155,7 @@ func (m Model) View() string {
 	assert.That(m.height >= 0, "skinpicker.View: negative height")
 	var items []string
 	items = append(items, m.styles.ListItemActive.Render("Select Theme"))
-	items = append(items, "")
+	items = append(items, m.styles.Timestamp.Render("  ↑/↓ preview · Enter keep · Esc undo"))
 
 	start, end := listwin.Window(m.cursor, len(m.skins), listwin.Rows(m.height))
 	assert.That(start >= 0, "skinpicker.View: window starts before the list")

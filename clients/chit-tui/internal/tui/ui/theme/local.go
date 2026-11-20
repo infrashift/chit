@@ -154,6 +154,7 @@ func LoadLocal(name, themesDir string) (Theme, []string, error) {
 	if t.Author == "" {
 		t.Author = "local"
 	}
+	t.Key, t.Path = normalized, path
 	assert.That(t.Author != "", "LoadLocal: author left empty")
 	return t, warnings, nil
 }
@@ -198,5 +199,6 @@ func loadLegacySkin(name string) (Theme, bool) {
 		return Theme{}, false
 	}
 	assert.That(t.baseSet(), "loadLegacySkin: JSON theme missing a defaulted slot")
+	t.Key, t.Path = normalized, path
 	return t, true
 }

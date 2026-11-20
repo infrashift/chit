@@ -44,6 +44,7 @@ type Model struct {
 // New creates a new input model.
 func New(s styles.Styles) Model {
 	ta := textarea.New()
+	s.ThemeTextArea(&ta)
 	ta.Placeholder = "Type a message… (Alt+Enter for new line)"
 	ta.CharLimit = 65535
 	ta.ShowLineNumbers = false
@@ -79,7 +80,22 @@ func (m Model) Focused() bool {
 }
 
 // SetStyles replaces the styles.
-func (m *Model) SetStyles(s styles.Styles) { m.styles = s }
+//
+// The text area draws through a pointer to its focused or blurred style,
+// and Focus and Blur set that pointer. A copy of the model keeps a pointer
+// into the old copy, so SetStyles sets it again. A focused text area must
+// focus again, and the command that it returns keeps the cursor blink.
+func (m *Model) SetStyles(s styles.Styles) tea.Cmd {
+	m.styles = s
+	s.ThemeTextArea(&m.textarea)
+	if !m.textarea.Focused() {
+		m.textarea.Blur()
+		return nil
+	}
+	cmd := m.textarea.Focus()
+	assert.That(m.textarea.Focused(), "Model.SetStyles: the text area lost focus")
+	return cmd
+}
 
 // SetSize sets the input area dimensions.
 func (m *Model) SetSize(w, h int) {

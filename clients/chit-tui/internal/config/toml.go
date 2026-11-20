@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 
 	"github.com/BurntSushi/toml"
 	"github.com/adrg/xdg"
@@ -27,6 +28,10 @@ type FileSettings struct {
 	ThemeDark   string
 	ThemeLight  string
 	Appearance  string
+	// ThemeWatch and ThemePaint hold "true" or "false" from a TOML boolean,
+	// or "" when the file does not set them.
+	ThemeWatch string
+	ThemePaint string
 }
 
 // fileKeys returns the recognized TOML keys; anything absent from them is
@@ -41,6 +46,8 @@ func fileKeys() []string {
 		"theme_dark",
 		"theme_light",
 		"appearance",
+		"theme_watch",
+		"theme_paint",
 	}
 }
 
@@ -68,6 +75,10 @@ func setFileKey(s *FileSettings, key, v string) bool {
 		s.ThemeLight = v
 	case "appearance":
 		s.Appearance = v
+	case "theme_watch":
+		s.ThemeWatch = v
+	case "theme_paint":
+		s.ThemePaint = v
 	default:
 		return false
 	}
@@ -147,7 +158,8 @@ func stripUnknownKeys(raw map[string]any, warnings *[]string) {
 }
 
 // apply copies validated values onto settings. Anything that survived vetting
-// is known to be a string, so a non-string here is simply skipped.
+// is a string or, for the switches, a boolean. A boolean is stored as
+// "true" or "false".
 func apply(raw map[string]any, settings *FileSettings) {
 	assert.That(raw != nil, "apply: nil document")
 	assert.That(settings != nil, "apply: nil settings")
@@ -155,6 +167,9 @@ func apply(raw map[string]any, settings *FileSettings) {
 		v, ok := raw[key]
 		if !ok {
 			continue
+		}
+		if b, ok := v.(bool); ok {
+			v = strconv.FormatBool(b)
 		}
 		if s, ok := v.(string); ok {
 			handled := setFileKey(settings, key, s)

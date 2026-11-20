@@ -52,6 +52,8 @@ configuration error is an absent server URL.
 | `theme` | `CHIT_THEME` | — | Theme to use regardless of appearance |
 | `theme_dark`, `theme_light` | — | — | Themes for dark and light terminals, used when `theme` is not set |
 | `appearance` | — | `system` | `dark`, `light`, or `system` (ask the terminal) |
+| `theme_watch` | — | `true` | Apply each change to the active local theme file while the client runs |
+| `theme_paint` | — | `true` | Set the default colors of the terminal to the colors of the theme |
 | — | `CHIT_SESSION_TOKEN` | — | Pre-set session token (skips interactive login) |
 
 `CHIT_SESSION_TOKEN` has no config-file key; it can only come from the
@@ -146,6 +148,25 @@ A configured theme name that does not resolve is a warning, not an error: the
 client falls through to the next choice. See the
 [Themes guide](/chit/tui/guides/themes/) for the full order and for how
 `/theme` saves the choice of the user back to this file.
+
+### `theme_watch`, `theme_paint`
+
+Both keys are TOML booleans, and both are `true` when the file does not set
+them. Another type, such as `"no"`, is a warning, and the client uses the
+default.
+
+- `theme_watch` applies each saved change to the file of the active local
+  theme while the client runs.
+- `theme_paint` sets the default foreground and background of the terminal
+  to the colors of the theme. The client gives the terminal its own colors
+  back when it stops.
+
+```toml
+theme_watch = true
+theme_paint = false
+```
+
+See [Change the Theme While the Client Runs](/chit/tui/guides/themes/#change-the-theme-while-the-client-runs).
 
 ## Command-Line Flags
 

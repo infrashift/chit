@@ -19,6 +19,10 @@ type Config struct {
 	Appearance   string
 	AuthHeader   string
 	SessionFile  string
+	// ThemeWatch reloads an edited local theme file while the client runs.
+	ThemeWatch bool
+	// ThemePaint sets the terminal's default colors to the theme's.
+	ThemePaint bool
 }
 
 // defaults
@@ -51,6 +55,8 @@ func Load() (*Config, []string, error) {
 		Appearance:   file.Appearance,
 		AuthHeader:   firstNonEmpty(os.Getenv("CHIT_AUTH_HEADER"), file.AuthHeader, DefaultAuthHeader),
 		SessionFile:  firstNonEmpty(os.Getenv("CHIT_SESSION_FILE"), file.SessionFile),
+		ThemeWatch:   file.ThemeWatch != "false",
+		ThemePaint:   file.ThemePaint != "false",
 	}
 
 	if err := cfg.Validate(); err != nil {

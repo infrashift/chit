@@ -27,6 +27,7 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/threadinbox"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/confirm"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/viewport"
 	"github.com/infrashift/chit/clients/chit-tui/internal/ws"
 )
@@ -140,6 +141,20 @@ type Model struct {
 	// themeSetting is the config key a theme picked in the client is saved
 	// under; see config.Config.ThemeSettingKey.
 	themeSetting string
+	// The active theme and its runtime state (themes.go).
+	themeKey  string
+	themePath string
+	themeMod  time.Time
+	// previewFrom is the theme before the first preview of a picker
+	// session, or nil when no preview is on screen.
+	previewFrom *themeState
+	// themeCache holds the themes resolved during one picker session, so
+	// a preview does not read a file for each cursor move.
+	themeCache map[string]theme.Theme
+	themeWatch bool
+	themePaint bool
+	// watchSeq names the one live theme-file watch loop (themes.go).
+	watchSeq uint64
 	// clipboardOut is where copying writes its OSC 52 sequence: the
 	// terminal, except in tests, which would otherwise write escape
 	// sequences into their output.
@@ -199,6 +214,8 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 		confirm:      confirm.New(s, questionTTL),
 		loginModel:   login.New(s, kratosClient),
 		themeSetting: "theme",
+		themeWatch:   cfg != nil && cfg.ThemeWatch,
+		themePaint:   cfg != nil && cfg.ThemePaint,
 		clipboardOut: os.Stdout,
 		appState:     state,
 		tokenStore:   tokenStore,
@@ -273,10 +290,12 @@ func (m Model) Init() tea.Cmd {
 	assert.That(m.scope != nil, "Init: nil request scope")
 	assert.That(m.appState >= AppStateLogin, "Init: unknown app state")
 	assert.That(m.appState <= AppStateRunning, "Init: app state past running")
+	// The terminal takes the theme's colors before anything else draws.
+	paint := m.paintCmd()
 	if m.appState == AppStateLogin || m.appState == AppStateReLogin {
-		return nil
+		return paint
 	}
-	return m.initRunning()
+	return tea.Batch(paint, m.watchTick(m.watchSeq), m.initRunning())
 }
 
 func (m Model) initRunning() tea.Cmd {

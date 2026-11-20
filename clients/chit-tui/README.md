@@ -42,6 +42,8 @@ The client reads settings from `~/.config/chit/config.toml` (set `CHIT_CONFIG_FI
 | `auth_header` | `CHIT_AUTH_HEADER` | `X-Session-Token` | Header the session token is sent in |
 | `theme` | `CHIT_THEME` | — | Theme to use whatever the terminal's appearance |
 | `theme_dark`, `theme_light` | — | — | Themes for dark and light terminals, used when `theme` is not set |
+| `theme_watch` | — | `true` | Apply each change to the active local theme file while the client runs |
+| `theme_paint` | — | `true` | Set the default colors of the terminal to the colors of the theme |
 | `appearance` | — | `system` | `dark`, `light`, or `system` (ask the terminal) |
 
 ```toml
@@ -62,6 +64,8 @@ theme_light = "kanagawa-lotus"
 ## Themes
 
 Bundled: `tokyo-night` and `tokyo-night-day` (the defaults for dark and light terminals), `catppuccin`, `catppuccin-latte`, `kanagawa`, `kanagawa-lotus`, `nightfox`, `dayfox`.
+
+A theme change applies at once, with no restart. `Ctrl+T` or `/theme` opens the picker: each cursor move shows that theme, `Enter` keeps it, and `Esc` puts the old one back. `/theme <name>` sets one theme, and `/theme reload` reads the active theme file again. The client also applies each saved change to a local theme file by itself.
 
 Pick one for the session with `/theme`. The client saves it to the config file as `theme`. If you set `theme_dark` and `theme_light`, the client saves it as the theme for the current appearance. This keeps the automatic change between dark and light.
 

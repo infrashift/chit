@@ -36,6 +36,8 @@ func keyMessage(key string) (string, bool) {
 		return `must be "ws" or "wss"`, true
 	case "appearance":
 		return `must be "dark", "light", or "system"`, true
+	case "theme_watch", "theme_paint":
+		return "must be true or false", true
 	default:
 		return "", false
 	}

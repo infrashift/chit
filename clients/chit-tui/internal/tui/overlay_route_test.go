@@ -26,7 +26,7 @@ func modelWithEveryOverlayOpen() Model {
 	m.threadInbox = threadinbox.New(s)
 	m.threadInbox.Open()
 	m.skinPicker = skinpicker.New(s)
-	m.skinPicker.Open()
+	m.skinPicker.Open("")
 	m.chCreator = chcreator.New(s)
 	m.chCreator.Open("team-1")
 	m.tagPicker = tagpicker.New(s)

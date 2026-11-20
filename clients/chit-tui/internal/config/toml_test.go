@@ -250,3 +250,28 @@ func containsSubstring(haystack []string, needle string) bool {
 	}
 	return false
 }
+
+func TestLoadFile_ThemeSwitches(t *testing.T) {
+	path := writeFile(t, "config.toml", "theme_watch = false\ntheme_paint = true\n")
+	settings, warnings := config.LoadFile(path)
+	if len(warnings) != 0 || settings.ThemeWatch != "false" || settings.ThemePaint != "true" {
+		t.Errorf("settings = %+v, warnings = %v", settings, warnings)
+	}
+	bad := writeFile(t, "bad.toml", "theme_watch = \"no\"\n")
+	settings, warnings = config.LoadFile(bad)
+	if settings.ThemeWatch != "" || !containsSubstring(warnings, "true or false") {
+		t.Errorf("a string switch: settings = %+v, warnings = %v", settings, warnings)
+	}
+}
+
+func TestLoad_ThemeSwitchesDefaultOn(t *testing.T) {
+	t.Setenv("CHIT_CONFIG_FILE", writeFile(t, "config.toml", "theme_paint = false\n"))
+	t.Setenv("CHIT_SERVER_URL", "http://localhost:8065")
+	cfg, _, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.ThemeWatch || cfg.ThemePaint {
+		t.Errorf("ThemeWatch = %v, ThemePaint = %v; want true, false", cfg.ThemeWatch, cfg.ThemePaint)
+	}
+}

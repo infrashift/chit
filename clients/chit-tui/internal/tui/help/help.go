@@ -94,6 +94,7 @@ func keyBindings() []binding {
 		{"p", "pin or unpin a post (history pane)"},
 		{"esc", "close overlay / leave thread / back to history"},
 		{"?", "this help (history or thread pane)"},
+		{"ctrl+t", "themes: up/down shows each one, enter keeps it, esc undoes"},
 		{"ctrl+c", "quit"},
 	}
 	assert.That(len(bs) > 0, "keyBindings: no bindings")
@@ -113,6 +114,7 @@ func keyBindings() []binding {
 func hints() []string {
 	hs := []string{
 		"To reply: press tab to focus the history pane, pick a post with j/k, then enter.",
+		"A theme changes at once, with no restart. A theme file that you edit loads again by itself.",
 	}
 	assert.That(len(hs) > 0, "hints: no hints")
 	for _, h := range hs {
@@ -126,7 +128,7 @@ func hints() []string {
 // server decides whether it is a command.
 func clientCommands() []binding {
 	bs := []binding{
-		{"/theme", "choose a theme (alias: /skin)"},
+		{"/theme", "choose a theme; /theme <name> sets one, /theme reload reads it again (alias: /skin)"},
 		{"/group", "start a group conversation with three or more people"},
 		{"/nick", "change your display name"},
 		{"/username", "change your username (breaks existing @mentions)"},

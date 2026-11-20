@@ -34,7 +34,7 @@ func TestSkinPicker_ScrollsToTheCursor(t *testing.T) {
 		names[i] = fmt.Sprintf("theme-%02d", i)
 	}
 	m.SetSkins(names)
-	m.Open()
+	m.Open("")
 	for _, k := range down(scrollRows - 1) {
 		m, _ = m.Update(k)
 	}

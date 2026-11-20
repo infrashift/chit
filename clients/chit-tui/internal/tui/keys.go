@@ -93,6 +93,8 @@ func (m *Model) globalKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 		return m.openChCreator(), true
 	case key.Matches(msg, m.keys.CmdPalette):
 		return m.openPalette(""), true
+	case key.Matches(msg, m.keys.Theme):
+		return m.openThemePicker(), true
 	case key.Matches(msg, m.keys.Search):
 		return m.openPalette("?"), true
 	// "?" is a printable key: only open help when not typing in a text box.

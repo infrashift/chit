@@ -55,6 +55,7 @@ type Model struct {
 // New creates a new member picker model.
 func New(s styles.Styles) Model {
 	ti := textinput.New()
+	s.ThemeTextInput(&ti)
 	ti.Placeholder = "Search users..."
 	ti.CharLimit = 256
 	m := Model{
@@ -119,6 +120,7 @@ func (m *Model) Blur() {
 func (m *Model) SetStyles(s styles.Styles) {
 	m.styles = s
 	m.chips.SetStyles(s)
+	s.ThemeTextInput(&m.input)
 }
 
 // SetSize sets dimensions.

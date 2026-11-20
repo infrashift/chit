@@ -188,3 +188,20 @@ func TestFlow_GroupPickerChips(t *testing.T) {
 		t.Errorf("Backspace did not remove the pick:\n%s", view)
 	}
 }
+
+// Ctrl+T opens the theme picker in a real program; a move previews the next
+// theme and Esc puts the first one back.
+func TestFlow_ThemePreviewAndUndo(t *testing.T) {
+	tm := programWith(t, flowClient())
+	waitForScreen(t, tm, "welcome aboard")
+
+	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlT})
+	waitForScreen(t, tm, "Esc undo")
+	tm.Send(tea.KeyMsg{Type: tea.KeyDown})
+	tm.Send(tea.KeyMsg{Type: tea.KeyEscape})
+
+	view := finalViewAfter(t, tm, "Type a message")
+	if strings.Contains(view, "Select Theme") {
+		t.Errorf("Esc left the theme picker open:\n%s", view)
+	}
+}

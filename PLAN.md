@@ -93,10 +93,10 @@ Tracking: [ISSUE-019](.okfw/issues/issue-019-the-tui-has-no-reusable-bubbles-for
 ## Phase 14: Runtime themes
 Tracking: [ISSUE-020](.okfw/issues/issue-020-a-theme-change-does-not-restyle-all-of-the-tui-and-edited-themes-need-a-restart--01a1f77112c7.md)
 
-- [ ] Make one restyle path, and test that a theme change equals a fresh start.
-- [ ] Add the preview in the picker, /theme <name> and /theme reload.
-- [ ] Add the theme-file watch and the theme_watch setting.
-- [ ] Tell users about /theme in the help overlay and the docs.
+- [x] Make one restyle path, and test that a theme change equals a fresh start.
+- [x] Add the preview in the picker, /theme <name> and /theme reload.
+- [x] Add the theme-file watch and the theme_watch setting.
+- [x] Tell users about /theme in the help overlay and the docs.
 
 ## Phase 15: Show the HALO data
 Tracking: [ISSUE-021](.okfw/issues/issue-021-the-tui-does-not-show-agents-provenance-attachments-or-stream-status--01a1f77112d1.md)

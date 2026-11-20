@@ -1,6 +1,9 @@
 package tui
 
-import "github.com/charmbracelet/bubbles/key"
+import (
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
+)
 
 // KeyMap defines the global key bindings.
 type KeyMap struct {
@@ -11,6 +14,7 @@ type KeyMap struct {
 	Search     key.Binding
 	NewDM      key.Binding
 	NewChannel key.Binding
+	Theme      key.Binding
 	TagPicker  key.Binding
 	Copy       key.Binding
 	Edit       key.Binding
@@ -23,61 +27,33 @@ type KeyMap struct {
 // DefaultKeyMap returns the default key bindings.
 func DefaultKeyMap() KeyMap {
 	return KeyMap{
-		Quit: key.NewBinding(
-			key.WithKeys("ctrl+c"),
-			key.WithHelp("ctrl+c", "quit"),
-		),
-		Tab: key.NewBinding(
-			key.WithKeys("tab"),
-			key.WithHelp("tab", "next pane"),
-		),
-		ShiftTab: key.NewBinding(
-			key.WithKeys("shift+tab"),
-			key.WithHelp("shift+tab", "prev pane"),
-		),
-		CmdPalette: key.NewBinding(
-			key.WithKeys("ctrl+k"),
-			key.WithHelp("ctrl+k", "palette"),
-		),
-		Search: key.NewBinding(
-			key.WithKeys("ctrl+s"),
-			key.WithHelp("ctrl+s", "search"),
-		),
-		NewDM: key.NewBinding(
-			key.WithKeys("ctrl+d"),
-			key.WithHelp("ctrl+d", "people"),
-		),
-		NewChannel: key.NewBinding(
-			key.WithKeys("ctrl+n"),
-			key.WithHelp("ctrl+n", "new channel"),
-		),
-		TagPicker: key.NewBinding(
-			key.WithKeys("t"),
-			key.WithHelp("t", "tag post"),
-		),
-		Copy: key.NewBinding(
-			key.WithKeys("y"),
-			key.WithHelp("y", "copy selection"),
-		),
-		Edit: key.NewBinding(
-			key.WithKeys("e"),
-			key.WithHelp("e", "edit your post"),
-		),
-		Delete: key.NewBinding(
-			key.WithKeys("d"),
-			key.WithHelp("d d", "delete your post"),
-		),
-		Pin: key.NewBinding(
-			key.WithKeys("p"),
-			key.WithHelp("p", "pin or unpin a post"),
-		),
-		Help: key.NewBinding(
-			key.WithKeys("?"),
-			key.WithHelp("?", "help"),
-		),
-		Escape: key.NewBinding(
-			key.WithKeys("esc"),
-			key.WithHelp("esc", "close overlay"),
-		),
+		Quit:       bind("ctrl+c", "quit"),
+		Tab:        bind("tab", "next pane"),
+		ShiftTab:   bind("shift+tab", "prev pane"),
+		CmdPalette: bind("ctrl+k", "palette"),
+		Search:     bind("ctrl+s", "search"),
+		NewDM:      bind("ctrl+d", "people"),
+		NewChannel: bind("ctrl+n", "new channel"),
+		Theme:      bind("ctrl+t", "themes"),
+		TagPicker:  bind("t", "tag post"),
+		Copy:       bind("y", "copy selection"),
+		Edit:       bind("e", "edit your post"),
+		Delete:     bindHelp("d", "d d", "delete your post"),
+		Pin:        bind("p", "pin or unpin a post"),
+		Help:       bind("?", "help"),
+		Escape:     bind("esc", "close overlay"),
 	}
+}
+
+// bind makes a binding of one key, with its help text.
+func bind(keys, desc string) key.Binding {
+	return bindHelp(keys, keys, desc)
+}
+
+// bindHelp makes a binding of one key whose help names other keys, as
+// "d d" for the delete that asks first.
+func bindHelp(keys, helpKeys, desc string) key.Binding {
+	b := key.NewBinding(key.WithKeys(keys), key.WithHelp(helpKeys, desc))
+	assert.That(len(b.Keys()) == 1 && b.Help().Desc == desc, "bindHelp: binding not built")
+	return b
 }

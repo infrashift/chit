@@ -70,7 +70,9 @@ func (m Model) handleLoginSuccess(msg login.LoginSuccessMsg) (tea.Model, tea.Cmd
 	}
 
 	m.appState = AppStateRunning
-	return m, tea.Batch(m.initRunning(), saveCmd)
+	// The watch loop ended while the sign-in screen dropped its ticks.
+	watch := m.restartThemeWatch()
+	return m, tea.Batch(m.initRunning(), saveCmd, watch)
 }
 
 // handleAuthExpired keeps the session's state for the re-login, which is

@@ -6,11 +6,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
-	"github.com/infrashift/chit/clients/chit-tui/internal/config"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/input"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/palette"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
 
 var (
@@ -104,11 +102,7 @@ func (m Model) runClientCommand(verb, args string) (tea.Model, tea.Cmd, bool) {
 	// These act on this client alone; the server knows nothing about them.
 	switch verb {
 	case "/skin", "/theme":
-		m.skinPicker.SetSkins(theme.ListAvailable(config.ThemesDir()))
-		cmd := m.setFocus(FocusSkinPicker)
-		m.skinPicker.Open()
-		assert.That(m.focus == FocusSkinPicker, "runClientCommand: skin picker not focused")
-		return m, cmd, true
+		return handled(m.themeCommand(args))
 	case "/logout":
 		return handled(m.handleLogout())
 	case "/group":

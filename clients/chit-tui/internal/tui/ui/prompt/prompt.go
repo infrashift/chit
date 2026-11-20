@@ -47,6 +47,7 @@ type Model struct {
 func New(s styles.Styles, limit int) Model {
 	assert.That(limit > 0, "prompt.New: the limit must be positive")
 	ti := textinput.New()
+	s.ThemeTextInput(&ti)
 	ti.CharLimit = limit
 	ti.Prompt = "> "
 	m := Model{input: ti, styles: s}
@@ -106,6 +107,7 @@ func (m *Model) SetSize(w, h int) {
 func (m *Model) SetStyles(s styles.Styles) {
 	assert.That(s.MarkdownStyleConfig.CodeBlock.Chroma != nil, "prompt.SetStyles: styles not built by styles.New")
 	m.styles = s
+	s.ThemeTextInput(&m.input)
 }
 
 // Update handles Enter and Esc, and gives each other message to the input.

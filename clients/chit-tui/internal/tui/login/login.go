@@ -56,6 +56,8 @@ func New(s styles.Styles, kratosClient *auth.KratosClient) Model {
 	assert.That(!pw.Focused(), "login.New: password focused")
 	assert.That(pw.EchoMode == textinput.EchoPassword, "login.New: password echoed in clear")
 
+	s.ThemeTextInput(&id)
+	s.ThemeTextInput(&pw)
 	return Model{
 		identifier:   id,
 		password:     pw,
@@ -76,6 +78,8 @@ func (m *Model) SetSize(w, h int) {
 func (m *Model) SetStyles(s styles.Styles) {
 	assert.That(s.MarkdownStyleConfig.CodeBlock.Chroma != nil, "login.SetStyles: styles not built by styles.New")
 	m.styles = s
+	s.ThemeTextInput(&m.identifier)
+	s.ThemeTextInput(&m.password)
 }
 
 // Reset clears the form for re-login.

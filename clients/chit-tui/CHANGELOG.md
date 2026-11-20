@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tag names checked first** — the TUI refuses a tag name that the server refuses, and tells why
 - **HALO contract** — the models and the API client know attachments, provenance, on-behalf-of posts, actor types, tag rename and delete, and channel tags
 - **Unicode #tags** — a `#tag` can hold the letters and digits of each script
+- **Runtime themes** — `Ctrl+T` opens the theme picker, which shows each theme as the cursor moves; `Esc` undoes the preview. `/theme <name>` and `/theme reload`. An edited local theme file applies by itself (`theme_watch`). The terminal's own colors follow the theme (`theme_paint`, OSC 10/11)
 - **Reusable Bubbles** — `ui/confirm`, `ui/chips`, `ui/prompt`, `ui/activity` and `ui/filepick`; the post delete and the member picker use the first two
 
 - **Config file** — `~/.config/chit/config.toml` (or `CHIT_CONFIG_FILE`), checked against a CUE schema; an invalid setting is a warning, not a failure. The environment still overrides the file
@@ -33,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Functional tests** — flows run in a real Bubble Tea program with teatest; benchmarks cover rendering
 
 ### Changed
+
+- **Themed text boxes** — the message input and each search box take the colors of the theme, not those of bubbles. The cursor line of the input lost its black or white background
 
 - **Session file location** — the stored session moves from `~/.config/chit-tui/session.json` to `~/.config/chit/session.json`, beside the config and themes. An existing session is moved over on first start, so nobody is signed out
 - **Slash commands go to the server** — anything but the client's own commands is sent as typed, rather than opening the palette and discarding the text

@@ -51,6 +51,7 @@ type Model struct {
 // New creates a new tag picker model.
 func New(s styles.Styles) Model {
 	ti := textinput.New()
+	s.ThemeTextInput(&ti)
 	ti.Placeholder = "Filter tags... (ctrl+n create, ctrl+t private)"
 	ti.CharLimit = 50
 	m := Model{
@@ -134,7 +135,10 @@ func (m *Model) Blur() {
 }
 
 // SetStyles replaces the styles.
-func (m *Model) SetStyles(s styles.Styles) { m.styles = s }
+func (m *Model) SetStyles(s styles.Styles) {
+	m.styles = s
+	s.ThemeTextInput(&m.input)
+}
 
 // SetSize sets dimensions.
 func (m *Model) SetSize(w, h int) {

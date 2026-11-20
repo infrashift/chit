@@ -18,9 +18,8 @@ a light variant. You can also write a theme — see
 
 There are four ways to pick one:
 
-- **In the client** — type `/theme` (or its alias `/skin`) and pick from the
-  list with `↑`/`↓` (or `j`/`k`) and `Enter`. The new theme applies at once,
-  with no restart. The client also saves it to the config file (see below).
+- **In the client** — see [Change the Theme While the Client Runs](#change-the-theme-while-the-client-runs).
+  The client also saves the theme to the config file (see below).
 - **For one run** — `chit-tui --theme kanagawa`.
 - **In the config file** — `theme = "kanagawa"` in
   `~/.config/chit/config.toml`.
@@ -37,6 +36,41 @@ theme_light = "kanagawa-lotus"
 
 `chit-tui --list-themes` prints every theme name you can use: the bundled
 ones, then the local ones, marked `(local)`. The `/theme` picker lists the same set.
+
+## Change the Theme While the Client Runs
+
+A theme change applies at once. You do not restart the client.
+
+- **`Ctrl+T` or `/theme`** opens the theme picker on the active theme.
+  `↑`/`↓` (or `k`/`j`) shows each theme on the full screen as the cursor
+  moves to it. `Enter` keeps the theme and saves it. `Esc` puts the theme
+  from before the picker back, and saves nothing.
+- **`/theme <name>`** applies and saves one theme, for example
+  `/theme kanagawa`. For a name that does not exist, the client shows the
+  names that are near it.
+- **`/theme reload`** reads the active theme file again. Use it after you
+  edit a [custom theme](/chit/tui/guides/custom-themes/).
+
+The client also reads an edited local theme file again by itself. Every 2
+seconds, it examines the time of the last change of the active theme file.
+When the time changes, the client loads the file and applies it. If the
+file has an error, the client shows the error and keeps the current theme.
+To stop this, set `theme_watch = false` in the config file.
+
+### Colors of the Terminal
+
+The client sets the default foreground and background of the terminal to
+the colors of the theme. It uses the OSC 10 and OSC 11 control sequences.
+So the cells that the client does not draw on, such as the empty part of a
+short pane, also show the theme. When the client stops, it gives the
+terminal its own colors back with OSC 110 and OSC 111.
+
+Most terminals accept these sequences: xterm, kitty, WezTerm, Alacritty,
+iTerm2, the VTE terminals and tmux 3.3 or later. A terminal that does not
+accept them shows its own colors. To keep the colors of the terminal, set
+`theme_paint = false` in the config file.
+
+The message input and the search boxes also take the colors of the theme.
 
 ## How the Theme Is Chosen
 

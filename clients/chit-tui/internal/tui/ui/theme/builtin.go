@@ -85,6 +85,7 @@ func TokyoNight() Theme {
 	assert.That(t.baseSet(), "TokyoNight: a palette color failed to parse")
 	assert.That(t.Name != "" && t.Author != "", "TokyoNight: name or author unset")
 	assert.That(brighter(t.Foreground, t.Background), "TokyoNight: dark theme with a light background")
+	t.Key = "tokyo-night"
 	return t
 }
 
@@ -100,6 +101,7 @@ func TokyoNightDay() Theme {
 	assert.That(t.baseSet(), "TokyoNightDay: a palette color failed to parse")
 	assert.That(t.Name != "" && t.Author != "", "TokyoNightDay: name or author unset")
 	assert.That(brighter(t.Background, t.Foreground), "TokyoNightDay: light theme with a dark background")
+	t.Key = "tokyo-night-day"
 	return t
 }
 
@@ -196,8 +198,19 @@ func Dayfox() Theme {
 // builtinTheme builds the bundled theme with the exact name given. Each call
 // builds a fresh Theme so callers can mutate what they get back.
 func builtinTheme(name string) (Theme, bool) {
-	assert.That(name == strings.ToLower(name), "builtinTheme: name not lowercased")
-	assert.That(name == strings.TrimSpace(name), "builtinTheme: name not trimmed")
+	t, ok := builtinFlavor(name)
+	if ok {
+		// The display name ("Tokyo Night") is not the name that loads it.
+		t.Key = name
+	}
+	assert.That(!ok || t.Key == name, "builtinTheme: key not set")
+	return t, ok
+}
+
+// builtinFlavor builds the bundled theme name.
+func builtinFlavor(name string) (Theme, bool) {
+	assert.That(name == strings.ToLower(name), "builtinFlavor: name not lowercased")
+	assert.That(name == strings.TrimSpace(name), "builtinFlavor: name not trimmed")
 	switch name {
 	case "tokyo-night":
 		return TokyoNight(), true

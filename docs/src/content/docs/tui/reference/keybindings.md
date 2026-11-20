@@ -20,6 +20,7 @@ These keys work in all panes:
 | `Ctrl+S` | Open the palette in message-search mode (`?`) |
 | `Ctrl+D` | Open the palette in people mode (`@`) |
 | `Ctrl+N` | Create a new team channel |
+| `Ctrl+T` | Open the theme picker |
 | `?` | Help overlay (only when the history or thread pane is focused) |
 | `Esc` | Close overlay → leave thread → from the input, cancel an edit in progress and move focus to history |
 
@@ -151,7 +152,9 @@ chit-tui itself runs these commands, and they never reach the server:
 
 | Command | Action |
 |---------|--------|
-| `/theme` (alias `/skin`) | Choose a theme (see [Themes](/chit/tui/guides/themes/)) |
+| `/theme` (alias `/skin`) | Open the theme picker (see [Themes](/chit/tui/guides/themes/)) |
+| `/theme <name>` | Apply and save one theme |
+| `/theme reload` | Read the active theme file again |
 | `/group` | Start a group conversation with three or more people |
 | `/nick <display name>` | Change your display name |
 | `/username <handle>` | Change your username (breaks existing @mentions) |
@@ -226,13 +229,13 @@ that name, created in the channel if it does not exist.
 
 ## Theme Picker
 
-When the theme picker is open (`/theme`):
+When the theme picker is open (`Ctrl+T` or `/theme`):
 
 | Key | Action |
 |-----|--------|
-| `↑` / `↓` or `k` / `j` | Move selection |
-| `Enter` | Apply and save the theme |
-| `Esc` | Close without changing the theme |
+| `↑` / `↓` or `k` / `j` | Move the selection and show that theme |
+| `Enter` | Keep the theme and save it |
+| `Esc` | Close, and put back the theme from before the picker |
 
 ## Help Overlay
 

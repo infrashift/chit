@@ -133,6 +133,12 @@ func (m Model) routeSessionMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return handled(m.handleProfileUpdated(msg))
 	case skinpicker.SkinSelectedMsg:
 		return handled(m.handleThemeChosen(msg))
+	case skinpicker.SkinPreviewMsg:
+		return handled(m.handleThemePreview(msg))
+	case skinpicker.SkinCancelledMsg:
+		return handled(m.handleThemeCancelled())
+	case themeWatchMsg:
+		return handled(m.handleThemeWatch(msg))
 	case clipboardCopiedMsg:
 		return handled(m.handleClipboardCopied(msg))
 	case ClearErrMsg:

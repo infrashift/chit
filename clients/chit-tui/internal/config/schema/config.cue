@@ -18,4 +18,10 @@
 	theme_dark?:  string
 	theme_light?: string
 	appearance?:  "dark" | "light" | "system"
+
+	// Runtime themes. theme_watch reloads an edited local theme file while
+	// the client runs. theme_paint sets the terminal's own colors to the
+	// theme. Both are on when absent.
+	theme_watch?: bool
+	theme_paint?: bool
 }
