@@ -3,8 +3,8 @@ title: Podman Kube
 description: Deploying the Chit stack with Podman Kube.
 ---
 
-Chit's local stack, chitd included, is defined in `deploy/chit.kube.yml` and
-started with a single command, no Docker Compose required. The manifest
+`deploy/chit.kube.yml` defines Chit's local stack, chitd included. A single
+command starts it, with no Docker Compose. The manifest
 defines two pods: `chit-db`, which runs PostgreSQL, and `chit-app`, which waits
 for it, runs the migrations and starts everything else.
 
@@ -42,23 +42,29 @@ Then the services:
 | **memberhook-stub** | `golang:1.26-alpine` (the builder image of `deploy/Containerfile`) | 4490 on 127.0.0.1 | A stub of HALO's membership hook for the stack e2e, `go run` from `tests/e2e/hookstub` in the checkout. It registers chitd's Hydra client `chit-e2e-memberhook` and allows every member until the e2e names one to refuse. Test only. |
 | **chitd** | `localhost/chit:latest` | 8065 | The Chit server |
 
-The chitd container is configured in the manifest with the database URL, the
-Kratos and Keto URLs, the ZincSearch URL and credentials, and the SeaweedFS
-endpoint and its dev S3 key (`CHIT_S3_*`), the e2e machine actors, and the
-membership hook (`CHIT_MEMBERSHIP_HOOK_*`, pointing at `memberhook-stub`);
-everything else takes chitd's defaults. To set more (for example `CHIT_MACHINE_ACTORS` or
-`CHIT_TRUSTED_PROXY_SECRET`), add it to the `chitd` container's `env` and run
-`make kube-restart`, or run chitd locally with `.env` (see
-[Startup Order](#startup-order)).
+The manifest gives the chitd container these settings:
+
+- the database URL;
+- the Kratos and Keto URLs;
+- the ZincSearch URL and credentials;
+- the SeaweedFS endpoint and its dev S3 key (`CHIT_S3_*`);
+- the e2e machine actors;
+- the membership hook (`CHIT_MEMBERSHIP_HOOK_*`, which points at
+  `memberhook-stub`).
+
+All other settings take the defaults of chitd. To set more (for example
+`CHIT_MACHINE_ACTORS` or `CHIT_TRUSTED_PROXY_SECRET`), add it to the `env` of
+the `chitd` container and run `make kube-restart`. Alternatively, run chitd
+locally with `.env` (see [Startup Order](#startup-order)).
 
 Podman names each container `<pod>-<container>`, e.g. `chit-app-chitd`.
 
-Every image is pinned by digest in the manifest. "TSC" is
+The manifest pins every image by digest. "TSC" is
 `ghcr.io/infrashift/trusted-service-containers`; SeaweedFS is its
 `trusted/seaweedfs`, built from source on UBI9 Micro. PostgreSQL is its
 `trusted/postgresql17`: the signed PGDG RPMs, contrib included, on UBI9
-Minimal. It runs as UID 26 with primary group 0, refuses to run as root, and
-keeps the `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` contract of
+Minimal. It runs as UID 26 with primary group 0, and refuses to run as root.
+It keeps the `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` contract of
 the Docker images. ZincSearch,
 `migrate/migrate` and the Go builder image are not in TSC and come from
 their upstream registries.
@@ -87,8 +93,9 @@ the same way it builds the Ory images.
 ### Upgrading from the DHI PostgreSQL image
 
 Before the switch to `trusted/postgresql17`, `chit-pgdata` held a cluster of
-the DHI `postgres:17-debian` mirror: owned by UID 70, at
-`/var/lib/postgresql/17/data`, with the glibc `en_US.UTF-8` collation. The new
+the DHI `postgres:17-debian` mirror. UID 70 owns this cluster. It is at
+`/var/lib/postgresql/17/data`, and its `LC_COLLATE` is the glibc
+`en_US.UTF-8` locale. The new
 image cannot start on that volume, and it has no `en_US.UTF-8` locale, so move
 the data with a dump and a restore:
 
@@ -118,13 +125,13 @@ make kube-up
 
 The restore prints `ERROR: role "chit" already exists` and one
 `ERROR: invalid LC_COLLATE locale name: "en_US.UTF-8"` for each database. Both
-are expected: the role and the databases already exist, and the rest of the
-dump goes into them. Any other error needs a look before you serve traffic.
-The restored databases use the builtin `C.UTF-8` collation, and every index is
-built again under it.
+are normal: the role and the databases already exist, and the rest of the
+dump goes into them. Examine any other error before you serve traffic.
+The restored databases sort text with the builtin `C.UTF-8` locale, and
+PostgreSQL builds every index again with it.
 
-A volume with nothing to keep must still be created again: run
-`make kube-clean` (or `make uat-clean` for the UAT stack) once, and the next
+If the volume has no data to keep, you must still create it again. Run
+`make kube-clean` (or `make uat-clean` for the UAT stack) one time. The next
 `make kube-up` (or `make uat-up`) initialises an empty volume.
 
 ## Networking
@@ -182,23 +189,22 @@ See [Manual Acceptance Testing](/chit/getting-started/manual-acceptance-testing/
 
 ## Containerfile
 
-The server image is built from `deploy/Containerfile`:
+`make kube-build` builds the server image from `deploy/Containerfile`:
 
 ```bash
 make kube-build
 ```
 
-The Containerfile uses a multi-stage build: Go compilation of `chitd` and
-`chit-reconcile` in a `golang:1.26-alpine` builder stage, then a
-`ubi9-minimal` runtime image that runs as a non-root `chit` user, carries the
-CUE definitions at `/etc/chit/auth` (`CHIT_COMMANDS_CUE_DIR`), and starts
-`chitd`.
+The Containerfile uses a multi-stage build. A `golang:1.26-alpine` builder
+stage compiles `chitd` and `chit-reconcile`. Then a `ubi9-minimal` runtime
+image runs as a non-root `chit` user. It carries the CUE definitions at
+`/etc/chit/auth` (`CHIT_COMMANDS_CUE_DIR`) and starts `chitd`.
 
 ## Test Containerfile
 
 A separate Containerfile at `Containerfiles/Containerfile.test` builds a UBI9
-image with the full Go toolchain for running unit tests. The unit tests use
-in-memory fakes; no PostgreSQL or Ory services are needed.
+image with the full Go toolchain to run unit tests. The unit tests use
+in-memory fakes. They need no PostgreSQL or Ory services.
 
 ```bash
 make test-container
@@ -214,12 +220,12 @@ podman run --rm chit-test:latest go test -run TestSpecific ./internal/model/...
 ## Startup Order
 
 1. `make kube-up` builds the image and starts both pods. The init containers
-   create the databases and run the Kratos, Keto, Hydra and Chit migrations,
-   then the services, chitd included, start.
+   create the databases and run the Kratos, Keto, Hydra and Chit migrations.
+   Then the services, chitd included, start.
 2. Check chitd: `curl http://localhost:8065/api/v1/system/ping`.
 
-To work on chitd itself, stop the pod's copy so `:8065` is free and run your
-build in its place:
+To work on chitd itself, stop the pod's copy so `:8065` is free. Then run the
+local build in its place:
 
 ```bash
 podman stop chit-app-chitd
@@ -228,5 +234,5 @@ make run
 ```
 
 `podman start chit-app-chitd` brings the containerized one back. If you later
-add new migration files, apply them to the running pod with
-`make kube-migrate`; no pod restart required.
+add new migration files, apply them to the pod with
+`make kube-migrate`. The pod does not need a restart.

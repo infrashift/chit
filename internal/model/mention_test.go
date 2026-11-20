@@ -5,12 +5,15 @@ import (
 	"testing"
 )
 
-func TestParseMentions(t *testing.T) {
-	tests := []struct {
-		name    string
-		content string
-		want    []string
-	}{
+// parseMentionsCase is one TestParseMentions case.
+type parseMentionsCase struct {
+	name    string
+	content string
+	want    []string
+}
+
+func parseMentionsCases() []parseMentionsCase {
+	return []parseMentionsCase{
 		{
 			name:    "basic mentions",
 			content: "hello @alice and @bob",
@@ -67,8 +70,10 @@ func TestParseMentions(t *testing.T) {
 			want:    []string{"all", "channel"},
 		},
 	}
+}
 
-	for _, tt := range tests {
+func TestParseMentions(t *testing.T) {
+	for _, tt := range parseMentionsCases() {
 		t.Run(tt.name, func(t *testing.T) {
 			got := ParseMentions(tt.content)
 			if !reflect.DeepEqual(got, tt.want) {

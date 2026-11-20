@@ -193,18 +193,27 @@ func TestLogin_ZeroSize(t *testing.T) {
 	}
 }
 
+// writeLoginJSON writes v as the JSON response body. It runs in the
+// server's goroutine, so a failure is reported with t.Errorf.
+func writeLoginJSON(t *testing.T, w http.ResponseWriter, v any) {
+	t.Helper()
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		t.Errorf("encode response: %v", err)
+	}
+}
+
 func TestInitLoginAndSubmit_Success(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /self-service/login/api", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		writeLoginJSON(t, w, map[string]any{
 			"id":         "flow-1",
 			"expires_at": "2026-12-31T23:59:59Z",
 		})
 	})
 	mux.HandleFunc("POST /self-service/login", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		writeLoginJSON(t, w, map[string]any{
 			"session_token": "tok-123",
 			"session": map[string]any{
 				"expires_at": "2026-12-31T23:59:59Z",
@@ -249,14 +258,14 @@ func TestInitLoginAndSubmit_LoginError(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /self-service/login/api", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		writeLoginJSON(t, w, map[string]any{
 			"id":         "flow-1",
 			"expires_at": "2026-12-31T23:59:59Z",
 		})
 	})
 	mux.HandleFunc("POST /self-service/login", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(401)
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		writeLoginJSON(t, w, map[string]any{
 			"error": map[string]string{"message": "bad password"},
 		})
 	})

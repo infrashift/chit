@@ -3,14 +3,14 @@ title: Keybindings
 description: Keyboard shortcuts, mouse actions, and slash commands for Chit TUI.
 ---
 
-Chit TUI is keyboard-first: every action has a keybinding, and the most
-common ones are also clickable on the bottom action bar. Press `?` (from the
+Chit TUI is keyboard-first. Every action has a key, and the most
+common actions also have a button on the bottom action bar. Press `?` (from the
 history or thread pane) for the built-in help overlay, which lists the same
 keys as this page.
 
 ## Global Keybindings
 
-These work regardless of which pane is focused:
+These keys work in all panes:
 
 | Key | Action |
 |-----|--------|
@@ -23,14 +23,14 @@ These work regardless of which pane is focused:
 | `?` | Help overlay (only when the history or thread pane is focused) |
 | `Esc` | Close overlay → leave thread → from the input, cancel an edit in progress and move focus to history |
 
-`?` only opens help outside the input, since there it is a character you
-might be typing.
+`?` opens help only outside the input. In the input, `?` is a character that
+you can type.
 
 ## The Palette
 
 `Ctrl+K` opens the unified palette. With an empty query it lists channels and
-DMs sorted by mentions, then unread count, then most recent post — typing
-fuzzy-filters the list. The first character switches modes:
+DMs sorted by mentions, then unread count, then most recent post. When you
+type, the palette fuzzy-filters the list. The first character switches modes:
 
 | Prefix | Mode |
 |--------|------|
@@ -47,13 +47,13 @@ fuzzy-filters the list. The first character switches modes:
 | `Enter` | Select row (in `?`/`@` mode with no results: run the search) |
 | `Esc` | Close palette |
 
-Choosing a search result jumps to that message, opening its channel first if
-it is somewhere else. A search query may include `#tag` to narrow results to
+When you choose a search result, the palette goes to that message. If the
+message is in a different channel, the palette first opens that channel. A search query may include `#tag` to narrow results to
 posts with that tag.
 
-Choosing a slash command does not run it: it is put in the input box as
-`/command `, because most commands take arguments and the palette has no way
-to collect them. Finish the line and press `Enter`.
+When you choose a slash command, the palette does not run it. The palette
+puts it in the input box as `/command `. Most commands take arguments, and the
+palette cannot collect them. Finish the line and press `Enter`.
 
 ## Mouse Actions
 
@@ -72,7 +72,7 @@ second overlay on top of the first.
 
 ## History Pane (Viewport)
 
-When the message history is focused:
+When the message history has focus:
 
 | Key | Action |
 |-----|--------|
@@ -85,22 +85,22 @@ When the message history is focused:
 | `d` `d` | Delete the selected post (your own posts only); press `d` twice |
 | `p` | Pin or unpin the selected post |
 
-Reaching the top of the loaded history fetches the page before it, so older
+At the top of the loaded history, the TUI gets the page before it, so older
 messages load as you scroll back.
 
-**Copying** uses the OSC 52 escape sequence, which the terminal itself acts
-on — that is what makes it work over SSH and inside multiplexers. Not every
-terminal supports it (Terminal.app ignores it; tmux and screen need it
-enabled), so the status bar confirms how many lines were sent rather than
-leaving you to guess.
+**Copy** uses the OSC 52 escape sequence, and the terminal itself acts
+on it, so copy works over SSH and inside multiplexers. Not every
+terminal supports OSC 52. Terminal.app ignores it, and tmux and screen must
+have it enabled. For this reason, the status bar shows how many lines the TUI sent, so you
+do not have to guess.
 
-**Editing** loads the post back into the input, and the action bar shows
+**Edit** loads the post back into the input, and the action bar shows
 `editing — enter saves, esc cancels`. `Enter` replaces the post; `Esc` cancels
-and clears the input. Edit and delete only act on your own posts, matching
-what the server enforces; on anyone else's they do nothing.
+and clears the input. Edit and delete only act on the posts that you wrote, as
+the server enforces. On the posts of other users they do nothing.
 
-**Deleting** cannot be undone and `d` is one stray keystroke away, so the
-first `d` asks for confirmation in the status bar. Press `d` again on the same
+**Delete** cannot be undone, and one stray keystroke can press `d`. For this
+reason, the first `d` shows a prompt in the status bar. Press `d` again on the same
 post to delete it; any other key cancels.
 
 **Pinning** is a channel-level act, so unlike edit and delete it works on
@@ -108,9 +108,9 @@ anyone's post.
 
 ## Thread Pane
 
-Opening a thread replaces the history pane and moves focus to the input,
-which now composes replies to the thread root. Press `Tab` to focus the
-thread pane itself for the scrolling and tagging keys.
+When you open a thread, the thread replaces the history pane. Focus moves to
+the input, which now writes replies to the thread root. To use the scroll and
+tag keys, press `Tab` to move focus to the thread pane.
 
 | Key | Action |
 |-----|--------|
@@ -121,7 +121,7 @@ thread pane itself for the scrolling and tagging keys.
 
 ## Input
 
-When the input area is focused:
+When the input area has focus:
 
 | Key | Action |
 |-----|--------|
@@ -130,12 +130,14 @@ When the input area is focused:
 | `Alt+Enter` | Insert newline |
 | `Esc` | Cancel an edit in progress; move focus to history |
 
-A message starting with `/` is treated as a command when you press `Enter`.
+When you press `Enter`, the TUI treats a message that starts with `/` as a
+command.
 A bare `/` opens the palette in command mode instead, so you can browse.
 
 ### Mention Autocomplete
 
-Typing `@` offers channel members plus `@all`, `@channel`, and `@here`:
+When you type `@`, the input offers channel members plus `@all`, `@channel`,
+and `@here`:
 
 | Key | Action |
 |-----|--------|
@@ -145,7 +147,7 @@ Typing `@` offers channel members plus `@all`, `@channel`, and `@here`:
 
 ## Slash Commands
 
-These commands are handled by chit-tui itself and never reach the server:
+chit-tui itself runs these commands, and they never reach the server:
 
 | Command | Action |
 |---------|--------|
@@ -157,12 +159,12 @@ These commands are handled by chit-tui itself and never reach the server:
 | `/leave` | Leave the current channel |
 | `/logout` | Sign out and clear the stored session |
 
-Anything else starting with `/` is sent to the server, which owns the command
-registry and decides whether it is a command; text that is not one is posted
-as an ordinary message.
+chit-tui sends all other text that starts with `/` to the server. The server
+owns the command registry and decides whether the text is a command. If the
+text is not a command, the server posts it as an ordinary message.
 
-`/nick` and `/username` are separate because renaming your handle breaks
-every @mention already written, while a display name can change freely.
+`/nick` and `/username` are separate commands. A new handle breaks every
+@mention that people wrote before, but a display name can change freely.
 
 ## Thread Inbox
 
@@ -190,7 +192,7 @@ When the channel creator overlay is open (`Ctrl+N`):
 
 ## Member Picker
 
-The member picker opens when creating a **private** channel, to choose its
+The member picker opens when you create a **private** channel, to choose its
 members, and for `/group`, to choose the people in the conversation:
 
 | Key | Action |
@@ -218,7 +220,7 @@ When the tag picker overlay is open (`t` from the history or thread pane):
 | `Ctrl+T` | Switch what `Ctrl+N` creates: a **channel** tag (the default), shared with the channel's members, or a **private** tag that only you see |
 | `Esc` | Close tag picker |
 
-The picker lists the channel's tags and your private tags, which it marks
+The picker lists the channel's tags and the private tags of the user, which it marks
 `(private)`. A `#tag` written in a message is always the channel's tag of
 that name, created in the channel if it does not exist.
 

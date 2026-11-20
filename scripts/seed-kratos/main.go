@@ -15,6 +15,8 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+
+	"github.com/infrashift/chit/internal/errlog"
 )
 
 type seedIdentity struct {
@@ -24,13 +26,16 @@ type seedIdentity struct {
 	Password    string
 }
 
-// The password for all UAT users is "Password1!" — suitable for manual testing only.
-var identities = []seedIdentity{
-	{"alice@example.com", "alice", "Alice Anderson", "Password1!"},
-	{"bob@example.com", "bob", "Bob Baker", "Password1!"},
-	{"chad@example.com", "chad", "Chad Cooper", "Password1!"},
-	{"diana@example.com", "diana", "Diana Drake", "Password1!"},
-	{"eve@example.com", "eve", "Eve Ellis", "Password1!"},
+// seedIdentities returns the identities to seed. The password for all UAT
+// users is "Password1!" — suitable for manual testing only.
+func seedIdentities() []seedIdentity {
+	return []seedIdentity{
+		{"alice@example.com", "alice", "Alice Anderson", "Password1!"},
+		{"bob@example.com", "bob", "Bob Baker", "Password1!"},
+		{"chad@example.com", "chad", "Chad Cooper", "Password1!"},
+		{"diana@example.com", "diana", "Diana Drake", "Password1!"},
+		{"eve@example.com", "eve", "Eve Ellis", "Password1!"},
+	}
 }
 
 func main() {
@@ -42,32 +47,13 @@ func main() {
 // run does the seeding; it is split from main so the deferred db.Close runs
 // on every exit path, including failures.
 func run(ctx context.Context) error {
-	kratosAdminURL := os.Getenv("KRATOS_ADMIN_URL")
-	if kratosAdminURL == "" {
-		kratosAdminURL = "http://localhost:4434"
-	}
+	identities := seedIdentities()
+	kratosAdminURL := envOr("KRATOS_ADMIN_URL", "http://localhost:4434")
+	dbURL := envOr("CHIT_DATABASE_URL", "postgres://chit:chit@localhost:5432/chit?sslmode=disable")
 
-	dbURL := os.Getenv("CHIT_DATABASE_URL")
-	if dbURL == "" {
-		dbURL = "postgres://chit:chit@localhost:5432/chit?sslmode=disable"
-	}
-
-	// Wait for Kratos admin API to be ready.
-	fmt.Println("Waiting for Kratos admin API...")
 	client := &http.Client{Timeout: 5 * time.Second}
-	for i := range 30 {
-		resp, err := httpDo(ctx, client, http.MethodGet, kratosAdminURL+"/health/ready", nil)
-		if err == nil {
-			_ = resp.Body.Close()
-			if resp.StatusCode == 200 {
-				fmt.Printf("Kratos admin is ready (%ds).\n", i)
-				break
-			}
-		}
-		if i == 29 {
-			return errors.New("kratos admin API not ready after 30s")
-		}
-		time.Sleep(1 * time.Second)
+	if err := waitForKratos(ctx, client, kratosAdminURL); err != nil {
+		return err
 	}
 
 	// Connect to Chit database to sync kratos_id values.
@@ -75,7 +61,7 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("connect to database: %w", err)
 	}
-	defer func() { _ = db.Close() }()
+	defer errlog.Close(db, "chit database")
 
 	if err = db.PingContext(ctx); err != nil {
 		return fmt.Errorf("ping database: %w", err)
@@ -91,20 +77,65 @@ func run(ctx context.Context) error {
 		}
 		fmt.Printf("  %-8s  kratos_id=%s\n", id.Username, kratosID)
 
-		// Sync kratos_id into the Chit database users table.
-		result, err := db.ExecContext(ctx,
-			"UPDATE users SET kratos_id = $1 WHERE email = $2 AND delete_at = 0",
-			kratosID, id.Email,
-		)
-		if err != nil {
-			return fmt.Errorf("update kratos_id for %s: %w", id.Username, err)
-		}
-		rows, _ := result.RowsAffected()
-		if rows == 0 {
-			fmt.Printf("  WARNING: no Chit user found with email %s\n", id.Email)
+		if err := syncKratosID(ctx, db, kratosID, id); err != nil {
+			return err
 		}
 	}
 
+	printCredentials(identities)
+	return nil
+}
+
+// envOr returns the environment variable key, or def when it is unset.
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+// waitForKratos polls the Kratos admin API's readiness for up to 30 seconds.
+func waitForKratos(ctx context.Context, client *http.Client, kratosAdminURL string) error {
+	// Wait for Kratos admin API to be ready.
+	fmt.Println("Waiting for Kratos admin API...")
+	for i := range 30 {
+		resp, err := httpDo(ctx, client, http.MethodGet, kratosAdminURL+"/health/ready", nil)
+		if err == nil {
+			errlog.Debug(resp.Body.Close(), "close kratos health response body")
+			if resp.StatusCode == 200 {
+				fmt.Printf("Kratos admin is ready (%ds).\n", i)
+				return nil
+			}
+		}
+		if i == 29 {
+			return errors.New("kratos admin API not ready after 30s")
+		}
+		time.Sleep(1 * time.Second)
+	}
+	return nil
+}
+
+// syncKratosID writes kratosID onto the Chit user with id's email.
+func syncKratosID(ctx context.Context, db *sql.DB, kratosID string, id seedIdentity) error {
+	// Sync kratos_id into the Chit database users table.
+	result, err := db.ExecContext(ctx,
+		"UPDATE users SET kratos_id = $1 WHERE email = $2 AND delete_at = 0",
+		kratosID, id.Email,
+	)
+	if err != nil {
+		return fmt.Errorf("update kratos_id for %s: %w", id.Username, err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		fmt.Printf("  WARNING: rows affected for %s: %v\n", id.Username, err)
+	} else if rows == 0 {
+		fmt.Printf("  WARNING: no Chit user found with email %s\n", id.Email)
+	}
+	return nil
+}
+
+// printCredentials prints the login of each seeded identity.
+func printCredentials(identities []seedIdentity) {
 	fmt.Println()
 	fmt.Println("=== UAT Login Credentials ===")
 	fmt.Println()
@@ -116,7 +147,6 @@ func run(ctx context.Context) error {
 	fmt.Println()
 	fmt.Println("All users can log in via chit-tui using their email and password.")
 	fmt.Println()
-	return nil
 }
 
 // httpDo sends a request bound to ctx. body may be nil.
@@ -166,10 +196,11 @@ func findIdentityByEmail(ctx context.Context, client *http.Client, baseURL, emai
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() { errlog.Debug(resp.Body.Close(), "close kratos response body") }()
 
 	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(resp.Body)
+		errlog.Debug(readErr, "read kratos error body")
 		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -212,10 +243,11 @@ func createIdentity(ctx context.Context, client *http.Client, baseURL string, id
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() { errlog.Debug(resp.Body.Close(), "close kratos response body") }()
 
 	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, readErr := io.ReadAll(resp.Body)
+		errlog.Debug(readErr, "read kratos error body")
 		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
 	}
 
@@ -255,10 +287,11 @@ func updatePassword(ctx context.Context, client *http.Client, baseURL, kratosID 
 	if err != nil {
 		return err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() { errlog.Debug(resp.Body.Close(), "close kratos response body") }()
 
 	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, readErr := io.ReadAll(resp.Body)
+		errlog.Debug(readErr, "read kratos error body")
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
 	}
 	return nil

@@ -35,10 +35,13 @@ func agentReply() *model.Post {
 func TestViewPost_KeepsWhatWasSaid(t *testing.T) {
 	full := agentReply()
 	full.EditAt = 1791400001000
-	raw, _ := json.Marshal(viewPost(full))
+	raw, err := json.Marshal(viewPost(full))
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	var back model.Post
-	if err := json.Unmarshal(raw, &back); err != nil {
+	if err = json.Unmarshal(raw, &back); err != nil {
 		t.Fatal(err)
 	}
 	if back.ID != full.ID || back.RootID != full.RootID || back.UserID != full.UserID ||
@@ -55,7 +58,10 @@ func TestViewPost_KeepsWhatWasSaid(t *testing.T) {
 	}
 
 	// What it saves on a typical agent reply, measured rather than assumed.
-	fullRaw, _ := json.Marshal(full)
+	fullRaw, err := json.Marshal(full)
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Logf("agent reply: full %d bytes, view %d bytes (%.1fx)",
 		len(fullRaw), len(raw), float64(len(fullRaw))/float64(len(raw)))
 	if len(raw) >= len(fullRaw) {
@@ -64,9 +70,14 @@ func TestViewPost_KeepsWhatWasSaid(t *testing.T) {
 }
 
 func TestViewEvents(t *testing.T) {
-	data, _ := json.Marshal(agentReply())
+	data, err := json.Marshal(agentReply())
+	if err != nil {
+		t.Fatal(err)
+	}
 	var postData map[string]any
-	_ = json.Unmarshal(data, &postData)
+	if err := json.Unmarshal(data, &postData); err != nil {
+		t.Fatal(err)
+	}
 	events := []*model.WebSocketEvent{
 		{Event: model.WebSocketEventTyping, Data: map[string]any{"user_id": "u"}, Sequence: 1},
 		{Event: model.WebSocketEventPosted, Data: postData, Sequence: 2},

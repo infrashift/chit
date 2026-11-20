@@ -137,7 +137,9 @@ func newFakeKeto(t *testing.T) *fakeKeto {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]bool{"allowed": k.allowed})
+		if err := json.NewEncoder(w).Encode(map[string]bool{"allowed": k.allowed}); err != nil {
+			t.Errorf("encode keto check: %v", err)
+		}
 	}))
 	t.Cleanup(k.srv.Close)
 	return k

@@ -1,0 +1,21 @@
+# decisions
+
+<!-- okfw:generated — maintained by okfw; edits here are overwritten -->
+
+## Concepts
+
+* [ADR-0001: Adopt an OKF wiki (okfw) for project knowledge](adr-0001-adopt-an-okf-wiki-okfw-for-project-knowledge--01a1f5379df0.md) - An okfw OKF wiki in .okfw/ holds chit project knowledge: architecture, specs, ADRs, issues and daily notes.
+* [ADR-0002: Adapt the NASA Power of 10 rules to chit](adr-0002-adapt-the-nasa-power-of-10-rules-to-chit--01a1f5379df7.md) - chit obeys the NASA/JPL Power of 10 rules as adapted to Go, with a deviation for R3 and framework exceptions for R6 and R9.
+* [ADR-0003: semscope checks the Power of 10 rules](adr-0003-semscope-checks-the-power-of-10-rules--01a1f5379dfe.md) - make semscope runs semscope with the nasa-p10 ruleset and the .semscope.cue overlay on both Go modules when semscope is installed.
+* [ADR-0004: golangci-lint enforces the Power of 10 linters](adr-0004-golangci-lint-enforces-the-power-of-10-linters--01a1f5379e05.md) - Both .golangci.yml files enable funlen, gochecknoglobals, forbidigo, errcheck check-blank and the other linters that match the Power of 10 rules.
+* [ADR-0005: lexis checks the documentation with a repository vocabulary](adr-0005-lexis-checks-the-documentation-with-a-repository-vocabulary--01a1f5379e0c.md) - make docs-lexis checks the Markdown documentation and the wiki against ASD-STE100 with lexis and vocabulary.cue, and each finding fails it.
+* [ADR-0006: The Ory stack authenticates and chitd authorizes](adr-0006-the-ory-stack-authenticates-and-chitd-authorizes--01a1f5379e13.md) - Oathkeeper, Kratos and Hydra authenticate each request; chitd checks permissions against PostgreSQL membership, and Keto authorizes slash commands only.
+* [ADR-0007: Thin pub/sub envelopes with PG LISTEN/NOTIFY by default](adr-0007-thin-pub-sub-envelopes-with-pg-listen-notify-by-default--01a1f5379e1a.md) - chitd publishes thin event envelopes on chit_events through PG LISTEN/NOTIFY or NATS, and WebSocket fan-out stays in-process.
+* [ADR-0008: chit-tui is a separate Go module](adr-0008-chit-tui-is-a-separate-go-module--01a1f5379e21.md) - clients/chit-tui has its own go.mod so the charmbracelet dependencies stay out of the server build, and make check-deps enforces it.
+* [ADR-0009: Allowlisted machine actors act on behalf of a person](adr-0009-allowlisted-machine-actors-act-on-behalf-of-a-person--01a1f5379e28.md) - X-On-Behalf-Of lets a client in CHIT_ON_BEHALF_OF_CLIENTS act as a person on an allowlisted route, and provisions a Kratos identity that chit has not seen.
+* [ADR-0010: errlog checks the errors that a caller cannot return](adr-0010-errlog-checks-the-errors-that-a-caller-cannot-return--01a1f53e0eaa.md) - Each module has internal/errlog, which logs with slog the errors of deferred closes and best-effort cleanups, so no error goes to the blank identifier.
+* [ADR-0011: A failed assertion stops one unit of work or the process](adr-0011-a-failed-assertion-stops-one-unit-of-work-or-the-process--01a1f56cdcd3.md) - assert.That panics; a request gives a 500, a guarded goroutine for one connection or thread stops alone, and a loop that the process needs stops the process so that Podman restarts it.
+* [ADR-0012: Attachments in SeaweedFS, checked by imagecheck](adr-0012-attachments-in-seaweedfs-checked-by-imagecheck--01a1f5dddc78.md) - chitd keeps the bytes of image attachments in an S3 bucket (SeaweedFS), checks and encodes each upload again with pkg/imagecheck, and serves it only to channel members.
+* [ADR-0013: A membership policy hook decides each channel add](adr-0013-a-membership-policy-hook-decides-each-channel-add--01a1f5dddc7e.md) - When CHIT_MEMBERSHIP_HOOK_URL is set, chitd asks the hook before each channel add, and only an answer of allow lets the add occur.
+* [ADR-0014: Rate limits for each person and for each on-behalf-of client](adr-0014-rate-limits-for-each-person-and-for-each-on-behalf-of-client--01a1f5dddc85.md) - Each person keeps a per-user limit, and an on-behalf-of client has an aggregate limit of its own, so halod can act for many people through one machine actor.
+

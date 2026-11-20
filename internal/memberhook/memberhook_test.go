@@ -31,7 +31,7 @@ func fixed(a memberhooktest.Answer) func(*memberhook.Request) memberhooktest.Ans
 }
 
 func TestCheck_Allow(t *testing.T) {
-	srv := memberhooktest.New(t, fixed(memberhooktest.Allow))
+	srv := memberhooktest.New(t, fixed(memberhooktest.Allow()))
 	d, err := srv.Client(t).Check(t.Context(), sampleRequest())
 	if err != nil || !d.Allow {
 		t.Fatalf("Check = %+v, %v; want allow", d, err)
@@ -104,7 +104,7 @@ func TestCheck_TimeoutFailsClosed(t *testing.T) {
 	release := make(chan struct{})
 	srv := memberhooktest.New(t, func(*memberhook.Request) memberhooktest.Answer {
 		<-release
-		return memberhooktest.Allow
+		return memberhooktest.Allow()
 	})
 	t.Cleanup(func() { close(release) })
 	h, err := memberhook.New(&memberhook.Config{
@@ -125,7 +125,7 @@ func TestCheck_TimeoutFailsClosed(t *testing.T) {
 }
 
 func TestCheck_NetworkErrorFailsClosed(t *testing.T) {
-	srv := memberhooktest.New(t, fixed(memberhooktest.Allow))
+	srv := memberhooktest.New(t, fixed(memberhooktest.Allow()))
 	h, err := memberhook.New(&memberhook.Config{
 		URL: "http://127.0.0.1:1/check", Timeout: time.Second,
 		TokenURL: srv.Token.URL, ClientID: memberhooktest.ClientID, ClientSecret: memberhooktest.ClientSecret,
@@ -139,7 +139,7 @@ func TestCheck_NetworkErrorFailsClosed(t *testing.T) {
 }
 
 func TestCheck_TokenErrorFailsClosed(t *testing.T) {
-	srv := memberhooktest.New(t, fixed(memberhooktest.Allow))
+	srv := memberhooktest.New(t, fixed(memberhooktest.Allow()))
 	h, err := memberhook.New(&memberhook.Config{
 		URL: srv.Hook.URL, Timeout: time.Second,
 		TokenURL: srv.Token.URL, ClientID: memberhooktest.ClientID, ClientSecret: "wrong",
@@ -157,7 +157,7 @@ func TestCheck_TokenErrorFailsClosed(t *testing.T) {
 
 // The token is fetched once and reused.
 func TestCheck_CachesTheToken(t *testing.T) {
-	srv := memberhooktest.New(t, fixed(memberhooktest.Allow))
+	srv := memberhooktest.New(t, fixed(memberhooktest.Allow()))
 	h := srv.Client(t)
 	for range 3 {
 		if _, err := h.Check(t.Context(), sampleRequest()); err != nil {
@@ -175,9 +175,11 @@ func TestCheck_401RefreshesTheTokenOnce(t *testing.T) {
 	token := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		n := tokenCalls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"access_token": "token-" + string(rune('0'+n)), "token_type": "bearer", "expires_in": 3600,
-		})
+		}); err != nil {
+			t.Errorf("write the token: %v", err)
+		}
 	}))
 	defer token.Close()
 	var revoked atomic.Bool
@@ -188,7 +190,9 @@ func TestCheck_401RefreshesTheTokenOnce(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		_, _ = io.WriteString(w, `{"allow":true}`)
+		if _, err := io.WriteString(w, `{"allow":true}`); err != nil {
+			t.Errorf("write the hook answer: %v", err)
+		}
 	}))
 	defer hook.Close()
 
@@ -216,7 +220,7 @@ func TestCheck_401RefreshesTheTokenOnce(t *testing.T) {
 
 // A hook that refuses every token is a refusal after exactly one retry.
 func TestCheck_401TwiceFailsClosed(t *testing.T) {
-	srv := memberhooktest.New(t, fixed(memberhooktest.Allow))
+	srv := memberhooktest.New(t, fixed(memberhooktest.Allow()))
 	var hookCalls atomic.Int32
 	hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hookCalls.Add(1)
@@ -245,11 +249,15 @@ func TestCheck_RequestShape(t *testing.T) {
 		method, auth, contentType string
 		body                      map[string]any
 	}
-	srv := memberhooktest.New(t, fixed(memberhooktest.Allow))
+	srv := memberhooktest.New(t, fixed(memberhooktest.Allow()))
 	hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got.method, got.auth, got.contentType = r.Method, r.Header.Get("Authorization"), r.Header.Get("Content-Type")
-		_ = json.NewDecoder(r.Body).Decode(&got.body)
-		_, _ = io.WriteString(w, `{"allow":true}`)
+		if err := json.NewDecoder(r.Body).Decode(&got.body); err != nil {
+			t.Errorf("decode the hook request: %v", err)
+		}
+		if _, err := io.WriteString(w, `{"allow":true}`); err != nil {
+			t.Errorf("write the hook answer: %v", err)
+		}
 	}))
 	defer hook.Close()
 	h, err := memberhook.New(&memberhook.Config{
@@ -295,11 +303,13 @@ func TestCheck_RequestShape(t *testing.T) {
 
 // A redirect is not followed: it would carry the token elsewhere.
 func TestCheck_DoesNotFollowRedirects(t *testing.T) {
-	srv := memberhooktest.New(t, fixed(memberhooktest.Allow))
+	srv := memberhooktest.New(t, fixed(memberhooktest.Allow()))
 	var followed atomic.Bool
 	elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		followed.Store(true)
-		_, _ = io.WriteString(w, `{"allow":true}`)
+		if _, err := io.WriteString(w, `{"allow":true}`); err != nil {
+			t.Errorf("write the hook answer: %v", err)
+		}
 	}))
 	defer elsewhere.Close()
 	hook := httptest.NewServer(http.RedirectHandler(elsewhere.URL, http.StatusTemporaryRedirect))
@@ -321,7 +331,7 @@ func TestCheck_DoesNotFollowRedirects(t *testing.T) {
 
 // A cancelled caller is not an allow.
 func TestCheck_CancelledContext(t *testing.T) {
-	srv := memberhooktest.New(t, fixed(memberhooktest.Allow))
+	srv := memberhooktest.New(t, fixed(memberhooktest.Allow()))
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if d, err := srv.Client(t).Check(ctx, sampleRequest()); err == nil || d.Allow {

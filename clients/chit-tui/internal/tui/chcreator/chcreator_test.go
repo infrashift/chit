@@ -257,7 +257,7 @@ func TestChCreator_SubmitPrivate(t *testing.T) {
 		t.Fatal("expected command from submit")
 	}
 	msg := cmd()
-	submitted := msg.(chcreator.ChannelSubmittedMsg)
+	submitted := mustMsg[chcreator.ChannelSubmittedMsg](t, msg)
 	if submitted.Channel.Type != model.ChannelPrivate {
 		t.Errorf("type = %q, want P", submitted.Channel.Type)
 	}
@@ -287,7 +287,7 @@ func TestChCreator_SubmitWithPurpose(t *testing.T) {
 		t.Fatal("expected command from submit")
 	}
 	msg := cmd()
-	submitted := msg.(chcreator.ChannelSubmittedMsg)
+	submitted := mustMsg[chcreator.ChannelSubmittedMsg](t, msg)
 	if submitted.Channel.Purpose != "CI/CD notifications" {
 		t.Errorf("purpose = %q", submitted.Channel.Purpose)
 	}
@@ -396,4 +396,14 @@ func TestSlug_IsAlwaysAValidName(t *testing.T) {
 	if got := chcreator.Slug("Café Ops"); got != "caf-ops" && got != "cafe-ops" {
 		t.Errorf(`Slug("Café Ops") = %q`, got)
 	}
+}
+
+// mustMsg returns msg as a T, failing the test when it is something else.
+func mustMsg[T any](t *testing.T, msg tea.Msg) T {
+	t.Helper()
+	got, ok := msg.(T)
+	if !ok {
+		t.Fatalf("msg = %T, want %T", msg, got)
+	}
+	return got
 }

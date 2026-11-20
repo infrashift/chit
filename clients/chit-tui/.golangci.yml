@@ -1,16 +1,48 @@
 version: "2"
 linters:
   enable:
+    - errorlint # R7: wrap and compare errors correctly (ADR-0004)
+    - gochecknoglobals # R6: no mutable package state (ADR-0004)
+    - forbidigo # R5, R7: panic only in internal/assert (ADR-0004, ADR-0011)
+    - funlen # R4: 60 lines for each function (ADR-0004)
+    - gocognit # R1: simple control flow (ADR-0004)
+    - nestif # R1: shallow nesting (ADR-0004)
     - misspell
   settings:
+    forbidigo:
+      forbid:
+        - pattern: ^panic$
+          msg: "use internal/assert for programmer errors; return an error for bad input (ADR-0011)"
+    # R4 and R1 (ADR-0002, ADR-0004).
+    funlen:
+      lines: 60
+      statements: -1
+      ignore-comments: false
+    gocognit:
+      min-complexity: 20
+    nestif:
+      min-complexity: 4
+    # R7 (ADR-0002, ADR-0004): no error goes to the blank identifier, and
+    # each type assertion checks its ok result.
+    errcheck:
+      check-blank: true
+      check-type-assertions: true
     misspell:
       locale: US
   exclusions:
     generated: lax
+    rules:
+      - path: internal/assert/assert\.go
+        linters: [forbidigo]
+      - path: _test\.go
+        linters: [forbidigo]
     paths:
       - third_party$
       - builtin$
       - examples$
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
 formatters:
   enable:
     - gofmt

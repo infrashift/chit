@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 )
 
@@ -16,6 +17,9 @@ type SqlThreadStore struct {
 }
 
 func (s *SqlThreadStore) SaveOrUpdate(ctx context.Context, thread *model.Thread) error {
+	assert.That(thread != nil, "SqlThreadStore.SaveOrUpdate: nil thread")
+	assert.That(s.sqlStore != nil, "SqlThreadStore.SaveOrUpdate: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlThreadStore.SaveOrUpdate: nil pool")
 	if err := thread.IsValid(); err != nil {
 		return err
 	}
@@ -38,6 +42,8 @@ func (s *SqlThreadStore) SaveOrUpdate(ctx context.Context, thread *model.Thread)
 }
 
 func (s *SqlThreadStore) Get(ctx context.Context, postID string) (*model.Thread, error) {
+	assert.That(s.sqlStore != nil, "SqlThreadStore.Get: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlThreadStore.Get: nil pool")
 	query := `SELECT post_id, channel_id, reply_count, last_reply_at, participants
 		FROM threads WHERE post_id = $1`
 
@@ -56,6 +62,9 @@ func (s *SqlThreadStore) Get(ctx context.Context, postID string) (*model.Thread,
 }
 
 func (s *SqlThreadStore) IncrementReplyCount(ctx context.Context, postID string, timestamp int64, userID string) error {
+	assert.That(s.sqlStore != nil, "SqlThreadStore.IncrementReplyCount: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlThreadStore.IncrementReplyCount: nil pool")
+	assert.That(timestamp > 0, "SqlThreadStore.IncrementReplyCount: timestamp is not a time")
 	// Atomically increment reply_count, update last_reply_at, and add participant if not present.
 	query := `UPDATE threads SET
 		reply_count = reply_count + 1,
@@ -75,6 +84,9 @@ func (s *SqlThreadStore) IncrementReplyCount(ctx context.Context, postID string,
 }
 
 func (s *SqlThreadStore) DecrementReplyCount(ctx context.Context, postID string) error {
+	assert.That(s.sqlStore != nil, "SqlThreadStore.DecrementReplyCount: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlThreadStore.DecrementReplyCount: nil pool")
+	assert.That(postID != "", "SqlThreadStore.DecrementReplyCount: empty root id")
 	query := `UPDATE threads SET
 		reply_count = GREATEST(reply_count - 1, 0),
 		last_reply_at = COALESCE(
@@ -87,6 +99,10 @@ func (s *SqlThreadStore) DecrementReplyCount(ctx context.Context, postID string)
 }
 
 func (s *SqlThreadStore) IncrementMentionCounts(ctx context.Context, postID string, userIDs []string) error {
+	assert.That(s.sqlStore != nil, "SqlThreadStore.IncrementMentionCounts: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlThreadStore.IncrementMentionCounts: nil pool")
+	assert.That(postID != "", "SqlThreadStore.IncrementMentionCounts: empty root id")
+	assert.That(len(userIDs) > 0, "SqlThreadStore.IncrementMentionCounts: no users")
 	query := `UPDATE thread_memberships SET unread_mention_count = unread_mention_count + 1
 		WHERE post_id = $1 AND user_id = ANY($2::uuid[]) AND following = TRUE`
 	if _, err := s.sqlStore.pool.Exec(ctx, query, postID, userIDs); err != nil {
@@ -96,6 +112,9 @@ func (s *SqlThreadStore) IncrementMentionCounts(ctx context.Context, postID stri
 }
 
 func (s *SqlThreadStore) SaveMembership(ctx context.Context, membership *model.ThreadMembership) error {
+	assert.That(membership != nil, "SqlThreadStore.SaveMembership: nil membership")
+	assert.That(s.sqlStore != nil, "SqlThreadStore.SaveMembership: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlThreadStore.SaveMembership: nil pool")
 	if err := membership.IsValid(); err != nil {
 		return err
 	}
@@ -118,6 +137,8 @@ func (s *SqlThreadStore) SaveMembership(ctx context.Context, membership *model.T
 }
 
 func (s *SqlThreadStore) GetMembership(ctx context.Context, postID, userID string) (*model.ThreadMembership, error) {
+	assert.That(s.sqlStore != nil, "SqlThreadStore.GetMembership: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlThreadStore.GetMembership: nil pool")
 	query := `SELECT post_id, user_id, following, last_viewed_at, unread_mention_count
 		FROM thread_memberships WHERE post_id = $1 AND user_id = $2`
 
@@ -136,6 +157,9 @@ func (s *SqlThreadStore) GetMembership(ctx context.Context, postID, userID strin
 }
 
 func (s *SqlThreadStore) UpdateMembership(ctx context.Context, membership *model.ThreadMembership) error {
+	assert.That(membership != nil, "SqlThreadStore.UpdateMembership: nil membership")
+	assert.That(s.sqlStore != nil, "SqlThreadStore.UpdateMembership: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlThreadStore.UpdateMembership: nil pool")
 	query := `UPDATE thread_memberships SET following = $1, last_viewed_at = $2, unread_mention_count = $3
 		WHERE post_id = $4 AND user_id = $5`
 
@@ -155,6 +179,10 @@ func (s *SqlThreadStore) UpdateMembership(ctx context.Context, membership *model
 
 // GetThreadsForUser lists the threads userID follows in teamID's channels.
 func (s *SqlThreadStore) GetThreadsForUser(ctx context.Context, userID, teamID string, page, perPage int) (*model.UserThreadList, error) {
+	assert.That(s.sqlStore != nil, "SqlThreadStore.GetThreadsForUser: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlThreadStore.GetThreadsForUser: nil pool")
+	assert.That(page >= 0, "SqlThreadStore.GetThreadsForUser: negative page")
+	assert.That(perPage >= 1, "SqlThreadStore.GetThreadsForUser: per page below 1")
 	if !validIDs(userID, teamID) {
 		return &model.UserThreadList{Threads: []*model.ThreadResponse{}}, nil
 	}
@@ -165,6 +193,10 @@ func (s *SqlThreadStore) GetThreadsForUser(ctx context.Context, userID, teamID s
 // group channels, which belong to no team and so never appear in a team's
 // list.
 func (s *SqlThreadStore) GetDirectThreadsForUser(ctx context.Context, userID string, page, perPage int) (*model.UserThreadList, error) {
+	assert.That(s.sqlStore != nil, "SqlThreadStore.GetDirectThreadsForUser: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlThreadStore.GetDirectThreadsForUser: nil pool")
+	assert.That(page >= 0, "SqlThreadStore.GetDirectThreadsForUser: negative page")
+	assert.That(perPage >= 1, "SqlThreadStore.GetDirectThreadsForUser: per page below 1")
 	if !validIDs(userID) {
 		return &model.UserThreadList{Threads: []*model.ThreadResponse{}}, nil
 	}
@@ -183,6 +215,8 @@ func (s *SqlThreadStore) GetDirectThreadsForUser(ctx context.Context, userID str
 // endpoint is documented to report unread status, and a client that had to
 // fetch each root separately would issue one request per thread.
 func (s *SqlThreadStore) listThreads(ctx context.Context, userID, scope string, scopeArgs []any, page, perPage int) (*model.UserThreadList, error) {
+	assert.That(scope != "", "SqlThreadStore.listThreads: empty scope")
+	assert.That(perPage >= 1, "SqlThreadStore.listThreads: per page below 1")
 	from := `FROM threads t
 		INNER JOIN thread_memberships tm ON t.post_id = tm.post_id
 		INNER JOIN channels c ON t.channel_id = c.id
@@ -239,6 +273,9 @@ func (s *SqlThreadStore) listThreads(ctx context.Context, userID, scope string, 
 }
 
 func (s *SqlThreadStore) MarkAsRead(ctx context.Context, postID, userID string, timestamp int64) error {
+	assert.That(s.sqlStore != nil, "SqlThreadStore.MarkAsRead: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlThreadStore.MarkAsRead: nil pool")
+	assert.That(timestamp > 0, "SqlThreadStore.MarkAsRead: timestamp is not a time")
 	query := `UPDATE thread_memberships SET last_viewed_at = $1, unread_mention_count = 0
 		WHERE post_id = $2 AND user_id = $3`
 

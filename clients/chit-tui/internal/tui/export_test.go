@@ -4,7 +4,7 @@ import "io"
 
 // SetClipboardOutput redirects what copying writes, so tests that copy do
 // not print escape sequences into the test output.
-func SetClipboardOutput(w io.Writer) { clipboardOut = w }
+func (m *Model) SetClipboardOutput(w io.Writer) { m.clipboardOut = w }
 
 // Focused reports which area has keyboard focus. Where keys land decides
 // what single-letter keys do, so tests need to see it directly.

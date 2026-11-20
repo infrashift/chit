@@ -7,9 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/infrashift/chit/internal/assert"
 )
 
 // ClaudeResult is the subset of `claude -p --output-format json` output the
@@ -57,6 +60,8 @@ func (u ClaudeUsage) ContextTokens() int64 {
 // ErrSessionNotFound is returned when --resume names a session the CLI has no
 // transcript for: the bridge's WORKDIR or ~/.claude changed since the thread
 // started, or the session was never written.
+//
+// semscope: allow(NASA-P10-06) sentinel error: errors.Is needs one identity
 var ErrSessionNotFound = errors.New("claude session not found")
 
 // RunError is a failed run. Summary is safe to show in the channel; Detail
@@ -67,7 +72,10 @@ type RunError struct {
 	Detail  string
 }
 
-func (e *RunError) Error() string { return e.Summary }
+func (e *RunError) Error() string {
+	assert.That(e.Summary != "", "RunError.Error: empty summary")
+	return e.Summary
+}
 
 // killWaitDelay is how long a cancelled run's output pipes may stay open
 // before Run gives up on them.
@@ -80,6 +88,7 @@ type ClaudeRunner struct {
 
 // NewClaudeRunner creates a runner from bridge configuration.
 func NewClaudeRunner(cfg *Config) *ClaudeRunner {
+	assert.That(cfg != nil, "NewClaudeRunner: nil config")
 	return &ClaudeRunner{cfg: cfg}
 }
 
@@ -94,6 +103,7 @@ func NewClaudeRunner(cfg *Config) *ClaudeRunner {
 // *RunError carrying the CLI's own message, so the caller can still keep the
 // session it names.
 func (r *ClaudeRunner) Run(ctx context.Context, prompt, sessionID string) (*ClaudeResult, error) {
+	assert.That(r.cfg.RunTimeout > 0, "ClaudeRunner.Run: run timeout not positive; Load validates it")
 	runCtx, cancel := context.WithTimeout(ctx, r.cfg.RunTimeout)
 	defer cancel()
 
@@ -147,12 +157,14 @@ func (r *ClaudeRunner) Run(ctx context.Context, prompt, sessionID string) (*Clau
 			Detail:  fmt.Sprintf("%v: %s", parseErr, tail(stdout.String(), 2000)),
 		}
 	}
+	assert.That(!result.IsError, "ClaudeRunner.Run: failed result returned as a success")
 	return &result, nil
 }
 
 // contextWindow returns the window to measure the footer's fill against: the
 // largest one the run's models report, else CHIT_CLAUDE_CONTEXT_WINDOW.
 func (r *ClaudeRunner) contextWindow(res *ClaudeResult) int64 {
+	assert.That(res != nil, "ClaudeRunner.contextWindow: nil result")
 	var window int64
 	for _, m := range res.ModelUsage {
 		window = max(window, m.ContextWindow)
@@ -160,6 +172,7 @@ func (r *ClaudeRunner) contextWindow(res *ClaudeResult) int64 {
 	if window == 0 {
 		window = int64(r.cfg.ContextWindow)
 	}
+	assert.That(window >= 0, "ClaudeRunner.contextWindow: negative window")
 	return window
 }
 
@@ -194,6 +207,8 @@ func (r *ClaudeRunner) args(sessionID string) []string {
 	if sessionID != "" {
 		args = append(args, "--resume", sessionID)
 	}
+	assert.That(args[0] == "-p" && slices.Contains(args, "--strict-mcp-config"), "ClaudeRunner.args: run is not headless and isolated")
+	assert.That(sessionID == "" || args[len(args)-1] == sessionID, "ClaudeRunner.args: --resume does not name the session")
 	return args
 }
 
@@ -205,6 +220,7 @@ const footerSeparator = "\n\n---\n`⚙"
 // rewrites the whole conversation into it, and that is where a long thread's
 // cost goes.
 func (r *ClaudeRunner) Footer(res *ClaudeResult) string {
+	assert.That(res != nil, "ClaudeRunner.Footer: nil result")
 	pct := int64(0)
 	if window := r.contextWindow(res); window > 0 {
 		pct = res.Usage.ContextTokens() * 100 / window
@@ -229,6 +245,7 @@ func humanTokens(n int64) string {
 // tail returns at most n trailing bytes of s, trimmed, never splitting a
 // UTF-8 sequence.
 func tail(s string, n int) string {
+	assert.That(n > 0, "tail: limit not positive")
 	s = strings.TrimSpace(s)
 	if len(s) <= n {
 		return s
@@ -237,11 +254,13 @@ func tail(s string, n int) string {
 	for i < len(s) && !utf8.RuneStart(s[i]) {
 		i++
 	}
+	assert.That(len(s)-i <= n, "tail: kept more than the limit")
 	return "…" + s[i:]
 }
 
 // firstLine returns the first non-blank line of s, cut to at most n bytes.
 func firstLine(s string, n int) string {
+	assert.That(n > 0, "firstLine: limit not positive")
 	for line := range strings.SplitSeq(s, "\n") {
 		if line = strings.TrimSpace(line); line != "" {
 			return truncate(line, n)
@@ -252,6 +271,7 @@ func firstLine(s string, n int) string {
 
 // truncate cuts s to at most n bytes on a rune boundary, marking the cut.
 func truncate(s string, n int) string {
+	assert.That(n > 0, "truncate: limit not positive")
 	if len(s) <= n {
 		return s
 	}
@@ -259,5 +279,6 @@ func truncate(s string, n int) string {
 	for i > 0 && !utf8.RuneStart(s[i]) {
 		i--
 	}
+	assert.That(i <= n, "truncate: kept more than the limit")
 	return s[:i] + "…"
 }

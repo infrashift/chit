@@ -22,7 +22,7 @@ func newHookEnv(t *testing.T, policy func(*memberhook.Request) memberhooktest.An
 	return e, srv
 }
 
-func allowEveryone(*memberhook.Request) memberhooktest.Answer { return memberhooktest.Allow }
+func allowEveryone(*memberhook.Request) memberhooktest.Answer { return memberhooktest.Allow() }
 
 // refusing returns a policy that refuses userID with a fixed reason.
 func refusing(userID string) func(*memberhook.Request) memberhooktest.Answer {
@@ -126,7 +126,11 @@ func TestMembershipHook_DirectAndGroupRefusedIs403(t *testing.T) {
 		`["`+testUserID+`","`+extraUserID+`","`+thirdUserID+`"]`, nil)
 	requireRefusalBody(t, w.Code, w.Body.Bytes())
 
-	if dms, _ := e.ms.Channels.GetDirectChannelsForUser(t.Context(), testUserID); len(dms) != 0 {
+	dms, err := e.ms.Channels.GetDirectChannelsForUser(t.Context(), testUserID)
+	if err != nil {
+		t.Fatalf("direct channels: %v", err)
+	}
+	if len(dms) != 0 {
 		t.Fatalf("channels %v after refusals", dms)
 	}
 }

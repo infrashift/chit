@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/config"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/skinpicker"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
@@ -15,6 +16,8 @@ import (
 
 // View renders the full UI.
 func (m Model) View() string {
+	assert.That(m.width >= 0, "View: negative width")
+	assert.That(m.height >= 0, "View: negative height")
 	if m.width == 0 || m.height == 0 {
 		return "Loading..."
 	}
@@ -22,6 +25,8 @@ func (m Model) View() string {
 	if m.appState == AppStateLogin || m.appState == AppStateReLogin {
 		return m.loginModel.View()
 	}
+	assert.That(m.mainPane == paneChannel || m.mainPane == paneThread, "View: unknown main pane")
+	assert.That(m.appState == AppStateRunning, "View: not signed in")
 
 	top := m.viewport.View()
 	if m.mainPane == paneThread {
@@ -50,6 +55,7 @@ func (m Model) View() string {
 		if mentionY < 0 {
 			mentionY = 0
 		}
+		assert.That(mentionY < m.height, "View: mention popup below the screen")
 		layout = placeOverlay(1, mentionY, mentionView, layout)
 	}
 
@@ -66,24 +72,84 @@ const overlayY = 2
 // the overlay closes (for overlays that never take focus, like help).
 const focusKeep FocusArea = -1
 
-// overlayRef is one floating overlay's hooks: visibility, key routing,
-// rendering, and lifecycle plumbing. Every overlay consumer (key intercepts,
-// View compositing, blur/resize/restyle, mouse hit-testing) iterates the
-// single overlays() table, so adding an overlay means adding one entry here.
+// overlayID names one floating overlay. It selects the overlay's Update in
+// updateOverlay, the one hook that cannot go through overlayModel because each
+// sub-model's Update returns its own concrete type.
+type overlayID int
+
+const (
+	overlayDMPicker overlayID = iota
+	overlayThreadInbox
+	overlaySkinPicker
+	overlayChannelCreator
+	overlayTagPicker
+	overlayPalette
+	overlayHelp
+)
+
+// overlayModel is what every floating overlay's sub-model provides. The
+// overlays() table holds pointers to the Model's own fields, so calls through
+// it read and change the Model in place.
+type overlayModel interface {
+	Visible() bool
+	View() string
+	SetSize(w, h int)
+	SetStyles(s styles.Styles)
+}
+
+// blurrer is an overlay that can hold focus; overlays without Blur (help)
+// never take focus and have nothing to release.
+type blurrer interface {
+	Blur()
+}
+
+// overlayRef is one floating overlay: its sub-model, the ID that routes keys
+// to it, and where focus goes when it closes. Every overlay consumer (key
+// intercepts, View compositing, blur/resize/restyle, mouse hit-testing)
+// iterates the single overlays() table, so adding an overlay means adding one
+// entry there and one case in updateOverlay.
 type overlayRef struct {
-	visible    func() bool
-	update     func(tea.KeyMsg) tea.Cmd
-	view       func() string
-	blur       func()
-	setSize    func(w, h int)
-	setStyles  func(styles.Styles)
+	id         overlayID
+	model      overlayModel
 	closeFocus FocusArea // focus target after the overlay self-closes
+}
+
+func (o overlayRef) visible() bool {
+	assert.That(o.model != nil, "overlayRef.visible: nil overlay")
+	return o.model.Visible()
+}
+
+func (o overlayRef) view() string {
+	assert.That(o.model != nil, "overlayRef.view: nil overlay")
+	assert.That(o.model.Visible(), "overlayRef.view: rendering a closed overlay")
+	return o.model.View()
+}
+
+func (o overlayRef) setSize(w, h int) {
+	assert.That(o.model != nil, "overlayRef.setSize: nil overlay")
+	assert.That(w >= 0, "overlayRef.setSize: negative width")
+	assert.That(h >= 0, "overlayRef.setSize: negative height")
+	o.model.SetSize(w, h)
+}
+
+func (o overlayRef) setStyles(newStyles styles.Styles) {
+	assert.That(o.model != nil, "overlayRef.setStyles: nil overlay")
+	o.model.SetStyles(newStyles)
+}
+
+// blur releases the overlay's focus, if it is one that can hold focus.
+func (o overlayRef) blur() {
+	assert.That(o.model != nil, "overlayRef.blur: nil overlay")
+	if b, ok := o.model.(blurrer); ok {
+		b.Blur()
+	}
 }
 
 // overlays lists the centered floating overlays in z-order (later entries
 // render on top; earlier entries win key interception, though only one
 // overlay is ever open at a time).
 func (m *Model) overlays() []overlayRef {
+	assert.That(m != nil, "overlays: nil model")
 	// The tag picker acts on the post under the cursor or the open thread's
 	// root, so it returns to whichever pane that was. The history pane is
 	// hidden behind an open thread, and keys sent there act on posts the
@@ -92,104 +158,53 @@ func (m *Model) overlays() []overlayRef {
 	if m.mainPane == paneThread {
 		tagPickerReturn = FocusThread
 	}
-	return []overlayRef{
-		{
-			visible: func() bool { return m.dmPicker.Visible() },
-			update: func(msg tea.KeyMsg) tea.Cmd {
-				var cmd tea.Cmd
-				m.dmPicker, cmd = m.dmPicker.Update(msg)
-				return cmd
-			},
-			view:       func() string { return m.dmPicker.View() },
-			blur:       m.dmPicker.Blur,
-			setSize:    m.dmPicker.SetSize,
-			setStyles:  m.dmPicker.SetStyles,
-			closeFocus: FocusInput,
-		},
-		{
-			visible: func() bool { return m.threadInbox.Visible() },
-			update: func(msg tea.KeyMsg) tea.Cmd {
-				var cmd tea.Cmd
-				m.threadInbox, cmd = m.threadInbox.Update(msg)
-				return cmd
-			},
-			view:       func() string { return m.threadInbox.View() },
-			blur:       m.threadInbox.Blur,
-			setSize:    m.threadInbox.SetSize,
-			setStyles:  m.threadInbox.SetStyles,
-			closeFocus: FocusInput,
-		},
-		{
-			visible: func() bool { return m.skinPicker.Visible() },
-			update: func(msg tea.KeyMsg) tea.Cmd {
-				var cmd tea.Cmd
-				m.skinPicker, cmd = m.skinPicker.Update(msg)
-				return cmd
-			},
-			view:       func() string { return m.skinPicker.View() },
-			blur:       m.skinPicker.Blur,
-			setSize:    m.skinPicker.SetSize,
-			setStyles:  m.skinPicker.SetStyles,
-			closeFocus: FocusInput,
-		},
-		{
-			visible: func() bool { return m.chCreator.Visible() },
-			update: func(msg tea.KeyMsg) tea.Cmd {
-				var cmd tea.Cmd
-				m.chCreator, cmd = m.chCreator.Update(msg)
-				return cmd
-			},
-			view:       func() string { return m.chCreator.View() },
-			blur:       m.chCreator.Blur,
-			setSize:    m.chCreator.SetSize,
-			setStyles:  m.chCreator.SetStyles,
-			closeFocus: FocusInput,
-		},
-		{
-			visible: func() bool { return m.tagPicker.Visible() },
-			update: func(msg tea.KeyMsg) tea.Cmd {
-				var cmd tea.Cmd
-				m.tagPicker, cmd = m.tagPicker.Update(msg)
-				return cmd
-			},
-			view:       func() string { return m.tagPicker.View() },
-			blur:       m.tagPicker.Blur,
-			setSize:    m.tagPicker.SetSize,
-			setStyles:  m.tagPicker.SetStyles,
-			closeFocus: tagPickerReturn,
-		},
-		{
-			visible: func() bool { return m.palette.Visible() },
-			update: func(msg tea.KeyMsg) tea.Cmd {
-				var cmd tea.Cmd
-				m.palette, cmd = m.palette.Update(msg)
-				return cmd
-			},
-			view:       func() string { return m.palette.View() },
-			blur:       m.palette.Blur,
-			setSize:    m.palette.SetSize,
-			setStyles:  m.palette.SetStyles,
-			closeFocus: FocusInput,
-		},
-		{
-			visible: func() bool { return m.help.Visible() },
-			update: func(msg tea.KeyMsg) tea.Cmd {
-				var cmd tea.Cmd
-				m.help, cmd = m.help.Update(msg)
-				return cmd
-			},
-			view:       func() string { return m.help.View() },
-			blur:       func() {},
-			setSize:    m.help.SetSize,
-			setStyles:  m.help.SetStyles,
-			closeFocus: focusKeep, // help never takes focus
-		},
+	refs := []overlayRef{
+		{id: overlayDMPicker, model: &m.dmPicker, closeFocus: FocusInput},
+		{id: overlayThreadInbox, model: &m.threadInbox, closeFocus: FocusInput},
+		{id: overlaySkinPicker, model: &m.skinPicker, closeFocus: FocusInput},
+		{id: overlayChannelCreator, model: &m.chCreator, closeFocus: FocusInput},
+		{id: overlayTagPicker, model: &m.tagPicker, closeFocus: tagPickerReturn},
+		{id: overlayPalette, model: &m.palette, closeFocus: FocusInput},
+		{id: overlayHelp, model: &m.help, closeFocus: focusKeep}, // help never takes focus
 	}
+	assert.That(len(refs) == int(overlayHelp)+1, "overlays: an overlay is missing from the table")
+	assert.That(tagPickerReturn == FocusViewport || tagPickerReturn == FocusThread, "overlays: tag picker returns to no pane")
+	return refs
+}
+
+// updateOverlay routes a key to the overlay id names and stores its new state
+// in the Model.
+func (m *Model) updateOverlay(id overlayID, msg tea.KeyMsg) tea.Cmd {
+	assert.That(m != nil, "updateOverlay: nil model")
+	assert.That(id >= overlayDMPicker, "updateOverlay: overlay ID before the first")
+	assert.That(id <= overlayHelp, "updateOverlay: overlay ID past the last")
+	var cmd tea.Cmd
+	switch id {
+	case overlayDMPicker:
+		m.dmPicker, cmd = m.dmPicker.Update(msg)
+	case overlayThreadInbox:
+		m.threadInbox, cmd = m.threadInbox.Update(msg)
+	case overlaySkinPicker:
+		m.skinPicker, cmd = m.skinPicker.Update(msg)
+	case overlayChannelCreator:
+		m.chCreator, cmd = m.chCreator.Update(msg)
+	case overlayTagPicker:
+		m.tagPicker, cmd = m.tagPicker.Update(msg)
+	case overlayPalette:
+		m.palette, cmd = m.palette.Update(msg)
+	case overlayHelp:
+		m.help, cmd = m.help.Update(msg)
+	}
+	return cmd
 }
 
 // syncActionBar pushes the current model state into the action bar before it
 // is rendered or hit-tested.
 func (m *Model) syncActionBar() {
+	assert.That(m != nil, "syncActionBar: nil model")
+	assert.That(m.focus >= FocusViewport, "syncActionBar: focus before the first area")
+	assert.That(m.focus <= FocusThreadInbox, "syncActionBar: focus past the last area")
+	assert.That(m.mainPane == paneChannel || m.mainPane == paneThread, "syncActionBar: unknown main pane")
 	team := ""
 	if m.activeTeam != nil {
 		team = m.activeTeam.DisplayName
@@ -218,10 +233,15 @@ func (m *Model) syncActionBar() {
 // paletteOrigin returns the screen position of the palette overlay. It is the
 // single source of truth shared by View and mouse hit-testing.
 func (m Model) paletteOrigin(view string) (int, int) {
+	assert.That(m.width >= 0, "paletteOrigin: negative width")
+	assert.That(m.palette.Visible(), "paletteOrigin: palette not open")
 	return (m.width - lipgloss.Width(view)) / 2, overlayY
 }
 
 func (m *Model) resizeComponents() {
+	assert.That(m != nil, "resizeComponents: nil model")
+	assert.That(m.width >= 0, "resizeComponents: negative width")
+	assert.That(m.height >= 0, "resizeComponents: negative height")
 	vpHeight := m.height - inputHeight - 1 // -1 for the action bar
 
 	m.viewport.SetSize(m.width, vpHeight)
@@ -239,12 +259,15 @@ func (m *Model) resizeComponents() {
 func placeOverlay(x, y int, fg, bg string) string {
 	bgLines := splitLines(bg)
 	fgLines := splitLines(fg)
+	assert.That(len(bgLines) >= 1, "placeOverlay: background has no lines")
+	assert.That(len(fgLines) >= 1, "placeOverlay: overlay has no lines")
 
 	for i, fgLine := range fgLines {
 		bgIdx := y + i
 		if bgIdx < 0 || bgIdx >= len(bgLines) {
 			continue
 		}
+		assert.That(bgIdx < len(bgLines), "placeOverlay: row past the background")
 		bgLine := bgLines[bgIdx]
 		fgWidth := ansi.StringWidth(fgLine)
 		bgWidth := ansi.StringWidth(bgLine)
@@ -280,12 +303,17 @@ func splitLines(s string) []string {
 		}
 	}
 	lines = append(lines, s[start:])
+	assert.That(len(lines) >= 1, "splitLines: no lines")
+	assert.That(start <= len(s), "splitLines: line start past the end")
 	return lines
 }
 
 // handleThemeChosen restyles everything with the chosen theme and saves the
 // choice.
 func (m Model) handleThemeChosen(msg skinpicker.SkinSelectedMsg) (tea.Model, tea.Cmd) {
+	assert.That(msg.Name != "", "handleThemeChosen: empty theme name")
+	assert.That(m.appState == AppStateRunning, "handleThemeChosen: not signed in")
+	assert.That(m.themeSetting != "", "handleThemeChosen: no setting to save the theme under")
 	t, _, err := theme.ResolveNamed(msg.Name, config.ThemesDir())
 	if err != nil {
 		// The name came from a list this component built, so a failure

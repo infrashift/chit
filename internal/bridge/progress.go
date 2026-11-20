@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"time"
+
+	"github.com/infrashift/chit/internal/assert"
 )
 
 // progressDelay is how long a run may go before the thread is shown that the
@@ -13,19 +15,30 @@ const progressDelay = 10 * time.Second
 // progressNotice stands in the thread while a long run is under way.
 const progressNotice = "⏳ Working on it… (this note goes away when I reply)"
 
+// progressNote is a progress note that may be in the thread. Stop ends it.
+type progressNote struct {
+	b       *Bridge
+	root    string
+	timer   *time.Timer
+	created chan struct{} // closed once the timer's post attempt has finished
+	noteID  string        // set before created is closed; empty if posting failed
+}
+
 // showProgress posts progressNotice in the thread if the run is still going
-// after b.progressDelay, and returns the function that ends it: called once
-// the reply is posted, it cancels the note or deletes it.
+// after b.progressDelay, and returns the note: Stop, called once the reply is
+// posted, cancels the note or deletes it.
 //
 // The note is deleted rather than edited into the reply. The reply has to be
 // a new post: other bridges, notifications and mention handling act on
 // `posted` events, and an @mention that arrived by edit would hand work to
 // another agent that never hears of it.
-func (b *Bridge) showProgress(ctx context.Context, channelID, root string, hops int) (done func()) {
-	var noteID string
-	created := make(chan struct{})
-	timer := time.AfterFunc(b.progressDelay, func() {
-		defer close(created)
+func (b *Bridge) showProgress(ctx context.Context, channelID, root string, hops int) *progressNote {
+	assert.That(root != "", "Bridge.showProgress: empty thread root")
+	assert.That(b.client != nil, "Bridge.showProgress: nil chitd client")
+	assert.That(b.progressDelay > 0, "Bridge.showProgress: progress delay not positive")
+	p := &progressNote{b: b, root: root, created: make(chan struct{})}
+	p.timer = time.AfterFunc(b.progressDelay, func() {
+		defer close(p.created)
 		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), replyTimeout)
 		defer cancel()
 		note, err := b.client.CreatePost(rctx, channelID, root, progressNotice, map[string]any{hopsProp: hops})
@@ -33,20 +46,28 @@ func (b *Bridge) showProgress(ctx context.Context, channelID, root string, hops 
 			slog.Warn("failed to post progress note", "root_id", root, "error", err)
 			return
 		}
-		noteID = note.ID
+		assert.That(note != nil, "Bridge.showProgress: nil note without an error")
+		p.noteID = note.ID
 	})
-	return func() {
-		if timer.Stop() {
-			return
-		}
-		<-created
-		if noteID == "" {
-			return
-		}
-		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), replyTimeout)
-		defer cancel()
-		if err := b.client.DeletePost(rctx, noteID); err != nil {
-			slog.Warn("failed to remove progress note", "root_id", root, "post_id", noteID, "error", err)
-		}
+	assert.That(p.timer != nil, "Bridge.showProgress: no timer")
+	return p
+}
+
+// Stop cancels the note if it has not been posted yet, or deletes it. ctx is
+// the run's context; the delete outlives its cancellation.
+func (p *progressNote) Stop(ctx context.Context) {
+	assert.That(p.timer != nil && p.created != nil, "progressNote.Stop: note not built by showProgress")
+	assert.That(p.b != nil && p.b.client != nil, "progressNote.Stop: nil bridge or client")
+	if p.timer.Stop() {
+		return
+	}
+	<-p.created
+	if p.noteID == "" {
+		return
+	}
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), replyTimeout)
+	defer cancel()
+	if err := p.b.client.DeletePost(rctx, p.noteID); err != nil {
+		slog.Warn("failed to remove progress note", "root_id", p.root, "post_id", p.noteID, "error", err)
 	}
 }

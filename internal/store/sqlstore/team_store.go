@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 )
 
@@ -15,10 +16,15 @@ type SqlTeamStore struct {
 }
 
 func (s *SqlTeamStore) Save(ctx context.Context, team *model.Team) (*model.Team, error) {
+	assert.That(team != nil, "SqlTeamStore.Save: nil team")
+	assert.That(s.sqlStore != nil, "SqlTeamStore.Save: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlTeamStore.Save: nil pool")
 	team.PreSave()
 	if err := team.IsValid(); err != nil {
 		return nil, err
 	}
+	assert.That(team.ID != "" && team.UpdateAt > 0, "SqlTeamStore.Save: PreSave left no id or time")
+	assert.That(team.Type != "", "SqlTeamStore.Save: PreSave left no type")
 
 	query := `INSERT INTO teams (id, name, display_name, description, type, creator_id, create_at, update_at, delete_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
@@ -34,6 +40,8 @@ func (s *SqlTeamStore) Save(ctx context.Context, team *model.Team) (*model.Team,
 }
 
 func (s *SqlTeamStore) Get(ctx context.Context, id string) (*model.Team, error) {
+	assert.That(s.sqlStore != nil, "SqlTeamStore.Get: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlTeamStore.Get: nil pool")
 	if !validIDs(id) {
 		return nil, model.NewNotFoundError("SqlTeamStore.Get", id)
 	}
@@ -52,6 +60,8 @@ func (s *SqlTeamStore) Get(ctx context.Context, id string) (*model.Team, error) 
 }
 
 func (s *SqlTeamStore) GetByName(ctx context.Context, name string) (*model.Team, error) {
+	assert.That(s.sqlStore != nil, "SqlTeamStore.GetByName: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlTeamStore.GetByName: nil pool")
 	query := `SELECT ` + teamColumns + `
 		FROM teams WHERE name = $1 AND delete_at = 0`
 
@@ -67,7 +77,11 @@ func (s *SqlTeamStore) GetByName(ctx context.Context, name string) (*model.Team,
 }
 
 func (s *SqlTeamStore) Update(ctx context.Context, team *model.Team) (*model.Team, error) {
+	assert.That(team != nil, "SqlTeamStore.Update: nil team")
+	assert.That(s.sqlStore != nil, "SqlTeamStore.Update: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlTeamStore.Update: nil pool")
 	team.PreUpdate()
+	assert.That(team.UpdateAt > 0, "SqlTeamStore.Update: PreUpdate left no time")
 
 	query := `UPDATE teams SET name = $1, display_name = $2, description = $3, type = $4, update_at = $5
 		WHERE id = $6 AND delete_at = 0`
@@ -85,6 +99,9 @@ func (s *SqlTeamStore) Update(ctx context.Context, team *model.Team) (*model.Tea
 }
 
 func (s *SqlTeamStore) Delete(ctx context.Context, id string, deleteAt int64) error {
+	assert.That(s.sqlStore != nil, "SqlTeamStore.Delete: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlTeamStore.Delete: nil pool")
+	assert.That(deleteAt > 0, "SqlTeamStore.Delete: deleteAt is not a time")
 	query := `UPDATE teams SET delete_at = $1, update_at = $1 WHERE id = $2 AND delete_at = 0`
 	tag, err := s.sqlStore.pool.Exec(ctx, query, deleteAt, id)
 	if err != nil {
@@ -97,6 +114,10 @@ func (s *SqlTeamStore) Delete(ctx context.Context, id string, deleteAt int64) er
 }
 
 func (s *SqlTeamStore) GetAll(ctx context.Context, visibleTo string, page, perPage int) ([]*model.Team, error) {
+	assert.That(s.sqlStore != nil, "SqlTeamStore.GetAll: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlTeamStore.GetAll: nil pool")
+	assert.That(page >= 0, "SqlTeamStore.GetAll: negative page")
+	assert.That(perPage >= 1, "SqlTeamStore.GetAll: per page below 1")
 	query := `SELECT ` + teamColumns + `
 		FROM teams t WHERE delete_at = 0
 		AND ($3 = '' OR t.type = 'O' OR EXISTS (
@@ -114,6 +135,8 @@ func (s *SqlTeamStore) GetAll(ctx context.Context, visibleTo string, page, perPa
 }
 
 func (s *SqlTeamStore) GetTeamsForUser(ctx context.Context, userID string) ([]*model.Team, error) {
+	assert.That(s.sqlStore != nil, "SqlTeamStore.GetTeamsForUser: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlTeamStore.GetTeamsForUser: nil pool")
 	query := `SELECT ` + teamColumnsT + `
 		FROM teams t
 		INNER JOIN team_members tm ON t.id = tm.team_id
@@ -130,10 +153,14 @@ func (s *SqlTeamStore) GetTeamsForUser(ctx context.Context, userID string) ([]*m
 }
 
 func (s *SqlTeamStore) SaveMember(ctx context.Context, member *model.TeamMember) (*model.TeamMember, error) {
+	assert.That(member != nil, "SqlTeamStore.SaveMember: nil member")
+	assert.That(s.sqlStore != nil, "SqlTeamStore.SaveMember: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlTeamStore.SaveMember: nil pool")
 	member.PreSave()
 	if err := member.IsValid(); err != nil {
 		return nil, err
 	}
+	assert.That(member.Roles != "" && member.CreateAt > 0, "SqlTeamStore.SaveMember: PreSave left no roles or time")
 
 	query := `INSERT INTO team_members (team_id, user_id, roles, create_at, delete_at)
 		VALUES ($1, $2, $3, $4, $5)
@@ -150,6 +177,8 @@ func (s *SqlTeamStore) SaveMember(ctx context.Context, member *model.TeamMember)
 }
 
 func (s *SqlTeamStore) RemoveMember(ctx context.Context, teamID, userID string) error {
+	assert.That(s.sqlStore != nil, "SqlTeamStore.RemoveMember: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlTeamStore.RemoveMember: nil pool")
 	query := `DELETE FROM team_members WHERE team_id = $1 AND user_id = $2`
 	_, err := s.sqlStore.pool.Exec(ctx, query, teamID, userID)
 	if err != nil {
@@ -159,6 +188,10 @@ func (s *SqlTeamStore) RemoveMember(ctx context.Context, teamID, userID string) 
 }
 
 func (s *SqlTeamStore) GetMembers(ctx context.Context, teamID string, page, perPage int) ([]*model.TeamMember, error) {
+	assert.That(s.sqlStore != nil, "SqlTeamStore.GetMembers: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlTeamStore.GetMembers: nil pool")
+	assert.That(page >= 0, "SqlTeamStore.GetMembers: negative page")
+	assert.That(perPage >= 1, "SqlTeamStore.GetMembers: per page below 1")
 	query := `SELECT team_id, user_id, roles, create_at, delete_at
 		FROM team_members WHERE team_id = $1 AND delete_at = 0
 		ORDER BY create_at LIMIT $2 OFFSET $3`
@@ -190,6 +223,8 @@ func (s *SqlTeamStore) GetMemberIDs(ctx context.Context, teamID string) ([]strin
 }
 
 func (s *SqlTeamStore) GetMember(ctx context.Context, teamID, userID string) (*model.TeamMember, error) {
+	assert.That(s.sqlStore != nil, "SqlTeamStore.GetMember: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlTeamStore.GetMember: nil pool")
 	if !validIDs(teamID, userID) {
 		return nil, model.NewNotFoundError("SqlTeamStore.GetMember", teamID+"/"+userID)
 	}
@@ -218,6 +253,7 @@ const (
 )
 
 func scanTeam(row pgx.Row) (*model.Team, error) {
+	assert.That(row != nil, "scanTeam: nil row")
 	t := &model.Team{}
 	err := row.Scan(
 		&t.ID, &t.Name, &t.DisplayName, &t.Description, &t.Type,
@@ -227,6 +263,7 @@ func scanTeam(row pgx.Row) (*model.Team, error) {
 }
 
 func scanTeams(rows pgx.Rows) ([]*model.Team, error) {
+	assert.That(rows != nil, "scanTeams: nil rows")
 	var teams []*model.Team
 	for rows.Next() {
 		t, err := scanTeam(rows)

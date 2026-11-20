@@ -20,7 +20,7 @@ func TestBridge_ProgressNoteForLongRuns(t *testing.T) {
 	b, ctx := liveBridge(t, testConfig(t, srv.URL, bin))
 	b.progressDelay = 20 * time.Millisecond
 
-	b.handleEvent(ctx, postedEvent(&model.Post{ID: "root-1", ChannelID: testChannelID,
+	b.handleEvent(ctx, postedEvent(t, &model.Post{ID: "root-1", ChannelID: testChannelID,
 		UserID: testOtherUser, Content: "long task"}))
 	waitFor(t, "the run to start", func() bool { return fileExists(started) })
 	note := waitForPosts(t, chitd, 1)[0]
@@ -47,7 +47,7 @@ func TestBridge_NoProgressNoteForQuickRuns(t *testing.T) {
 	srv := chitd.server(t)
 	b, ctx := liveBridge(t, testConfig(t, srv.URL, writeEchoClaude(t, t.TempDir())))
 
-	b.handleEvent(ctx, postedEvent(&model.Post{ID: "root-1", ChannelID: testChannelID,
+	b.handleEvent(ctx, postedEvent(t, &model.Post{ID: "root-1", ChannelID: testChannelID,
 		UserID: testOtherUser, Content: "quick"}))
 	if reply := waitForPosts(t, chitd, 1)[0]; reply.Content == progressNotice {
 		t.Error("a quick run should not show a progress note")
@@ -85,11 +85,11 @@ func TestBridge_NewSessionMidThreadIsSeeded(t *testing.T) {
 	stdin := filepath.Join(dir, "stdin")
 	b, ctx := liveBridge(t, testConfig(t, srv.URL, writeStdinClaude(t, dir, stdin)))
 
-	b.handleEvent(ctx, postedEvent(&model.Post{ID: "msg-4", ChannelID: testChannelID,
+	b.handleEvent(ctx, postedEvent(t, &model.Post{ID: "msg-4", ChannelID: testChannelID,
 		UserID: testOtherUser, RootID: "root-1", Content: "@chit-agent what do you think?"}))
 	waitForPosts(t, chitd, 1)
 
-	got, _ := os.ReadFile(stdin)
+	got := readFileOK(t, stdin)
 	want := "Earlier in this thread:\n\n" +
 		"[@alice] should we shard the users table?\n\n" +
 		"[@bob] only past 50M rows\n\n" +
@@ -150,7 +150,7 @@ func TestBridge_StopAndStatus(t *testing.T) {
 	b.agentUsername = testAgentUsername
 
 	say := func(id, content string) {
-		b.handleEvent(ctx, postedEvent(&model.Post{ID: id, ChannelID: testChannelID,
+		b.handleEvent(ctx, postedEvent(t, &model.Post{ID: id, ChannelID: testChannelID,
 			UserID: testOtherUser, RootID: "root-1", Content: content}))
 	}
 	say("msg-1", "long task")
@@ -193,7 +193,7 @@ func TestBridge_NewStartsAFreshSession(t *testing.T) {
 	b.agentUsername = testAgentUsername
 
 	say := func(id, content string) {
-		b.handleEvent(ctx, postedEvent(&model.Post{ID: id, ChannelID: testChannelID,
+		b.handleEvent(ctx, postedEvent(t, &model.Post{ID: id, ChannelID: testChannelID,
 			UserID: testOtherUser, RootID: "root-1", Content: content}))
 	}
 	say("msg-1", "first")
@@ -210,7 +210,7 @@ func TestBridge_NewStartsAFreshSession(t *testing.T) {
 	if argv := readArgv(t, argvFile); slices.Contains(argv, "--resume") {
 		t.Errorf("the message after !new must start a new session: %q", argv)
 	}
-	stdin, _ := os.ReadFile(argvFile + ".stdin")
+	stdin := readFileOK(t, argvFile+".stdin")
 	if !strings.HasSuffix(string(stdin), "[@alice] second") {
 		t.Errorf("only the text after !new goes to Claude, got %q", stdin)
 	}
@@ -229,10 +229,10 @@ func TestBridge_NewIsNotSeeded(t *testing.T) {
 	b, ctx := liveBridge(t, testConfig(t, srv.URL, writeStdinClaude(t, dir, stdin)))
 	b.agentUsername = testAgentUsername
 
-	b.handleEvent(ctx, postedEvent(&model.Post{ID: "msg-3", ChannelID: testChannelID,
+	b.handleEvent(ctx, postedEvent(t, &model.Post{ID: "msg-3", ChannelID: testChannelID,
 		UserID: testOtherUser, RootID: "root-1", Content: "!new fresh question"}))
 	waitForPosts(t, chitd, 1)
-	if got, _ := os.ReadFile(stdin); string(got) != "[@alice] fresh question" {
+	if got := readFileOK(t, stdin); string(got) != "[@alice] fresh question" {
 		t.Errorf("prompt after !new = %q, want only the message", got)
 	}
 }

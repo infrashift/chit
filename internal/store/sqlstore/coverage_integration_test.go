@@ -147,7 +147,10 @@ func TestThreadStoreIntegration_MarkAsReadAndUpdateMembership(t *testing.T) {
 	if err = ss.Thread().UpdateMembership(t.Context(), m); err != nil {
 		t.Fatalf("UpdateMembership: %v", err)
 	}
-	if m, _ = ss.Thread().GetMembership(t.Context(), root.ID, user.ID); m.Following {
+	if m, err = ss.Thread().GetMembership(t.Context(), root.ID, user.ID); err != nil {
+		t.Fatalf("GetMembership after unfollow: %v", err)
+	}
+	if m.Following {
 		t.Error("unfollow did not persist")
 	}
 }

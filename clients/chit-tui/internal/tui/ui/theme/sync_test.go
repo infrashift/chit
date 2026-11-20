@@ -32,13 +32,13 @@ func themeColorFieldCount(t *testing.T) int {
 
 func TestThemeStructMatchesKeyLists(t *testing.T) {
 	got := themeColorFieldCount(t)
-	want := len(config.ThemeColorKeys) + len(config.ThemeDerivedKeys)
+	want := len(config.ThemeColorKeys()) + len(config.ThemeDerivedKeys())
 
 	if got != want {
 		t.Errorf("Theme has %d color fields but the key lists name %d "+
 			"(%d palette + %d derived); a slot was added without updating "+
 			"config.ThemeColorKeys, schema/theme.cue, and LoadLocal",
-			got, want, len(config.ThemeColorKeys), len(config.ThemeDerivedKeys))
+			got, want, len(config.ThemeColorKeys()), len(config.ThemeDerivedKeys()))
 	}
 }
 
@@ -50,9 +50,9 @@ func TestEveryPaletteKeyReachesTheTheme(t *testing.T) {
 	// A distinct color per key, so a slot wired to the wrong key shows up as
 	// a mismatch rather than coincidentally matching.
 	body := "name = \"Sync\"\n"
-	want := make(map[string]string, len(config.ThemeColorKeys))
+	want := make(map[string]string, len(config.ThemeColorKeys()))
 
-	for i, key := range config.ThemeColorKeys {
+	for i, key := range config.ThemeColorKeys() {
 		hex := distinctHex(i)
 		want[key] = hex
 		body += key + " = \"" + hex + "\"\n"
@@ -89,9 +89,9 @@ func TestEveryPaletteKeyReachesTheTheme(t *testing.T) {
 
 	// The assertion map itself must cover the key list, or a new key could be
 	// missed here too.
-	if len(got) != len(config.ThemeColorKeys) {
+	if len(got) != len(config.ThemeColorKeys()) {
 		t.Fatalf("this test checks %d keys but the list names %d; update the map",
-			len(got), len(config.ThemeColorKeys))
+			len(got), len(config.ThemeColorKeys()))
 	}
 
 	for key, wantHex := range want {
@@ -141,7 +141,7 @@ func TestDerivedKeysReachTheTheme(t *testing.T) {
 // completeThemeBody builds a valid theme body from the canonical key list.
 func completeThemeBody() string {
 	body := "name = \"Generated\"\n"
-	for _, key := range config.ThemeColorKeys {
+	for _, key := range config.ThemeColorKeys() {
 		body += key + " = \"#7aa2f7\"\n"
 	}
 	return body

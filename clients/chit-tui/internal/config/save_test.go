@@ -43,9 +43,32 @@ func TestSaveTheme_ReplacesExistingKey(t *testing.T) {
 	}
 
 	// One assignment, not two.
-	body, _ := os.ReadFile(path)
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
 	if n := strings.Count(string(body), "theme ="); n != 1 {
 		t.Errorf("file has %d theme assignments, want 1:\n%s", n, body)
+	}
+}
+
+// A theme name is data, not a replacement template: "$1" or "${x}" in the
+// name must reach the file as written.
+func TestSaveTheme_ReplacesWithDollarInName(t *testing.T) {
+	path := writeFile(t, "config.toml", "theme = \"nightfox\"\n")
+	t.Setenv("CHIT_CONFIG_FILE", path)
+
+	const name = "my$1theme${x}"
+	if err := config.SaveTheme(name); err != nil {
+		t.Fatalf("SaveTheme: %v", err)
+	}
+
+	settings, warnings := config.LoadFile(path)
+	if len(warnings) != 0 {
+		t.Errorf("saved config does not load cleanly: %v", warnings)
+	}
+	if settings.Theme != name {
+		t.Errorf("Theme = %q, want %q", settings.Theme, name)
 	}
 }
 
@@ -123,7 +146,10 @@ func TestSaveTheme_HandlesMissingTrailingNewline(t *testing.T) {
 		t.Errorf("config does not load cleanly: %v", warnings)
 	}
 	if settings.Theme != "dayfox" || settings.ServerURL != "http://x.test" {
-		body, _ := os.ReadFile(path)
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read config: %v", err)
+		}
 		t.Errorf("Theme = %q, ServerURL = %q; file:\n%s",
 			settings.Theme, settings.ServerURL, body)
 	}
@@ -179,7 +205,11 @@ func TestSaveTheme_UnwritableDirectory(t *testing.T) {
 	if err := os.Mkdir(readonly, 0o555); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(readonly, 0o755) })
+	t.Cleanup(func() {
+		if err := os.Chmod(readonly, 0o755); err != nil {
+			t.Errorf("restore dir mode: %v", err)
+		}
+	})
 
 	t.Setenv("CHIT_CONFIG_FILE", filepath.Join(readonly, "config.toml"))
 
@@ -199,7 +229,11 @@ func TestSaveTheme_UnreadableFile(t *testing.T) {
 	if err := os.Chmod(path, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+	t.Cleanup(func() {
+		if err := os.Chmod(path, 0o600); err != nil {
+			t.Errorf("restore file mode: %v", err)
+		}
+	})
 
 	t.Setenv("CHIT_CONFIG_FILE", path)
 
@@ -221,7 +255,10 @@ func TestSaveThemeSetting_WritesOnlyItsKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, _ := os.ReadFile(path)
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
 	if want := "theme_dark = \"nightfox\"\ntheme_light = \"dayfox\"\n"; string(got) != want {
 		t.Errorf("config = %q, want %q", got, want)
 	}

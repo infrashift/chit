@@ -22,7 +22,10 @@ const (
 	configFile = "../../deploy/keto/keto.yml"
 )
 
-var kubeFiles = []string{"../../deploy/chit.kube.yml", "../../deploy/chit-uat.kube.yml"}
+// kubeFiles returns the kube files that carry a copy of the Keto config.
+func kubeFiles() []string {
+	return []string{"../../deploy/chit.kube.yml", "../../deploy/chit-uat.kube.yml"}
+}
 
 func readFile(t *testing.T, path string) string {
 	t.Helper()
@@ -66,7 +69,7 @@ func TestKetoSchemaInSync(t *testing.T) {
 		{"chit-keto-config", "keto.yml", configFile},
 		{"chit-keto-schema", "chit.cue", schemaFile},
 	}
-	for _, kube := range kubeFiles {
+	for _, kube := range kubeFiles() {
 		for _, w := range want {
 			data := configMap(t, kube, w.configMap)
 			if len(data) != 1 || data[w.key] != readFile(t, w.file) {

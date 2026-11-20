@@ -2,9 +2,13 @@ package model
 
 import (
 	"fmt"
+	"net/http"
 	"regexp"
+	"slices"
 
 	"github.com/google/uuid"
+
+	"github.com/infrashift/chit/internal/assert"
 )
 
 // Server-owned and checked post props.
@@ -28,10 +32,15 @@ const (
 	ProvenanceMaxModelLen = 200
 )
 
+// semscope: allow(NASA-P10-06) compiled once, never changed
 var sha256HexRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
-// provenanceIDFields are the provenance fields that hold UUID lists.
-var provenanceIDFields = []string{"tool_ids", "okf_namespace_ids", "attachment_ids"}
+// provenanceIDFields returns the provenance fields that hold UUID lists.
+func provenanceIDFields() []string {
+	out := []string{"tool_ids", "okf_namespace_ids", "attachment_ids"}
+	assert.That(len(out) == 3, "provenanceIDFields: wrong number of id fields")
+	return out
+}
 
 // ValidateProvenance checks a props.provenance value, as decoded from JSON.
 // It is an object with only these optional fields:
@@ -42,41 +51,61 @@ var provenanceIDFields = []string{"tool_ids", "okf_namespace_ids", "attachment_i
 //
 // Any other field, or a value of another type, is a 400.
 func ValidateProvenance(v any) *AppError {
-	bad := func(format string, args ...any) *AppError {
-		return NewBadRequestError("Post.Provenance", "props.provenance: "+fmt.Sprintf(format, args...))
-	}
 	obj, ok := v.(map[string]any)
 	if !ok {
-		return bad("must be an object")
+		return badProvenance("must be an object")
 	}
 	for key, val := range obj {
-		switch key {
-		case "tool_ids", "okf_namespace_ids", "attachment_ids":
-			list, ok := val.([]any)
-			if !ok {
-				return bad("%s must be a list of UUIDs", key)
-			}
-			if len(list) > ProvenanceMaxIDs {
-				return bad("%s has %d entries, more than %d", key, len(list), ProvenanceMaxIDs)
-			}
-			for i, item := range list {
-				s, ok := item.(string)
-				if !ok || !isCanonicalUUID(s) {
-					return bad("%s[%d] is not a UUID", key, i)
-				}
-			}
-		case "okf_blob_sha256":
-			s, ok := val.(string)
-			if !ok || !sha256HexRe.MatchString(s) {
-				return bad("okf_blob_sha256 must be 64 lowercase hex characters")
-			}
-		case "model":
-			s, ok := val.(string)
-			if !ok || s == "" || len(s) > ProvenanceMaxModelLen {
-				return bad("model must be a string of 1 to %d characters", ProvenanceMaxModelLen)
-			}
-		default:
-			return bad("unknown field %q (allowed: %v, okf_blob_sha256, model)", key, provenanceIDFields)
+		if err := validateProvenanceField(key, val); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// badProvenance is ValidateProvenance's 400 for an invalid props.provenance.
+func badProvenance(format string, args ...any) *AppError {
+	assert.That(format != "", "badProvenance: empty format")
+	err := NewBadRequestError("Post.Provenance", "props.provenance: "+fmt.Sprintf(format, args...))
+	assert.That(err.StatusCode == http.StatusBadRequest, "badProvenance: not a 400")
+	return err
+}
+
+// validateProvenanceField checks one field of a props.provenance object.
+func validateProvenanceField(key string, val any) *AppError {
+	switch key {
+	case "tool_ids", "okf_namespace_ids", "attachment_ids":
+		return validateProvenanceIDs(key, val)
+	case "okf_blob_sha256":
+		s, ok := val.(string)
+		if !ok || !sha256HexRe.MatchString(s) {
+			return badProvenance("okf_blob_sha256 must be 64 lowercase hex characters")
+		}
+	case "model":
+		s, ok := val.(string)
+		if !ok || s == "" || len(s) > ProvenanceMaxModelLen {
+			return badProvenance("model must be a string of 1 to %d characters", ProvenanceMaxModelLen)
+		}
+	default:
+		return badProvenance("unknown field %q (allowed: %v, okf_blob_sha256, model)", key, provenanceIDFields())
+	}
+	return nil
+}
+
+// validateProvenanceIDs checks a provenance field that holds a list of UUIDs.
+func validateProvenanceIDs(key string, val any) *AppError {
+	assert.That(slices.Contains(provenanceIDFields(), key), "validateProvenanceIDs: not an id field")
+	list, ok := val.([]any)
+	if !ok {
+		return badProvenance("%s must be a list of UUIDs", key)
+	}
+	if len(list) > ProvenanceMaxIDs {
+		return badProvenance("%s has %d entries, more than %d", key, len(list), ProvenanceMaxIDs)
+	}
+	for i, item := range list {
+		s, ok := item.(string)
+		if !ok || !isCanonicalUUID(s) {
+			return badProvenance("%s[%d] is not a UUID", key, i)
 		}
 	}
 	return nil

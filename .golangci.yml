@@ -2,12 +2,36 @@ version: "2"
 linters:
   enable:
     - bodyclose
+    - errorlint # R7: wrap and compare errors correctly (ADR-0004)
+    - gochecknoglobals # R6: no mutable package state (ADR-0004)
+    - forbidigo # R5, R7: panic only in internal/assert (ADR-0004, ADR-0011)
+    - funlen # R4: 60 lines for each function (ADR-0004)
+    - gocognit # R1: simple control flow (ADR-0004)
+    - nestif # R1: shallow nesting (ADR-0004)
     - gocritic
     - misspell
     - noctx
     - revive
     - sqlclosecheck
   settings:
+    # R7 (ADR-0002, ADR-0004): no error goes to the blank identifier, and
+    # each type assertion checks its ok result.
+    errcheck:
+      check-blank: true
+      check-type-assertions: true
+    forbidigo:
+      forbid:
+        - pattern: ^panic$
+          msg: "use internal/assert for programmer errors; return an error for bad input (ADR-0011)"
+    # R4 and R1 (ADR-0002, ADR-0004).
+    funlen:
+      lines: 60
+      statements: -1
+      ignore-comments: false
+    gocognit:
+      min-complexity: 20
+    nestif:
+      min-complexity: 4
     gocritic:
       enabled-tags:
         - diagnostic
@@ -31,6 +55,13 @@ linters:
         - -ST1003
   exclusions:
     generated: lax
+    rules:
+      - path: internal/assert/assert\.go
+        linters: [forbidigo]
+      - path: pkg/imagecheck/internal/assert/assert\.go
+        linters: [forbidigo]
+      - path: _test\.go
+        linters: [forbidigo]
     paths:
       - third_party$
       - builtin$

@@ -1,6 +1,7 @@
 package tui_test
 
 import (
+	"io"
 	"strings"
 	"testing"
 
@@ -75,6 +76,7 @@ func TestModel_TagLoadErrorIsShown(t *testing.T) {
 // and a failed sign-in is reported on the form.
 func TestModel_SignInScreen(t *testing.T) {
 	m := tui.NewModel(&config.Config{}, &mockClient{}, nil, testutil.Styles(), nil, nil, nil)
+	m.SetClipboardOutput(io.Discard)
 	m, _ = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
 	m, _ = step(t, m, input.SlashTriggerMsg{Input: "/logout"})
 	if m.Init() != nil {

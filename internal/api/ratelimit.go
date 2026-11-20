@@ -10,6 +10,7 @@ import (
 
 	"golang.org/x/time/rate"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 )
 
@@ -51,29 +52,77 @@ const (
 	bucketClient = "client"
 )
 
-// RateLimit applies limits to each request. isClient reports whether a user
-// is an allowlisted on-behalf-of client (app.App.OnBehalfOfAllowed).
-func RateLimit(limits RateLimits, isClient func(*model.User) bool) func(http.Handler) http.Handler {
-	return rateLimit(limits, isClient, time.Now)
+// ClientAllowlist reports whether a user is an allowlisted on-behalf-of
+// client. *app.App is the implementation (App.OnBehalfOfAllowed).
+type ClientAllowlist interface {
+	OnBehalfOfAllowed(u *model.User) bool
 }
 
-func rateLimit(limits RateLimits, isClient func(*model.User) bool, now func() time.Time) func(http.Handler) http.Handler {
-	users := newUserLimiters(rate.Limit(limits.UserPerSecond), limits.UserBurst, now())
-	clients := newUserLimiters(rate.Limit(limits.ClientPerSecond), limits.ClientBurst, now())
+// clock supplies the current time; tests substitute a fake.
+type clock interface {
+	Now() time.Time
+}
 
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			buckets := bucketsFor(r, users, clients, isClient)
-			refused, wait := take(now(), buckets)
-			if refused == nil {
-				next.ServeHTTP(w, r)
-				return
-			}
-			logRefusal(r, refused.name, wait)
-			setRetryAfter(w, wait)
-			WriteError(w, model.NewAppError("RateLimit", "rate limit exceeded", "", http.StatusTooManyRequests))
-		})
+// systemClock is the production clock.
+type systemClock struct{}
+
+// Now returns time.Now().
+func (systemClock) Now() time.Time { return time.Now() }
+
+// RateLimit applies limits to each request. clients says which users are
+// allowlisted on-behalf-of clients.
+//
+// semscope: allow(NASA-P10-09) chi's Router.Use requires func(http.Handler) http.Handler.
+func RateLimit(limits RateLimits, clients ClientAllowlist) func(http.Handler) http.Handler {
+	assert.That(clients != nil, "RateLimit: nil client allowlist")
+	return newRateLimiter(limits, clients, systemClock{}).wrap
+}
+
+// rateLimiter holds the buckets of the rate-limit middleware.
+type rateLimiter struct {
+	users     *userLimiters
+	clients   *userLimiters
+	allowlist ClientAllowlist
+	clock     clock
+}
+
+func newRateLimiter(limits RateLimits, allowlist ClientAllowlist, clk clock) *rateLimiter {
+	assert.That(allowlist != nil && clk != nil, "newRateLimiter: nil allowlist or clock")
+	l := &rateLimiter{
+		users:     newUserLimiters(rate.Limit(limits.UserPerSecond), limits.UserBurst, clk.Now()),
+		clients:   newUserLimiters(rate.Limit(limits.ClientPerSecond), limits.ClientBurst, clk.Now()),
+		allowlist: allowlist,
+		clock:     clk,
 	}
+	return l
+}
+
+// wrap is the middleware: next serves each request that the limits allow.
+func (l *rateLimiter) wrap(next http.Handler) http.Handler {
+	assert.That(next != nil, "rateLimiter.wrap: nil next handler")
+	return &limitedHandler{limiter: l, next: next}
+}
+
+// limitedHandler refuses a request over its limits with a 429, and passes
+// the others to next.
+type limitedHandler struct {
+	limiter *rateLimiter
+	next    http.Handler
+}
+
+func (h *limitedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	l := h.limiter
+	assert.That(l != nil && h.next != nil, "limitedHandler.ServeHTTP: not built by rateLimiter.wrap")
+	buckets := bucketsFor(r, l.users, l.clients, l.allowlist)
+	refused, wait := take(l.clock.Now(), buckets)
+	if refused == nil {
+		h.next.ServeHTTP(w, r)
+		return
+	}
+	assert.That(wait >= 0, "limitedHandler.ServeHTTP: negative wait")
+	logRefusal(r, refused.name, wait)
+	setRetryAfter(w, wait)
+	WriteError(w, model.NewAppError("RateLimit", "rate limit exceeded", "", http.StatusTooManyRequests))
 }
 
 // bucket is one token bucket that a request counts against.
@@ -84,7 +133,8 @@ type bucket struct {
 }
 
 // bucketsFor returns the buckets that r counts against.
-func bucketsFor(r *http.Request, users, clients *userLimiters, isClient func(*model.User) bool) []bucket {
+func bucketsFor(r *http.Request, users, clients *userLimiters, allowlist ClientAllowlist) []bucket {
+	assert.That(users != nil && clients != nil && allowlist != nil, "bucketsFor: nil limiters or allowlist")
 	user := ContextGetUser(r)
 	switch {
 	case user == nil:
@@ -98,7 +148,7 @@ func bucketsFor(r *http.Request, users, clients *userLimiters, isClient func(*mo
 			{bucketUser, users, user.ID},
 			{bucketClient, clients, ContextGetActor(r).ID},
 		}
-	case isClient(user):
+	case allowlist.OnBehalfOfAllowed(user):
 		return []bucket{{bucketClient, clients, user.ID}}
 	default:
 		return []bucket{{bucketUser, users, user.ID}}
@@ -111,6 +161,7 @@ func bucketsFor(r *http.Request, users, clients *userLimiters, isClient func(*mo
 // returns the bucket that refused, and how long until it would allow the
 // request.
 func take(now time.Time, buckets []bucket) (*bucket, time.Duration) {
+	assert.That(len(buckets) > 0, "take: no buckets")
 	held := make([]*rate.Reservation, 0, len(buckets))
 	for i := range buckets {
 		res := buckets[i].limiters.reserve(buckets[i].key, now)
@@ -126,6 +177,7 @@ func take(now time.Time, buckets []bucket) (*bucket, time.Duration) {
 		if !res.OK() {
 			wait = 0 // never: no bucket has a burst below 1
 		}
+		assert.That(len(held) < len(buckets), "take: a refusal after every bucket allowed")
 		return &buckets[i], wait
 	}
 	return nil, 0
@@ -141,6 +193,7 @@ func setRetryAfter(w http.ResponseWriter, wait time.Duration) {
 // logRefusal records a refusal: which bucket, and who. For a request on
 // behalf of a person, both the actor and the principal.
 func logRefusal(r *http.Request, name string, wait time.Duration) {
+	assert.That(name != "", "logRefusal: unnamed bucket")
 	attrs := []any{"bucket", name, "method", r.Method, "path", r.URL.Path,
 		"retry_after_ms", wait.Milliseconds()}
 	user := ContextGetUser(r)
@@ -179,11 +232,13 @@ type limiterEntry struct {
 }
 
 func newUserLimiters(limit rate.Limit, burst int, now time.Time) *userLimiters {
+	assert.That(burst >= 1, "newUserLimiters: burst below 1")
 	// Time for an empty bucket to refill, with margin; at least a minute.
 	idle := time.Minute
 	if limit > 0 {
 		idle = max(idle, 2*time.Duration(float64(burst)/float64(limit)*float64(time.Second)))
 	}
+	assert.That(idle >= time.Minute, "newUserLimiters: idle time under a minute")
 	return &userLimiters{
 		limit: limit, burst: burst, idleAfter: idle,
 		lastSweep: now, entries: map[string]*limiterEntry{},
@@ -193,6 +248,7 @@ func newUserLimiters(limit rate.Limit, burst int, now time.Time) *userLimiters {
 // reserve reserves a token from key's bucket; the caller cancels the
 // reservation if it does not go ahead.
 func (u *userLimiters) reserve(key string, now time.Time) *rate.Reservation {
+	assert.That(u.entries != nil, "userLimiters.reserve: not built by newUserLimiters")
 	return u.limiter(key, now).ReserveN(now, 1)
 }
 
@@ -214,5 +270,6 @@ func (u *userLimiters) limiter(key string, now time.Time) *rate.Limiter {
 		u.entries[key] = e
 	}
 	e.lastSeen = now
+	assert.That(e.limiter != nil && u.entries[key] == e, "userLimiters.limiter: bucket not stored")
 	return e.limiter
 }

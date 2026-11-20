@@ -28,14 +28,14 @@ chit-tui
 
 ## 3. Log In
 
-The TUI opens with a login screen. Enter your **email** and **password**, then
-press `Enter`. After login, the session is stored locally and reused on
-subsequent launches.
+The TUI opens with a login screen. Enter the **email** and **password** of the
+account, then press `Enter`. After login, the TUI stores the session locally.
+The TUI uses this session again when it starts the next time.
 
-Once authenticated, you'll see:
+After login, the TUI shows:
 
 - **Top pane** — Chat history for the active channel
-- **Bottom input** — Message composition area
+- **Bottom input** — The area where you write a message
 - **Action bar** — A row of clickable buttons, the active team/channel, and
   the connection indicator along the bottom edge
 
@@ -59,8 +59,8 @@ wheel-scroll the history.
 
 ## 5. Send a Message
 
-1. Type your message in the input (supports Markdown) — the input is focused
-   by default; press `Tab` if the history pane has focus
+1. Type the message in the input. The input supports Markdown and has focus
+   by default. If the history pane has focus, press `Tab`.
 2. Press `Enter` to send (`Alt+Enter` inserts a newline)
 
 ## 6. Open a Thread
@@ -76,8 +76,8 @@ wheel-scroll the history.
 Press `Ctrl+S` — the palette opens in message-search mode. Type a query,
 press `Enter` to search the active channel, then use arrow keys to browse
 results. Start the query with a second `?` (`??term`) to search every channel
-you belong to. Choosing a result jumps to that message, opening its channel
-first if needed.
+you belong to. When you choose a result, the TUI goes to that message. If
+necessary, the TUI first opens the channel of the message.
 
 ## 8. Quit
 

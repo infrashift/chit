@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+
+	"github.com/infrashift/chit/internal/assert"
 )
 
 // Worker represents a background job that can be started and stopped.
@@ -26,15 +28,19 @@ func NewScheduler() *Scheduler {
 
 // AddWorker registers a worker with the scheduler.
 func (s *Scheduler) AddWorker(w Worker) {
+	assert.That(w != nil, "Scheduler.AddWorker: nil worker")
+	assert.That(s.cancel == nil, "Scheduler.AddWorker: scheduler already started")
 	s.workers = append(s.workers, w)
 }
 
 // Start launches all registered workers.
 func (s *Scheduler) Start() {
+	assert.That(s.cancel == nil, "Scheduler.Start: already started")
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 
 	for _, w := range s.workers {
+		assert.That(w != nil, "Scheduler.Start: nil worker")
 		s.wg.Add(1)
 		go func(worker Worker) {
 			defer s.wg.Done()
@@ -53,6 +59,7 @@ func (s *Scheduler) Stop() {
 		s.cancel()
 	}
 	for _, w := range s.workers {
+		assert.That(w != nil, "Scheduler.Stop: nil worker")
 		w.Stop()
 	}
 	s.wg.Wait()

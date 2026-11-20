@@ -2,10 +2,14 @@ package tui
 
 import (
 	"context"
+	"errors"
+	"io"
+	"os"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/api"
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/auth"
 	"github.com/infrashift/chit/clients/chit-tui/internal/config"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
@@ -135,6 +139,10 @@ type Model struct {
 	// themeSetting is the config key a theme picked in the client is saved
 	// under; see config.Config.ThemeSettingKey.
 	themeSetting string
+	// clipboardOut is where copying writes its OSC 52 sequence: the
+	// terminal, except in tests, which would otherwise write escape
+	// sequences into their output.
+	clipboardOut io.Writer
 	// usersRequested marks user IDs already looked up.
 	usersRequested map[string]bool
 	// commandAuthors names the pseudo-author of each command's output, by
@@ -160,6 +168,7 @@ type Model struct {
 
 // NewModel creates the root model.
 func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s styles.Styles, tokenStore *auth.TokenStore, kratosClient *auth.KratosClient, sessionStore *auth.SessionStore) Model {
+	assert.That(client != nil, "NewModel: nil client")
 	state := AppStateRunning
 	if tokenStore != nil && tokenStore.Get() == "" {
 		state = AppStateLogin
@@ -169,42 +178,34 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 	}
 
 	m := Model{
-		scope:          newRequestScope(),
-		cfg:            cfg,
-		client:         client,
-		wsClient:       wsClient,
-		viewport:       viewport.New(s),
-		input:          input.New(s),
-		actionBar:      actionbar.New(s),
-		thread:         thread.New(s),
-		palette:        palette.New(s),
-		threadInbox:    threadinbox.New(s),
-		help:           help.New(s),
-		mention:        mention.New(s),
-		dmPicker:       dmpicker.New(s),
-		skinPicker:     skinpicker.New(s),
-		chCreator:      chcreator.New(s),
-		tagPicker:      tagpicker.New(s),
-		loginModel:     login.New(s, kratosClient),
-		users:          make(map[string]*model.User),
-		channelsByTeam: make(map[string][]*model.Channel),
-		unread:         make(map[string]int64),
-		mentions:       make(map[string]int64),
-		dmDisplayNames: make(map[string]string),
-		channelMembers: make(map[string][]*model.ChannelMember),
-		threadCounts:   make(map[string]int),
-		postTags:       make(map[string][]*model.Tag),
-		commandAuthors: make(map[string]string),
-		usersRequested: make(map[string]bool),
-		themeSetting:   "theme",
-		appState:       state,
-		tokenStore:     tokenStore,
-		kratosClient:   kratosClient,
-		sessionStore:   sessionStore,
-		focus:          FocusInput,
-		keys:           DefaultKeyMap(),
-		styles:         s,
+		scope:        newRequestScope(),
+		cfg:          cfg,
+		client:       client,
+		wsClient:     wsClient,
+		viewport:     viewport.New(s),
+		input:        input.New(s),
+		actionBar:    actionbar.New(s),
+		thread:       thread.New(s),
+		palette:      palette.New(s),
+		threadInbox:  threadinbox.New(s),
+		help:         help.New(s),
+		mention:      mention.New(s),
+		dmPicker:     dmpicker.New(s),
+		skinPicker:   skinpicker.New(s),
+		chCreator:    chcreator.New(s),
+		tagPicker:    tagpicker.New(s),
+		loginModel:   login.New(s, kratosClient),
+		themeSetting: "theme",
+		clipboardOut: os.Stdout,
+		appState:     state,
+		tokenStore:   tokenStore,
+		kratosClient: kratosClient,
+		sessionStore: sessionStore,
+		focus:        FocusInput,
+		keys:         DefaultKeyMap(),
+		styles:       s,
 	}
+	m.makeCaches()
 	// Seed the client-local commands rather than waiting for the server
 	// registry, which never contains them and may never arrive at all.
 	m.palette.SetCommands(clientCommands())
@@ -213,17 +214,47 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 	// root-side updates are visible without further plumbing.
 	m.palette.SetCounts(m.unread, m.mentions)
 	m.palette.SetDMDisplayNames(m.dmDisplayNames)
-	_ = m.input.Focus()
+	// Focus also returns the first blink, but NewModel cannot run a
+	// command. applyLoadedUser starts the blink when the session starts.
+	firstBlink := m.input.Focus()
+	assert.That(firstBlink != nil, "NewModel: focused input without a blink")
+	assert.That(m.scope != nil, "NewModel: nil request scope")
+	assert.That(m.sessionStore != nil, "NewModel: nil session store")
+	assert.That(m.appState != AppStateReLogin, "NewModel: a new model starts in re-login")
+	assert.That(m.focus == FocusInput, "NewModel: input does not start focused")
 	return m
+}
+
+// makeCaches gives a new model the empty maps its session fills in.
+func (m *Model) makeCaches() {
+	assert.That(m.users == nil, "makeCaches: caches already made")
+	assert.That(m.unread == nil, "makeCaches: badge caches already made")
+	m.users = make(map[string]*model.User)
+	m.channelsByTeam = make(map[string][]*model.Channel)
+	m.unread = make(map[string]int64)
+	m.mentions = make(map[string]int64)
+	m.dmDisplayNames = make(map[string]string)
+	m.channelMembers = make(map[string][]*model.ChannelMember)
+	m.threadCounts = make(map[string]int)
+	m.postTags = make(map[string][]*model.Tag)
+	m.commandAuthors = make(map[string]string)
+	m.usersRequested = make(map[string]bool)
+	assert.That(len(m.users) == 0, "makeCaches: users cache not empty")
+	assert.That(len(m.commandAuthors) == 0, "makeCaches: command authors not empty")
 }
 
 // SetThemeSetting sets the config key a theme picked with /theme is saved
 // under, which depends on the appearance resolved at startup.
-func (m *Model) SetThemeSetting(key string) { m.themeSetting = key }
+func (m *Model) SetThemeSetting(key string) {
+	assert.That(key != "", "SetThemeSetting: empty key")
+	m.themeSetting = key
+}
 
 // setError sets the error and returns a command to auto-clear it after 10 seconds.
 func (m *Model) setError(err error) tea.Cmd {
+	assert.That(err != nil, "setError: nil error")
 	m.errSeq++
+	assert.That(m.errSeq > 0, "setError: error sequence wrapped")
 	m.err = err
 	seq := m.errSeq
 	return tea.Tick(10*time.Second, func(_ time.Time) tea.Msg {
@@ -233,6 +264,9 @@ func (m *Model) setError(err error) tea.Cmd {
 
 // Init returns the initial commands.
 func (m Model) Init() tea.Cmd {
+	assert.That(m.scope != nil, "Init: nil request scope")
+	assert.That(m.appState >= AppStateLogin, "Init: unknown app state")
+	assert.That(m.appState <= AppStateRunning, "Init: app state past running")
 	if m.appState == AppStateLogin || m.appState == AppStateReLogin {
 		return nil
 	}
@@ -240,6 +274,9 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) initRunning() tea.Cmd {
+	assert.That(m.appState == AppStateRunning, "initRunning: not signed in")
+	assert.That(m.client != nil, "initRunning: nil client")
+	assert.That(m.scope != nil, "initRunning: nil request scope")
 	cmds := []tea.Cmd{
 		FetchMe(m.reqCtx(), m.client),
 		FetchTeams(m.reqCtx(), m.client),
@@ -252,6 +289,7 @@ func (m Model) initRunning() tea.Cmd {
 			return WSConnectedMsg{Err: m.wsClient.Connect()}
 		})
 	}
+	assert.That(len(cmds) >= 5, "initRunning: a startup request is missing")
 	return tea.Batch(cmds...)
 }
 
@@ -274,15 +312,34 @@ type requestScope struct {
 
 func newRequestScope() *requestScope {
 	ctx, cancel := context.WithCancel(context.Background())
+	assert.That(ctx.Err() == nil, "newRequestScope: new context already canceled")
+	assert.That(cancel != nil, "newRequestScope: nil cancel")
 	return &requestScope{ctx: ctx, cancel: cancel}
 }
 
 // reqCtx is the context requests made now should run under.
-func (m Model) reqCtx() context.Context { return m.scope.ctx }
+func (m Model) reqCtx() context.Context {
+	assert.That(m.scope != nil, "reqCtx: nil request scope")
+	assert.That(m.scope.ctx != nil, "reqCtx: nil context")
+	return m.scope.ctx
+}
 
 // endRequests cancels every request of the session that is ending and
 // starts a fresh scope for the next one.
 func (m *Model) endRequests() {
+	assert.That(m.scope != nil, "endRequests: nil request scope")
+	old := m.scope
 	m.scope.cancel()
 	m.scope = newRequestScope()
+	assert.That(old.ctx.Err() != nil, "endRequests: the old scope is still live")
+	assert.That(m.scope != old, "endRequests: the scope was not replaced")
+}
+
+func (m Model) handleErr(msg ErrMsg) (tea.Model, tea.Cmd) {
+	assert.That(msg.Err != nil, "handleErr: nil error")
+	assert.That(m.appState == AppStateRunning, "handleErr: not signed in")
+	if errors.Is(msg.Err, ws.ErrNotConnected) {
+		m.wsConnected = false
+	}
+	return m, m.setError(msg.Err)
 }

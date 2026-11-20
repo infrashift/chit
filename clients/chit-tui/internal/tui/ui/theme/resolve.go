@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 )
 
 // Appearance selects between a light and a dark theme when no explicit theme
@@ -69,10 +71,38 @@ type Request struct {
 	// ThemesDir holds user theme files.
 	ThemesDir string
 
-	// SystemIsDark reports whether the terminal is dark. It is injected so
-	// resolution stays testable and never probes a terminal on its own; nil
-	// is treated as dark.
-	SystemIsDark func() bool
+	// System reports whether the terminal is dark. It is injected so
+	// resolution stays testable and never probes a terminal on its own; it is
+	// asked only when no appearance was set, and nil is treated as dark.
+	System DarkDetector
+}
+
+// DarkDetector reports whether the terminal has a dark background. Asking may
+// query the terminal, so Request calls IsDark only when no appearance setting
+// decides the answer first.
+type DarkDetector interface {
+	IsDark() bool
+}
+
+// resolveFlagTheme resolves the theme named on the command line, which must
+// exist.
+func resolveFlagTheme(req Request) (Theme, []string, error) {
+	assert.That(req.FlagTheme != "", "resolveFlagTheme: no flag theme")
+	t, w, err := ResolveNamed(req.FlagTheme, req.ThemesDir)
+	warnings := append([]string(nil), w...)
+	if err != nil {
+		if errors.Is(err, ErrLocalThemeNotFound) {
+			return Theme{}, warnings, fmt.Errorf(
+				"unknown theme %q. Bundled themes: %s. Local themes are read from %s",
+				req.FlagTheme, strings.Join(BuiltinNames(), ", "), req.ThemesDir)
+		}
+		return Theme{}, warnings, err
+	}
+	if req.FlagAppearance != AppearanceUnset || req.ConfigAppearance != AppearanceUnset {
+		warnings = append(warnings,
+			"appearance is ignored because a theme was named explicitly")
+	}
+	return t, warnings, nil
 }
 
 // Resolve turns a request into a theme, plus any advisory warnings.
@@ -85,24 +115,12 @@ type Request struct {
 // who just typed a name wants to know it was wrong, whereas a config file that
 // has aged out of date should not stop the client from starting.
 func Resolve(req Request) (Theme, []string, error) {
+	assert.That(req.FlagAppearance >= AppearanceUnset && req.FlagAppearance <= AppearanceSystem, "Resolve: flag appearance not a known value")
+	assert.That(req.ConfigAppearance >= AppearanceUnset && req.ConfigAppearance <= AppearanceSystem, "Resolve: config appearance not a known value")
 	var warnings []string
 
 	if req.FlagTheme != "" {
-		t, w, err := ResolveNamed(req.FlagTheme, req.ThemesDir)
-		warnings = append(warnings, w...)
-		if err != nil {
-			if errors.Is(err, ErrLocalThemeNotFound) {
-				return Theme{}, warnings, fmt.Errorf(
-					"unknown theme %q. Bundled themes: %s. Local themes are read from %s",
-					req.FlagTheme, strings.Join(BuiltinNames(), ", "), req.ThemesDir)
-			}
-			return Theme{}, warnings, err
-		}
-		if req.FlagAppearance != AppearanceUnset || req.ConfigAppearance != AppearanceUnset {
-			warnings = append(warnings,
-				"appearance is ignored because a theme was named explicitly")
-		}
-		return t, warnings, nil
+		return resolveFlagTheme(req)
 	}
 
 	if req.ConfigTheme != "" {
@@ -147,7 +165,9 @@ func (req Request) Dark() bool {
 	if appearance == AppearanceUnset {
 		appearance = AppearanceSystem
 	}
-	return appearanceIsDark(appearance, req.SystemIsDark)
+	assert.That(appearance != AppearanceUnset, "Request.Dark: appearance still unset after defaulting")
+	assert.That(appearance <= AppearanceSystem, "Request.Dark: appearance not a known value")
+	return appearanceIsDark(appearance, req.System)
 }
 
 // pickByAppearance returns the configured theme name for the resolved
@@ -159,17 +179,19 @@ func pickByAppearance(req Request, dark bool) string {
 	return req.ConfigThemeLight
 }
 
-func appearanceIsDark(a Appearance, systemIsDark func() bool) bool {
+func appearanceIsDark(a Appearance, system DarkDetector) bool {
+	assert.That(a != AppearanceUnset, "appearanceIsDark: appearance unset")
+	assert.That(a >= AppearanceDark && a <= AppearanceSystem, "appearanceIsDark: appearance not a known value")
 	switch a {
 	case AppearanceDark:
 		return true
 	case AppearanceLight:
 		return false
 	default:
-		if systemIsDark == nil {
+		if system == nil {
 			return true
 		}
-		return systemIsDark()
+		return system.IsDark()
 	}
 }
 
@@ -177,6 +199,8 @@ func appearanceIsDark(a Appearance, systemIsDark func() bool) bool {
 // theme and a broken one need different wording: one is a name that resolves
 // to nothing, the other is a file that failed to load.
 func configThemeWarning(name string, err error) string {
+	assert.That(name != "", "configThemeWarning: empty theme name")
+	assert.That(err != nil, "configThemeWarning: nil error")
 	if errors.Is(err, ErrLocalThemeNotFound) {
 		return fmt.Sprintf("unknown theme %q in config, ignoring. Bundled themes: %s",
 			name, strings.Join(BuiltinNames(), ", "))

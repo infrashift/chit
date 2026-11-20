@@ -7,6 +7,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/infrashift/chit/internal/assert"
+	"github.com/infrashift/chit/internal/errlog"
 )
 
 // WebhookEvent contains the data to be dispatched as a CloudEvent.
@@ -44,10 +47,12 @@ func NewCloudEvent(evt *WebhookEvent) *CloudEvent {
 	// The audit log's event_id, so a receiver can correlate a delivery with
 	// the audit record; a fresh UUID matched nothing. CloudEvents requires an
 	// id, so one is minted for an event that has none.
+	assert.That(evt != nil, "NewCloudEvent: nil event")
 	id := evt.EventID
 	if id == "" {
 		id = uuid.Must(uuid.NewV7()).String()
 	}
+	assert.That(id != "", "NewCloudEvent: event has no id")
 	return &CloudEvent{
 		SpecVersion:     "1.0",
 		Type:            "com.chit.command.executed",
@@ -67,7 +72,12 @@ func NewCloudEvent(evt *WebhookEvent) *CloudEvent {
 
 // SignPayload computes an HMAC-SHA256 hex digest of payload using secret.
 func SignPayload(payload []byte, secret string) string {
+	assert.That(secret != "", "SignPayload: empty secret")
 	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write(payload)
-	return hex.EncodeToString(mac.Sum(nil))
+	// hash.Hash.Write never returns an error; the check satisfies rule 7.
+	_, err := mac.Write(payload)
+	errlog.Warn(err, "hmac write")
+	sig := hex.EncodeToString(mac.Sum(nil))
+	assert.That(len(sig) == 2*sha256.Size, "SignPayload: digest is not 64 hex digits")
+	return sig
 }

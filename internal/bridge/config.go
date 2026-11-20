@@ -13,6 +13,7 @@ import (
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/v2"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/chitclient"
 )
 
@@ -103,7 +104,7 @@ const SettingSourcesAll = "all"
 
 // Defaults returns a Config populated with default values.
 func Defaults() *Config {
-	return &Config{
+	c := &Config{
 		ServerURL:      "http://localhost:8065",
 		ClaudeBin:      "claude",
 		PermissionMode: "dontAsk",
@@ -122,6 +123,8 @@ func Defaults() *Config {
 		MaxConcurrentRuns: 2,
 		ShutdownGrace:     60 * time.Second,
 	}
+	assert.That(c.validateLimits() == nil, "Defaults: default limits fail validation")
+	return c
 }
 
 // UseOAuth reports whether the bridge authenticates with Hydra-issued access
@@ -130,6 +133,7 @@ func (c *Config) UseOAuth() bool { return c.OAuthClientID != "" }
 
 // OAuth returns the client-credentials configuration for chitclient.
 func (c *Config) OAuth() *chitclient.OAuthConfig {
+	assert.That(c.UseOAuth(), "Config.OAuth: OAuth is not configured")
 	return &chitclient.OAuthConfig{
 		TokenURL:     c.OAuthTokenURL,
 		ClientID:     c.OAuthClientID,
@@ -144,20 +148,7 @@ func Load() (*Config, error) {
 	k := koanf.New(".")
 	cfg := Defaults()
 
-	err := k.Load(env.ProviderWithValue("CHIT_CLAUDE_", ".", func(key, value string) (string, any) {
-		key = strings.ToLower(strings.TrimPrefix(key, "CHIT_CLAUDE_"))
-		if key == "channels" {
-			parts := strings.Split(value, ",")
-			channels := make([]string, 0, len(parts))
-			for _, p := range parts {
-				if p = strings.TrimSpace(p); p != "" {
-					channels = append(channels, p)
-				}
-			}
-			return key, channels
-		}
-		return key, value
-	}), nil)
+	err := k.Load(env.ProviderWithValue("CHIT_CLAUDE_", ".", envValue), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -166,25 +157,8 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
-	// Either authentication mode is acceptable, but exactly one must be
-	// configured — silently falling back to the weaker one would be worse
-	// than refusing to start.
-	switch {
-	case cfg.UseOAuth():
-		// Both set used to mean OAuth, silently: an operator who thought the
-		// agent ran as its Kratos identity would find it acting as another
-		// user, with other roles.
-		if cfg.AgentKratosID != "" {
-			return nil, fmt.Errorf("set CHIT_CLAUDE_OAUTH_CLIENT_ID or CHIT_CLAUDE_AGENT_KRATOS_ID, not both")
-		}
-		if cfg.OAuthClientSecret == "" {
-			return nil, fmt.Errorf("CHIT_CLAUDE_OAUTH_CLIENT_SECRET is required when OAUTH_CLIENT_ID is set")
-		}
-		if cfg.OAuthTokenURL == "" {
-			return nil, fmt.Errorf("CHIT_CLAUDE_OAUTH_TOKEN_URL is required when OAUTH_CLIENT_ID is set")
-		}
-	case cfg.AgentKratosID == "":
-		return nil, fmt.Errorf("either CHIT_CLAUDE_OAUTH_CLIENT_ID or CHIT_CLAUDE_AGENT_KRATOS_ID is required")
+	if err := cfg.validateAuth(); err != nil {
+		return nil, err
 	}
 	if len(cfg.Channels) == 0 {
 		return nil, fmt.Errorf("CHIT_CLAUDE_CHANNELS is required (comma-separated channel IDs)")
@@ -196,7 +170,53 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	assert.That(len(cfg.Channels) > 0 && cfg.WorkDir != "", "Load: channels or workdir missing after validation")
+	assert.That(cfg.RunTimeout > 0 && cfg.MaxConcurrentRuns >= 1, "Load: run limits invalid after validation")
 	return cfg, nil
+}
+
+// envValue maps a CHIT_CLAUDE_ variable to its config key, splitting the
+// comma-separated channel list.
+func envValue(key, value string) (configKey string, configValue any) {
+	key = strings.ToLower(strings.TrimPrefix(key, "CHIT_CLAUDE_"))
+	if key == "channels" {
+		parts := strings.Split(value, ",")
+		channels := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if p = strings.TrimSpace(p); p != "" {
+				channels = append(channels, p)
+			}
+		}
+		assert.That(len(channels) <= len(parts), "envValue: more channels than comma-separated parts")
+		return key, channels
+	}
+	return key, value
+}
+
+// validateAuth checks that exactly one authentication mode is configured.
+func (c *Config) validateAuth() error {
+	// Either authentication mode is acceptable, but exactly one must be
+	// configured — silently falling back to the weaker one would be worse
+	// than refusing to start.
+	switch {
+	case c.UseOAuth():
+		// Both set used to mean OAuth, silently: an operator who thought the
+		// agent ran as its Kratos identity would find it acting as another
+		// user, with other roles.
+		if c.AgentKratosID != "" {
+			return fmt.Errorf("set CHIT_CLAUDE_OAUTH_CLIENT_ID or CHIT_CLAUDE_AGENT_KRATOS_ID, not both")
+		}
+		if c.OAuthClientSecret == "" {
+			return fmt.Errorf("CHIT_CLAUDE_OAUTH_CLIENT_SECRET is required when OAUTH_CLIENT_ID is set")
+		}
+		if c.OAuthTokenURL == "" {
+			return fmt.Errorf("CHIT_CLAUDE_OAUTH_TOKEN_URL is required when OAUTH_CLIENT_ID is set")
+		}
+	case c.AgentKratosID == "":
+		return fmt.Errorf("either CHIT_CLAUDE_OAUTH_CLIENT_ID or CHIT_CLAUDE_AGENT_KRATOS_ID is required")
+	}
+	assert.That(c.UseOAuth() != (c.AgentKratosID != ""), "Config.validateAuth: not exactly one auth mode")
+	return nil
 }
 
 // validateLimits rejects numeric settings that would parse but break the

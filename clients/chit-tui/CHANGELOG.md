@@ -40,6 +40,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The cursor never blinked** — the root model dropped every cursor blink, so the input cursor stayed a steady block. Each editor now gets its blinks, and a blink does not run the `@` mention detection or clear the channel form's validation error
+- **Selection in an emptied channel** — a mouse selection that stayed active while the channel emptied (a switch, or a delete of the last post) crashed the client on the next render
+- **Older history in a fresh view** — loading older posts into a view with no posts could move the cursor one past the last post; a new view now starts with no post selected
+- **Thread inbox team count** — opening the thread inbox kept the count of the team from the last time it was open
+- **Theme names with `$`** — saving a theme whose name contains `$` wrote a garbled name, because the name was read as a pattern replacement
 - **Typed words that are key names vanished** — text arriving in a burst (fast typing over a slow link, or input without bracketed paste) is split at spaces, and a chunk that was exactly "right", "left", "up", "down", "home" or "end" moved the cursor instead of being typed
 - **Replying from a reply was refused** — replies are listed in the channel, and `Enter` on one opened a thread rooted at the reply, which the server rejects replies to. It now opens the root's thread. A message the server refuses is put back in the input instead of being lost
 - **Reply counts and tags did not update live** — the server now sends `thread_updated` after a reply and a new `post_tags_updated` event after a tag is added or removed, and the client shows both as they happen

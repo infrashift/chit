@@ -2,6 +2,7 @@ package theme
 
 import (
 	"image/color"
+	"slices"
 	"sort"
 	"testing"
 )
@@ -32,15 +33,17 @@ func slots(t Theme) map[string]string {
 	}
 }
 
-// Routing the bundled themes through a flavor generator must not change what
-// users already see. These are the exact values the hand-written constructors
-// produced before the generator existed.
-func TestLegacyThemesAreUnchanged(t *testing.T) {
-	tests := []struct {
-		name string
-		got  Theme
-		want map[string]string
-	}{
+// legacyThemeCase is a bundled theme and the slot values it must keep.
+type legacyThemeCase struct {
+	name string
+	got  Theme
+	want map[string]string
+}
+
+// legacyThemeCases are the exact values the hand-written constructors
+// produced before the flavor generator existed.
+func legacyThemeCases() []legacyThemeCase {
+	return []legacyThemeCase{
 		{
 			name: "tokyo-night",
 			got:  TokyoNight(),
@@ -94,8 +97,12 @@ func TestLegacyThemesAreUnchanged(t *testing.T) {
 			},
 		},
 	}
+}
 
-	for _, tc := range tests {
+// Routing the bundled themes through a flavor generator must not change what
+// users already see.
+func TestLegacyThemesAreUnchanged(t *testing.T) {
+	for _, tc := range legacyThemeCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			got := slots(tc.got)
 			for slot, want := range tc.want {
@@ -108,9 +115,12 @@ func TestLegacyThemesAreUnchanged(t *testing.T) {
 }
 
 func TestEveryBuiltinPopulatesEverySlot(t *testing.T) {
-	for name, ctor := range builtinThemes {
+	for _, name := range BuiltinNames() {
 		t.Run(name, func(t *testing.T) {
-			th := ctor()
+			th, ok := builtinTheme(name)
+			if !ok {
+				t.Fatalf("builtinTheme(%q) not found", name)
+			}
 			for slot, hex := range slots(th) {
 				if hex == "" {
 					t.Errorf("%s is unset", slot)
@@ -158,16 +168,25 @@ func TestLookupReturnsFreshInstance(t *testing.T) {
 
 func TestBuiltinNamesIsSortedAndComplete(t *testing.T) {
 	names := BuiltinNames()
-	if len(names) != len(builtinThemes) {
-		t.Fatalf("BuiltinNames returned %d names, want %d", len(names), len(builtinThemes))
+	want := []string{
+		"catppuccin", "catppuccin-latte", "dayfox", "kanagawa",
+		"kanagawa-lotus", "nightfox", "tokyo-night", "tokyo-night-day",
+	}
+	if !slices.Equal(names, want) {
+		t.Fatalf("BuiltinNames = %v, want %v", names, want)
 	}
 	if !sort.StringsAreSorted(names) {
 		t.Errorf("BuiltinNames is not sorted: %v", names)
 	}
 	for _, n := range names {
-		if _, ok := builtinThemes[n]; !ok {
+		if _, ok := builtinTheme(n); !ok {
 			t.Errorf("BuiltinNames returned %q, which is not a builtin", n)
 		}
+	}
+	// The result is a copy: changing it must not change the bundled list.
+	names[0] = "mutated"
+	if BuiltinNames()[0] != want[0] {
+		t.Error("BuiltinNames returned the package's own slice")
 	}
 }
 

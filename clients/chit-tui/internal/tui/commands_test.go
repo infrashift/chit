@@ -543,7 +543,7 @@ func TestFetchMyThreads_LoadsTeamAndDirectThreads(t *testing.T) {
 // With no team there is no team inbox to ask for, but DM threads still are.
 func TestFetchMyThreads_WithoutATeamLoadsOnlyDirectThreads(t *testing.T) {
 	client := &mockClient{directThreads: []*model.ThreadResponse{{Thread: &model.Thread{PostID: "dm"}}}}
-	msg := tui.FetchMyThreads(context.Background(), client, "")().(tui.ThreadsLoadedMsg)
+	msg := mustMsg[tui.ThreadsLoadedMsg](t, tui.FetchMyThreads(context.Background(), client, "")())
 	if len(client.teamThreadFetches) != 0 {
 		t.Errorf("fetched a team inbox with no team: %v", client.teamThreadFetches)
 	}
@@ -557,7 +557,7 @@ func TestFetchMyThreads_WithoutATeamLoadsOnlyDirectThreads(t *testing.T) {
 func TestFetchMyThreads_ReportsAFailure(t *testing.T) {
 	for _, teamID := range []string{"t1", ""} {
 		client := &mockClient{err: errors.New("boom")}
-		if msg := tui.FetchMyThreads(context.Background(), client, teamID)().(tui.ThreadsLoadedMsg); msg.Err == nil {
+		if msg := mustMsg[tui.ThreadsLoadedMsg](t, tui.FetchMyThreads(context.Background(), client, teamID)()); msg.Err == nil {
 			t.Errorf("team %q: the failure was not reported", teamID)
 		}
 	}

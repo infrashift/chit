@@ -4,9 +4,11 @@ import (
 	"context"
 	"regexp"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 )
 
+// semscope: allow(NASA-P10-06) compiled once, never changed
 var streamIDRe = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,64}$`)
 
 // SendStreamStatus relays a stream_status event to the members of a channel:
@@ -22,6 +24,8 @@ var streamIDRe = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,64}$`)
 // else, like typing.
 func (a *App) SendStreamStatus(ctx context.Context, channelID string, sender, actor *model.User, status, streamID string) error {
 	const where = "App.SendStreamStatus"
+	assert.That(sender != nil, where+": nil sender")
+	assert.That(a.Hub != nil, where+": nil hub")
 	switch status {
 	case model.StreamStatusStarted, model.StreamStatusProgress, model.StreamStatusFinished:
 	default:
@@ -48,6 +52,7 @@ func (a *App) SendStreamStatus(ctx context.Context, channelID string, sender, ac
 	if actor != nil {
 		data["actor_id"] = actor.ID
 	}
+	assert.That(len(data) >= 3 && len(data) <= 5, where+": event data has an unexpected number of fields")
 	a.Hub.Broadcast(&model.WebSocketEvent{
 		Event:     model.WebSocketEventStreamStatus,
 		Data:      data,

@@ -66,20 +66,20 @@ func TestFileStoreIntegration_SaveGetAttachDelete(t *testing.T) {
 	if err != nil || !slices.Equal(read.FileIDs, []string{b.ID, a.ID}) {
 		t.Fatalf("post file_ids %v, %v", read.FileIDs, err)
 	}
-	list, _ := ss.Post().GetPostsForChannel(t.Context(), channel.ID, model.GetPostsOptions{PerPage: 10})
-	if len(list.Order) != 1 || len(list.Order[0].FileIDs) != 2 {
-		t.Fatalf("channel posts: %+v", list.Order)
+	list, err := ss.Post().GetPostsForChannel(t.Context(), channel.ID, model.GetPostsOptions{PerPage: 10})
+	if err != nil || len(list.Order) != 1 || len(list.Order[0].FileIDs) != 2 {
+		t.Fatalf("channel posts: %+v, %v", list, err)
 	}
-	if got, _ := ss.File().Get(t.Context(), a.ID); got.PostID != post.ID {
-		t.Fatalf("PostID %q", got.PostID)
+	if got, getErr := ss.File().Get(t.Context(), a.ID); getErr != nil || got.PostID != post.ID {
+		t.Fatalf("file %+v (want PostID %q), %v", got, post.ID, getErr)
 	}
 	// A file attaches once.
 	_, err = ss.Post().Save(t.Context(), &model.Post{ChannelID: channel.ID, UserID: user.ID, Content: "x", FileIDs: []string{a.ID}})
 	wantStatus(t, err, http.StatusConflict)
 	// A post without files reads back with none.
 	plain := savePost(t, ss, channel.ID, user.ID, "", "plain", 5000)
-	if p, _ := ss.Post().Get(t.Context(), plain.ID); p.FileIDs != nil {
-		t.Fatalf("plain post file_ids %v", p.FileIDs)
+	if p, getErr := ss.Post().Get(t.Context(), plain.ID); getErr != nil || p.FileIDs != nil {
+		t.Fatalf("plain post %+v, %v", p, getErr)
 	}
 
 	// Deleting the post deletes and unlinks its files.
@@ -198,8 +198,8 @@ func TestFileStoreIntegration_Sweep(t *testing.T) {
 	if err := ss.File().Purge(t.Context(), old.ID); err != nil {
 		t.Fatal(err)
 	}
-	if deleted, _ := ss.File().Deleted(t.Context(), 6001, 10); len(deleted) != 0 {
-		t.Fatalf("purged row still listed: %+v", deleted)
+	if deleted, err := ss.File().Deleted(t.Context(), 6001, 10); err != nil || len(deleted) != 0 {
+		t.Fatalf("purged row still listed: %+v, %v", deleted, err)
 	}
 	// Purge leaves a live file alone.
 	if err := ss.File().Purge(t.Context(), fresh.ID); err != nil {

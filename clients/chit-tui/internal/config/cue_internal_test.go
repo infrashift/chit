@@ -61,10 +61,34 @@ func TestWarnKey(t *testing.T) {
 // Every key the schema accepts needs a human message, or a user hitting it
 // gets the bare fallback text instead of an explanation.
 func TestEveryFileKeyHasAMessage(t *testing.T) {
-	for key := range fileKeys {
-		if _, ok := keyMessages[key]; !ok {
-			t.Errorf("key %q is accepted by the schema but has no entry in keyMessages", key)
+	for _, key := range fileKeys() {
+		if _, ok := keyMessage(key); !ok {
+			t.Errorf("key %q is accepted by the schema but has no entry in keyMessage", key)
 		}
+	}
+}
+
+// Every recognized key must land in its own field: a key missing from the
+// switch would be accepted and then silently dropped.
+func TestEveryFileKeyIsSet(t *testing.T) {
+	seen := make(map[FileSettings]string)
+	for _, key := range fileKeys() {
+		var s FileSettings
+		if !setFileKey(&s, key, "v") {
+			t.Errorf("setFileKey does not handle recognized key %q", key)
+			continue
+		}
+		if s == (FileSettings{}) {
+			t.Errorf("setFileKey(%q) set no field", key)
+		}
+		if other, dup := seen[s]; dup {
+			t.Errorf("keys %q and %q set the same field", key, other)
+		}
+		seen[s] = key
+	}
+	var s FileSettings
+	if setFileKey(&s, "nonsense", "v") || s != (FileSettings{}) {
+		t.Error("setFileKey accepted an unknown key")
 	}
 }
 
@@ -159,7 +183,7 @@ func TestStripUnknownThemeKeysSortsWarnings(t *testing.T) {
 
 func TestKnownThemeKeysCoversEveryList(t *testing.T) {
 	known := knownThemeKeys()
-	for _, group := range [][]string{ThemeColorKeys, ThemeDerivedKeys, ThemeMeta} {
+	for _, group := range [][]string{ThemeColorKeys(), ThemeDerivedKeys(), ThemeMeta()} {
 		for _, key := range group {
 			if !known[key] {
 				t.Errorf("key %q is not in knownThemeKeys", key)

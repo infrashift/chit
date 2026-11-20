@@ -155,9 +155,13 @@ func (e *fileEnv) upload(t *testing.T, channelID, who string, headers map[string
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, _ = w.Write(p.data)
+		if _, err := w.Write(p.data); err != nil {
+			t.Fatalf("write part %s: %v", p.field, err)
+		}
 	}
-	_ = mw.Close()
+	if err := mw.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/channels/"+channelID+"/files", &body)
 	r.Header.Set("Content-Type", mw.FormDataContentType())
 	setWho(r, who)
@@ -196,7 +200,10 @@ func (e *fileEnv) get(t *testing.T, path, who string, headers map[string]string)
 
 func (e *fileEnv) attach(t *testing.T, who string, headers map[string]string, content string, fileIDs ...string) *httptest.ResponseRecorder {
 	t.Helper()
-	ids, _ := json.Marshal(fileIDs)
+	ids, err := json.Marshal(fileIDs)
+	if err != nil {
+		t.Fatalf("marshal file ids: %v", err)
+	}
 	body := fmt.Sprintf(`{"channel_id":%q,"content":%q,"file_ids":%s}`, testChannelID, content, ids)
 	return e.do(t, http.MethodPost, "/api/v1/posts", who, body, headers)
 }
@@ -444,7 +451,10 @@ func TestFiles_DedupWithinAChannelOnly(t *testing.T) {
 	if len(keys) != 2 || !contains(keys, otherChannelID+"/"+b.ID) {
 		t.Fatalf("the same bytes in another channel did not get their own object: %v", keys)
 	}
-	stored, _ := e.ms.Files.Get(t.Context(), b.ID)
+	stored, err := e.ms.Files.Get(t.Context(), b.ID)
+	if err != nil {
+		t.Fatalf("get file %s: %v", b.ID, err)
+	}
 	if !strings.HasPrefix(stored.S3Key, otherChannelID+"/") {
 		t.Fatalf("a file of %s uses the object %s", otherChannelID, stored.S3Key)
 	}
@@ -562,7 +572,11 @@ func TestFiles_SweepIsBounded(t *testing.T) {
 		e.mustUpload(t, testChannelID, me, nil, testPNG(t, color.Gray{Y: uint8(i)}), "")
 	}
 	time.Sleep(5 * time.Millisecond)
-	if expired, _, _ := e.a.SweepFiles(t.Context()); expired != 2 {
+	expired, _, err := e.a.SweepFiles(t.Context())
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if expired != 2 {
 		t.Fatalf("expired %d in one pass, want the batch of 2", expired)
 	}
 }

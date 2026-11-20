@@ -3,43 +3,48 @@ title: Pub/Sub
 description: Cross-node event coordination with PG LISTEN/NOTIFY and NATS.
 ---
 
-Chit uses a pub/sub abstraction to distribute events beyond the chitd
-process. chitd publishes a thin event envelope on the `chit_events` topic for
-most events it broadcasts. **Nothing in this repository subscribes to that
+Chit uses a pub/sub interface to send events outside the chitd process.
+chitd publishes a thin event envelope on the `chit_events` topic for most
+events it broadcasts. **Nothing in this repository subscribes to that
 topic.** `chit-mcp`, `chit-claude` and `chit-tui` receive events over chitd's
-WebSocket instead, which carries full payloads and is filtered by membership
-in the hub.
+WebSocket instead. The WebSocket carries full payloads, and the hub filters
+them by membership.
 
 :::note[Single-node WebSocket fan-out]
 chitd does **not** consume the `chit_events` topic itself, so WebSocket
-delivery is in-process (single-node). Multi-node fan-out, where a post
-created on node A reaches clients connected to nodes B and C, is a planned
-use of this abstraction but is not implemented.
+delivery is in-process (single-node). Multi-node fan-out is a planned use of
+this interface, but it is not implemented. With it, a post created on node A
+reaches clients connected to nodes B and C.
 :::
 
 ## Interface
 
-The pub/sub system is a Go interface (`internal/pubsub/pubsub.go`), so the
-backend can be swapped without changing application code:
+The pub/sub system is a Go interface (`internal/pubsub/pubsub.go`). So an
+operator can replace the backend, and the application code stays the same:
 
 ```go
 type PubSub interface {
     Publish(ctx context.Context, topic string, data []byte) error
-    Subscribe(ctx context.Context, topic string, handler func(data []byte)) error
+    Subscribe(ctx context.Context, topic string, handler Handler) error
     Close() error
+}
+
+// Handler receives the messages published on a subscribed topic.
+type Handler interface {
+    Handle(data []byte)
 }
 ```
 
-`Subscribe` registers a callback that is invoked for each message on the
-topic. There is no `Unsubscribe`; subscriptions end when the backend is
-closed.
+`Subscribe` registers a handler. The backend calls its `Handle` method for
+each message on the topic. There is no `Unsubscribe`; subscriptions end when
+the backend closes.
 
 ## Backends
 
 ### PG LISTEN/NOTIFY (Default)
 
 The default backend uses PostgreSQL's built-in `LISTEN/NOTIFY` (`pg_notify`).
-No additional infrastructure is required; it uses the existing database pool.
+It needs no additional infrastructure; it uses the database pool of chitd.
 Topic names must be valid PostgreSQL identifiers
 (`^[a-zA-Z_][a-zA-Z0-9_]{0,62}$`). The listener reconnects and re-`LISTEN`s
 after a connection failure.
@@ -53,7 +58,7 @@ after a connection failure.
 For higher throughput or larger payloads, Chit supports NATS as an alternative
 backend.
 
-- **Pros:** Higher throughput, larger message sizes, clustering support
+- **Pros:** Higher throughput, larger message sizes, NATS clusters
 - **Cons:** Additional infrastructure to deploy and manage
 
 ## Backend Selection
@@ -65,8 +70,8 @@ Set the `CHIT_PUBSUB_BACKEND` environment variable:
 | `pgnotify` | PG LISTEN/NOTIFY (default) |
 | `nats` | NATS |
 
-Any other value is refused at startup. When using NATS, `CHIT_NATS_URL` is
-required:
+chitd refuses all other values at startup. With NATS, `CHIT_NATS_URL` is
+mandatory:
 
 ```bash
 CHIT_PUBSUB_BACKEND=nats
@@ -75,8 +80,8 @@ CHIT_NATS_URL=nats://localhost:4222
 
 ## The `chit_events` Topic
 
-Events are published on a single topic, `chit_events`. Because PostgreSQL
-`NOTIFY` payloads are limited to roughly 8KB, the envelopes
+chitd publishes events on a single topic, `chit_events`. The maximum
+PostgreSQL `NOTIFY` payload is about 8KB. So the envelopes
 (`internal/pubsub/events.go`) are deliberately **thin**: an event type and
 identifiers, with no content and no timestamp.
 
@@ -98,13 +103,16 @@ identifiers, with no content and no timestamp.
 | `team_id` | `channel_created`, `channel_updated` (empty for DMs and groups) |
 | `target_user_id` | `mentioned` only: the mentioned user |
 
-Empty fields are omitted. Envelopes are published for `posted`,
+An envelope omits empty fields. chitd publishes envelopes for `posted`,
 `post_edited`, `post_deleted`, `post_pinned`, `post_unpinned`,
 `channel_created`, `channel_updated`, `channel_deleted`, `user_added`,
-`user_removed` and `mentioned`. `typing`, `thread_updated` and
-`command_response` go to the WebSocket hub only.
+`user_removed` and `mentioned`. For a channel tag, chitd also publishes
+envelopes for `post_tags_updated`, `channel_tags_updated`, `tag_updated` and
+`tag_deleted`. A change to a private tag gives no envelope. `typing`,
+`thread_updated`, `command_response` and `stream_status` go to the WebSocket
+hub only.
 
-A publish failure is logged at Warn and does not fail the request.
+chitd logs a publish failure at Warn, and the request does not fail.
 
 | Producer | Consumer | Purpose |
 |---|---|---|

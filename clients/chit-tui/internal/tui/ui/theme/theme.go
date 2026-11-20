@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 )
 
 // Theme defines all colors used throughout the TUI. Colors are
@@ -56,6 +58,8 @@ func (t Theme) derive() Theme {
 	if t.SearchMatchActive == nil {
 		t.SearchMatchActive = Blend(t.Background, t.Warning, 60)
 	}
+	assert.That(t.Accent == nil || t.Selection != nil, "derive: accent set but selection left nil")
+	assert.That(t.Warning == nil || (t.SearchMatch != nil && t.SearchMatchActive != nil), "derive: warning set but search slots left nil")
 	return t
 }
 
@@ -90,6 +94,8 @@ type themeFile struct {
 
 // LoadFromFile loads a theme from a JSON file.
 func LoadFromFile(path string) (Theme, error) {
+	assert.That(path != "", "LoadFromFile: empty path")
+	assert.That(filepath.Ext(path) == ".json", "LoadFromFile: not a .json skin")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Theme{}, err
@@ -103,7 +109,11 @@ func ParseJSON(data []byte) (Theme, error) {
 	if err := json.Unmarshal(data, &tf); err != nil {
 		return Theme{}, err
 	}
-	return tf.toTheme(), nil
+	t := tf.toTheme()
+	assert.That(t.baseSet(), "ParseJSON: base colors not defaulted")
+	assert.That(t.Selection != nil, "ParseJSON: selection not derived")
+	assert.That(t.SearchMatch != nil, "ParseJSON: search match not derived")
+	return t, nil
 }
 
 // ListAvailable returns the names a theme can be chosen by: the bundled
@@ -138,7 +148,10 @@ func ListAvailable(themesDir string) []string {
 		}
 	}
 	sort.Strings(local)
-	return append(names, local...)
+	out := append(names, local...)
+	assert.That(len(out) == len(seen), "ListAvailable: a name listed twice or a seen name dropped")
+	assert.That(sort.StringsAreSorted(local), "ListAvailable: local names unsorted")
+	return out
 }
 
 func skinsDir() string {
@@ -146,10 +159,14 @@ func skinsDir() string {
 	if err != nil {
 		return filepath.Join(os.Getenv("HOME"), ".config", "chit", "skins")
 	}
-	return filepath.Join(configDir, "chit", "skins")
+	dir := filepath.Join(configDir, "chit", "skins")
+	assert.That(filepath.Base(dir) == "skins", "skinsDir: path does not end in skins")
+	assert.That(filepath.IsAbs(dir), "skinsDir: config path not absolute")
+	return dir
 }
 
 func colorOrDefault(val string, def color.Color) color.Color {
+	assert.That(def != nil, "colorOrDefault: nil default")
 	if c := hexColor(val); c != nil {
 		return c
 	}
@@ -158,7 +175,8 @@ func colorOrDefault(val string, def color.Color) color.Color {
 
 func (tf themeFile) toTheme() Theme {
 	d := TokyoNight()
-	return Theme{
+	assert.That(d.baseSet(), "toTheme: default theme has an unset slot")
+	t := Theme{
 		Name:          tf.Name,
 		Author:        tf.Author,
 		Background:    colorOrDefault(tf.Background, d.Background),
@@ -188,4 +206,22 @@ func (tf themeFile) toTheme() Theme {
 		SearchMatch:       hexColor(tf.SearchMatch),
 		SearchMatchActive: hexColor(tf.SearchMatchActive),
 	}.derive()
+	assert.That(t.baseSet(), "toTheme: a base slot fell through without a default")
+	return t
+}
+
+// baseSet reports whether every base (non-derived) color slot is set.
+func (t Theme) baseSet() bool {
+	slots := []color.Color{
+		t.Background, t.Foreground, t.Subtle, t.Accent, t.Error, t.Success,
+		t.Warning, t.Border, t.ActiveBorder, t.Highlight, t.Muted, t.Username,
+		t.Timestamp, t.UnreadBadge, t.PinBadge, t.ChannelActive, t.MentionBadge,
+		t.MentionText, t.MentionSelfBg, t.TagBadge,
+	}
+	for _, c := range slots {
+		if c == nil {
+			return false
+		}
+	}
+	return true
 }

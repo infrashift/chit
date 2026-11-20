@@ -8,6 +8,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/infrashift/chit/internal/app"
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 	ws "github.com/infrashift/chit/internal/websocket"
 )
@@ -15,6 +16,7 @@ import (
 // originAllowed permits requests with no Origin header (non-browser clients)
 // and browser requests whose Origin is on the configured allowlist.
 func originAllowed(r *http.Request, allowed []string) bool {
+	assert.That(r != nil, "originAllowed: nil request")
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return true
@@ -28,6 +30,8 @@ func originAllowed(r *http.Request, allowed []string) bool {
 }
 
 func handleWebSocket(a *app.App) http.HandlerFunc {
+	assert.That(a != nil && a.Config != nil, "handleWebSocket: nil app or config")
+	assert.That(a.Hub != nil, "handleWebSocket: nil hub")
 	upgrader := websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
@@ -52,7 +56,9 @@ func handleWebSocket(a *app.App) http.HandlerFunc {
 			return
 		}
 
+		assert.That(conn != nil, "handleWebSocket: upgrade returned a nil connection")
 		client := ws.NewClient(a.Hub, conn, user.ID, a.Config.WSPingInterval, a.Config.WSWriteTimeout)
+		assert.That(client != nil, "handleWebSocket: nil client")
 		a.Hub.Register(client)
 		client.Start()
 

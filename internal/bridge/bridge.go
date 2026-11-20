@@ -6,13 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/chitclient"
+	"github.com/infrashift/chit/internal/errlog"
 	"github.com/infrashift/chit/internal/model"
 )
 
@@ -65,6 +68,8 @@ const idleWorkerTimeout = 10 * time.Minute
 const replyTimeout = 15 * time.Second
 
 // errShuttingDown is returned for a post the bridge stopped before running.
+//
+// semscope: allow(NASA-P10-06) sentinel error: errors.Is needs one identity
 var errShuttingDown = errors.New("the bridge is shutting down")
 
 // shutdownNotice answers posts a shutting-down bridge did not get to.
@@ -108,10 +113,13 @@ type Bridge struct {
 
 // New creates a Bridge from configuration.
 func New(cfg *Config) *Bridge {
+	assert.That(cfg != nil, "New: nil config")
+	assert.That(cfg.MaxConcurrentRuns >= 1, "New: no run slots; Load validates the limit")
 	channels := make(map[string]struct{}, len(cfg.Channels))
 	for _, id := range cfg.Channels {
 		channels[id] = struct{}{}
 	}
+	assert.That(len(channels) <= len(cfg.Channels), "New: more allowed channels than configured")
 	client := chitclient.New(cfg.ServerURL, cfg.AgentKratosID, cfg.ProxySecret)
 	if cfg.UseOAuth() {
 		client = chitclient.NewOAuth(cfg.ServerURL, cfg.OAuth())
@@ -143,10 +151,13 @@ func New(cfg *Config) *Bridge {
 // runs in progress get ShutdownGrace to finish, and threads with posts that
 // never started are told to send them again.
 func (b *Bridge) Run(ctx context.Context) error {
+	assert.That(ctx != nil, "Bridge.Run: nil context")
+	assert.That(b.client != nil && b.cfg != nil, "Bridge.Run: bridge not built by New")
 	me, err := b.client.Me(ctx)
 	if err != nil {
 		return fmt.Errorf("resolve agent identity: %w", err)
 	}
+	assert.That(me != nil, "Bridge.Run: nil agent user without an error")
 	b.agentUserID = me.ID
 	b.agentUsername = me.Username
 	b.mu.Lock()
@@ -173,10 +184,9 @@ func (b *Bridge) Run(ctx context.Context) error {
 	// cancelled when the grace period is up.
 	workCtx, stopWork := context.WithCancel(context.WithoutCancel(ctx))
 	defer stopWork()
-	b.client.Listen(ctx, func(event *model.WebSocketEvent) {
-		b.handleEvent(workCtx, event)
-	})
+	b.client.Listen(ctx, eventListener{b: b, ctx: workCtx})
 
+	assert.That(b.cfg.ShutdownGrace >= 0, "Bridge.Run: negative shutdown grace; Load validates it")
 	close(b.stopping)
 	done := make(chan struct{})
 	go func() {
@@ -202,7 +212,11 @@ func (b *Bridge) Run(ctx context.Context) error {
 // bridge; a failure to get an answer only warns, so a chitd restart does not
 // keep the bridge down.
 func (b *Bridge) checkChannels(ctx context.Context) error {
+	assert.That(ctx != nil, "Bridge.checkChannels: nil context")
+	assert.That(len(b.channels) <= len(b.cfg.Channels), "Bridge.checkChannels: allowlist differs from the config")
 	for _, id := range b.cfg.Channels {
+		_, allowed := b.channels[id]
+		assert.That(allowed, "Bridge.checkChannels: configured channel missing from the allowlist")
 		member, err := b.isMember(ctx, id)
 		var status *chitclient.StatusError
 		switch {
@@ -222,10 +236,13 @@ func (b *Bridge) checkChannels(ctx context.Context) error {
 // channel can only be read by its members; an open channel can be read by
 // anyone on its team, so for a team channel the agent's memberships decide.
 func (b *Bridge) isMember(ctx context.Context, channelID string) (bool, error) {
+	assert.That(ctx != nil, "Bridge.isMember: nil context")
+	assert.That(b.client != nil, "Bridge.isMember: nil chitd client")
 	channel, err := b.client.GetChannel(ctx, channelID)
 	if err != nil {
 		return false, err
 	}
+	assert.That(channel != nil, "Bridge.isMember: nil channel without an error")
 	if channel.TeamID == "" {
 		return true, nil
 	}
@@ -241,9 +258,25 @@ func (b *Bridge) isMember(ctx context.Context, channelID string) (bool, error) {
 	return false, nil
 }
 
+// eventListener hands the WebSocket's events to the bridge under the work
+// context, which outlives the listening context.
+type eventListener struct {
+	b   *Bridge
+	ctx context.Context
+}
+
+// HandleEvent passes event to the bridge.
+func (l eventListener) HandleEvent(event *model.WebSocketEvent) {
+	assert.That(l.b != nil, "eventListener.HandleEvent: nil bridge")
+	assert.That(l.ctx != nil, "eventListener.HandleEvent: nil work context")
+	l.b.handleEvent(l.ctx, event)
+}
+
 // handleEvent filters incoming events down to posts the bridge should answer
 // and enqueues them on their thread's worker.
 func (b *Bridge) handleEvent(ctx context.Context, event *model.WebSocketEvent) {
+	assert.That(ctx != nil, "Bridge.handleEvent: nil context")
+	assert.That(event != nil, "Bridge.handleEvent: nil event")
 	if event.Event != model.WebSocketEventPosted {
 		return
 	}
@@ -251,6 +284,7 @@ func (b *Bridge) handleEvent(ctx context.Context, event *model.WebSocketEvent) {
 	if post == nil {
 		return
 	}
+	assert.That(post.ID != "", "Bridge.handleEvent: decoded post has no ID")
 	addressed, ok := b.shouldEnqueue(post)
 	if !ok || !b.firstSighting(post.ID) {
 		return
@@ -260,6 +294,8 @@ func (b *Bridge) handleEvent(ctx context.Context, event *model.WebSocketEvent) {
 	if root == "" {
 		root = post.ID
 	}
+	_, allowed := b.channels[post.ChannelID]
+	assert.That(allowed, "Bridge.handleEvent: post outside the allowlist passed the filter")
 
 	item := queued{post: post, addressed: addressed}
 	if addressed {
@@ -277,6 +313,20 @@ func (b *Bridge) handleEvent(ctx context.Context, event *model.WebSocketEvent) {
 		}
 	}
 
+	if !b.enqueue(ctx, root, item) {
+		slog.Warn("thread queue full, dropping message", "root_id", root, "post_id", post.ID)
+		if addressed {
+			b.noticeQueueFull(ctx, root, post)
+		}
+	}
+}
+
+// enqueue sends item to root's worker, starting the worker if the thread has
+// none, and reports whether the queue had room.
+func (b *Bridge) enqueue(ctx context.Context, root string, item queued) bool {
+	assert.That(root != "", "Bridge.enqueue: empty thread root")
+	assert.That(item.post != nil && item.post.ID != "", "Bridge.enqueue: queued item without a post")
+	assert.That(!item.runAfter || item.newSession, "Bridge.enqueue: runAfter set without newSession")
 	// The send happens under mu, so a worker retiring for idleness (which
 	// also takes mu) can never leave a post in a queue nobody reads.
 	b.mu.Lock()
@@ -287,6 +337,7 @@ func (b *Bridge) handleEvent(ctx context.Context, event *model.WebSocketEvent) {
 		b.wg.Add(1)
 		go b.threadWorker(ctx, root, queue)
 	}
+	assert.That(cap(queue) == perThreadQueueSize, "Bridge.enqueue: thread queue has the wrong capacity")
 	sent := false
 	select {
 	case queue <- item:
@@ -295,23 +346,19 @@ func (b *Bridge) handleEvent(ctx context.Context, event *model.WebSocketEvent) {
 	}
 	// The agent is about to answer here, so the thread is joined now: a
 	// follow-up sent before that answer lands is for the agent too.
-	if sent && addressed {
+	if sent && item.addressed {
 		b.joined.add(root)
 		b.bystander.remove(root)
 	}
 	b.mu.Unlock()
-
-	if !sent {
-		slog.Warn("thread queue full, dropping message", "root_id", root, "post_id", post.ID)
-		if addressed {
-			b.noticeQueueFull(ctx, root, post)
-		}
-	}
+	return sent
 }
 
 // firstSighting records postID and reports whether it is new. A post delivered
 // twice would otherwise run claude twice and answer twice.
 func (b *Bridge) firstSighting(postID string) bool {
+	assert.That(postID != "", "Bridge.firstSighting: empty post ID")
+	assert.That(b.seen != nil, "Bridge.firstSighting: nil seen set")
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.seen.add(postID)
@@ -321,6 +368,9 @@ func (b *Bridge) firstSighting(postID string) bool {
 // post was dropped. It posts from its own goroutine: the caller is the
 // WebSocket read loop, which must not wait on the network.
 func (b *Bridge) noticeQueueFull(ctx context.Context, root string, post *model.Post) {
+	assert.That(root != "", "Bridge.noticeQueueFull: empty thread root")
+	assert.That(post != nil, "Bridge.noticeQueueFull: nil post")
+	assert.That(b.busy != nil, "Bridge.noticeQueueFull: nil busy set")
 	b.mu.Lock()
 	_, told := b.busy[root]
 	b.busy[root] = struct{}{}
@@ -330,6 +380,7 @@ func (b *Bridge) noticeQueueFull(ctx context.Context, root string, post *model.P
 	}
 	b.wg.Add(1)
 	go func() {
+		defer errlog.Recover("bridge queue-full reply")
 		defer b.wg.Done()
 		b.reply(ctx, post.ChannelID, root, queueFullNotice, map[string]any{hopsProp: agentHops(post)})
 	}()
@@ -346,6 +397,8 @@ func (b *Bridge) noticeQueueFull(ctx context.Context, root string, post *model.P
 // in a thread the bridge knows nothing about yet is queued unaddressed, for
 // the worker to check.
 func (b *Bridge) shouldEnqueue(post *model.Post) (addressed, ok bool) {
+	assert.That(post != nil, "Bridge.shouldEnqueue: nil post")
+	assert.That(b.cfg != nil && b.channels != nil, "Bridge.shouldEnqueue: bridge not built by New")
 	if _, ok := b.channels[post.ChannelID]; !ok {
 		b.warnOffAllowlist(post.ChannelID)
 		return false, false
@@ -364,6 +417,7 @@ func (b *Bridge) shouldEnqueue(post *model.Post) (addressed, ok bool) {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	assert.That(b.joined != nil && b.bystander != nil, "Bridge.shouldEnqueue: nil thread memory")
 	switch {
 	case b.joined.has(post.RootID):
 		return true, true
@@ -378,6 +432,8 @@ func (b *Bridge) shouldEnqueue(post *model.Post) (addressed, ok bool) {
 // and one @channel would otherwise start a run in every persona serving the
 // channel.
 func (b *Bridge) mentioned(post *model.Post) bool {
+	assert.That(post != nil, "Bridge.mentioned: nil post")
+	assert.That(b.cfg != nil, "Bridge.mentioned: nil config")
 	if b.cfg.AnswerBroadcasts {
 		return mentionsUser(post, b.agentUserID)
 	}
@@ -395,7 +451,10 @@ func (b *Bridge) mentioned(post *model.Post) bool {
 // anyone can open a DM or group channel with it. Silently dropping those posts
 // would hide the fact that the agent was pulled somewhere unexpected.
 func (b *Bridge) warnOffAllowlist(channelID string) {
+	_, served := b.channels[channelID]
+	assert.That(!served, "Bridge.warnOffAllowlist: channel is on the allowlist")
 	b.mu.Lock()
+	assert.That(b.offlist != nil, "Bridge.warnOffAllowlist: nil offlist")
 	_, seen := b.offlist[channelID]
 	if !seen {
 		b.offlist[channelID] = struct{}{}
@@ -421,6 +480,9 @@ func (b *Bridge) warnOffAllowlist(channelID string) {
 // from an agent, and treating it as human would reset the count to zero and
 // lift the hop cap for as long as the lookup kept failing.
 func (b *Bridge) shouldRun(ctx context.Context, post *model.Post) (run bool, authorActor string) {
+	assert.That(ctx != nil, "Bridge.shouldRun: nil context")
+	assert.That(post != nil, "Bridge.shouldRun: nil post")
+	assert.That(b.cfg.MaxAgentHops >= 0, "Bridge.shouldRun: negative hop cap; Load validates it")
 	actor := b.actorType(ctx, post.UserID)
 	if actor == "" && agentHops(post) > 0 {
 		actor = model.ActorTypeAgent
@@ -448,6 +510,7 @@ func (b *Bridge) shouldRun(ctx context.Context, post *model.Post) (run bool, aut
 // actorType returns the author's actor_type, or "" when it cannot be
 // resolved.
 func (b *Bridge) actorType(ctx context.Context, userID string) string {
+	assert.That(ctx != nil, "Bridge.actorType: nil context")
 	if user := b.author(ctx, userID); user != nil {
 		return user.ActorType
 	}
@@ -460,6 +523,8 @@ func (b *Bridge) actorType(ctx context.Context, userID string) string {
 // misclassify that author for good — an agent read as a human escapes the
 // loop guard.
 func (b *Bridge) author(ctx context.Context, userID string) *model.User {
+	assert.That(ctx != nil, "Bridge.author: nil context")
+	assert.That(b.client != nil, "Bridge.author: nil chitd client")
 	b.mu.Lock()
 	user, ok := b.authors[userID]
 	b.mu.Unlock()
@@ -472,6 +537,7 @@ func (b *Bridge) author(ctx context.Context, userID string) *model.User {
 		slog.Warn("failed to resolve post author", "user_id", userID, "error", err)
 		return nil
 	}
+	assert.That(user != nil, "Bridge.author: nil user without an error")
 
 	b.mu.Lock()
 	b.authors[userID] = user
@@ -498,6 +564,7 @@ func mentionsUsernameDirectly(content, username string) bool {
 // arriving over the wire are JSON, so the value is a float64; the int case
 // covers props this process built in memory.
 func agentHops(post *model.Post) int {
+	assert.That(post != nil, "agentHops: nil post")
 	if post.Props == nil {
 		return 0
 	}
@@ -516,10 +583,14 @@ func agentHops(post *model.Post) int {
 // been idle for idleTimeout, and on shutdown, after telling the thread about
 // any post it did not get to.
 func (b *Bridge) threadWorker(ctx context.Context, root string, queue chan queued) {
+	defer b.recoverThread(root)
 	defer b.wg.Done()
+	assert.That(root != "", "Bridge.threadWorker: empty thread root")
+	assert.That(queue != nil, "Bridge.threadWorker: nil queue")
+	assert.That(b.idleTimeout > 0, "Bridge.threadWorker: idle timeout not positive")
 	idle := time.NewTimer(b.idleTimeout)
 	defer idle.Stop()
-	for {
+	for ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
 			return
@@ -532,6 +603,7 @@ func (b *Bridge) threadWorker(ctx context.Context, root string, queue chan queue
 			}
 			idle.Reset(b.idleTimeout)
 		case q := <-queue:
+			assert.That(q.post != nil, "Bridge.threadWorker: queued item without a post")
 			select {
 			case <-b.stopping:
 				b.abandon(ctx, root, queue, &q)
@@ -552,38 +624,62 @@ func (b *Bridge) threadWorker(ctx context.Context, root string, queue chan queue
 	}
 }
 
+// recoverThread stops a panic in the worker of one thread (ADR-0011). It
+// logs the panic and removes the state of the thread, so the next post
+// starts a new worker. The other threads go on.
+func (b *Bridge) recoverThread(root string) {
+	r := recover()
+	if r == nil {
+		return
+	}
+	slog.Error("bridge thread worker stopped after a panic",
+		"root_id", root, "panic", r, "stack", string(debug.Stack()))
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.queues, root)
+	delete(b.sessions, root)
+	delete(b.busy, root)
+}
+
 // retire removes an idle thread's worker state, unless a post arrived in the
 // meantime. Sends happen under mu, so once the queue is gone from the map
 // nothing more can arrive on it.
 func (b *Bridge) retire(root string, queue chan queued) bool {
+	assert.That(queue != nil, "Bridge.retire: nil queue")
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	assert.That(b.queues[root] == queue, "Bridge.retire: worker's queue is not the thread's queue")
 	if len(queue) > 0 {
 		return false
 	}
 	delete(b.queues, root)
 	delete(b.sessions, root)
 	delete(b.busy, root)
+	_, still := b.queues[root]
+	assert.That(!still, "Bridge.retire: queue still registered")
 	return true
 }
 
 // abandon tells a thread, once, that the addressed posts left in its queue
 // (and taken, if non-nil) were never run.
 func (b *Bridge) abandon(ctx context.Context, root string, queue chan queued, taken *queued) {
+	assert.That(queue != nil, "Bridge.abandon: nil queue")
+	assert.That(taken == nil || taken.post != nil, "Bridge.abandon: taken item without a post")
 	var last *model.Post
 	if taken != nil && taken.addressed {
 		last = taken.post
 	}
-	for {
-		select {
-		case q := <-queue:
-			if q.addressed {
-				last = q.post
-			}
-			continue
-		default:
+	// This worker is the only receiver, so a receive after len > 0 does not
+	// block, and the capacity bounds the loop (Power of 10 rule 2).
+	for range cap(queue) {
+		if len(queue) == 0 {
+			break
 		}
-		break
+		q := <-queue
+		assert.That(q.post != nil, "Bridge.abandon: queued item without a post")
+		if q.addressed {
+			last = q.post
+		}
 	}
 	if last == nil {
 		return
@@ -593,6 +689,8 @@ func (b *Bridge) abandon(ctx context.Context, root string, queue chan queued, ta
 }
 
 func (b *Bridge) processPost(ctx context.Context, root string, post *model.Post) {
+	assert.That(root != "", "Bridge.processPost: empty thread root")
+	assert.That(post != nil && post.ID != "", "Bridge.processPost: post without an ID")
 	run, authorActor := b.shouldRun(ctx, post)
 	if !run {
 		slog.Debug("post filtered out before running claude",
@@ -600,36 +698,15 @@ func (b *Bridge) processPost(ctx context.Context, root string, post *model.Post)
 		return
 	}
 
-	// Replying to a human resets the chain; replying to an agent extends it.
-	// Error replies carry the count too: an error text could contain an
-	// @mention that would otherwise restart an exchange at hop 0.
-	hops := 0
-	if authorActor == model.ActorTypeAgent || authorActor == model.ActorTypeBot {
-		hops = agentHops(post) + 1
-	}
+	hops := replyHops(post, authorActor)
+	sessionID, seed := b.resumeSession(ctx, root, post)
 
-	// A new session in an existing thread is given the thread so far,
-	// unless !new or a retirement asked for a clean start.
-	sessionID, seed := "", false
-	if root != post.ID {
-		var clean bool
-		sessionID, _, clean = b.threadState(ctx, root)
-		seed = sessionID == "" && !clean
-	}
-
-	// The run gets its own context so !stop can cancel it alone.
-	runCtx, cancelRun := context.WithCancelCause(ctx)
-	b.mu.Lock()
-	b.running[root] = runState{cancel: cancelRun, started: time.Now()}
-	b.mu.Unlock()
-	progressDone := b.showProgress(ctx, post.ChannelID, root, hops)
-	defer progressDone()
+	runCtx, cancelRun := b.startRun(ctx, root)
+	assert.That(!seed || sessionID == "", "Bridge.processPost: seeding a resumed session")
+	progress := b.showProgress(ctx, post.ChannelID, root, hops)
+	defer progress.Stop(ctx)
 	result, notice, err := b.runClaude(runCtx, root, post, sessionID, seed)
-	b.mu.Lock()
-	delete(b.running, root)
-	b.joined.add(root)
-	b.bystander.remove(root)
-	b.mu.Unlock()
+	b.finishRun(root)
 	stopped := errors.Is(context.Cause(runCtx), errStopped)
 	cancelRun(nil)
 	if stopped {
@@ -648,22 +725,89 @@ func (b *Bridge) processPost(ctx context.Context, root string, post *model.Post)
 		b.mu.Unlock()
 	}
 	if err != nil {
-		var runErr *RunError
-		if errors.As(err, &runErr) && runErr.Detail != "" {
-			slog.Error("claude run failed", "root_id", root, "error", err, "detail", runErr.Detail)
-		} else {
-			slog.Error("claude run failed", "root_id", root, "error", err)
-		}
-		props := map[string]any{hopsProp: hops}
-		// A failed run can still have started a session worth resuming
-		// (an API error mid-task leaves the work done so far).
-		if result != nil && result.SessionID != "" {
-			props[sessionProp] = result.SessionID
-		}
-		b.reply(ctx, post.ChannelID, root, notice+"⚠️ Claude run failed: "+err.Error(), props)
+		b.replyRunFailed(ctx, root, post, hops, result, notice, err)
 		return
 	}
+	b.replyResult(ctx, root, post, hops, result, notice)
+}
 
+// replyHops is the agent-hop count a reply to post carries.
+func replyHops(post *model.Post, authorActor string) int {
+	assert.That(post != nil, "replyHops: nil post")
+	// Replying to a human resets the chain; replying to an agent extends it.
+	// Error replies carry the count too: an error text could contain an
+	// @mention that would otherwise restart an exchange at hop 0.
+	if authorActor == model.ActorTypeAgent || authorActor == model.ActorTypeBot {
+		return agentHops(post) + 1
+	}
+	return 0
+}
+
+// resumeSession returns the session a run for post resumes, and whether a new
+// session should be seeded with the thread so far.
+func (b *Bridge) resumeSession(ctx context.Context, root string, post *model.Post) (string, bool) {
+	assert.That(root != "", "Bridge.resumeSession: empty thread root")
+	assert.That(post != nil && post.ID != "", "Bridge.resumeSession: post without an ID")
+	// A new session in an existing thread is given the thread so far,
+	// unless !new or a retirement asked for a clean start.
+	if root == post.ID {
+		return "", false
+	}
+	t := b.thread(ctx, root)
+	assert.That(t.sessionID == "" || t.joined, "Bridge.resumeSession: session in a thread the agent has not joined")
+	return t.sessionID, t.sessionID == "" && !t.clean
+}
+
+// startRun records a run in root and returns its context.
+func (b *Bridge) startRun(ctx context.Context, root string) (context.Context, context.CancelCauseFunc) {
+	assert.That(ctx != nil, "Bridge.startRun: nil context")
+	assert.That(root != "", "Bridge.startRun: empty thread root")
+	// The run gets its own context so !stop can cancel it alone.
+	runCtx, cancelRun := context.WithCancelCause(ctx)
+	b.mu.Lock()
+	assert.That(b.running != nil, "Bridge.startRun: nil run map")
+	b.running[root] = runState{cancel: cancelRun, started: time.Now()}
+	b.mu.Unlock()
+	return runCtx, cancelRun
+}
+
+// finishRun clears root's run and marks the thread as joined.
+func (b *Bridge) finishRun(root string) {
+	assert.That(root != "", "Bridge.finishRun: empty thread root")
+	b.mu.Lock()
+	delete(b.running, root)
+	b.joined.add(root)
+	b.bystander.remove(root)
+	assert.That(b.joined.has(root), "Bridge.finishRun: thread not marked as joined")
+	b.mu.Unlock()
+}
+
+// replyRunFailed logs a failed run and answers in the thread with the error.
+func (b *Bridge) replyRunFailed(ctx context.Context, root string, post *model.Post, hops int, result *ClaudeResult, notice string, err error) {
+	assert.That(err != nil, "Bridge.replyRunFailed: nil error")
+	assert.That(post != nil, "Bridge.replyRunFailed: nil post")
+	assert.That(root != "", "Bridge.replyRunFailed: empty thread root")
+	var runErr *RunError
+	if errors.As(err, &runErr) && runErr.Detail != "" {
+		slog.Error("claude run failed", "root_id", root, "error", err, "detail", runErr.Detail)
+	} else {
+		slog.Error("claude run failed", "root_id", root, "error", err)
+	}
+	props := map[string]any{hopsProp: hops}
+	// A failed run can still have started a session worth resuming
+	// (an API error mid-task leaves the work done so far).
+	if result != nil && result.SessionID != "" {
+		props[sessionProp] = result.SessionID
+	}
+	b.reply(ctx, post.ChannelID, root, notice+"⚠️ Claude run failed: "+err.Error(), props)
+}
+
+// replyResult answers in the thread with a successful run's result, retiring
+// the session when it has grown past the configured limit.
+func (b *Bridge) replyResult(ctx context.Context, root string, post *model.Post, hops int, result *ClaudeResult, notice string) {
+	assert.That(result != nil, "Bridge.replyResult: nil result")
+	assert.That(post != nil, "Bridge.replyResult: nil post")
+	assert.That(root != "", "Bridge.replyResult: empty thread root")
 	content := result.Result
 	if content == "" {
 		content = "_(empty response)_"
@@ -713,6 +857,9 @@ const sessionLostNotice = "_The Claude session for this thread could not be foun
 // thread would fail the same way — and returns a notice saying so, for the
 // reply to lead with.
 func (b *Bridge) runClaude(ctx context.Context, root string, post *model.Post, sessionID string, seed bool) (*ClaudeResult, string, error) {
+	assert.That(post != nil, "Bridge.runClaude: nil post")
+	assert.That(b.runner != nil, "Bridge.runClaude: nil runner")
+	assert.That(!seed || sessionID == "", "Bridge.runClaude: seeding a resumed session")
 	select {
 	case b.runSlots <- struct{}{}:
 	case <-b.stopping:
@@ -721,6 +868,7 @@ func (b *Bridge) runClaude(ctx context.Context, root string, post *model.Post, s
 		return nil, "", errShuttingDown
 	}
 	defer func() { <-b.runSlots }()
+	assert.That(len(b.runSlots) >= 1, "Bridge.runClaude: running without a slot")
 	select {
 	case <-b.stopping:
 		return nil, "", errShuttingDown
@@ -750,6 +898,8 @@ func (b *Bridge) runClaude(ctx context.Context, root string, post *model.Post, s
 // logRun writes one run_complete line per run: the record to total token use
 // from, per thread or per bridge.
 func logRun(root, postID string, resumed bool, start time.Time, result *ClaudeResult, err error) {
+	assert.That(root != "" && postID != "", "logRun: empty thread root or post ID")
+	assert.That(!start.IsZero(), "logRun: zero start time")
 	attrs := []any{"root_id", root, "post_id", postID, "resumed", resumed,
 		"duration_ms", time.Since(start).Milliseconds(), "ok", err == nil}
 	if result != nil {
@@ -770,10 +920,16 @@ func logRun(root, postID string, resumed bool, start time.Time, result *ClaudeRe
 // agent may answer any of them; the remaining props go on the last part, which
 // is where session recovery looks first.
 func (b *Bridge) reply(ctx context.Context, channelID, root, content string, props map[string]any) {
+	_, allowed := b.channels[channelID]
+	assert.That(allowed, "Bridge.reply: channel outside the allowlist")
+	assert.That(root != "", "Bridge.reply: empty thread root")
+	assert.That(content != "", "Bridge.reply: empty content")
+	assert.That(props != nil, "Bridge.reply: nil props")
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), replyTimeout)
 	defer cancel()
 	parts := splitContent(content, model.PostMaxContentSize)
 	for i, part := range parts {
+		assert.That(part != "" && len(part) <= model.PostMaxContentSize, "Bridge.reply: part empty or too long")
 		partProps := props
 		if i < len(parts)-1 {
 			partProps = map[string]any{hopsProp: props[hopsProp]}
@@ -790,6 +946,7 @@ func (b *Bridge) reply(ctx context.Context, channelID, root, content string, pro
 // at a line end in the second half of each piece and never splitting a UTF-8
 // sequence.
 func splitContent(s string, limit int) []string {
+	assert.That(limit >= utf8.UTFMax, "splitContent: limit too small to hold a rune")
 	var parts []string
 	for len(s) > limit {
 		cut := strings.LastIndexByte(s[:limit], '\n') + 1
@@ -799,10 +956,26 @@ func splitContent(s string, limit int) []string {
 				cut--
 			}
 		}
+		assert.That(cut <= limit, "splitContent: piece longer than the limit")
 		parts = append(parts, s[:cut])
 		s = s[cut:]
 	}
 	return append(parts, s)
+}
+
+// threadInfo is threadState's answer as one value, for a caller that needs
+// only part of it.
+type threadInfo struct {
+	sessionID     string
+	joined, clean bool
+}
+
+// thread returns threadState's answer as a threadInfo.
+func (b *Bridge) thread(ctx context.Context, root string) threadInfo {
+	assert.That(ctx != nil, "Bridge.thread: nil context")
+	assert.That(root != "", "Bridge.thread: empty thread root")
+	sessionID, joined, clean := b.threadState(ctx, root)
+	return threadInfo{sessionID: sessionID, joined: joined, clean: clean}
 }
 
 // threadState returns the claude session to resume in a thread, whether this
@@ -812,6 +985,8 @@ func splitContent(s string, limit int) []string {
 // agent's replies in the thread that names a session; a reply marked with
 // sessionResetProp ends the search, since the session before it was retired.
 func (b *Bridge) threadState(ctx context.Context, root string) (sessionID string, joined, clean bool) {
+	assert.That(root != "", "Bridge.threadState: empty thread root")
+	assert.That(b.client != nil, "Bridge.threadState: nil chitd client")
 	b.mu.Lock()
 	sessionID, ok := b.sessions[root]
 	clean = b.cleanStart.has(root)
@@ -833,7 +1008,7 @@ func (b *Bridge) threadState(ctx context.Context, root string) (sessionID string
 			continue
 		}
 		joined = true
-		if reset, _ := p.Props[sessionResetProp].(bool); reset {
+		if reset, ok := p.Props[sessionResetProp].(bool); ok && reset {
 			clean = true
 			break
 		}
@@ -850,6 +1025,8 @@ func (b *Bridge) threadState(ctx context.Context, root string) (sessionID string
 		}
 		b.mu.Unlock()
 	}
+	assert.That(sessionID == "" || joined, "Bridge.threadState: session found without the agent's reply")
+	assert.That(!clean || joined, "Bridge.threadState: clean start without the agent's reply")
 	return sessionID, joined, clean
 }
 
@@ -857,12 +1034,14 @@ func (b *Bridge) threadState(ctx context.Context, root string) (sessionID string
 // follow-up there needs no mention. The answer is remembered either way; the
 // agent's own replies keep it current.
 func (b *Bridge) participates(ctx context.Context, root string) bool {
-	_, joined, _ := b.threadState(ctx, root)
+	assert.That(root != "", "Bridge.participates: empty thread root")
+	joined := b.thread(ctx, root).joined
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if joined {
 		b.joined.add(root)
 		b.bystander.remove(root)
+		assert.That(b.joined.has(root), "Bridge.participates: joined thread not remembered")
 	} else {
 		b.bystander.add(root)
 	}
@@ -879,11 +1058,13 @@ func postFromEventData(data map[string]any) *model.Post {
 	if err := json.Unmarshal(raw, &post); err != nil || post.ID == "" {
 		return nil
 	}
+	assert.That(len(raw) > 0, "postFromEventData: empty encoding decoded to a post")
 	return &post
 }
 
 // mentionsUser reports whether the post's parsed mentions include userID.
 func mentionsUser(post *model.Post, userID string) bool {
+	assert.That(post != nil, "mentionsUser: nil post")
 	if post.Props == nil {
 		return false
 	}

@@ -44,7 +44,16 @@ func TestOpenAPISpec_AllEndpoints(t *testing.T) {
 		}
 	}
 
-	expectedOps := []string{
+	for _, opID := range expectedOperationIDs() {
+		if !foundOps[opID] {
+			t.Errorf("missing operationId: %s", opID)
+		}
+	}
+}
+
+// expectedOperationIDs lists the operationIds the spec must declare.
+func expectedOperationIDs() []string {
+	return []string{
 		"system_ping",
 		"system_client_config",
 		"create_user",
@@ -95,12 +104,6 @@ func TestOpenAPISpec_AllEndpoints(t *testing.T) {
 		"remove_tag_from_post",
 		"get_tags_for_post",
 		"handle_web_socket",
-	}
-
-	for _, opID := range expectedOps {
-		if !foundOps[opID] {
-			t.Errorf("missing operationId: %s", opID)
-		}
 	}
 }
 

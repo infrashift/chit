@@ -104,8 +104,12 @@ func TestKetoIntegration_ListPaginates(t *testing.T) {
 		}
 	}
 	t.Cleanup(func() {
+		// t.Context() is already canceled when cleanups run.
 		for i := range n {
-			_ = c.DeleteRelation(t.Context(), ns, channel, model.KetoRelationMember, fmt.Sprintf("user-%03d", i))
+			if err := c.DeleteRelation(context.Background(), ns, channel, model.KetoRelationMember, fmt.Sprintf("user-%03d", i)); err != nil {
+				t.Errorf("delete %d: %v", i, err)
+				return
+			}
 		}
 	})
 
@@ -137,16 +141,7 @@ func TestKetoIntegration_ReconcileCommands(t *testing.T) {
 		assertCheck(t, c, ns, "Command:"+cmd, model.KetoRelationExecute, "Actor:"+actor, want)
 	}
 
-	cfg := &command.CUEConfig{
-		Roles: []command.CUERole{
-			{Name: "admin", AllowedCommands: []string{"help", "kick"}},
-			{Name: "user", AllowedCommands: []string{"help"}},
-		},
-		Actors: []command.CUEActor{
-			{ID: admin, Roles: []string{"admin"}},
-			{ID: user, Roles: []string{"user"}},
-		},
-	}
+	cfg := reconcileTestConfig(admin, user)
 	if err := rec.Reconcile(t.Context(), cfg); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -189,6 +184,21 @@ func TestKetoIntegration_ReconcileCommands(t *testing.T) {
 	}
 	exec("help", admin, false)
 	assertTuples(t, c, ns, nil)
+}
+
+// reconcileTestConfig grants admin help and kick through the admin role, and
+// user help through the user role.
+func reconcileTestConfig(admin, user string) *command.CUEConfig {
+	return &command.CUEConfig{
+		Roles: []command.CUERole{
+			{Name: "admin", AllowedCommands: []string{"help", "kick"}},
+			{Name: "user", AllowedCommands: []string{"help"}},
+		},
+		Actors: []command.CUEActor{
+			{ID: admin, Roles: []string{"admin"}},
+			{ID: user, Roles: []string{"user"}},
+		},
+	}
 }
 
 func assertTuples(t *testing.T, c *keto.Client, ns string, want []string) {
@@ -241,7 +251,11 @@ func TestKetoIntegration_ReconcileTwiceDoesNotGrow(t *testing.T) {
 	if err := rec.Reconcile(t.Context(), &command.CUEConfig{}); err != nil {
 		t.Fatalf("empty reconcile: %v", err)
 	}
-	t.Cleanup(func() { _ = rec.Reconcile(context.Background(), &command.CUEConfig{}) })
+	t.Cleanup(func() {
+		if err := rec.Reconcile(context.Background(), &command.CUEConfig{}); err != nil {
+			t.Errorf("empty reconcile: %v", err)
+		}
+	})
 	rows := func() int {
 		t.Helper()
 		tuples, err := c.ListRelations(t.Context(), ns)

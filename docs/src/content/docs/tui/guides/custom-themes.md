@@ -3,11 +3,11 @@ title: Custom Themes
 description: Create your own Chit TUI theme with a TOML file.
 ---
 
-You can create your own themes by placing TOML files in the themes directory.
+To create a theme, put a TOML file in the themes directory.
 
 ## Theme File Location
 
-Chit TUI looks for your themes in:
+Chit TUI looks for local themes in:
 
 ```
 ~/.config/chit/themes/<name>.toml
@@ -22,26 +22,27 @@ chit-tui --theme dracula
 ```
 
 or `theme = "dracula"` (or `theme_dark` / `theme_light`) in
-`~/.config/chit/config.toml`, or `CHIT_THEME=dracula`. Your themes also
+`~/.config/chit/config.toml`, or `CHIT_THEME=dracula`. Local themes also
 appear in the `/theme` picker and in `chit-tui --list-themes`, marked
 `(local)`.
 
 ### Naming Rules
 
-- **Lowercase file names only.** Names are lowercased before the file is
-  looked up, so `Dracula.toml` would never be found, and it is left out of the
-  lists rather than offered and then failing.
-- **Bundled names win.** A file named like a bundled theme, such as
-  `kanagawa.toml`, is shadowed by the bundled one and is not listed. Bundled
-  themes are checked first so a local file cannot change what a documented
+- **Lowercase file names only.** The client changes a name to lowercase
+  before it looks up the file, so the client never finds `Dracula.toml`. The
+  lists do not show this file, so the client does not offer a theme that then
+  fails.
+- **Bundled names win.** A bundled theme hides a file with the same name, such
+  as `kanagawa.toml`, and the lists do not show that file. The client checks
+  the bundled themes first, so a local file cannot change what a documented
   name means.
 - Names cannot contain path separators or `..`.
 
 ## Theme File Format
 
-A theme file is TOML. Unlike the config file, it must be complete: every
-palette key is required, so a theme can never render half-styled because of a
-typo.
+A theme file is TOML. Unlike the config file, it must be complete. It must
+set every palette key, so a typo can never make a theme with only half of its
+styles.
 
 ```toml
 # ~/.config/chit/themes/dracula.toml
@@ -82,17 +83,17 @@ terminal's own palette colors:
 `lightmagenta`, `lightcyan`, `white`
 
 The `light`/`dark` names also accept an underscore (`light_blue`,
-`dark_gray`), and `grey` spellings work too. A named color renders as
-whatever your terminal sets that slot to, so a theme built from names blends
-into your existing terminal color scheme instead of overriding it.
+`dark_gray`), and `grey` spellings work too. A named color shows the
+value that the terminal sets for that slot. As a result, a theme of names blends into
+the current color scheme of the terminal, and does not override it.
 
-Two names are counter-intuitive: `gray` is ANSI color 7 (the terminal's
-normal white) and `white` is ANSI color 15 (bright white).
+Two names are not what they seem. `gray` is ANSI color 7 (the terminal's
+normal white). `white` is ANSI color 15 (bright white).
 
 ## Color Fields
 
-`name` is required; `author` is optional. Every color below is required
-unless marked derived.
+A theme must set `name`; `author` is optional. A theme must set every color
+below, except the colors marked derived.
 
 | Field | Used For |
 |-------|----------|
@@ -120,38 +121,42 @@ unless marked derived.
 | `search_match` | *Derived.* Background of search-term matches in the history |
 | `search_match_active` | *Derived.* Background of the current search match |
 
-The three derived fields are optional. When a file leaves them out they are
-computed by blending `background` toward `accent` (selection) or `warning`
-(search matches), so they suit the palette you actually declared.
+The three derived fields are optional. When a file leaves them out, the client
+calculates them. It blends `background` toward `accent` (selection) or
+`warning` (search matches), so these colors suit the palette that the file
+declares.
 
 ## Errors and Warnings
 
-A key the schema does not recognize is ignored with a warning; it is most
-likely left over from an older version.
+The client ignores a key that the schema does not recognize, with a warning.
+Such a key probably comes from an older version.
 
-A missing key or a bad color is an error, and every problem in the file is
-reported at once so you can fix them in one pass. What happens next depends
-on where the name came from:
+An absent key or a bad color is an error. The client reports all problems in
+the file at once, so you can fix them in one pass. The next step depends on
+the source of the name:
 
 - `--theme dracula` stops the client and shows the errors.
 - `theme = "dracula"` in the config file prints a warning and falls through to
-  the next theme choice (see [How the Theme Is Chosen](/chit/tui/guides/themes/#how-the-theme-is-chosen)).
+  the next theme choice (see [the theme order](/chit/tui/guides/themes/#how-the-theme-is-chosen)).
 
-Silently filling in defaults would leave you looking at a theme that is not
-the one you asked for, which is why a broken theme file is never patched up.
+The client never adds default values to a broken theme file. With silent
+defaults, the user sees a theme that is different from the requested theme.
 
 ## Legacy JSON Skins
 
 Before theme files moved to TOML, custom themes were JSON files in
-`~/.config/chit/skins/<name>.json`. These still load: when no
-`themes/<name>.toml` exists, the skins directory is checked next, and a
-warning asks you to move the theme to the themes directory as a `.toml` file.
-Legacy skins are listed by `/theme` and `--list-themes` alongside TOML themes.
+`~/.config/chit/skins/<name>.json`. These files still load. When no
+`themes/<name>.toml` exists, the client looks in the skins directory next. A
+warning then asks you to move the theme to the themes directory as a `.toml`
+file. `/theme` and `--list-themes` show legacy skins together with TOML themes.
 
-They keep their old behavior: any field a JSON skin omits falls back to the
-Tokyo Night value, and only hex colors are accepted. To convert one, copy its
-keys into a `.toml` file, add any of the required keys it was missing, and
-delete the JSON file.
+Legacy skins keep their old behavior. Each field that a JSON skin omits falls
+back to the Tokyo Night value. The client accepts only hex colors in a skin.
+To convert a skin, do these steps:
+
+1. Copy its keys into a `.toml` file.
+2. Add the mandatory keys that the skin does not have.
+3. Delete the JSON file.
 
 ## Resolution Order
 
@@ -159,7 +164,7 @@ For any theme name, the loader checks in order:
 
 1. **Bundled themes** — `tokyo-night`, `tokyo-night-day`, `catppuccin`,
    `catppuccin-latte`, `kanagawa`, `kanagawa-lotus`, `nightfox`, `dayfox`
-2. **Your theme file** — `~/.config/chit/themes/<name>.toml`
+2. **Local theme file** — `~/.config/chit/themes/<name>.toml`
 3. **Legacy skin** — `~/.config/chit/skins/<name>.json`, with a warning
 
 If none matches, the name is unknown: an error for `--theme`, a warning for a

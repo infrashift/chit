@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"slices"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 	"github.com/infrashift/chit/internal/pubsub"
 )
@@ -39,12 +40,14 @@ type TagCreate struct {
 }
 
 func notFoundTag(tagID string) error {
+	assert.That(tagID != "", "notFoundTag: empty tag id")
 	return model.NewNotFoundError("App.Tag", tagID)
 }
 
 // onBehalf reports whether actor is an allowlisted client acting for the
 // request's user.
 func (a *App) onBehalf(actor *model.User) bool {
+	assert.That(a.Config != nil, "App.onBehalf: nil config")
 	return actor != nil && a.OnBehalfOfAllowed(actor)
 }
 
@@ -52,6 +55,8 @@ func (a *App) onBehalf(actor *model.User) bool {
 // Tag, a member of its channel for a channel Tag. Otherwise it is a 404, the
 // same as an unknown Tag.
 func (a *App) visibleTag(ctx context.Context, tagID, userID string) (*model.Tag, error) {
+	assert.That(userID != "", "App.visibleTag: empty user id")
+	assert.That(a.Store != nil, "App.visibleTag: nil store")
 	tag, err := a.Store.Tag().Get(ctx, tagID)
 	if err != nil {
 		if isNotFound(err) {
@@ -59,6 +64,7 @@ func (a *App) visibleTag(ctx context.Context, tagID, userID string) (*model.Tag,
 		}
 		return nil, err
 	}
+	assert.That(tag != nil, "App.visibleTag: nil tag without an error")
 	switch tag.Scope {
 	case model.TagScopePrivate:
 		if tag.OwnerID != userID {
@@ -71,23 +77,28 @@ func (a *App) visibleTag(ctx context.Context, tagID, userID string) (*model.Tag,
 	default:
 		return nil, notFoundTag(tagID)
 	}
+	assert.That(tag.VisibleTo(userID), "App.visibleTag: returning a tag the user cannot see")
 	return tag, nil
 }
 
 // filterTags keeps the Tags userID can see on an item userID can read.
 func filterTags(tags []*model.Tag, userID string) []*model.Tag {
+	assert.That(userID != "", "filterTags: empty user id")
 	out := make([]*model.Tag, 0, len(tags))
 	for _, t := range tags {
 		if t.VisibleTo(userID) {
 			out = append(out, t)
 		}
 	}
+	assert.That(len(out) <= len(tags), "filterTags: more tags out than in")
 	return out
 }
 
 // requireTagManager returns a 403 unless userID may rename or delete tag:
 // its owner, or a system_admin for a Tag of the system actor.
 func (a *App) requireTagManager(ctx context.Context, tag *model.Tag, userID string) error {
+	assert.That(tag != nil, "App.requireTagManager: nil tag")
+	assert.That(userID != "", "App.requireTagManager: empty user id")
 	if tag.OwnerID == userID {
 		return nil
 	}
@@ -109,34 +120,13 @@ func reservedRefusal() error {
 // allowlisted client when the request came on userID's behalf.
 func (a *App) CreateTag(ctx context.Context, req TagCreate, userID string, actor *model.User) (*model.Tag, error) {
 	const where = "App.CreateTag"
+	assert.That(userID != "", where+": empty user id")
+	assert.That(a.Store != nil, where+": nil store")
 	if req.Scope == "" {
 		req.Scope = model.TagScopePrivate
 	}
-	if err := model.ValidateTagName(req.Name); err != nil {
+	if err := a.validateTagCreate(ctx, &req, userID, actor); err != nil {
 		return nil, err
-	}
-	switch req.Scope {
-	case model.TagScopePrivate:
-		if req.ChannelID != "" {
-			return nil, model.NewBadRequestError(where, "a private tag names no channel")
-		}
-	case model.TagScopeChannel:
-		if !model.IsValidID(req.ChannelID) {
-			return nil, model.NewBadRequestError(where, "a channel tag needs a channel_id")
-		}
-		if err := a.requireChannelMember(ctx, req.ChannelID, userID); err != nil {
-			return nil, err
-		}
-	default:
-		return nil, model.NewBadRequestError(where, "scope must be private or channel")
-	}
-	if model.IsReservedTagName(req.Name) {
-		if !a.onBehalf(actor) {
-			return nil, reservedRefusal()
-		}
-		if req.Scope != model.TagScopePrivate {
-			return nil, model.NewBadRequestError(where, "a profile/ tag is always the owner's private tag")
-		}
 	}
 
 	key := model.TagNameKey(req.Name)
@@ -152,6 +142,7 @@ func (a *App) CreateTag(ctx context.Context, req TagCreate, userID string, actor
 	if n >= model.MaxTagsPerOwner {
 		return nil, model.NewBadRequestError(where, "you own the most tags allowed (1024); delete one first")
 	}
+	assert.That(n >= 0, where+": negative tag count")
 	tag := &model.Tag{Name: req.Name, Scope: req.Scope, ChannelID: req.ChannelID, OwnerID: userID}
 	saved, err := a.Store.Tag().Save(ctx, tag)
 	if err != nil {
@@ -161,13 +152,51 @@ func (a *App) CreateTag(ctx context.Context, req TagCreate, userID string, actor
 		}
 		return nil, err
 	}
+	assert.That(saved != nil && saved.OwnerID == userID, where+": saved tag has another owner")
 	return saved, nil
+}
+
+// validateTagCreate checks a CreateTag request: the name, the scope and its
+// channel, and the reservation of profile/ names to allowlisted clients.
+func (a *App) validateTagCreate(ctx context.Context, req *TagCreate, userID string, actor *model.User) error {
+	const where = "App.CreateTag"
+	assert.That(req != nil, "App.validateTagCreate: nil request")
+	assert.That(req.Scope != "", "App.validateTagCreate: scope not defaulted")
+	if err := model.ValidateTagName(req.Name); err != nil {
+		return err
+	}
+	switch req.Scope {
+	case model.TagScopePrivate:
+		if req.ChannelID != "" {
+			return model.NewBadRequestError(where, "a private tag names no channel")
+		}
+	case model.TagScopeChannel:
+		if !model.IsValidID(req.ChannelID) {
+			return model.NewBadRequestError(where, "a channel tag needs a channel_id")
+		}
+		if err := a.requireChannelMember(ctx, req.ChannelID, userID); err != nil {
+			return err
+		}
+	default:
+		return model.NewBadRequestError(where, "scope must be private or channel")
+	}
+	if model.IsReservedTagName(req.Name) {
+		if !a.onBehalf(actor) {
+			return reservedRefusal()
+		}
+		if req.Scope != model.TagScopePrivate {
+			return model.NewBadRequestError(where, "a profile/ tag is always the owner's private tag")
+		}
+	}
+	return nil
 }
 
 // GetVisibleTags lists the Tags userID can see: their private Tags and the
 // channel Tags of their channels. A channelID narrows the list to that
 // channel's Tags plus userID's private Tags, and needs membership.
 func (a *App) GetVisibleTags(ctx context.Context, userID, channelID string) ([]*model.Tag, error) {
+	assert.That(userID != "", "App.GetVisibleTags: empty user id")
+	assert.That(a.Store != nil, "App.GetVisibleTags: nil store")
 	var channelIDs []string
 	if channelID != "" {
 		if err := a.requireChannelMember(ctx, channelID, userID); err != nil {
@@ -181,6 +210,7 @@ func (a *App) GetVisibleTags(ctx context.Context, userID, channelID string) ([]*
 		}
 		channelIDs = ids
 	}
+	assert.That(channelID == "" || len(channelIDs) == 1, "App.GetVisibleTags: a channel filter names more than one channel")
 	tags, err := a.Store.Tag().GetVisible(ctx, userID, channelIDs)
 	if err != nil {
 		return nil, err
@@ -192,6 +222,8 @@ func (a *App) GetVisibleTags(ctx context.Context, userID, channelID string) ([]*
 
 // RenameTag renames a Tag; its owner only.
 func (a *App) RenameTag(ctx context.Context, tagID, name, userID string) (*model.Tag, error) {
+	assert.That(userID != "", "App.RenameTag: empty user id")
+	assert.That(a.Store != nil, "App.RenameTag: nil store")
 	tag, err := a.visibleTag(ctx, tagID, userID)
 	if err != nil {
 		return nil, err
@@ -210,12 +242,15 @@ func (a *App) RenameTag(ctx context.Context, tagID, name, userID string) (*model
 	if err != nil {
 		return nil, err
 	}
+	assert.That(updated != nil && updated.ID == tag.ID, "App.RenameTag: store returned another tag")
 	a.publishTagEvent(ctx, model.WebSocketEventTagUpdated, updated, map[string]any{"tag": updated})
 	return updated, nil
 }
 
 // DeleteTag deletes a Tag and every application of it; its owner only.
 func (a *App) DeleteTag(ctx context.Context, tagID, userID string) error {
+	assert.That(userID != "", "App.DeleteTag: empty user id")
+	assert.That(a.Store != nil, "App.DeleteTag: nil store")
 	tag, err := a.visibleTag(ctx, tagID, userID)
 	if err != nil {
 		return err
@@ -235,6 +270,8 @@ func (a *App) DeleteTag(ctx context.Context, tagID, userID string) error {
 // what deleting or anonymizing a person must run (HALO section 3.9). The
 // user themselves or a system_admin may run it.
 func (a *App) DeleteTagsOfUser(ctx context.Context, targetID, actorID string) error {
+	assert.That(actorID != "", "App.DeleteTagsOfUser: empty actor id")
+	assert.That(a.Store != nil, "App.DeleteTagsOfUser: nil store")
 	if targetID != actorID {
 		if err := a.requireSystemAdmin(ctx, actorID, "App.DeleteTagsOfUser"); err != nil {
 			return err
@@ -247,6 +284,8 @@ func (a *App) DeleteTagsOfUser(ctx context.Context, targetID, actorID string) er
 // channelID: a private Tag by its owner only, a channel Tag in its own
 // channel only. apply also enforces the profile/ rule.
 func (a *App) applicableTag(ctx context.Context, tagID, channelID, userID string, actor *model.User, apply bool) (*model.Tag, error) {
+	assert.That(channelID != "", "App.applicableTag: empty channel id")
+	assert.That(apply || actor == nil, "App.applicableTag: an actor on a removal")
 	tag, err := a.visibleTag(ctx, tagID, userID)
 	if err != nil {
 		return nil, err
@@ -264,6 +303,7 @@ func (a *App) applicableTag(ctx context.Context, tagID, channelID, userID string
 // MaxTagsPerItem Tags of tag's class: channel Tags, or the private Tags of
 // tag's owner. Counting other owners' private Tags would reveal them.
 func requireRoomOnItem(current []*model.Tag, tag *model.Tag) error {
+	assert.That(tag != nil && tag.ID != "", "requireRoomOnItem: tag has no id")
 	n := 0
 	for _, t := range current {
 		if t.ID == tag.ID {
@@ -273,6 +313,7 @@ func requireRoomOnItem(current []*model.Tag, tag *model.Tag) error {
 			n++
 		}
 	}
+	assert.That(n <= len(current), "requireRoomOnItem: counted more tags than the item holds")
 	if n >= model.MaxTagsPerItem {
 		return model.NewBadRequestError("App.Tag", "this item already has the most tags allowed (32)")
 	}
@@ -282,10 +323,13 @@ func requireRoomOnItem(current []*model.Tag, tag *model.Tag) error {
 // AddTagToPost applies a Tag to a post. The caller must be able to read the
 // post (a member of its channel) and may apply the Tag (see applicableTag).
 func (a *App) AddTagToPost(ctx context.Context, postID, tagID, userID string, actor *model.User) error {
+	assert.That(userID != "", "App.AddTagToPost: empty user id")
+	assert.That(a.Store != nil, "App.AddTagToPost: nil store")
 	post, err := a.Store.Post().Get(ctx, postID)
 	if err != nil {
 		return err
 	}
+	assert.That(post != nil, "App.AddTagToPost: nil post without an error")
 	if authErr := a.requireChannelMember(ctx, post.ChannelID, userID); authErr != nil {
 		return authErr
 	}
@@ -310,10 +354,13 @@ func (a *App) AddTagToPost(ctx context.Context, postID, tagID, userID string, ac
 // RemoveTagFromPost removes a Tag from a post: any member for a channel Tag,
 // the owner for a private one.
 func (a *App) RemoveTagFromPost(ctx context.Context, postID, tagID, userID string) error {
+	assert.That(userID != "", "App.RemoveTagFromPost: empty user id")
+	assert.That(a.Store != nil, "App.RemoveTagFromPost: nil store")
 	post, err := a.Store.Post().Get(ctx, postID)
 	if err != nil {
 		return err
 	}
+	assert.That(post != nil, "App.RemoveTagFromPost: nil post without an error")
 	if authErr := a.requireChannelMember(ctx, post.ChannelID, userID); authErr != nil {
 		return authErr
 	}
@@ -330,6 +377,8 @@ func (a *App) RemoveTagFromPost(ctx context.Context, postID, tagID, userID strin
 
 // GetTagsForPost returns the Tags on a post that the caller can see.
 func (a *App) GetTagsForPost(ctx context.Context, postID, userID string) ([]*model.Tag, error) {
+	assert.That(userID != "", "App.GetTagsForPost: empty user id")
+	assert.That(a.Store != nil, "App.GetTagsForPost: nil store")
 	if err := a.requirePostChannelMember(ctx, postID, userID); err != nil {
 		return nil, err
 	}
@@ -347,6 +396,8 @@ func (a *App) GetTagsForPost(ctx context.Context, postID, userID string) ([]*mod
 //
 // Membership is resolved once per distinct channel, not once per post.
 func (a *App) GetTagsForPosts(ctx context.Context, messageIDs []string, userID string) (map[string][]*model.Tag, error) {
+	assert.That(userID != "", "App.GetTagsForPosts: empty user id")
+	assert.That(a.Store != nil, "App.GetTagsForPosts: nil store")
 	out := map[string][]*model.Tag{}
 	if len(messageIDs) == 0 {
 		return out, nil
@@ -358,6 +409,7 @@ func (a *App) GetTagsForPosts(ctx context.Context, messageIDs []string, userID s
 	allowed := map[string]bool{}
 	visible := make([]string, 0, len(posts))
 	for _, post := range posts {
+		assert.That(post != nil, "App.GetTagsForPosts: store returned a nil post")
 		ok, seen := allowed[post.ChannelID]
 		if !seen {
 			ok = a.isChannelMember(ctx, post.ChannelID, userID)
@@ -367,6 +419,7 @@ func (a *App) GetTagsForPosts(ctx context.Context, messageIDs []string, userID s
 			visible = append(visible, post.ID)
 		}
 	}
+	assert.That(len(visible) <= len(posts), "App.GetTagsForPosts: more visible posts than posts")
 	if len(visible) == 0 {
 		return out, nil
 	}
@@ -379,11 +432,14 @@ func (a *App) GetTagsForPosts(ctx context.Context, messageIDs []string, userID s
 			out[postID] = mine
 		}
 	}
+	assert.That(len(out) <= len(visible), "App.GetTagsForPosts: tags for posts the caller cannot read")
 	return out, nil
 }
 
 // AddTagToChannel applies a Tag to a channel itself.
 func (a *App) AddTagToChannel(ctx context.Context, channelID, tagID, userID string, actor *model.User) error {
+	assert.That(userID != "", "App.AddTagToChannel: empty user id")
+	assert.That(a.Store != nil, "App.AddTagToChannel: nil store")
 	if err := a.requireChannelMember(ctx, channelID, userID); err != nil {
 		return err
 	}
@@ -407,6 +463,8 @@ func (a *App) AddTagToChannel(ctx context.Context, channelID, tagID, userID stri
 
 // RemoveTagFromChannel removes a Tag from a channel.
 func (a *App) RemoveTagFromChannel(ctx context.Context, channelID, tagID, userID string) error {
+	assert.That(userID != "", "App.RemoveTagFromChannel: empty user id")
+	assert.That(a.Store != nil, "App.RemoveTagFromChannel: nil store")
 	if err := a.requireChannelMember(ctx, channelID, userID); err != nil {
 		return err
 	}
@@ -424,6 +482,8 @@ func (a *App) RemoveTagFromChannel(ctx context.Context, channelID, tagID, userID
 // GetTagsForChannel returns the Tags on a channel itself that the caller
 // can see.
 func (a *App) GetTagsForChannel(ctx context.Context, channelID, userID string) ([]*model.Tag, error) {
+	assert.That(userID != "", "App.GetTagsForChannel: empty user id")
+	assert.That(a.Store != nil, "App.GetTagsForChannel: nil store")
 	if err := a.requireChannelMember(ctx, channelID, userID); err != nil {
 		return nil, err
 	}
@@ -439,7 +499,9 @@ func (a *App) GetTagsForChannel(ctx context.Context, channelID, userID string) (
 // filter then matches nothing, the same answer for both, so it confirms no
 // private Tag.
 func (a *App) visibleTagIDs(ctx context.Context, tagIDs []string, userID, where string) (ids []string, ok bool, err error) {
+	assert.That(userID != "" && where != "", "App.visibleTagIDs: empty user id or caller")
 	ids = slices.Compact(slices.Sorted(slices.Values(tagIDs)))
+	assert.That(len(ids) <= len(tagIDs), "App.visibleTagIDs: compact grew the list")
 	if len(ids) > model.MaxTagFilter {
 		return nil, false, model.NewBadRequestError(where, "a filter names at most 8 tags")
 	}
@@ -464,6 +526,8 @@ func (a *App) visibleTagIDs(ctx context.Context, tagIDs []string, userID, where 
 // comes with the channel-level Tags the caller can see.
 func (a *App) FilterChannelsByTags(ctx context.Context, userID, teamID string, tagIDs []string) ([]*model.TaggedChannel, error) {
 	const where = "App.FilterChannelsByTags"
+	assert.That(userID != "", where+": empty user id")
+	assert.That(a.Store != nil, where+": nil store")
 	out := []*model.TaggedChannel{}
 	ids, ok, err := a.visibleTagIDs(ctx, tagIDs, userID, where)
 	if err != nil {
@@ -475,25 +539,9 @@ func (a *App) FilterChannelsByTags(ctx context.Context, userID, teamID string, t
 	if !ok {
 		return out, nil
 	}
-	var channels []*model.Channel
-	if teamID != "" {
-		if authErr := a.requireTeamMember(ctx, teamID, userID); authErr != nil {
-			return nil, authErr
-		}
-		channels, err = a.Store.Channel().GetChannelsForUser(ctx, userID, teamID)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		chIDs, idsErr := a.Store.Channel().GetChannelIDsForUser(ctx, userID)
-		if idsErr != nil {
-			return nil, idsErr
-		}
-		for _, id := range chIDs {
-			if c, getErr := a.Store.Channel().Get(ctx, id); getErr == nil {
-				channels = append(channels, c)
-			}
-		}
+	channels, err := a.tagFilterChannels(ctx, userID, teamID)
+	if err != nil {
+		return nil, err
 	}
 	byID := map[string]*model.Channel{}
 	candidates := make([]string, 0, len(channels))
@@ -510,22 +558,53 @@ func (a *App) FilterChannelsByTags(ctx context.Context, userID, teamID string, t
 	}
 	slices.Sort(matched)
 	for _, id := range matched {
+		assert.That(byID[id] != nil, "App.FilterChannelsByTags: store matched a channel outside the candidates")
 		tags, err := a.Store.Tag().GetTagsForChannel(ctx, id)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, &model.TaggedChannel{Channel: byID[id], Tags: filterTags(tags, userID)})
 	}
+	assert.That(len(out) <= len(candidates), "App.FilterChannelsByTags: more matches than candidates")
 	return out, nil
+}
+
+// tagFilterChannels returns the channels FilterChannelsByTags considers:
+// userID's channels in teamID (which needs team membership), or all of
+// userID's channels when teamID is empty.
+func (a *App) tagFilterChannels(ctx context.Context, userID, teamID string) ([]*model.Channel, error) {
+	assert.That(userID != "", "App.tagFilterChannels: empty user id")
+	assert.That(a.Store != nil, "App.tagFilterChannels: nil store")
+	if teamID != "" {
+		if authErr := a.requireTeamMember(ctx, teamID, userID); authErr != nil {
+			return nil, authErr
+		}
+		return a.Store.Channel().GetChannelsForUser(ctx, userID, teamID)
+	}
+	chIDs, err := a.Store.Channel().GetChannelIDsForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	var channels []*model.Channel
+	for _, id := range chIDs {
+		if c, getErr := a.Store.Channel().Get(ctx, id); getErr == nil {
+			channels = append(channels, c)
+		}
+	}
+	assert.That(len(channels) <= len(chIDs), "App.tagFilterChannels: more channels than ids")
+	return channels, nil
 }
 
 // requirePostChannelMember resolves a post to its channel and checks
 // membership there.
 func (a *App) requirePostChannelMember(ctx context.Context, messageID, actorID string) error {
+	assert.That(actorID != "", "App.requirePostChannelMember: empty actor id")
+	assert.That(a.Store != nil, "App.requirePostChannelMember: nil store")
 	post, err := a.Store.Post().Get(ctx, messageID)
 	if err != nil {
 		return err
 	}
+	assert.That(post != nil, "App.requirePostChannelMember: nil post without an error")
 	return a.requireChannelMember(ctx, post.ChannelID, actorID)
 }
 
@@ -534,6 +613,8 @@ func (a *App) requirePostChannelMember(ctx context.Context, messageID, actorID s
 // tagAudience returns who may hear of a change to changed: its owner for a
 // private Tag, every member of channelID for a channel Tag.
 func (a *App) tagAudience(ctx context.Context, changed *model.Tag, channelID string) []string {
+	assert.That(changed != nil, "App.tagAudience: nil tag")
+	assert.That(channelID != "", "App.tagAudience: empty channel id")
 	if changed.Scope != model.TagScopeChannel {
 		return []string{changed.OwnerID}
 	}
@@ -552,6 +633,8 @@ func (a *App) tagAudience(ctx context.Context, changed *model.Tag, channelID str
 // The full list, rather than the one tag that changed, lets a client
 // replace what it has without tracking adds and removes.
 func (a *App) publishPostTags(ctx context.Context, post *model.Post, changed *model.Tag) {
+	assert.That(post != nil && changed != nil, "App.publishPostTags: nil post or tag")
+	assert.That(a.Hub != nil, "App.publishPostTags: nil hub")
 	all, err := a.Store.Tag().GetTagsForPost(ctx, post.ID)
 	if err != nil {
 		slog.Warn("post_tags_updated: could not read tags", "post_id", post.ID, "error", err)
@@ -571,6 +654,8 @@ func (a *App) publishPostTags(ctx context.Context, post *model.Post, changed *mo
 
 // publishChannelTags is publishPostTags for the Tags on a channel itself.
 func (a *App) publishChannelTags(ctx context.Context, channelID string, changed *model.Tag) {
+	assert.That(channelID != "" && changed != nil, "App.publishChannelTags: empty channel id or nil tag")
+	assert.That(a.Hub != nil, "App.publishChannelTags: nil hub")
 	all, err := a.Store.Tag().GetTagsForChannel(ctx, channelID)
 	if err != nil {
 		slog.Warn("channel_tags_updated: could not read tags", "channel_id", channelID, "error", err)
@@ -591,10 +676,13 @@ func (a *App) publishChannelTags(ctx context.Context, channelID string, changed 
 // publishTagEvent announces a rename or delete: to the owner for a private
 // Tag, to the Tag's channel for a channel Tag.
 func (a *App) publishTagEvent(ctx context.Context, event string, tag *model.Tag, data map[string]any) {
+	assert.That(tag != nil && event != "", "App.publishTagEvent: nil tag or empty event")
+	assert.That(a.Hub != nil, "App.publishTagEvent: nil hub")
 	b := &model.WebSocketBroadcast{UserID: tag.OwnerID}
 	if tag.Scope == model.TagScopeChannel {
 		b = &model.WebSocketBroadcast{ChannelID: tag.ChannelID}
 	}
+	assert.That(b.UserID != "" || b.ChannelID != "", "App.publishTagEvent: event has no audience")
 	a.Hub.Broadcast(&model.WebSocketEvent{Event: event, Data: data, Broadcast: b})
 	a.publishEnvelope(ctx, tag, &pubsub.EventEnvelope{Event: event, ChannelID: tag.ChannelID})
 }
@@ -604,6 +692,8 @@ func (a *App) publishTagEvent(ctx context.Context, event string, tag *model.Tag,
 // has to an export, and even "a private tag changed on this post" is not
 // theirs to know.
 func (a *App) publishEnvelope(ctx context.Context, changed *model.Tag, env *pubsub.EventEnvelope) {
+	assert.That(changed != nil && env != nil, "App.publishEnvelope: nil tag or envelope")
+	assert.That(env.Event != "", "App.publishEnvelope: envelope has no event")
 	if changed.Scope != model.TagScopeChannel || a.PubSub == nil {
 		return
 	}

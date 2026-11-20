@@ -176,7 +176,9 @@ func fakeZinc(t *testing.T, hits []string, status int) string {
 			From int `json:"from"`
 			Max  int `json:"max_results"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&req)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode search request: %v", err)
+		}
 		end := min(req.From+req.Max, len(hits))
 		type hit struct {
 			ID string `json:"_id"`
@@ -185,7 +187,9 @@ func fakeZinc(t *testing.T, hits []string, status int) string {
 		for _, id := range hits[min(req.From, len(hits)):end] {
 			out = append(out, hit{ID: id})
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"hits": map[string]any{"hits": out}})
+		if err := json.NewEncoder(w).Encode(map[string]any{"hits": map[string]any{"hits": out}}); err != nil {
+			t.Errorf("encode search hits: %v", err)
+		}
 	}))
 	t.Cleanup(srv.Close)
 	return srv.URL

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/keto"
 	"github.com/infrashift/chit/internal/model"
 )
@@ -29,6 +30,7 @@ type Reconciler struct {
 
 // NewReconciler creates a Reconciler backed by the given Keto client.
 func NewReconciler(k KetoClient) *Reconciler {
+	assert.That(k != nil, "NewReconciler: nil keto client")
 	return &Reconciler{keto: k}
 }
 
@@ -45,6 +47,8 @@ func NewReconciler(k KetoClient) *Reconciler {
 // Writes come first so that a grant being kept is never briefly missing. If
 // listing fails, nothing is deleted.
 func (r *Reconciler) Reconcile(ctx context.Context, cfg *CUEConfig) error {
+	assert.That(r != nil && r.keto != nil, "Reconciler.Reconcile: reconciler not built by NewReconciler")
+	assert.That(cfg != nil, "Reconciler.Reconcile: nil config")
 	ns := model.KetoNamespaceCommand
 	desired := map[string]bool{}
 
@@ -58,6 +62,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, cfg *CUEConfig) error {
 				Namespace: ns, Object: fmt.Sprintf("Command:%s", cmdSlug), Relation: model.KetoRelationExecute,
 				SubjectSet: &keto.SubjectSet{Namespace: ns, Object: roleObject, Relation: model.KetoRelationMember},
 			}
+			assert.That(t.SubjectSet != nil && t.SubjectID == "", "Reconciler.Reconcile: grant subject is not a subject set")
 			desired[t.String()] = true
 			slog.Info("reconcile: granting command to role", "command", cmdSlug, "role", role.Name)
 			if err := r.keto.WriteSubjectSetRelation(ctx, t.Namespace, t.Object, t.Relation,
@@ -74,6 +79,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, cfg *CUEConfig) error {
 				Namespace: ns, Object: fmt.Sprintf("Role:%s", roleName), Relation: model.KetoRelationMember,
 				SubjectID: fmt.Sprintf("Actor:%s", actor.ID),
 			}
+			assert.That(t.SubjectSet == nil && t.SubjectID != "", "Reconciler.Reconcile: membership subject is not a literal id")
 			desired[t.String()] = true
 			slog.Info("reconcile: assigning actor to role", "actor", actor.ID, "role", roleName)
 			if err := r.keto.WriteRelation(ctx, t.Namespace, t.Object, t.Relation, t.SubjectID); err != nil {
@@ -83,6 +89,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, cfg *CUEConfig) error {
 	}
 
 	// 3. Revoke everything else in the namespace.
+	return r.revokeUndeclared(ctx, ns, desired)
+}
+
+// revokeUndeclared deletes every tuple in namespace ns that is not in
+// desired. If listing fails, nothing is deleted.
+func (r *Reconciler) revokeUndeclared(ctx context.Context, ns string, desired map[string]bool) error {
+	assert.That(ns != "", "Reconciler.revokeUndeclared: empty namespace")
+	assert.That(desired != nil, "Reconciler.revokeUndeclared: nil desired set")
 	existing, err := r.keto.ListRelations(ctx, ns)
 	if err != nil {
 		return fmt.Errorf("list %s tuples: %w", ns, err)

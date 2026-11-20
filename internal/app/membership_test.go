@@ -39,12 +39,16 @@ func newHookFixture(t *testing.T, policy func(*memberhook.Request) memberhooktes
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = al.Close() })
+	t.Cleanup(func() {
+		if err := al.Close(); err != nil {
+			t.Errorf("close audit logger: %v", err)
+		}
+	})
 	f.app.AuditLogger = al
 	return &hookFixture{fixture: f, hook: srv, audit: audit}
 }
 
-func allowAll(*memberhook.Request) memberhooktest.Answer { return memberhooktest.Allow }
+func allowAll(*memberhook.Request) memberhooktest.Answer { return memberhooktest.Allow() }
 
 // refuse returns a policy that refuses the named user of f.
 func (f *hookFixture) refuse(name string) {
@@ -72,7 +76,11 @@ func (f *hookFixture) auditRecords() []map[string]any {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	defer func() { _ = file.Close() }()
+	defer func() {
+		if err := file.Close(); err != nil {
+			f.t.Errorf("close audit log: %v", err)
+		}
+	}()
 	var out []map[string]any
 	sc := bufio.NewScanner(file)
 	for sc.Scan() {
@@ -270,7 +278,7 @@ func TestMembershipHook_TimeoutFailsClosed(t *testing.T) {
 	release := make(chan struct{})
 	f := newHookFixture(t, func(*memberhook.Request) memberhooktest.Answer {
 		<-release
-		return memberhooktest.Allow
+		return memberhooktest.Allow()
 	})
 	t.Cleanup(func() { close(release) })
 	hook, err := memberhook.New(&memberhook.Config{
@@ -359,7 +367,7 @@ func TestMembershipHook_CreateOpenChannelAddsOnlyCheckedMembers(t *testing.T) {
 	late := f.user("late")
 	f.hook.SetPolicy(func(*memberhook.Request) memberhooktest.Answer {
 		f.store.Teams.SeedMember(&model.TeamMember{TeamID: f.team.ID, UserID: late.ID, Roles: model.TeamRoleUser})
-		return memberhooktest.Allow
+		return memberhooktest.Allow()
 	})
 	created, err := f.app.CreateChannel(t.Context(), &model.Channel{
 		TeamID: f.team.ID, Name: "open-chan", DisplayName: "O", Type: model.ChannelOpen, CreatorID: f.user("creator").ID,
@@ -379,8 +387,11 @@ func TestMembershipHook_CreateOpenChannelSkipsAMemberWhoLeft(t *testing.T) {
 	f.joinTeam("creator", "alice", "leaver")
 	leaver := f.user("leaver")
 	f.hook.SetPolicy(func(*memberhook.Request) memberhooktest.Answer {
-		_ = f.store.Teams.RemoveMember(context.Background(), f.team.ID, leaver.ID)
-		return memberhooktest.Allow
+		// The hook server's goroutine: t.Errorf, not t.Fatal.
+		if err := f.store.Teams.RemoveMember(context.Background(), f.team.ID, leaver.ID); err != nil {
+			t.Errorf("remove the leaver from the team: %v", err)
+		}
+		return memberhooktest.Allow()
 	})
 	created, err := f.app.CreateChannel(t.Context(), &model.Channel{
 		TeamID: f.team.ID, Name: "open-chan", DisplayName: "O", Type: model.ChannelOpen, CreatorID: f.user("creator").ID,
@@ -450,7 +461,7 @@ func TestMembershipHook_AbandonedChecksAreNotAudited(t *testing.T) {
 		case <-time.After(5 * time.Second):
 		}
 		time.Sleep(200 * time.Millisecond)
-		return memberhooktest.Allow
+		return memberhooktest.Allow()
 	})
 	_, err := f.app.CreateChannel(t.Context(), &model.Channel{
 		TeamID: f.team.ID, Name: "open-chan", DisplayName: "O", Type: model.ChannelOpen, CreatorID: f.user("creator").ID,
@@ -476,7 +487,11 @@ func TestMembershipHook_DirectChannel(t *testing.T) {
 	if _, err := f.store.Channels.GetDirectChannelsForUser(t.Context(), alice.ID); err != nil {
 		t.Fatal(err)
 	}
-	if dms, _ := f.store.Channels.GetDirectChannelsForUser(t.Context(), alice.ID); len(dms) != 0 {
+	dms, err := f.store.Channels.GetDirectChannelsForUser(t.Context(), alice.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dms) != 0 {
 		t.Fatalf("DMs %v after a refusal", dms)
 	}
 
@@ -510,7 +525,11 @@ func TestMembershipHook_GroupChannelIsWholeOrNothing(t *testing.T) {
 	f.refuse("carol")
 	_, err := f.app.CreateGroupChannel(t.Context(), f.user("alice").ID, ids)
 	requireRefusal(t, err, "tool_access")
-	if gms, _ := f.store.Channels.GetDirectChannelsForUser(t.Context(), f.user("alice").ID); len(gms) != 0 {
+	gms, err := f.store.Channels.GetDirectChannelsForUser(t.Context(), f.user("alice").ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gms) != 0 {
 		t.Fatalf("group channels %v after a refusal", gms)
 	}
 

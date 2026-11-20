@@ -19,8 +19,11 @@ cover:
 	go tool cover -func=coverage.out
 	@rm -f coverage.out
 
+# Found on PATH or in GOPATH/bin, like the root Makefile. The root lint-tui
+# passes its own GOLANGCI_LINT, so both modules use the same binary.
+GOLANGCI_LINT ?= $(shell command -v golangci-lint 2>/dev/null || echo $(shell go env GOPATH)/bin/golangci-lint)
 lint:
-	$(shell go env GOPATH)/bin/golangci-lint run ./...
+	GOWORK=off $(GOLANGCI_LINT) run ./...
 
 clean:
 	rm -rf $(BIN_DIR) coverage.out

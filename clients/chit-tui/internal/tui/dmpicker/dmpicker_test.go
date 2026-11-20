@@ -146,7 +146,7 @@ func TestDMPicker_UpBounds(t *testing.T) {
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
 	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	msg := cmd()
-	picked := msg.(dmpicker.MembersPickedMsg)
+	picked := mustMsg[dmpicker.MembersPickedMsg](t, msg)
 	if picked.Users[0].Username != "alice" {
 		t.Errorf("expected alice, got %s", picked.Users[0].Username)
 	}
@@ -165,7 +165,7 @@ func TestDMPicker_DownBounds(t *testing.T) {
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	msg := cmd()
-	picked := msg.(dmpicker.MembersPickedMsg)
+	picked := mustMsg[dmpicker.MembersPickedMsg](t, msg)
 	if picked.Users[0].Username != "alice" {
 		t.Errorf("expected alice, got %s", picked.Users[0].Username)
 	}
@@ -655,4 +655,14 @@ func TestPicker_KeepsTheBoxWhenDeselecting(t *testing.T) {
 	if len(picked.Users) != 1 {
 		t.Errorf("picked %d users, want 1", len(picked.Users))
 	}
+}
+
+// mustMsg returns msg as a T, failing the test when it is something else.
+func mustMsg[T any](t *testing.T, msg tea.Msg) T {
+	t.Helper()
+	got, ok := msg.(T)
+	if !ok {
+		t.Fatalf("msg = %T, want %T", msg, got)
+	}
+	return got
 }

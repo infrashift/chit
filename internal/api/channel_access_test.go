@@ -130,7 +130,11 @@ func TestUpdateChannel_Patch(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
 		}
-		if ch, _ := ms.Channels.Get(t.Context(), privateChannelID); ch.Header != "" {
+		ch, err := ms.Channels.Get(t.Context(), privateChannelID)
+		if err != nil {
+			t.Fatalf("get channel: %v", err)
+		}
+		if ch.Header != "" {
 			t.Fatalf("header = %q, want cleared", ch.Header)
 		}
 	})

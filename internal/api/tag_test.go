@@ -162,7 +162,10 @@ func TestGetTagsForPosts_RejectsOversizedBatch(t *testing.T) {
 	for i := range ids {
 		ids[i] = testRootPost
 	}
-	body, _ := json.Marshal(map[string][]string{"post_ids": ids})
+	body, err := json.Marshal(map[string][]string{"post_ids": ids})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
 
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(string(body)))
 	r.Header.Set("Content-Type", "application/json")

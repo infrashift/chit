@@ -2,16 +2,18 @@ package api
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/infrashift/chit/internal/app"
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 )
 
 func createPost(a *app.App) http.HandlerFunc {
+	assert.That(a != nil, "createPost: nil app")
+	assert.That(a.Store != nil, "createPost: nil store")
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
 		// Only the fields a client may choose. Decoding into model.Post let a
@@ -34,6 +36,7 @@ func createPost(a *app.App) http.HandlerFunc {
 		delete(body.Props, model.PropOnBehalfOf)
 
 		// With X-On-Behalf-Of, user is the person and actor the client.
+		assert.That(user != nil, "createPost: no authenticated user")
 		saved, err := a.CreatePostAs(r.Context(), &model.Post{
 			ChannelID: body.ChannelID,
 			RootID:    body.RootID,
@@ -46,25 +49,32 @@ func createPost(a *app.App) http.HandlerFunc {
 			WriteAppError(w, "createPost", err)
 			return
 		}
+		assert.That(saved != nil, "createPost: app returned nil without an error")
 
 		WriteJSON(w, http.StatusCreated, saved)
 	}
 }
 
 func getPost(a *app.App) http.HandlerFunc {
+	assert.That(a != nil, "getPost: nil app")
+	assert.That(a.Store != nil, "getPost: nil store")
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
 		id := chi.URLParam(r, "id")
+		assert.That(user != nil, "getPost: no authenticated user")
 		post, err := a.GetPost(r.Context(), id, user.ID)
 		if err != nil {
 			WriteAppError(w, "getPost", err)
 			return
 		}
+		assert.That(post != nil, "getPost: app returned nil without an error")
 		WriteJSON(w, http.StatusOK, post)
 	}
 }
 
 func updatePost(a *app.App) http.HandlerFunc {
+	assert.That(a != nil, "updatePost: nil app")
+	assert.That(a.Store != nil, "updatePost: nil store")
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
 		id := chi.URLParam(r, "id")
@@ -76,20 +86,25 @@ func updatePost(a *app.App) http.HandlerFunc {
 			return
 		}
 
+		assert.That(user != nil, "updatePost: no authenticated user")
 		updated, err := a.UpdatePost(r.Context(), id, app.PostPatch{Content: body.Content, Props: body.Props}, user.ID)
 		if err != nil {
 			WriteAppError(w, "updatePost", err)
 			return
 		}
+		assert.That(updated != nil, "updatePost: app returned nil without an error")
 
 		WriteJSON(w, http.StatusOK, updated)
 	}
 }
 
 func deletePost(a *app.App) http.HandlerFunc {
+	assert.That(a != nil, "deletePost: nil app")
+	assert.That(a.Store != nil, "deletePost: nil store")
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
 		id := chi.URLParam(r, "id")
+		assert.That(user != nil, "deletePost: no authenticated user")
 		if err := a.DeletePost(r.Context(), id, user.ID); err != nil {
 			WriteAppError(w, "deletePost", err)
 			return
@@ -99,9 +114,12 @@ func deletePost(a *app.App) http.HandlerFunc {
 }
 
 func pinPost(a *app.App) http.HandlerFunc {
+	assert.That(a != nil, "pinPost: nil app")
+	assert.That(a.Store != nil, "pinPost: nil store")
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
 		id := chi.URLParam(r, "id")
+		assert.That(user != nil, "pinPost: no authenticated user")
 		if err := a.PinPost(r.Context(), id, user.ID); err != nil {
 			WriteAppError(w, "pinPost", err)
 			return
@@ -111,9 +129,12 @@ func pinPost(a *app.App) http.HandlerFunc {
 }
 
 func unpinPost(a *app.App) http.HandlerFunc {
+	assert.That(a != nil, "unpinPost: nil app")
+	assert.That(a.Store != nil, "unpinPost: nil store")
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
 		id := chi.URLParam(r, "id")
+		assert.That(user != nil, "unpinPost: no authenticated user")
 		if err := a.UnpinPost(r.Context(), id, user.ID); err != nil {
 			WriteAppError(w, "unpinPost", err)
 			return
@@ -123,11 +144,13 @@ func unpinPost(a *app.App) http.HandlerFunc {
 }
 
 func getChannelPosts(a *app.App) http.HandlerFunc {
+	assert.That(a != nil, "getChannelPosts: nil app")
+	assert.That(a.Store != nil, "getChannelPosts: nil store")
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
 		channelID := chi.URLParam(r, "id")
 		page, perPage := parsePagination(r, 60)
-		since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
+		since := queryInt(r, "since", 64)
 
 		opts := model.GetPostsOptions{
 			Page:    page,
@@ -135,25 +158,31 @@ func getChannelPosts(a *app.App) http.HandlerFunc {
 			Since:   since,
 		}
 
+		assert.That(user != nil, "getChannelPosts: no authenticated user")
 		posts, err := a.GetPostsForChannel(r.Context(), channelID, user.ID, opts)
 		if err != nil {
 			WriteAppError(w, "getChannelPosts", err)
 			return
 		}
+		assert.That(posts != nil, "getChannelPosts: app returned nil without an error")
 
 		WriteJSON(w, http.StatusOK, posts)
 	}
 }
 
 func getPinnedPosts(a *app.App) http.HandlerFunc {
+	assert.That(a != nil, "getPinnedPosts: nil app")
+	assert.That(a.Store != nil, "getPinnedPosts: nil store")
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
 		channelID := chi.URLParam(r, "id")
+		assert.That(user != nil, "getPinnedPosts: no authenticated user")
 		posts, err := a.GetPinnedPosts(r.Context(), channelID, user.ID)
 		if err != nil {
 			WriteAppError(w, "getPinnedPosts", err)
 			return
 		}
+		assert.That(posts != nil, "getPinnedPosts: app returned nil without an error")
 		WriteJSON(w, http.StatusOK, posts)
 	}
 }
@@ -168,6 +197,8 @@ const (
 )
 
 func sendStreamStatus(a *app.App) http.HandlerFunc {
+	assert.That(a != nil, "sendStreamStatus: nil app")
+	assert.That(a.Store != nil, "sendStreamStatus: nil store")
 	limiters := newUserLimiters(streamStatusPerSecond, streamStatusBurst, time.Now())
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
@@ -179,6 +210,7 @@ func sendStreamStatus(a *app.App) http.HandlerFunc {
 		if !decodeBody(w, r, &body, "sendStreamStatus") {
 			return
 		}
+		assert.That(user != nil, "sendStreamStatus: no authenticated user")
 		if refused, wait := take(time.Now(), []bucket{{"stream_status", limiters, user.ID + " " + channelID}}); refused != nil {
 			setRetryAfter(w, wait)
 			WriteError(w, model.NewAppError("sendStreamStatus", "stream_status rate limit exceeded", "", http.StatusTooManyRequests))

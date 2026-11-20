@@ -10,6 +10,7 @@ import (
 	"github.com/infrashift/chit/internal/app"
 	"github.com/infrashift/chit/internal/config"
 	"github.com/infrashift/chit/internal/model"
+	"github.com/infrashift/chit/internal/pubsub"
 	"github.com/infrashift/chit/internal/store/storetest"
 	"github.com/infrashift/chit/internal/websocket"
 )
@@ -33,9 +34,9 @@ const (
 
 type noopPubSub struct{}
 
-func (noopPubSub) Publish(_ context.Context, _ string, _ []byte) error              { return nil }
-func (noopPubSub) Subscribe(_ context.Context, _ string, _ func(data []byte)) error { return nil }
-func (noopPubSub) Close() error                                                     { return nil }
+func (noopPubSub) Publish(_ context.Context, _ string, _ []byte) error           { return nil }
+func (noopPubSub) Subscribe(_ context.Context, _ string, _ pubsub.Handler) error { return nil }
+func (noopPubSub) Close() error                                                  { return nil }
 
 // mockStore is the shared in-memory store; see package storetest.
 type mockStore = storetest.Store
@@ -46,7 +47,24 @@ func setupTestApp(t *testing.T) (a *app.App, ms *mockStore, cleanup func()) {
 	t.Helper()
 
 	ms = storetest.New()
+	seedTestUsers(ms)
+	seedTestTeam(ms)
+	seedTestChannel(ms)
 
+	cfg := config.Defaults()
+	cfg.TrustedProxyHeader = "X-User-Id"
+	hub := websocket.NewHub(nil)
+	a = app.New(ms, hub, noopPubSub{}, cfg)
+
+	cleanup = func() {
+		hub.Stop()
+	}
+
+	return a, ms, cleanup
+}
+
+// seedTestUsers seeds testUser, alice, charlie and the admin dana.
+func seedTestUsers(ms *mockStore) {
 	ms.Users.Seed(&model.User{
 		ID:          testUserID,
 		KratosID:    testKratosID,
@@ -94,7 +112,10 @@ func setupTestApp(t *testing.T) (a *app.App, ms *mockStore, cleanup func()) {
 		CreateAt:    1000,
 		UpdateAt:    1000,
 	})
+}
 
+// seedTestTeam seeds the engineering team and its members.
+func seedTestTeam(ms *mockStore) {
 	ms.Teams.Seed(&model.Team{
 		ID:          testTeamID,
 		Name:        "engineering",
@@ -118,7 +139,11 @@ func setupTestApp(t *testing.T) (a *app.App, ms *mockStore, cleanup func()) {
 		TeamID: testTeamID,
 		UserID: adminUserID,
 	})
+}
 
+// seedTestChannel seeds the general channel with a root post, its reply,
+// the thread, and a tag on the root post.
+func seedTestChannel(ms *mockStore) {
 	ms.Channels.Seed(&model.Channel{
 		ID:          testChannelID,
 		TeamID:      testTeamID,
@@ -167,17 +192,6 @@ func setupTestApp(t *testing.T) (a *app.App, ms *mockStore, cleanup func()) {
 
 	ms.Tags.Seed(&model.Tag{ID: testTagID, Name: "important", Scope: model.TagScopeChannel, ChannelID: testChannelID, OwnerID: testUserID})
 	ms.Tags.SeedPostTag(testRootPost, testTagID)
-
-	cfg := config.Defaults()
-	cfg.TrustedProxyHeader = "X-User-Id"
-	hub := websocket.NewHub(nil)
-	a = app.New(ms, hub, noopPubSub{}, cfg)
-
-	cleanup = func() {
-		hub.Stop()
-	}
-
-	return a, ms, cleanup
 }
 
 // authedRequest wraps the given request with the test user in context.

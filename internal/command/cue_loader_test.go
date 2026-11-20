@@ -6,6 +6,12 @@ import (
 	"testing"
 )
 
+// cueTestFile is one file writeCUETestData writes, relative to its directory.
+type cueTestFile struct {
+	path    string
+	content string
+}
+
 func writeCUETestData(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -19,6 +25,18 @@ func writeCUETestData(t *testing.T) string {
 		t.Fatal(err)
 	}
 
+	for _, f := range cueTestFiles() {
+		if err := os.WriteFile(filepath.Join(dir, f.path), []byte(f.content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	return dir
+}
+
+// cueTestFiles is the CUE tree writeCUETestData writes: two commands and
+// two roles in one "auth" package.
+func cueTestFiles() []cueTestFile {
 	commandsCUE := `package auth
 
 #Command: {
@@ -67,20 +85,12 @@ roles: user: {
 }
 `
 
-	if err := os.WriteFile(filepath.Join(schemaDir, "commands.cue"), []byte(commandsCUE), 0o644); err != nil {
-		t.Fatal(err)
+	return []cueTestFile{
+		{filepath.Join("schema", "commands.cue"), commandsCUE},
+		{filepath.Join("schema", "roles.cue"), rolesCUE},
+		{filepath.Join("roles", "admin.cue"), adminCUE},
+		{filepath.Join("roles", "user.cue"), userCUE},
 	}
-	if err := os.WriteFile(filepath.Join(schemaDir, "roles.cue"), []byte(rolesCUE), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(rolesDir, "admin.cue"), []byte(adminCUE), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(rolesDir, "user.cue"), []byte(userCUE), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	return dir
 }
 
 func TestLoadCUE(t *testing.T) {

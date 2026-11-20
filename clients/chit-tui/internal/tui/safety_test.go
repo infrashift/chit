@@ -16,7 +16,10 @@ import (
 
 func key(r rune) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}} }
 
-var ownPost = &model.Post{ID: "mine", ChannelID: "c1", UserID: "u1", Content: "my old words", CreateAt: 1700000000000}
+// ownPost is a post by the signed-in user (u1).
+func ownPost() *model.Post {
+	return &model.Post{ID: "mine", ChannelID: "c1", UserID: "u1", Content: "my old words", CreateAt: 1700000000000}
+}
 
 // withOwnPost is a session with one of the user's own posts selected in a
 // focused history pane, where single-letter keys act on it.
@@ -29,7 +32,7 @@ func withOwnPost(t *testing.T) (tui.Model, *mockClient) {
 		{ID: "c1", TeamID: "t1", DisplayName: "General"},
 		{ID: "c2", TeamID: "t1", DisplayName: "Random"},
 	}})
-	m, _ = step(t, m, tui.PostsLoadedMsg{ChannelID: "c1", Posts: &model.PostList{Order: []*model.Post{ownPost}}})
+	m, _ = step(t, m, tui.PostsLoadedMsg{ChannelID: "c1", Posts: &model.PostList{Order: []*model.Post{ownPost()}}})
 	m, _ = step(t, m, tea.KeyMsg{Type: tea.KeyTab})
 	if m.Focused() != tui.FocusViewport {
 		t.Fatalf("setup: focus = %v, want the history pane", m.Focused())
@@ -81,7 +84,7 @@ func TestModel_EscAbandonsAnEdit(t *testing.T) {
 func TestModel_OpeningAThreadAbandonsAnEdit(t *testing.T) {
 	m, client := withOwnPost(t)
 	m, _ = step(t, m, key('e'))
-	m, _ = step(t, m, viewport.PostSelectedMsg{Post: ownPost})
+	m, _ = step(t, m, viewport.PostSelectedMsg{Post: ownPost()})
 	m, _ = step(t, m, tea.KeyMsg{Type: tea.KeyEscape})
 
 	_ = send(t, m, "after the thread")

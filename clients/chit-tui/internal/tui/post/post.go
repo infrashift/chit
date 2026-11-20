@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/glamour"
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/mention"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
@@ -24,6 +25,7 @@ type Model struct {
 
 // New creates a post model using a shared renderer.
 func New(p *model.Post, username string, s styles.Styles, width int, r *glamour.TermRenderer, currentUsername string, replyCount int, tags []string) Model {
+	assert.That(s.ReplyIndent.GetBorderLeft(), "post.New: styles not built by styles.New")
 	return Model{
 		Post:            p,
 		Username:        username,
@@ -63,6 +65,7 @@ func (m Model) View() string {
 	for _, tag := range m.tags {
 		badges = append(badges, m.styles.TagBadge.Render("#"+tag))
 	}
+	assert.That(len(badges) <= 4+len(m.tags), "Model.View: more badges than sources")
 	if len(badges) > 0 {
 		header += " " + strings.Join(badges, " ")
 	}
@@ -78,6 +81,7 @@ func (m Model) View() string {
 	content = highlightMentions(content, m.currentUsername, m.styles)
 
 	result := fmt.Sprintf("%s\n%s", header, content)
+	assert.That(len(result) > len(header), "Model.View: header without a body line")
 	if m.Post.RootID != "" {
 		result = m.styles.ReplyIndent.Render(result)
 	}
@@ -93,6 +97,9 @@ func highlightMentions(content, currentUsername string, s styles.Styles) string 
 	var b strings.Builder
 	last := 0
 	for _, span := range spans {
+		assert.That(span.Start >= last, "highlightMentions: mentions overlap or are out of order")
+		assert.That(span.Start < span.End && span.End <= len(content), "highlightMentions: mention outside the content")
+		assert.That(span.Username != "", "highlightMentions: mention without a name")
 		b.WriteString(content[last:span.Start])
 		mentionStr := content[span.Start:span.End]
 		if strings.EqualFold(span.Username, currentUsername) && currentUsername != "" {
@@ -102,6 +109,8 @@ func highlightMentions(content, currentUsername string, s styles.Styles) string 
 		}
 		last = span.End
 	}
+	assert.That(last <= len(content), "highlightMentions: consumed past the content")
 	b.WriteString(content[last:])
+	assert.That(b.Len() >= len(content), "highlightMentions: output lost text")
 	return b.String()
 }

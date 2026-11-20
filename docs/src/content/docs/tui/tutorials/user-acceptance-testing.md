@@ -6,29 +6,31 @@ description: Test the Chit TUI application and its API clients against a real Ch
 This guide covers two complementary approaches to user acceptance testing:
 
 1. **Interactive TUI testing** — Launch the full Chit TUI application against a
-   live UAT server and manually verify every feature, including interactive login.
+   live UAT server. Manually verify every feature, also the interactive login.
 2. **Automated e2e tests** — Run the automated test suite that validates the
    TUI's API and WebSocket clients programmatically.
 
-Both approaches use the same Podman-based UAT environment: a containerized Chit
-server with the full Ory stack (Kratos, Oathkeeper, Keto), PostgreSQL, and
-pre-seeded test users, a team, and a channel.
+Both approaches use the same Podman-based UAT environment. It has a
+containerized Chit server with the full Ory stack (Kratos, Oathkeeper, Keto)
+and PostgreSQL. It also has pre-seeded test users, a team, and a channel.
 
 ## Prerequisites
 
 Before you begin, make sure you have:
 
-- **Podman** installed and available on your `PATH`
-- **Go 1.24+** installed
-- The **Chit server** repository cloned as a sibling directory:
+- **Podman** installed and available on the `PATH`
+- **Go 1.26.10 or later** installed
+- The **Chit** repository cloned. chit-tui is in its `clients/chit-tui`
+  directory:
 
 ```
-parent/
-├── chit/          # github.com/infrashift/chit
-└── chit-tui/      # github.com/infrashift/chit-tui  (you are here)
+chit/                  # github.com/infrashift/chit: the server
+└── clients/
+    └── chit-tui/      # the TUI (you are here)
 ```
 
-If your Chit server repo lives somewhere else, override `CHIT_SRC`:
+The TUI Makefile finds the server source at `../..`. To use another server
+checkout, set `CHIT_SRC`:
 
 ```bash
 make test-e2e CHIT_SRC=/path/to/chit
@@ -37,12 +39,12 @@ make test-e2e CHIT_SRC=/path/to/chit
 ## UAT Seed Data
 
 The Chit server's seed scripts populate the database with users, a team, and a
-channel. After starting the UAT pod, `make uat-seed-kratos` creates Kratos
-identities so users can log in interactively via chit-tui.
+channel. After the UAT pod starts, `make uat-seed-kratos` creates Kratos
+identities so users can log in interactively through chit-tui.
 
 ### Users
 
-All users share the password **`Password1!`**. Log in using their **email** as
+All users share the password **`Password1!`**. Log in with their **email** as
 the identifier.
 
 | Username | Email                | Display Name   | Role          | Password     |
@@ -53,7 +55,7 @@ the identifier.
 | diana    | diana@example.com    | Diana Drake    | `system_user` | `Password1!` |
 | eve      | eve@example.com      | Eve Ellis      | `system_user` | `Password1!` |
 
-For direct API testing (bypassing auth), you can still use the `X-User-Id`
+For direct API testing without auth, you can still use the `X-User-Id`
 header against port 8065. See [Direct API access](#direct-api-access-bypassing-auth).
 
 ### Team and Channel
@@ -71,16 +73,16 @@ There are two ways to authenticate against the UAT environment:
 
 ### Interactive login (chit-tui)
 
-Point chit-tui at the **Oathkeeper proxy** (port 4455). When no
-`CHIT_SESSION_TOKEN` is set, chit-tui shows a login screen. Enter any user's
+Point chit-tui at the **Oathkeeper proxy** (port 4455). If
+`CHIT_SESSION_TOKEN` has no value, chit-tui shows a login screen. Enter any user's
 **email** and **password** from the table above.
 
 ```bash
 CHIT_SERVER_URL=http://localhost:4455 ./bin/chit-tui
 ```
 
-After login, the session token is stored at `~/.config/chit/session.json`
-(or the path set by `CHIT_SESSION_FILE`) and reused on subsequent launches. To
+After login, chit-tui stores the session token at `~/.config/chit/session.json`
+(or the path that `CHIT_SESSION_FILE` sets). It uses the token again on later launches. To
 force a fresh login:
 
 ```bash
@@ -98,7 +100,7 @@ CHIT_SESSION_FILE=/tmp/alice-session.json CHIT_SERVER_URL=http://localhost:4455 
 ### Direct API access (bypassing auth)
 
 For curl testing, you can hit the Chit server directly on port 8065 with the
-`X-User-Id` header, bypassing Oathkeeper entirely:
+`X-User-Id` header. This request does not go through Oathkeeper:
 
 ```bash
 # As Alice
@@ -112,7 +114,7 @@ curl -H 'X-User-Id: b0b00000-0000-4000-a000-000000000002' \
 
 ### Authenticated curl via Oathkeeper
 
-To test the full auth flow with curl, obtain a session token from Kratos:
+To test the full auth flow with curl, get a session token from Kratos:
 
 ```bash
 # 1. Init a login flow
@@ -148,27 +150,28 @@ ws := newTestWSClient(aliceKratosID, 64)
 
 ## Part 1: Interactive TUI Testing
 
-This section walks through launching the full Chit TUI application against the
-live UAT server and manually exercising every feature.
+This section shows how to launch the full Chit TUI application against the
+live UAT server. Then you manually try every feature.
 
 ### Step 1: Start the UAT Server
 
-From the **Chit server** repository, start the UAT environment:
+From `clients/chit-tui`, go to the root of the Chit repository and start the
+UAT environment:
 
 ```bash
-cd ../chit
+cd ../..
 make uat-up
 ```
 
-This creates Podman pods with PostgreSQL, the Chit server, and the full Ory
-stack (Kratos, Oathkeeper, Keto, Vault, Zincsearch). Wait for services to be
+This creates Podman pods with PostgreSQL, the Chit server, Kratos, Oathkeeper,
+Keto and ZincSearch. Wait for services to be
 ready:
 
 ```bash
 podman logs -f chit-uat-app-chitd
 ```
 
-Once you see the server is listening, verify:
+When the log shows that the server listens, verify:
 
 ```bash
 # Direct server access
@@ -189,8 +192,8 @@ idempotent and safe to run multiple times.
 
 ### Step 2: Build and Launch Chit TUI
 
-From `clients/chit-tui` in the Chit repository, build the binary and launch
-it pointing at the Oathkeeper proxy:
+From `clients/chit-tui` in the Chit repository, build the binary. Then launch
+it with the Oathkeeper proxy as the server URL:
 
 ```bash
 cd clients/chit-tui
@@ -202,8 +205,8 @@ CHIT_SERVER_URL=http://localhost:4455 ./bin/chit-tui
 The TUI opens with a **login screen**. Enter a user's email and password from
 the [Users table](#users) (e.g., `alice@example.com` / `Password1!`).
 
-After login, the session token is stored locally and reused on subsequent
-launches. To switch users, either use `/logout` inside the TUI, or launch with
+After login, the TUI stores the session token locally. It uses the token
+again on later launches. To switch users, either use `/logout` inside the TUI, or launch with
 a separate `CHIT_SESSION_FILE`:
 
 ```bash
@@ -245,7 +248,7 @@ CHIT_AUTH_HEADER=X-User-Id \
 
 ### Step 3: Manual Test Scenarios
 
-Work through each scenario below. Every scenario assumes you are starting from
+Work through each scenario below. Every scenario starts from
 the main TUI screen with Town Square selected.
 
 #### Scenario 1: Login and Verify Identity
@@ -257,15 +260,15 @@ the main TUI screen with Town Square selected.
 | 3 | Observe the action bar | Your username **alice** is shown next to the connection indicator `●` |
 
 **What this validates:** Kratos login flow (init flow, submit credentials),
-Oathkeeper session validation, user profile retrieval
-(`GET /api/v1/users/me`), team listing (`GET /api/v1/users/me/teams`), channel
-listing (`GET /api/v1/users/me/teams/{teamId}/channels`), session persistence.
+Oathkeeper session validation, and user profile retrieval
+(`GET /api/v1/users/me`). It also validates team listing (`GET /api/v1/users/me/teams`), channel
+listing (`GET /api/v1/users/me/teams/{teamId}/channels`), and the stored session.
 
 #### Scenario 2: Navigate Channels via the Palette
 
 The TUI auto-selects the first channel on launch. All channel navigation goes
-through the palette (`Ctrl+K`), which lists every channel and DM across all
-your teams, sorted by mentions, then unread count, then recency.
+through the palette (`Ctrl+K`). The palette lists every channel and DM of all
+the teams of the user. It sorts them by mentions, then unread count, then recency.
 
 | Step | Action | Expected Result |
 |------|--------|-----------------|
@@ -277,8 +280,8 @@ your teams, sorted by mentions, then unread count, then recency.
 If the user belongs to more than one team, palette rows show a `· team`
 suffix so channels with the same name are distinguishable.
 
-**What this validates:** Palette navigation, fuzzy filtering, channel
-selection, all-team channel loading.
+**What this validates:** Palette navigation, the fuzzy filter, channel
+selection, and the channel list of all teams.
 
 #### Scenario 3: Send a Message
 
@@ -289,8 +292,8 @@ selection, all-team channel loading.
 | 3 | Type `Hello from UAT!` and press `Enter` | Message appears in the viewport |
 | 4 | Scroll the viewport (`k`/`j`) | The new post is visible with your username and timestamp |
 
-**What this validates:** Post creation (`POST /api/v1/posts`), post rendering,
-viewport scrolling.
+**What this validates:** That the TUI creates a post (`POST /api/v1/posts`),
+renders posts, and scrolls the viewport.
 
 #### Scenario 4: Multiline Messages
 
@@ -306,7 +309,7 @@ viewport scrolling.
 | 8 | Observe the viewport | The post renders with a line break between "First line" and "Second line" |
 
 :::tip[Input Navigation]
-The input area supports full multiline editing:
+The input area supports full multiline edits:
 
 - **Alt+Enter** — insert a new line
 - **Up/Down arrows** — move cursor between lines
@@ -343,7 +346,7 @@ the `posted` event type, live viewport updates without manual refresh.
 | 4 | Press `Esc` | The channel history returns; the root post shows a `[1 replies]` badge |
 
 **What this validates:** Thread retrieval (`GET /api/v1/posts/{postId}/thread`),
-reply creation (`POST /api/v1/posts` with `root_id`), the thread main-pane view.
+new replies (`POST /api/v1/posts` with `root_id`), the thread main-pane view.
 
 #### Scenario 7: Search
 
@@ -359,9 +362,9 @@ reply creation (`POST /api/v1/posts` with `root_id`), the thread main-pane view.
 (`POST /api/v1/channels/{channelId}/posts/search`), the palette's search mode.
 
 :::tip[Tag Search]
-You can include `#tag` in your search query to filter results by tags. For
-example, `deploy #release` searches for posts containing "deploy" that are also
-tagged with `release`. See Scenario 17 for a full walkthrough.
+You can include `#tag` in the search query to filter results by tags. For
+example, `deploy #release` searches for posts that contain "deploy" and also
+have the `release` tag. See Scenario 17 for a full walkthrough.
 :::
 
 #### Scenario 8: Slash Commands in the Palette
@@ -373,8 +376,8 @@ tagged with `release`. See Scenario 17 for a full walkthrough.
 | 3 | Type a few characters to filter | List narrows to matching commands |
 | 4 | Press `Esc` | The palette closes |
 
-**What this validates:** Command retrieval (`GET /api/v1/commands`), fuzzy
-filtering, the palette's `/` command mode.
+**What this validates:** Command retrieval (`GET /api/v1/commands`), the fuzzy
+filter, the palette's `/` command mode.
 
 #### Scenario 9: Unread Badge
 
@@ -388,7 +391,7 @@ This scenario requires two terminals.
 | 4 | In terminal A, select Town Square | The badge clears on the next palette open |
 
 **What this validates:** Channel member tracking
-(`GET /api/v1/channels/{channelId}/members`), unread count computation,
+(`GET /api/v1/channels/{channelId}/members`), the unread count,
 view channel (`POST /api/v1/channels/{channelId}/members/me/view`).
 
 #### Scenario 10: Theme Switching
@@ -405,7 +408,7 @@ CHIT_SERVER_URL=http://localhost:4455 \
 ./bin/chit-tui
 ```
 
-**What this validates:** Theme loading via `CHIT_THEME` environment variable.
+**What this validates:** The `CHIT_THEME` environment variable loads a theme.
 
 #### Scenario 11: Create a Team Channel
 
@@ -418,8 +421,8 @@ CHIT_SERVER_URL=http://localhost:4455 \
 | 5 | Press `Enter` | Channel is created; the action bar shows **UAT Team > Deploy** |
 | 6 | Press `Ctrl+K` | **Deploy** is listed in the palette |
 
-**What this validates:** Channel creation (`POST /api/v1/channels`), auto-slug
-generation, channel creator overlay UI, palette refresh.
+**What this validates:** New channels (`POST /api/v1/channels`), the auto-slug,
+the channel creator overlay UI, and the palette refresh.
 
 #### Scenario 12: Create a Direct Message
 
@@ -430,8 +433,8 @@ generation, channel creator overlay UI, palette refresh.
 | 3 | Press `Enter` | DM channel is created; the history pane switches to the 1:1 conversation and the action bar shows **bob** |
 | 4 | Send a message: `Hey Bob!` | Message appears in the DM history |
 
-**What this validates:** User search (`POST /api/v1/users/search`), DM channel
-creation (`POST /api/v1/channels/direct`), the palette's `@` people mode.
+**What this validates:** User search (`POST /api/v1/users/search`), new DM
+channels (`POST /api/v1/channels/direct`), the palette's `@` people mode.
 
 #### Scenario 13: Create a Private Channel with Members
 
@@ -444,8 +447,8 @@ creation (`POST /api/v1/channels/direct`), the palette's `@` people mode.
 | 5 | Press `Enter` | The private channel is created with Bob added; the action bar shows **UAT Team > War Room** |
 | 6 | Repeat steps 1–3, then press `Esc` at the member picker | The channel is still created — Esc only skips member selection |
 
-**What this validates:** Private channel creation, the member picker overlay
-(multi-select with `Tab`), member addition
+**What this validates:** New private channels, the member picker overlay
+(multi-select with `Tab`), new members
 (`POST /api/v1/channels/{channelId}/members`), and Esc-skips-members behavior.
 
 #### Scenario 14: Tag a Post
@@ -459,7 +462,7 @@ creation (`POST /api/v1/channels/direct`), the palette's `@` people mode.
 | 5 | Press `Esc` | Tag picker closes |
 | 6 | Observe the post in the viewport | The post shows a `#urgent` badge |
 
-**What this validates:** Tag creation (`POST /api/v1/tags`), tag application
+**What this validates:** New tags (`POST /api/v1/tags`), tag application
 (`POST /api/v1/posts/{postId}/tags`), tag badge rendering, tag picker overlay UI.
 
 #### Scenario 15: Toggle Tags On/Off
@@ -484,8 +487,9 @@ API calls, tag picker state updates.
 | 3 | Observe the post in the viewport | Content shows `Deploy build 42 is ready` (hashtags stripped) |
 | 4 | Observe the post badges | The post shows `#release` and `#deploy` tag badges |
 
-**What this validates:** Hashtag parsing (`StripHashtags`), automatic tag
-creation and application on post creation, tag badges rendered from post tags.
+**What this validates:** The hashtag parser (`StripHashtags`), and the tags
+that the TUI creates and applies automatically with a new post. It also
+validates the tag badges rendered from post tags.
 
 #### Scenario 17: Search by Tag
 
@@ -519,9 +523,9 @@ the theme is hot-swapped via `/skin`.
 | 2 | Relaunch with `CHIT_SERVER_URL=http://localhost:4455 ./bin/chit-tui` | TUI skips login; goes directly to the main view |
 | 3 | Press `Ctrl+K` | Channels load without re-entering credentials |
 
-**What this validates:** Session token persistence at
-`~/.config/chit/session.json`, stored token validation via Kratos
-`CheckSession` on startup.
+**What this validates:** The stored session token at
+`~/.config/chit/session.json`, and the validation of the stored token with Kratos
+`CheckSession` at startup.
 
 #### Scenario 20: Logout
 
@@ -531,8 +535,8 @@ the theme is hot-swapped via `/skin`.
 | 2 | Enter a different user's email and password (e.g., `bob@example.com`) | Login succeeds; the action bar and palette show Bob's teams and channels |
 | 3 | Quit and relaunch | TUI auto-loads Bob's session (no login screen) |
 
-**What this validates:** `/logout` slash command, session clearing,
-re-authentication to a different account, new session persistence.
+**What this validates:** The `/logout` slash command clears the session. The
+user can sign in to a different account, and the TUI stores the new session.
 
 #### Scenario 21: Login Error Handling
 
@@ -543,8 +547,8 @@ re-authentication to a different account, new session persistence.
 | 3 | Enter `alice@example.com` with password `wrong` and press `Enter` | Error message displayed on login screen |
 | 4 | Enter the correct password `Password1!` and press `Enter` | Login succeeds; main view loads |
 
-**What this validates:** Login error display, recovery from failed login
-attempt, Kratos error handling.
+**What this validates:** The login screen shows errors, the user can recover
+from a failed login, and the TUI handles Kratos errors.
 
 #### Scenario 22: Mouse, Action Bar, and Help
 
@@ -562,10 +566,11 @@ clicks, wheel scroll), the help overlay, keyboard/mouse parity.
 
 ### Step 4: Tear Down the UAT Server
 
-When you are done testing, stop the UAT environment from the Chit server repo:
+When you finish the tests, stop the UAT environment from the root of the Chit
+repository:
 
 ```bash
-cd ../chit
+cd ../..
 make uat-down
 ```
 
@@ -573,16 +578,16 @@ make uat-down
 
 ## Part 2: Automated E2E Tests
 
-Chit TUI also ships with an automated end-to-end test suite that validates
+Chit TUI also ships with an automated end-to-end test suite. It validates
 the API and WebSocket clients programmatically. The tests run inside a Podman
-pod — no manual interaction required.
+pod, and you do not have to do manual steps.
 
 ### Environment Setup
 
 The `make test-e2e` target automates the entire pipeline. Under the hood it:
 
 1. **Builds the e2e test image** (`chit-tui-e2e:latest`) from `Containerfiles/Containerfile.e2e`
-2. **Builds the Chit server image** (`chit-e2e:latest`) from the server repo's `Containerfiles/Containerfile.e2e`
+2. **Builds the Chit server image** (`chit-e2e:latest`) from `Containerfiles/Containerfile.e2e` at the root of the repository (`CHIT_SRC`)
 3. **Creates a Podman pod** (`chit-tui-e2e`) with a shared network namespace
 4. **Starts PostgreSQL** — the trusted-service-containers `postgresql17` image (PostgreSQL 17 on UBI) with database `chit`
 5. **Starts the Chit server** — waits for Postgres, runs migrations, seeds UAT data, starts `chitd`
@@ -616,25 +621,25 @@ make test-e2e-clean
 
 ### Acceptance Tests
 
-All tests are in `tests/e2e/` and guarded by the `//go:build e2e` build tag,
-so they are excluded from `make test` and only run during `make test-e2e`.
+All tests are in `tests/e2e/` and have the `//go:build e2e` build tag,
+so `make test` does not run them. Only `make test-e2e` runs them.
 
 #### API Tests
 
-These tests validate the HTTP API client against the real Chit server.
+These tests check the HTTP API client against the real Chit server.
 
 ##### TestGetMe
 
 Authenticates as Alice and fetches her own profile. Verifies that the returned
-username is `"alice"` and email is `"alice@example.com"`, confirming that
+username is `"alice"` and the email is `"alice@example.com"`. This shows that
 authentication and user retrieval work end-to-end.
 
 **Endpoint:** `GET /api/v1/users/me`
 
 ##### TestGetMyTeams
 
-Fetches Alice's team memberships and asserts that at least one team is returned
-and that `uat-team` is present in the list.
+Fetches Alice's team memberships. Asserts that the server returns at least one team
+and that `uat-team` is in the list.
 
 **Endpoint:** `GET /api/v1/users/me/teams`
 
@@ -648,15 +653,15 @@ team. Verifies that `town-square` appears in the channel list.
 ##### TestCreateAndGetPost
 
 Creates a new post in `town-square` as Alice with a unique timestamp-based
-message, then retrieves it by ID. Confirms the returned content matches what
-was sent.
+message, then retrieves it by ID. Verifies that the returned content matches the
+sent content.
 
 **Endpoints:** `POST /api/v1/posts`, `GET /api/v1/posts/{postId}`
 
 ##### TestGetChannelPosts
 
 Creates a post in `town-square`, then fetches the channel's post list. Verifies
-that at least one post is returned in the paginated result.
+that the paginated result has at least one post.
 
 **Endpoints:** `POST /api/v1/posts`, `GET /api/v1/channels/{channelId}/posts`
 
@@ -678,16 +683,16 @@ and the post list contains at least 2 entries (root + reply).
 
 ##### TestSearchPosts
 
-Creates a post with a unique random term, waits briefly for indexing, then
-searches for that term within the channel. Verifies that at least one matching
-result is returned.
+Creates a post with a unique random term and waits briefly for the search
+index. Then searches for that term in the channel. Verifies that the server
+returns at least one result that matches.
 
 **Endpoints:** `POST /api/v1/posts`, `POST /api/v1/channels/{channelId}/posts/search`
 
 ##### TestGetUsersByIDs
 
-Fetches the user IDs for both Alice and Bob via `GetMe`, then performs a batch
-lookup by passing both IDs. Verifies that exactly 2 users are returned.
+Fetches the user IDs for both Alice and Bob through `GetMe`. Then does a batch
+lookup with both IDs. Verifies that the server returns exactly 2 users.
 
 **Endpoints:** `GET /api/v1/users/me`, `POST /api/v1/users/ids`
 
@@ -703,19 +708,19 @@ badges.
 
 Creates a direct message channel between Alice and Bob, verifies that the
 returned channel has type `"D"` (Direct), then posts a message into it.
-Confirms the post's `channel_id` matches the DM channel.
+Verifies that the post's `channel_id` matches the DM channel.
 
 **Endpoints:** `GET /api/v1/users/me`, `POST /api/v1/channels/direct`, `POST /api/v1/posts`
 
 #### WebSocket Tests
 
-These tests validate the real-time WebSocket event stream.
+These tests check the real-time WebSocket event stream.
 
 ##### TestWSConnectAndReceiveEvent
 
-Opens a WebSocket connection as Alice, then posts a message as Bob in
-`town-square` via the HTTP API. Listens on Alice's WebSocket for up to 10
-seconds and asserts that a `posted` event is received, confirming that the
+Opens a WebSocket connection as Alice. Then posts a message as Bob in
+`town-square` through the HTTP API. Listens on Alice's WebSocket for up to 10
+seconds and asserts that a `posted` event arrives. This shows that the
 server broadcasts real-time events to connected channel members.
 
 **WebSocket:** `ws://localhost:8065/api/v1/websocket`
@@ -725,7 +730,7 @@ server broadcasts real-time events to connected channel members.
 
 ### Pod cleanup
 
-If a previous run was interrupted, a stale pod may block the next run:
+If a previous run stopped before it finished, a stale pod can block the next run:
 
 ```bash
 make test-e2e-clean
@@ -733,7 +738,7 @@ make test-e2e-clean
 
 ### Viewing container logs
 
-While the pod is running (or after a failure before cleanup), inspect logs:
+While the pod runs (or after a failure before cleanup), inspect the logs:
 
 ```bash
 podman logs chit-tui-e2e-pg      # PostgreSQL
@@ -756,7 +761,7 @@ podman run --rm --pod chit-tui-e2e \
 
 ### Running a single test locally
 
-If you have a running UAT environment (via the Chit server's `make uat-up`),
+If a UAT environment runs (from the Chit server's `make uat-up`),
 you can run individual tests without the full pod pipeline:
 
 ```bash

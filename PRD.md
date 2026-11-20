@@ -14,15 +14,15 @@
 
 ## 1. Executive Summary
 
-**Chit** is a high-performance, greenfield chat application designed for sovereign, scalable communication. The primary focus is on secure text-based messaging with robust search capabilities and granular permission management. By leveraging the **Ory Stack** for identity and **PostgreSQL** as the unified persistence and coordination layer, Chit minimizes architectural complexity while maintaining a path toward high-scale distribution.
+**Chit** is a fast, greenfield chat application. The operator hosts it and keeps control of all data, and it can scale. The primary focus is secure text messages, with full search and fine-grained permissions. Chit uses the **Ory Stack** for identity. It uses **PostgreSQL** as the single layer that stores data and coordinates the nodes. So Chit keeps its architecture simple, and it can still grow to many nodes.
 
 ---
 
 ## 2. Project Goals
 
 * **Zero-Trust Identity:** Offload all authentication and authorization to the Ory ecosystem.
-* **Searchability:** Provide sub-second full-text search across all historical conversations.
-* **Simplicity:** Utilize PostgreSQL as the sole backend and coordination engine to reduce operational overhead.
+* **Searchability:** Give sub-second full-text search across all historical conversations.
+* **Simplicity:** Use PostgreSQL as the only backend, and also to coordinate the nodes. This decreases the operational work.
 * **Security:** Enforce channel access server-side from PostgreSQL channel membership; authorize slash commands through Ory Keto.
 
 ---
@@ -36,25 +36,25 @@
 
 ### 3.2 Messaging & Channels
 
-* **Real-time Communication:** Support for persistent connections via WebSockets.
+* **Real-time Delivery:** Clients keep persistent WebSocket connections to chitd.
 * **Channel Types:** Open (O), Private (P), Direct Message (D), and Group Message (G).
-* **Markdown Support:** Message content supports standard markdown formatting.
-* **Conversation Tagging:** Users can apply metadata tags to messages for categorized retrieval.
+* **Markdown Support:** Message content can use standard Markdown.
+* **Conversation Tags:** Users can apply metadata tags to messages, and then find messages by tag.
 * **Message Pinning:** Users can pin important messages within a channel.
-* **Persistence:** All messages must be acknowledged by PostgreSQL before being broadcast to clients.
+* **Durable Storage:** PostgreSQL must acknowledge each message before chitd broadcasts it to clients.
 
 ### 3.3 Threading
 
 * **Collapsed Reply Threads:** Messages can be replies to a root post (via `root_id`).
 * **Thread Tracking:** A `threads` table tracks aggregate stats (reply count, last reply time, participants) for each root post with replies.
 * **Thread Memberships:** Users who participate in or follow a thread have a `thread_memberships` record tracking their read state and follow preference.
-* **Auto-Follow:** Replying to a thread automatically follows it.
+* **Auto-Follow:** A user who replies to a thread automatically follows it.
 
 ### 3.4 Search
 
 * **Full-Text Search:** Users can search message history via keywords.
-* **Filtered Search:** Search across every channel the user belongs to, within one team, or within one channel; filter by tags (all must match) and by author. Results are always limited to channels the user is a member of. Time-range filtering is not implemented.
-* **Search Backend:** PostgreSQL by default. ZincSearch is optional (`CHIT_ZINCSEARCH_URL`); when configured it is populated by an asynchronous background worker syncing from PostgreSQL, and search falls back to PostgreSQL if it fails.
+* **Filtered Search:** A user can search all the channels that the user belongs to, one team, or one channel. The user can filter by tags (all must match) and by author. The results always include only channels that the user is a member of. chitd has no filter for a time range.
+* **Search Backend:** PostgreSQL by default. ZincSearch is optional (`CHIT_ZINCSEARCH_URL`). When the operator sets it, an asynchronous background worker copies posts from PostgreSQL into ZincSearch. If ZincSearch fails, search falls back to PostgreSQL.
 
 ### 3.5 Explicitly Excluded (MVP)
 
@@ -96,24 +96,24 @@ namespace: chit/command
   relation: execute
 ```
 
-When a user joins a channel, a Keto relation tuple is written
-(`chit/channel:<channel_id>#member@<user_id>`), best-effort: a failure is
-logged and does not fail the request, and the tuples for a newly created
-channel are written in the background. The tuple is deleted on leave. Nothing reads these tuples for
-access: channel checks (read/post/pin/invite) use the PostgreSQL
-`channel_members` table.
+When a user joins a channel, chitd writes a Keto relation tuple
+(`chit/channel:<channel_id>#member@<user_id>`). This write is best-effort:
+chitd logs a failure and does not fail the request. For a new channel, chitd
+writes the tuples in the background. When the user leaves, chitd deletes the
+tuple. Nothing reads these tuples for access: channel checks
+(read/post/pin/invite) use the PostgreSQL `channel_members` table.
 
-Slash-command execution is authorized via Keto: in the `chit/command`
-namespace, `Command:<id>#execute` is granted to the subject set
-`Role:<name>#member`, and actors (by chit `users.id`) are members of roles.
-Roles and actor bindings are defined in CUE under `auth/` and pushed into Keto
-by the `chit-reconcile` binary.
+Keto authorizes each slash command. In the `chit/command` namespace, Keto
+gives `Command:<id>#execute` to the subject set `Role:<name>#member`. Actors
+(by chit `users.id`) are members of roles. CUE files under `auth/` define the
+roles and the actor bindings, and the `chit-reconcile` binary pushes them into
+Keto.
 
 ### 4.2 User Auto-Provisioning
 
-On the first authenticated request through Oathkeeper, the Chit backend auto-provisions a local user record by fetching identity traits from the Kratos Admin API. No Kratos webhooks are needed.
+On the first authenticated request through Oathkeeper, the Chit backend auto-provisions a local user record. To do this, it gets the identity traits from the Kratos Admin API. Chit needs no Kratos webhooks.
 
-Machine actors (agents and bots) are not auto-provisioned. They are declared in `CHIT_MACHINE_ACTORS` (or created by a system admin through `POST /users`), bound to a Hydra OAuth2 client, and have no Kratos identity or email. An unknown OAuth2 client is refused.
+Chit does not add machine actors (agents and bots) automatically. The operator declares them in `CHIT_MACHINE_ACTORS`, or a system admin adds them through `POST /users`. Each machine actor links to a Hydra OAuth2 client and has no Kratos identity or email. chitd refuses an unknown OAuth2 client.
 
 ---
 
@@ -123,27 +123,27 @@ Machine actors (agents and bots) are not auto-provisioned. They are declared in 
 
 The codebase follows a layered pattern: **API → App → Store → PostgreSQL**
 
-* **API Layer:** HTTP handlers using chi router. Extracts auth context, validates input, delegates to App layer.
+* **API Layer:** HTTP handlers on the chi router. This layer extracts the auth context, validates input and sends the work to the App layer.
 * **App Layer:** Business logic and authorization. Coordinates between Store, Keto, WebSocket hub, and pub/sub. Holds the only cache, an LRU of authenticated users.
-* **Store Layer:** Data access. Interface-based (`store.Store`) with one PostgreSQL (pgx/v5) implementation, `sqlstore`. There is no decorator chain.
+* **Store Layer:** Data access. The `store.Store` interface has one PostgreSQL (pgx/v5) type that satisfies it: `sqlstore`. There is no decorator chain.
 
 ### 5.2 Real-time Coordination
 
 * **WebSocket Hub:** Per-user connection map with read/write pump goroutines per client.
 * **Cross-Node Pub/Sub:** Abstracted interface with two implementations:
-  * **PG LISTEN/NOTIFY** (default) — Keeps infrastructure minimal, uses the existing PostgreSQL connection.
-  * **NATS** (optional) — Available for high-scale deployments requiring higher throughput pub/sub.
-* The pub/sub backend is selected at startup via configuration. chitd publishes thin event envelopes on it, but nothing consumes them yet: WebSocket delivery is single-node until multi-node fan-out is built.
+  * **PG `LISTEN`/`NOTIFY`** (default) — Needs no more infrastructure. It uses the PostgreSQL connection that chitd already has.
+  * **NATS** (optional) — For large deployments that need a higher pub/sub throughput.
+* chitd selects the pub/sub backend at startup from its configuration. chitd publishes thin event envelopes on it, but nothing consumes them yet. WebSocket delivery stays single-node until multi-node fan-out exists.
 
 ### 5.3 Search Indexing
 
 Chit implements an "Asynchronous Worker" pattern to move data from PostgreSQL to ZincSearch:
 
-1. Message is saved to PostgreSQL.
-2. A background worker, polling every 5 seconds by an `(update_at, id)` cursor, picks up new and changed messages.
+1. chitd saves the message to PostgreSQL.
+2. Every 5 seconds, a background worker reads new and changed messages after an `(update_at, id)` cursor.
 3. The worker upserts each message into ZincSearch, and removes deleted ones.
 
-The worker runs only when ZincSearch is configured.
+In one tick, the worker handles at most 100 batches (20,000 posts). The worker runs only when the operator configures ZincSearch.
 
 ---
 
@@ -158,27 +158,27 @@ The schema uses UUIDv7 primary keys (time-sortable, B-tree friendly) and `BIGINT
 * **team_members** — Composite PK (team_id, user_id). Tracks roles and membership.
 * **channels** — Belongs to a team (or NULL for DMs/GMs). Types: O, P, D, G.
 * **channel_members** — Tracks per-user read state, mention counts, notification preferences.
-* **posts** — Messages. Supports threading via `root_id`. Content stored as TEXT (plaintext).
+* **posts** — Messages. A reply links to its root post through `root_id`. Content stored as TEXT (plaintext).
 * **threads** — Denormalized aggregate for root posts with replies.
 * **thread_memberships** — Per-user thread follow/read state.
-* **tags** — Named tags for message categorization.
-* **message_tags** — Junction table linking posts to tags.
+* **tags** — Named tags that put messages into categories.
+* **message_tags** — Join table that links posts to tags.
 
 ---
 
 ## 7. Security
 
-* **In-Transit:** All client-to-server communication is strictly over TLS/WSS.
-* **Access Control:** Oathkeeper enforces that no request reaches the Go backend without a valid Kratos session or Hydra access token. Channel-level access is enforced by chitd from PostgreSQL channel membership; Keto authorizes slash commands.
+* **In-Transit:** All traffic from client to server goes over TLS/WSS only.
+* **Access Control:** Oathkeeper enforces that no request reaches the Go backend without a valid Kratos session or Hydra access token. chitd enforces channel-level access from PostgreSQL channel membership; Keto authorizes slash commands.
 
 ---
 
 ## 8. Non-Functional Requirements
 
-* **Observability:** Implement structured logging using Go's `log/slog` with JSON output.
-* **Performance:** Message delivery latency (Send → DB → Receive) should stay under **200ms** for 95% of requests.
+* **Observability:** Write structured logs with Go's `log/slog` and JSON output.
+* **Speed:** The target for message delivery latency (Send → DB → Receive) is under **200ms** for 95% of requests.
 * **Portability:** The entire stack must be deployable via **Podman Kube** (`podman kube play`) for RHEL/UBI-based cloud environments.
-* **Code Organization:** Use Mattermost for code organization and architectural patterns.
-* **ID Format:** UUIDv7 for all primary keys — time-sortable, B-tree friendly, no coordination needed across nodes.
+* **Code Structure:** Use Mattermost as the model for code structure and architectural patterns.
+* **ID Format:** UUIDv7 for all primary keys — time-sortable, B-tree friendly, and the nodes do not need to coordinate.
 * **Router:** chi (actively maintained, standard `http.Handler` compatible).
-* **Database Driver:** pgx/v5 with connection pooling.
+* **Database Driver:** pgx/v5 with a connection pool.

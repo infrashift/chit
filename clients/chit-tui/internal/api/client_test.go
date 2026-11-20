@@ -3,6 +3,7 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/infrashift/chit/clients/chit-tui/internal/api"
+	"github.com/infrashift/chit/clients/chit-tui/internal/auth"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
 )
 
@@ -24,25 +26,33 @@ func setupTestClient(t *testing.T, mux *http.ServeMux) (api.ChitClient, *httptes
 	return client, srv
 }
 
-func writeJSON(w http.ResponseWriter, v any) {
+// writeJSON writes v as the JSON response body. It runs in the server's
+// goroutine, so a failure is reported with t.Errorf.
+func writeJSON(t *testing.T, w http.ResponseWriter, v any) {
+	t.Helper()
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		t.Errorf("encode response: %v", err)
+	}
 }
 
-func writeError(w http.ResponseWriter, status int, msg string) {
+func writeError(t *testing.T, w http.ResponseWriter, status int, msg string) {
+	t.Helper()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(model.AppError{ID: "test", Message: msg, StatusCode: status})
+	if err := json.NewEncoder(w).Encode(model.AppError{ID: "test", Message: msg, StatusCode: status}); err != nil {
+		t.Errorf("encode error response: %v", err)
+	}
 }
 
 func TestGetMe(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/users/me", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Session-Token") != "test-token" {
-			writeError(w, 401, "unauthorized")
+			writeError(t, w, 401, "unauthorized")
 			return
 		}
-		writeJSON(w, model.User{ID: "u1", Username: "alice"})
+		writeJSON(t, w, model.User{ID: "u1", Username: "alice"})
 	})
 	client, _ := setupTestClient(t, mux)
 
@@ -58,7 +68,7 @@ func TestGetMe(t *testing.T) {
 func TestGetMyTeams(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/users/me/teams", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, []*model.Team{{ID: "t1", Name: "eng"}})
+		writeJSON(t, w, []*model.Team{{ID: "t1", Name: "eng"}})
 	})
 	client, _ := setupTestClient(t, mux)
 
@@ -76,10 +86,10 @@ func TestGetMyChannels(t *testing.T) {
 	mux.HandleFunc("GET /api/v1/users/me/teams/{id}/channels", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if id != "t1" {
-			writeError(w, 404, "not found")
+			writeError(t, w, 404, "not found")
 			return
 		}
-		writeJSON(w, []*model.Channel{{ID: "c1", Name: "general"}})
+		writeJSON(t, w, []*model.Channel{{ID: "c1", Name: "general"}})
 	})
 	client, _ := setupTestClient(t, mux)
 
@@ -95,7 +105,7 @@ func TestGetMyChannels(t *testing.T) {
 func TestGetChannelPosts(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/channels/{id}/posts", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, model.PostList{Order: []*model.Post{{ID: "p1", Content: "hello"}}})
+		writeJSON(t, w, model.PostList{Order: []*model.Post{{ID: "p1", Content: "hello"}}})
 	})
 	client, _ := setupTestClient(t, mux)
 
@@ -113,11 +123,11 @@ func TestCreatePost(t *testing.T) {
 	mux.HandleFunc("POST /api/v1/posts", func(w http.ResponseWriter, r *http.Request) {
 		var p model.Post
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-			writeError(w, 400, "bad body")
+			writeError(t, w, 400, "bad body")
 			return
 		}
 		p.ID = "new-post-id"
-		writeJSON(w, p)
+		writeJSON(t, w, p)
 	})
 	client, _ := setupTestClient(t, mux)
 
@@ -133,7 +143,7 @@ func TestCreatePost(t *testing.T) {
 func TestGetPost(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/posts/{id}", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, model.Post{ID: "p1", Content: "hello"})
+		writeJSON(t, w, model.Post{ID: "p1", Content: "hello"})
 	})
 	client, _ := setupTestClient(t, mux)
 
@@ -173,7 +183,7 @@ func TestUnpinPost(t *testing.T) {
 func TestGetThread(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/posts/{id}/thread", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, model.PostList{
+		writeJSON(t, w, model.PostList{
 			Order: []*model.Post{{ID: "p1"}, {ID: "r1", RootID: "p1"}},
 		})
 	})
@@ -191,7 +201,7 @@ func TestGetThread(t *testing.T) {
 func TestGetCommands(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/commands", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, []*model.Command{{ID: "c1", Slug: "remind"}})
+		writeJSON(t, w, []*model.Command{{ID: "c1", Slug: "remind"}})
 	})
 	client, _ := setupTestClient(t, mux)
 
@@ -221,10 +231,10 @@ func TestGetUsersByIDs(t *testing.T) {
 	mux.HandleFunc("POST /api/v1/users/ids", func(w http.ResponseWriter, r *http.Request) {
 		var ids []string
 		if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
-			writeError(w, 400, "bad body")
+			writeError(t, w, 400, "bad body")
 			return
 		}
-		writeJSON(w, []*model.User{{ID: ids[0], Username: "alice"}})
+		writeJSON(t, w, []*model.User{{ID: ids[0], Username: "alice"}})
 	})
 	client, _ := setupTestClient(t, mux)
 
@@ -240,7 +250,7 @@ func TestGetUsersByIDs(t *testing.T) {
 func TestSearchPosts(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/channels/{id}/posts/search", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, model.PostList{Order: []*model.Post{{ID: "p1", Content: "match"}}})
+		writeJSON(t, w, model.PostList{Order: []*model.Post{{ID: "p1", Content: "match"}}})
 	})
 	client, _ := setupTestClient(t, mux)
 
@@ -256,7 +266,7 @@ func TestSearchPosts(t *testing.T) {
 func TestGetChannelMembers(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/channels/{id}/members", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, []*model.ChannelMember{
+		writeJSON(t, w, []*model.ChannelMember{
 			{ChannelID: "c1", UserID: "u1", MsgCount: 5},
 			{ChannelID: "c1", UserID: "u2", MsgCount: 3},
 		})
@@ -278,7 +288,7 @@ func TestGetChannelMembers(t *testing.T) {
 func TestGetMyDirectChannels(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/users/me/channels/direct", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, []*model.Channel{{ID: "dm1", Name: "u1__u2", Type: "D"}})
+		writeJSON(t, w, []*model.Channel{{ID: "dm1", Name: "u1__u2", Type: "D"}})
 	})
 	client, _ := setupTestClient(t, mux)
 
@@ -296,10 +306,10 @@ func TestSearchUsers(t *testing.T) {
 	mux.HandleFunc("GET /api/v1/users", func(w http.ResponseWriter, r *http.Request) {
 		term := r.URL.Query().Get("term")
 		if term != "ali" {
-			writeError(w, 400, "bad term")
+			writeError(t, w, 400, "bad term")
 			return
 		}
-		writeJSON(w, []*model.User{{ID: "u1", Username: "alice"}})
+		writeJSON(t, w, []*model.User{{ID: "u1", Username: "alice"}})
 	})
 	client, _ := setupTestClient(t, mux)
 
@@ -317,14 +327,14 @@ func TestCreateGroupChannel_Success(t *testing.T) {
 	mux.HandleFunc("POST /api/v1/channels/group", func(w http.ResponseWriter, r *http.Request) {
 		var ids []string
 		if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
-			writeError(w, 400, "bad body")
+			writeError(t, w, 400, "bad body")
 			return
 		}
 		if len(ids) < 3 {
-			writeError(w, 400, "need at least 3 users")
+			writeError(t, w, 400, "need at least 3 users")
 			return
 		}
-		writeJSON(w, model.Channel{ID: "g1", Type: "G", Name: "u1__u2__u3"})
+		writeJSON(t, w, model.Channel{ID: "g1", Type: "G", Name: "u1__u2__u3"})
 	})
 	client, _ := setupTestClient(t, mux)
 
@@ -342,11 +352,11 @@ func TestCreateChannel_Success(t *testing.T) {
 	mux.HandleFunc("POST /api/v1/channels", func(w http.ResponseWriter, r *http.Request) {
 		var ch model.Channel
 		if err := json.NewDecoder(r.Body).Decode(&ch); err != nil {
-			writeError(w, 400, "bad body")
+			writeError(t, w, 400, "bad body")
 			return
 		}
 		ch.ID = "new-ch-id"
-		writeJSON(w, ch)
+		writeJSON(t, w, ch)
 	})
 	client, _ := setupTestClient(t, mux)
 
@@ -368,7 +378,7 @@ func TestCreateDirectChannel_Success(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/channels/direct", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusCreated)
-		writeJSON(w, model.Channel{ID: "dm1", Type: "D", Name: "u1__u2"})
+		writeJSON(t, w, model.Channel{ID: "dm1", Type: "D", Name: "u1__u2"})
 	})
 	client, _ := setupTestClient(t, mux)
 
@@ -384,7 +394,7 @@ func TestCreateDirectChannel_Success(t *testing.T) {
 func TestGetAllTags(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/tags", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, []*model.Tag{{ID: "t1", Name: "urgent"}})
+		writeJSON(t, w, []*model.Tag{{ID: "t1", Name: "urgent"}})
 	})
 	client, _ := setupTestClient(t, mux)
 
@@ -402,14 +412,14 @@ func TestCreateTag(t *testing.T) {
 	mux.HandleFunc("POST /api/v1/tags", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]string
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeError(w, 400, "bad body")
+			writeError(t, w, 400, "bad body")
 			return
 		}
 		if body["scope"] != "channel" || body["channel_id"] != "c1" {
-			writeError(w, 400, "want a channel tag of c1")
+			writeError(t, w, 400, "want a channel tag of c1")
 			return
 		}
-		writeJSON(w, model.Tag{ID: "t1", Name: body["name"], Scope: body["scope"], ChannelID: body["channel_id"]})
+		writeJSON(t, w, model.Tag{ID: "t1", Name: body["name"], Scope: body["scope"], ChannelID: body["channel_id"]})
 	})
 	client, _ := setupTestClient(t, mux)
 
@@ -425,7 +435,7 @@ func TestCreateTag(t *testing.T) {
 func TestGetTagsForPost(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/posts/{id}/tags", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, []*model.Tag{{ID: "t1", Name: "urgent"}})
+		writeJSON(t, w, []*model.Tag{{ID: "t1", Name: "urgent"}})
 	})
 	client, _ := setupTestClient(t, mux)
 
@@ -467,11 +477,11 @@ func TestAddChannelMember(t *testing.T) {
 	mux.HandleFunc("POST /api/v1/channels/{id}/members", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]string
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeError(w, 400, "bad body")
+			writeError(t, w, 400, "bad body")
 			return
 		}
 		if body["user_id"] != "u2" {
-			writeError(w, 400, "wrong user_id")
+			writeError(t, w, 400, "wrong user_id")
 			return
 		}
 		w.WriteHeader(200)
@@ -483,17 +493,17 @@ func TestAddChannelMember(t *testing.T) {
 	}
 }
 
-func TestNewClientWithTokenFn_DynamicToken(t *testing.T) {
-	token := "initial-token"
+func TestNewClientWithTokenSource_DynamicToken(t *testing.T) {
+	tokens := auth.NewTokenStore("initial-token")
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/users/me", func(w http.ResponseWriter, r *http.Request) {
 		got := r.Header.Get("X-Session-Token")
-		writeJSON(w, model.User{ID: "u1", Username: got})
+		writeJSON(t, w, model.User{ID: "u1", Username: got})
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	client := api.NewClientWithTokenFn(srv.URL, func() string { return token }, "X-Session-Token")
+	client := api.NewClientWithTokenSource(srv.URL, tokens, "X-Session-Token")
 
 	u, err := client.GetMe(context.Background())
 	if err != nil {
@@ -504,7 +514,7 @@ func TestNewClientWithTokenFn_DynamicToken(t *testing.T) {
 	}
 
 	// Update token
-	token = "updated-token"
+	tokens.Set("updated-token")
 	u, err = client.GetMe(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -517,7 +527,7 @@ func TestNewClientWithTokenFn_DynamicToken(t *testing.T) {
 func TestGetMe_ErrorResponse(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/users/me", func(w http.ResponseWriter, _ *http.Request) {
-		writeError(w, 401, "unauthorized")
+		writeError(t, w, 401, "unauthorized")
 	})
 	client, _ := setupTestClient(t, mux)
 
@@ -525,8 +535,8 @@ func TestGetMe_ErrorResponse(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	apiErr, ok := err.(*api.APIError)
-	if !ok {
+	var apiErr *api.APIError
+	if !errors.As(err, &apiErr) {
 		t.Fatalf("expected *APIError, got %T", err)
 	}
 	if apiErr.StatusCode != 401 {
@@ -541,7 +551,9 @@ func TestSearchUsers_EscapesTerm(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.RawQuery
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[]`))
+		if _, err := w.Write([]byte(`[]`)); err != nil {
+			t.Errorf("write response: %v", err)
+		}
 	}))
 	defer srv.Close()
 
@@ -569,10 +581,10 @@ func TestUpdateMe_SendsOnlyTheChangedField(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("PUT /api/v1/users/me", func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeError(w, 400, "bad body")
+			writeError(t, w, 400, "bad body")
 			return
 		}
-		writeJSON(w, model.User{ID: "u1", Username: "alice", DisplayName: "Alice Anderson"})
+		writeJSON(t, w, model.User{ID: "u1", Username: "alice", DisplayName: "Alice Anderson"})
 	})
 	client, _ := setupTestClient(t, mux)
 
@@ -593,7 +605,7 @@ func TestUpdateMe_SendsOnlyTheChangedField(t *testing.T) {
 func TestUpdateMe_ErrorResponse(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("PUT /api/v1/users/me", func(w http.ResponseWriter, _ *http.Request) {
-		writeError(w, 409, "username already taken")
+		writeError(t, w, 409, "username already taken")
 	})
 	client, _ := setupTestClient(t, mux)
 
@@ -634,16 +646,18 @@ func TestClient_GivesUpOnAServerThatNeverAnswers(t *testing.T) {
 	}
 }
 
-// Each call reaches the endpoint the server serves it on, with the body the
-// server expects. These had no test at all.
-func TestClient_Endpoints(t *testing.T) {
-	tests := []struct {
-		name     string
-		route    string // "METHOD path", as http.ServeMux patterns write it
-		reply    any
-		call     func(api.ChitClient) error
-		wantBody string // JSON the request must carry; "" for none
-	}{
+// endpointCase is a client call, the route it must reach and what it sends.
+type endpointCase struct {
+	name     string
+	route    string // "METHOD path", as http.ServeMux patterns write it
+	reply    any
+	call     func(api.ChitClient) error
+	wantBody string // JSON the request must carry; "" for none
+}
+
+// threadAndPostEndpointCases cover the thread, search and post calls.
+func threadAndPostEndpointCases() []endpointCase {
+	return []endpointCase{
 		{
 			name:  "threads",
 			route: "GET /api/v1/users/me/teams/t1/threads",
@@ -694,6 +708,12 @@ func TestClient_Endpoints(t *testing.T) {
 			route: "DELETE /api/v1/posts/p1",
 			call:  func(c api.ChitClient) error { return c.DeletePost(context.Background(), "p1") },
 		},
+	}
+}
+
+// tagAndMemberEndpointCases cover the tag and channel-member calls.
+func tagAndMemberEndpointCases() []endpointCase {
+	return []endpointCase{
 		{
 			name:  "tags for posts",
 			route: "POST /api/v1/tags/posts",
@@ -725,6 +745,12 @@ func TestClient_Endpoints(t *testing.T) {
 			call:  func(c api.ChitClient) error { return c.RemoveChannelMember(context.Background(), "c1", "u1") },
 		},
 	}
+}
+
+// Each call reaches the endpoint the server serves it on, with the body the
+// server expects. These had no test at all.
+func TestClient_Endpoints(t *testing.T) {
+	tests := append(threadAndPostEndpointCases(), tagAndMemberEndpointCases()...)
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var body string
@@ -732,10 +758,13 @@ func TestClient_Endpoints(t *testing.T) {
 			mux := http.NewServeMux()
 			mux.HandleFunc(tc.route, func(w http.ResponseWriter, r *http.Request) {
 				hit = true
-				raw, _ := io.ReadAll(r.Body)
+				raw, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Errorf("read request body: %v", err)
+				}
 				body = strings.TrimSpace(string(raw))
 				if tc.reply != nil {
-					writeJSON(w, tc.reply)
+					writeJSON(t, w, tc.reply)
 				}
 			})
 			client, _ := setupTestClient(t, mux)
@@ -768,10 +797,10 @@ func TestGetMyDirectThreads(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/users/me/threads/direct", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("page") != "0" || r.URL.Query().Get("per_page") != "50" {
-			writeError(w, 400, "bad paging "+r.URL.RawQuery)
+			writeError(t, w, 400, "bad paging "+r.URL.RawQuery)
 			return
 		}
-		writeJSON(w, model.UserThreadList{Threads: []*model.ThreadResponse{{Thread: &model.Thread{PostID: "p1"}}}, Total: 1})
+		writeJSON(t, w, model.UserThreadList{Threads: []*model.ThreadResponse{{Thread: &model.Thread{PostID: "p1"}}}, Total: 1})
 	})
 	client, _ := setupTestClient(t, mux)
 
@@ -792,16 +821,18 @@ func TestThreadReadAndFollowNeedNoTeam(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("PUT /api/v1/users/me/threads/{id}/read", func(w http.ResponseWriter, r *http.Request) {
 		read = r.PathValue("id")
-		writeJSON(w, map[string]string{"status": "OK"})
+		writeJSON(t, w, map[string]string{"status": "OK"})
 	})
 	mux.HandleFunc("PUT /api/v1/users/me/threads/{id}/following", func(w http.ResponseWriter, r *http.Request) {
 		follow = r.PathValue("id")
 		var body struct {
 			Following bool `json:"following"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
 		following = &body.Following
-		writeJSON(w, map[string]string{"status": "OK"})
+		writeJSON(t, w, map[string]string{"status": "OK"})
 	})
 	client, _ := setupTestClient(t, mux)
 

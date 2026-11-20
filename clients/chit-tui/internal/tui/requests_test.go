@@ -2,6 +2,7 @@ package tui_test
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"slices"
 	"strings"
@@ -132,8 +133,14 @@ func TestModel_TagCreatedInThePickerAppearsInIt(t *testing.T) {
 // appearance rather than as a fixed theme that overrides both.
 func TestModel_ThemePickSavesToTheConfiguredSetting(t *testing.T) {
 	path := config.FilePath()
-	_ = os.Remove(path)
-	t.Cleanup(func() { _ = os.Remove(path) })
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("remove config: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("remove config: %v", err)
+		}
+	})
 
 	m := setupModel(t)
 	m.SetThemeSetting("theme_dark")

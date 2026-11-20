@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/command"
 	"github.com/infrashift/chit/internal/config"
 	"github.com/infrashift/chit/internal/keto"
@@ -28,10 +29,12 @@ func main() {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
+	assert.That(cfg != nil, "chit-reconcile: nil config without an error")
 	cueDir := cfg.CommandsCUEDir
 	if cueDir == "" {
 		cueDir = "auth"
 	}
+	assert.That(cueDir != "", "chit-reconcile: no CUE directory")
 
 	slog.Info("loading CUE definitions", "dir", cueDir)
 	cueCfg, err := command.LoadCUE(cueDir)
@@ -39,6 +42,7 @@ func main() {
 		log.Fatalf("failed to load CUE: %v", err)
 	}
 
+	assert.That(cueCfg != nil, "chit-reconcile: nil CUE config without an error")
 	slog.Info("CUE loaded",
 		"commands", len(cueCfg.Commands),
 		"roles", len(cueCfg.Roles),
@@ -48,6 +52,7 @@ func main() {
 	// declares can be revoked.
 	rec := command.NewReconciler(keto.New(cfg.KetoReadURL, cfg.KetoWriteURL, &http.Client{Timeout: 10 * time.Second}))
 
+	assert.That(rec != nil, "chit-reconcile: nil reconciler")
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	err = rec.Reconcile(ctx, cueCfg)
 	cancel()

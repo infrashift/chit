@@ -12,6 +12,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// chanHandler sends every message to the channel.
+type chanHandler chan []byte
+
+func (c chanHandler) Handle(data []byte) { c <- data }
+
 // Round-trip regression test: Subscribe must actually receive what Publish
 // sends (the previous implementation LISTENed on a connection it immediately
 // released, so nothing was ever delivered), and payloads must arrive verbatim
@@ -32,12 +37,14 @@ func TestPGNotifyIntegration_PublishSubscribeRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPGNotify: %v", err)
 	}
-	defer func() { _ = ps.Close() }()
+	defer func() {
+		if cerr := ps.Close(); cerr != nil {
+			t.Errorf("close: %v", cerr)
+		}
+	}()
 
 	received := make(chan []byte, 1)
-	if err := ps.Subscribe(context.Background(), "chit_test_topic", func(data []byte) {
-		received <- data
-	}); err != nil {
+	if err := ps.Subscribe(context.Background(), "chit_test_topic", chanHandler(received)); err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
 

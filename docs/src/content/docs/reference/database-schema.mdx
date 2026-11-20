@@ -3,34 +3,34 @@ title: Database Schema
 description: PostgreSQL schema design, tables, indexes, and conventions.
 ---
 
-Chit uses PostgreSQL 17 as its primary data store. The schema is managed with
-[golang-migrate](https://github.com/golang-migrate/migrate) and lives in the
-`migrations/` directory.
+Chit uses PostgreSQL 17 as its primary data store. Chit changes the schema with
+[golang-migrate](https://github.com/golang-migrate/migrate). The schema lives in
+the `migrations/` directory.
 
 ## Design Decisions
 
 ### UUIDv7 Primary Keys
 
-All tables use **UUIDv7** primary keys. UUIDv7 embeds a Unix millisecond
-timestamp in the first 48 bits, providing:
+All tables use **UUIDv7** primary keys. UUIDv7 has a Unix millisecond
+timestamp in the first 48 bits. This gives:
 
-- Natural chronological ordering without an additional `created_at` index
-- Global uniqueness without coordination
-- Compatibility with standard UUID columns and tooling
+- Natural time order without an additional `created_at` index
+- Global uniqueness, and the nodes do not need to coordinate
+- Compatibility with standard UUID columns and tools
 
 ### Bigint Millisecond Timestamps
 
-All `*_at` columns use `BIGINT` storing Unix milliseconds. This avoids
-timezone issues, simplifies cross-language serialization, and provides
-millisecond precision.
+All `*_at` columns use `BIGINT` that holds Unix milliseconds. This prevents
+timezone problems, and all languages can read and write the values without special code.
+The values are accurate to the millisecond.
 
 ### Soft Deletes
 
 Users, teams, channels and posts are soft-deleted. A `delete_at` of `0`
-means the row is active; a non-zero value is the deletion timestamp. Queries
+means the row is active; a non-zero value is the time of the delete. Queries
 for live rows filter on `delete_at = 0`, and the partial unique indexes on
-`channels` cover live rows only. Membership rows (`team_members`,
-`channel_members`) are deleted outright when a member leaves; the
+`channels` cover live rows only. When a member leaves, chitd deletes the
+membership row (`team_members`, `channel_members`) completely. The
 `team_members.delete_at` column stays `0`.
 
 ## Tables
@@ -122,8 +122,8 @@ Belong to a team. `team_id` is NULL for direct and group messages.
 | `G` | Group message |
 
 Direct channel names are the two member IDs, sorted and joined with `__`;
-group channel names join all member IDs the same way. The name is how a DM or
-group is found again, so it cannot be changed.
+group channel names join all member IDs the same way. chitd uses the name to
+find a DM or group again, so the name cannot change.
 
 **Indexes:**
 
@@ -220,7 +220,7 @@ system actor `chit-system` (`00000000-0000-7000-8000-000000000001`).
 
 ### message_tags
 
-Junction table linking posts to tags.
+Join table that links posts to tags.
 
 | Column | Type | Constraints | Description |
 |---|---|---|---|
@@ -233,7 +233,7 @@ Junction table linking posts to tags.
 
 ### channel_tags
 
-Junction table linking channels to tags, like `message_tags`.
+Join table that links channels to tags, like `message_tags`.
 
 | Column | Type | Constraints | Description |
 |---|---|---|---|
@@ -268,7 +268,7 @@ Image attachments. The bytes are in the object store under `s3_key`.
 
 ### post_files
 
-Links files to the post they are attached to.
+Links each file to the post that contains it.
 
 | Column | Type | Constraints | Description |
 |---|---|---|---|
@@ -278,7 +278,7 @@ Links files to the post they are attached to.
 
 ## Migrations
 
-Migrations are stored in `migrations/` and applied with golang-migrate:
+The migrations are in `migrations/`, and golang-migrate applies them:
 
 ```bash
 make migrate-up    # Apply all pending migrations (MIGRATE_URL)
@@ -286,7 +286,7 @@ make migrate-down  # Roll back all migrations
 ```
 
 `make kube-up` applies them automatically inside the pod, and
-`make kube-migrate` re-applies them against a running pod.
+`make kube-migrate` applies them again to a pod that runs.
 
 | Migration | Description |
 |---|---|
@@ -303,8 +303,8 @@ make migrate-down  # Roll back all migrations
 ### Rolling back
 
 - `000002` down fails once any direct or group channel exists: their names
-  (74 characters for a DM) do not fit back into VARCHAR(64). Delete those
-  channels first if it must be reversed.
+  (74 characters for a DM) do not fit back into VARCHAR(64). To roll it back,
+  first delete those channels.
 - `000006` down refuses to run while machine actors exist, rather than delete
   them or invent identities for them.
 - `000007` down does not split merged DMs apart again; which posts belonged to

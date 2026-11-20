@@ -3,7 +3,9 @@ package input_test
 import (
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/charmbracelet/bubbles/cursor"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/testutil"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/input"
@@ -182,6 +184,61 @@ func TestInput_ReplaceAtMention(t *testing.T) {
 	if val != "@alice " {
 		t.Errorf("value = %q, want '@alice '", val)
 	}
+}
+
+// The backspaces of a mention pick restart the cursor blink with a new tag,
+// which makes the pending blink tick stale. The pick must return the command
+// that starts the new cycle, or the cursor stops until the next key press.
+func TestInput_ReplaceAtMentionKeepsTheCursorBlinking(t *testing.T) {
+	m := input.New(testutil.Styles())
+	m.SetSize(80, 5)
+	m.Focus()
+	for _, ch := range "@al" {
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ch}})
+	}
+
+	blink, ok := blinkOf(m.ReplaceAtMention(0, "alice"))
+	if !ok {
+		t.Fatal("ReplaceAtMention returned no cursor blink")
+	}
+	// The blink is current: the cursor answers it with the next blink.
+	m, next := m.Update(blink)
+	if _, ok := blinkOf(next); !ok {
+		t.Fatal("the cursor did not schedule the next blink, so the returned blink was stale")
+	}
+	if got := m.Value(); got != "@alice " {
+		t.Errorf("value = %q, want '@alice '", got)
+	}
+}
+
+// blinkOf runs cmd, and the commands of a batch, and returns the first
+// cursor blink among their messages. A blink is a tick of about half a
+// second, so each command has two seconds.
+func blinkOf(cmd tea.Cmd) (cursor.BlinkMsg, bool) {
+	if cmd == nil {
+		return cursor.BlinkMsg{}, false
+	}
+	done := make(chan tea.Msg, 1)
+	go func() { done <- cmd() }()
+	var msg tea.Msg
+	select {
+	case msg = <-done:
+	case <-time.After(2 * time.Second):
+		return cursor.BlinkMsg{}, false
+	}
+	if blink, ok := msg.(cursor.BlinkMsg); ok {
+		return blink, true
+	}
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		return cursor.BlinkMsg{}, false
+	}
+	for _, sub := range batch {
+		if blink, ok := blinkOf(sub); ok {
+			return blink, true
+		}
+	}
+	return cursor.BlinkMsg{}, false
 }
 
 func TestInput_AltEnterInsertsNewline(t *testing.T) {

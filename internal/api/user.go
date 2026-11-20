@@ -7,10 +7,13 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/infrashift/chit/internal/app"
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 )
 
 func createUser(a *app.App) http.HandlerFunc {
+	assert.That(a != nil, "createUser: nil app")
+	assert.That(a.Store != nil, "createUser: nil store")
 	return func(w http.ResponseWriter, r *http.Request) {
 		actor := ContextGetUser(r)
 		if actor == nil {
@@ -28,6 +31,7 @@ func createUser(a *app.App) http.HandlerFunc {
 			WriteAppError(w, "createUser", err)
 			return
 		}
+		assert.That(saved != nil, "createUser: app returned nil without an error")
 
 		WriteJSON(w, http.StatusCreated, saved)
 	}
@@ -45,6 +49,8 @@ func getMe() http.HandlerFunc {
 }
 
 func updateMe(a *app.App) http.HandlerFunc {
+	assert.That(a != nil, "updateMe: nil app")
+	assert.That(a.Store != nil, "updateMe: nil store")
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := ContextGetUser(r)
 		if user == nil {
@@ -68,12 +74,15 @@ func updateMe(a *app.App) http.HandlerFunc {
 			WriteAppError(w, "updateMe", err)
 			return
 		}
+		assert.That(updated != nil, "updateMe: app returned nil without an error")
 
 		WriteJSON(w, http.StatusOK, updated)
 	}
 }
 
 func getUser(a *app.App) http.HandlerFunc {
+	assert.That(a != nil, "getUser: nil app")
+	assert.That(a.Store != nil, "getUser: nil store")
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 		user, err := a.GetUser(r.Context(), id)
@@ -81,12 +90,15 @@ func getUser(a *app.App) http.HandlerFunc {
 			WriteAppError(w, "getUser", err)
 			return
 		}
+		assert.That(user != nil, "getUser: app returned nil without an error")
 		user.Sanitize()
 		WriteJSON(w, http.StatusOK, user)
 	}
 }
 
 func getUserByUsername(a *app.App) http.HandlerFunc {
+	assert.That(a != nil, "getUserByUsername: nil app")
+	assert.That(a.Store != nil, "getUserByUsername: nil store")
 	return func(w http.ResponseWriter, r *http.Request) {
 		username := chi.URLParam(r, "username")
 		user, err := a.GetUserByUsername(r.Context(), username)
@@ -94,12 +106,15 @@ func getUserByUsername(a *app.App) http.HandlerFunc {
 			WriteAppError(w, "getUserByUsername", err)
 			return
 		}
+		assert.That(user != nil, "getUserByUsername: app returned nil without an error")
 		user.Sanitize()
 		WriteJSON(w, http.StatusOK, user)
 	}
 }
 
 func searchUsers(a *app.App) http.HandlerFunc {
+	assert.That(a != nil, "searchUsers: nil app")
+	assert.That(a.Store != nil, "searchUsers: nil store")
 	return func(w http.ResponseWriter, r *http.Request) {
 		term := r.URL.Query().Get("term")
 		page, perPage := parsePagination(r, 60)
@@ -119,6 +134,8 @@ func searchUsers(a *app.App) http.HandlerFunc {
 }
 
 func getUsersByIDs(a *app.App) http.HandlerFunc {
+	assert.That(a != nil, "getUsersByIDs: nil app")
+	assert.That(a.Store != nil, "getUsersByIDs: nil store")
 	return func(w http.ResponseWriter, r *http.Request) {
 		var ids []string
 		if !decodeBody(w, r, &ids, "getUsersByIDs") {

@@ -25,21 +25,39 @@ func newCommandFixture(t *testing.T, ketoAllowed bool) *fixture {
 		{ID: "kick", Slug: "kick", Description: "Remove a user", Category: "admin"},
 	})
 	f.app.CommandHandlers = map[string]command.Handler{
-		"help": command.HandlerFunc(func(context.Context, string, string, string) (*command.CommandResult, error) {
-			return &command.CommandResult{ResponseText: "Available commands: /help, /kick"}, nil
-		}),
-		"kick": command.HandlerFunc(func(_ context.Context, _, _, args string) (*command.CommandResult, error) {
-			return &command.CommandResult{ResponseText: fmt.Sprintf("Kicked %s", args), Triggered: true}, nil
-		}),
+		"help": &recordingCommand{text: "Available commands: /help, /kick"},
+		"kick": echoKickCommand{},
 	}
 
 	al, err := command.NewAuditLogger("-")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = al.Close() })
+	t.Cleanup(func() {
+		if err := al.Close(); err != nil {
+			t.Errorf("close audit logger: %v", err)
+		}
+	})
 	f.app.AuditLogger = al
 	return f
+}
+
+// recordingCommand answers with text and records that it ran.
+type recordingCommand struct {
+	text string
+	ran  bool
+}
+
+func (c *recordingCommand) Execute(context.Context, string, string, string) (*command.CommandResult, error) {
+	c.ran = true
+	return &command.CommandResult{ResponseText: c.text}, nil
+}
+
+// echoKickCommand answers "Kicked <args>" and triggers a webhook.
+type echoKickCommand struct{}
+
+func (echoKickCommand) Execute(_ context.Context, _, _, args string) (*command.CommandResult, error) {
+	return &command.CommandResult{ResponseText: fmt.Sprintf("Kicked %s", args), Triggered: true}, nil
 }
 
 // intercept runs content through the slash-command interceptor as testuser.
@@ -120,7 +138,7 @@ func TestCreatePost_SlashCommandNotPersisted(t *testing.T) {
 	if result.Type != "command_response" {
 		t.Errorf("type = %q, want command_response", result.Type)
 	}
-	if ephemeral, _ := result.Props["ephemeral"].(bool); !ephemeral {
+	if ephemeral, ok := result.Props["ephemeral"].(bool); !ok || !ephemeral {
 		t.Error("expected props.ephemeral=true")
 	}
 	if n := channelPostCount(t, f); n != 0 {
@@ -151,11 +169,8 @@ func TestCreatePost_NormalPostStillPersisted(t *testing.T) {
 // argument read a private channel's header back to them.
 func TestCreatePost_SlashCommandRequiresMembership(t *testing.T) {
 	f := newCommandFixture(t, true)
-	ran := false
-	f.app.CommandHandlers["help"] = command.HandlerFunc(func(context.Context, string, string, string) (*command.CommandResult, error) {
-		ran = true
-		return &command.CommandResult{ResponseText: "help"}, nil
-	})
+	help := &recordingCommand{text: "help"}
+	f.app.CommandHandlers["help"] = help
 
 	_, err := f.app.CreatePost(t.Context(), &model.Post{
 		ChannelID: f.channel.ID, UserID: f.user("outsider").ID, Content: "/help",
@@ -165,7 +180,7 @@ func TestCreatePost_SlashCommandRequiresMembership(t *testing.T) {
 	if !errors.As(err, &appErr) || appErr.StatusCode != http.StatusForbidden {
 		t.Fatalf("expected 403, got %v", err)
 	}
-	if ran {
+	if help.ran {
 		t.Fatal("the command ran for a non-member")
 	}
 }

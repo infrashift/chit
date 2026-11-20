@@ -1,5 +1,7 @@
 package model
 
+import "github.com/infrashift/chit/clients/chit-tui/internal/assert"
+
 const (
 	WebSocketEventPosted          = "posted"
 	WebSocketEventPostEdited      = "post_edited"
@@ -52,5 +54,6 @@ type AppError struct {
 }
 
 func (e *AppError) Error() string {
+	assert.That(e != nil, "AppError.Error: nil error")
 	return e.Message
 }

@@ -28,7 +28,7 @@ func enterReachesViewport(t *testing.T, m tui.Model) bool {
 func typingReachesInput(t *testing.T, m tui.Model) bool {
 	t.Helper()
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("zq")})
-	view := testutil.StripANSI(updated.(tui.Model).View())
+	view := testutil.StripANSI(asModel(t, updated).View())
 	return strings.Contains(view, "zq")
 }
 
@@ -37,12 +37,12 @@ func TestModel_EscClosingTagPickerRestoresViewportFocus(t *testing.T) {
 
 	// Focus the viewport and open the tag picker on the selected post.
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if !enterReachesViewport(t, m) {
 		t.Error("expected viewport to be focused after Esc-closing the tag picker")
@@ -53,9 +53,9 @@ func TestModel_EscClosingChCreatorRestoresInputFocus(t *testing.T) {
 	m := setupModel(t)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if !typingReachesInput(t, m) {
 		t.Error("expected input to be focused after Esc-closing the channel creator")
@@ -66,9 +66,9 @@ func TestModel_EscClosingSkinPickerRestoresInputFocus(t *testing.T) {
 	m := setupModel(t)
 
 	updated, _ := m.Update(input.SlashTriggerMsg{Input: "/skin"})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if !typingReachesInput(t, m) {
 		t.Error("expected input to be focused after Esc-closing the skin picker")
@@ -82,16 +82,16 @@ func TestModel_EscClosingMemberPickerCreatesPendingChannel(t *testing.T) {
 	// pending.
 	pending := &model.Channel{DisplayName: "Secret", Name: "secret", Type: model.ChannelPrivate, TeamID: "t1"}
 	updated, _ := m.Update(chcreator.ChannelSubmittedMsg{Channel: pending})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Esc skips member selection but still creates the channel: the picker
 	// emits a cancel message, whose handler issues CreateChannel.
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	created := false
 	for _, msg := range messagesOf(cmd) {
 		updated, next := m.Update(msg)
-		m = updated.(tui.Model)
+		m = asModel(t, updated)
 		for _, result := range messagesOf(next) {
 			if _, ok := result.(tui.ChannelCreatedMsg); ok {
 				created = true
@@ -112,13 +112,13 @@ func TestModel_EscClosingMemberPickerClearsPendingState(t *testing.T) {
 
 	pending := &model.Channel{DisplayName: "Secret", Name: "secret", Type: model.ChannelPrivate, TeamID: "t1"}
 	updated, _ := m.Update(chcreator.ChannelSubmittedMsg{Channel: pending})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	// Process the cancel message so the pending channel is consumed.
 	for _, msg := range messagesOf(cmd) {
 		updated, _ = m.Update(msg)
-		m = updated.(tui.Model)
+		m = asModel(t, updated)
 	}
 
 	// A repeated cancel (nothing pending) must not create anything.
@@ -135,11 +135,11 @@ func TestModel_HelpCloseKeepsPriorFocus(t *testing.T) {
 
 	// Focus the viewport, open help with "?", close it with a key.
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if !enterReachesViewport(t, m) {
 		t.Error("expected viewport focus to survive opening and closing help")

@@ -79,7 +79,7 @@ func TestSkinPicker_JKNavigation(t *testing.T) {
 		t.Fatal("expected command")
 	}
 	msg := cmd()
-	selected := msg.(skinpicker.SkinSelectedMsg)
+	selected := mustMsg[skinpicker.SkinSelectedMsg](t, msg)
 	if selected.Name != "catppuccin" {
 		t.Errorf("selected = %q, want %q", selected.Name, "catppuccin")
 	}
@@ -98,7 +98,7 @@ func TestSkinPicker_KNavigatesUp(t *testing.T) {
 	var cmd tea.Cmd
 	m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	msg := cmd()
-	selected := msg.(skinpicker.SkinSelectedMsg)
+	selected := mustMsg[skinpicker.SkinSelectedMsg](t, msg)
 	if selected.Name != "tokyo-night" {
 		t.Errorf("selected = %q, want %q", selected.Name, "tokyo-night")
 	}
@@ -116,7 +116,7 @@ func TestSkinPicker_UpBounds(t *testing.T) {
 	var cmd tea.Cmd
 	m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	msg := cmd()
-	selected := msg.(skinpicker.SkinSelectedMsg)
+	selected := mustMsg[skinpicker.SkinSelectedMsg](t, msg)
 	if selected.Name != "tokyo-night" {
 		t.Errorf("selected = %q, want %q", selected.Name, "tokyo-night")
 	}
@@ -136,7 +136,7 @@ func TestSkinPicker_DownBounds(t *testing.T) {
 	var cmd tea.Cmd
 	m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	msg := cmd()
-	selected := msg.(skinpicker.SkinSelectedMsg)
+	selected := mustMsg[skinpicker.SkinSelectedMsg](t, msg)
 	if selected.Name != "catppuccin" {
 		t.Errorf("selected = %q, want %q", selected.Name, "catppuccin")
 	}
@@ -226,4 +226,14 @@ func TestSkinPicker_SetStyles(t *testing.T) {
 	if !strings.Contains(view, "tokyo-night") {
 		t.Errorf("expected 'tokyo-night' in view after SetStyles:\n%s", view)
 	}
+}
+
+// mustMsg returns msg as a T, failing the test when it is something else.
+func mustMsg[T any](t *testing.T, msg tea.Msg) T {
+	t.Helper()
+	got, ok := msg.(T)
+	if !ok {
+		t.Fatalf("msg = %T, want %T", msg, got)
+	}
+	return got
 }

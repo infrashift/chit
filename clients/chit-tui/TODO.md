@@ -1,10 +1,13 @@
 # TODO
 
-Open work. Completed lists are in `docs/history/`; what changed is in the
-CHANGELOG.
+Open work. The lists of completed work are in `docs/history/`. The
+CHANGELOG records what changed.
 
 ## Tests
 
-- [ ] `auth` is at 88%. What is left are failures of a just-created temp
-      file (Chmod, Write, Close) and of building a request; reaching them
-      needs fault-injection hooks, which may not be worth adding.
+- [ ] `auth` has 88% coverage. The tests do not reach two types of failure.
+      The first is a failure of a temp file that the code created a moment
+      before (Chmod, Write, Close). The second is a failure to build a
+      request. To reach them, the
+      tests need hooks that inject faults. These hooks may not be worth the
+      work.

@@ -29,7 +29,10 @@ func TestDocsRoute_RawSpec(t *testing.T) {
 	if ct != "application/yaml" {
 		t.Fatalf("expected Content-Type application/yaml, got %s", ct)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
 	if !bytes.Equal(body, chitapi.OpenAPISpec) {
 		t.Fatal("response body does not match embedded spec")
 	}
@@ -51,7 +54,10 @@ func TestDocsRoute_SwaggerUI(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
 	if !strings.Contains(string(body), "<html") {
 		t.Fatal("expected Swagger UI HTML response")
 	}

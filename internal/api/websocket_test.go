@@ -37,8 +37,10 @@ func TestWebSocket_DeliversEventsToTheConnectedUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer func() { _ = conn.Close() }()
-	_ = resp.Body.Close()
+	defer closeOK(t, conn, "websocket")
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("close handshake response body: %v", err)
+	}
 
 	// Registration completes before the handler returns, so the event cannot
 	// race ahead of it.
@@ -48,7 +50,7 @@ func TestWebSocket_DeliversEventsToTheConnectedUser(t *testing.T) {
 		Broadcast: &model.WebSocketBroadcast{UserID: testUserID},
 	})
 
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	readDeadlineOK(t, conn, 2*time.Second)
 	var ev model.WebSocketEvent
 	if err := conn.ReadJSON(&ev); err != nil {
 		t.Fatalf("read: %v", err)
@@ -64,7 +66,11 @@ func TestWebSocket_RejectsAnUnauthenticatedCaller(t *testing.T) {
 	if err == nil {
 		t.Fatal("an unauthenticated caller connected")
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	}()
 	if resp.StatusCode != http.StatusUnauthorized || !strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {
 		t.Fatalf("got %d %q, want a JSON 401", resp.StatusCode, resp.Header.Get("Content-Type"))
 	}
@@ -80,8 +86,10 @@ func TestWebSocket_TypingIsRebroadcast(t *testing.T) {
 		if err != nil {
 			t.Fatalf("dial: %v", err)
 		}
-		_ = resp.Body.Close()
-		t.Cleanup(func() { _ = conn.Close() })
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close handshake response body: %v", err)
+		}
+		t.Cleanup(func() { closeOK(t, conn, "websocket") })
 		return conn
 	}
 	sender, watcher := dial(), dial()
@@ -92,7 +100,7 @@ func TestWebSocket_TypingIsRebroadcast(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	_ = watcher.SetReadDeadline(time.Now().Add(2 * time.Second))
+	readDeadlineOK(t, watcher, 2*time.Second)
 	var ev model.WebSocketEvent
 	if err := watcher.ReadJSON(&ev); err != nil {
 		t.Fatalf("read: %v", err)
@@ -137,12 +145,14 @@ func TestWebSocket_RemovedUserIsTold(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer func() { _ = conn.Close() }()
-	_ = resp.Body.Close()
+	defer closeOK(t, conn, "websocket")
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("close handshake response body: %v", err)
+	}
 
 	read := func() model.WebSocketEvent {
 		t.Helper()
-		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		readDeadlineOK(t, conn, 2*time.Second)
 		var ev model.WebSocketEvent
 		if err := conn.ReadJSON(&ev); err != nil {
 			t.Fatalf("read: %v", err)

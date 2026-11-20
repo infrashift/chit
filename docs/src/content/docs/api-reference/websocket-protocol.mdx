@@ -11,16 +11,16 @@ Chit provides real-time event delivery over WebSocket connections.
 GET /api/v1/websocket
 ```
 
-Upgrade a standard HTTP connection to WebSocket. The endpoint sits behind the
-same authentication as the REST API: the request must arrive through
-Oathkeeper carrying the trusted `X-User-Id` (Kratos session) or `X-Client-Id`
-(OAuth2 client credentials) header. An unauthenticated request gets the API's
-JSON `401` error instead of an upgrade.
+Upgrade a standard HTTP connection to WebSocket. The endpoint has the same
+authentication as the REST API. The request must come through Oathkeeper with
+the trusted `X-User-Id` (Kratos session) or `X-Client-Id` (OAuth2 client
+credentials) header. An unauthenticated request gets the API's JSON `401`
+error instead of an upgrade.
 
-The browser `Origin` header is checked against `CHIT_ALLOWED_ORIGINS`. A
-request with no `Origin` (a non-browser client such as `chit-tui` or
-`chit-mcp`) is accepted; `*` accepts any origin; an empty value accepts no
-browser origin. A rejected origin fails the upgrade.
+chitd checks the browser `Origin` header against `CHIT_ALLOWED_ORIGINS`. chitd
+accepts a request with no `Origin` (a non-browser client such as `chit-tui` or
+`chit-mcp`). `*` accepts any origin. An empty value accepts no browser origin.
+A refused origin fails the upgrade.
 
 ## Wire Format
 
@@ -66,12 +66,12 @@ Every event has the same envelope:
 | `seq` | int64 | Accepted for compatibility and ignored |
 | `data` | object | Action payload |
 
-A message that is not valid JSON is logged and ignored. A message larger than
+chitd logs and ignores a message that is not valid JSON. A message larger than
 **4096 bytes** closes the connection.
 
 ## Server → Client Event Types
 
-chitd sends 15 event types.
+chitd sends 19 event types.
 
 | Event | `data` | `broadcast` | Sent when |
 |---|---|---|---|
@@ -101,16 +101,16 @@ Notes:
   is no `post` wrapper.
 - `thread_updated` deliberately does not carry the reply. The reply itself
   arrives as `posted`.
-- `user_removed` is sent twice: to the channel's remaining members, and
-  addressed to the removed user, who is no longer in the channel's audience
-  by the time the channel copy is delivered. Each connection receives it
-  once.
-- A `command_response` is sent only when a handler executed, whatever text it
+- chitd sends `user_removed` two times. One copy goes to the members that
+  stay in the channel. The other copy goes to the removed user. When the hub
+  delivers the channel copy, the removed user is no longer in the channel's
+  audience. Each connection receives the event one time.
+- chitd sends a `command_response` only when a handler ran, whatever text it
   returned. An unknown command, a permission denial, a command with no
   handler, or a handler error answers only through the `POST /posts`
   response.
-- There is no presence or `status_change` event.
-- `stream_status`, like `typing`, is relayed and never stored: no post, no
+- There is no online-status or `status_change` event.
+- chitd relays `stream_status`, like `typing`, and never stores it: no post, no
   counter, no pubsub envelope. HALO's halod sends it while it streams a reply
   to the requester, so the channel's other members see activity.
 
@@ -120,16 +120,16 @@ Notes:
 |---|---|---|
 | `typing` | `channel_id` | Notify the channel that the user is typing |
 
-A `typing` action is relayed only if the sender is a member of `channel_id`
-(per the hub's membership cache). It is delivered to every connected member of
-the channel, including the sender's own connections.
+The hub relays a `typing` action only if the sender is a member of
+`channel_id` (per the hub's membership cache). The hub delivers it to every
+connected member of the channel, also to the sender's own connections.
 
 ## Broadcast Targeting
 
 The hub decides who receives each event from its `broadcast` object:
 
-1. **`user_id` set:** delivered only to that user's connections. Any
-   `channel_id` or `team_id` is ignored.
+1. **`user_id` set:** delivered only to that user's connections. The hub
+   ignores `channel_id` and `team_id`.
 2. **Otherwise `channel_id` set:** delivered only to connected members of that
    channel.
 3. **Otherwise `team_id` set:** delivered only to connected members of that
@@ -137,42 +137,43 @@ The hub decides who receives each event from its `broadcast` object:
 4. **All empty:** delivered to every connected client. chitd does not
    currently send such an event.
 
-An event with no `broadcast` object at all is dropped.
+The hub drops an event with no `broadcast` object.
 
-Channel and team membership come from a per-user cache that the hub loads from
+Channel and team membership come from a per-user cache. The hub loads it from
 the database when the user's first connection registers (with a 10-second
-timeout). Until that load finishes, channel- and team-targeted events are not
-delivered to that user. If the load fails it is retried on the user's next
-connection. Membership changes that happen while the load is in flight are
-queued and applied on top of it, so they are not lost. The cache is dropped
-when the user's last connection closes.
+timeout). Until that load finishes, the hub does not deliver channel- and
+team-targeted events to that user. If the load fails, the hub tries it again
+on the user's next connection. The hub queues membership changes that occur
+during the load, and applies them after the load. So the hub does not lose
+them. The hub drops the cache when the user's last connection closes.
 
 ## Connection Lifecycle
 
 1. **Connect:** the client upgrades at `/api/v1/websocket`.
-2. **Register:** the hub registers the connection, then starts its read and
-   write pumps. The first connection for a user triggers the membership load.
-3. **Receive events:** events addressed to the user, their channels or their
-   teams are written to the connection.
+2. **Register:** the hub registers the connection. Then it starts the read and
+   write pumps. The first connection of a user starts the membership load.
+3. **Receive events:** the hub writes events to the connection. These are
+   the events for the user, the user's channels or the user's teams.
 4. **Send actions:** the client may send `typing` actions.
 5. **Ping/Pong:** the server sends a ping every `CHIT_WS_PING_INTERVAL`
-   (default `30s`). The read deadline is twice that interval and is extended
-   only by a pong, so a client that does not answer pings is disconnected.
-   Each write has a deadline of `CHIT_WS_WRITE_TIMEOUT` (default `10s`).
-6. **Disconnect:** the client closes the connection, a ping times out, a
-   write fails, or the server drops a slow consumer (below). The hub then
-   unregisters the connection.
+   (default `30s`). The read deadline is two times that interval. Only a pong
+   moves the read deadline forward. So the server disconnects a client that
+   does not answer pings. Each write has a deadline of `CHIT_WS_WRITE_TIMEOUT`
+   (default `10s`).
+6. **Disconnect:** the connection closes for one of these causes. The client
+   closes it, a ping times out, a write fails, or the server drops a slow
+   consumer (below). The hub then unregisters the connection.
 
 ### Slow consumers
 
 Each connection has a send buffer of **256 events**. If an event arrives while
-the buffer is full, the hub disconnects that connection rather than block or
-silently drop events. Other connections, including the same user's other
-connections, are unaffected.
+the buffer is full, the hub disconnects that connection. It does not block,
+and it does not silently drop events. This has no effect on other connections,
+also not on the same user's other connections.
 
 ## Reconnection
 
-Events are not replayed and `seq` cannot be used to detect gaps. A client that
-reconnects, or is disconnected as a slow consumer, should reconnect with
-backoff and refetch what it shows, for example with
-`GET /channels/{id}/posts?since=<last create_at>`.
+chitd does not replay events, and a client cannot find gaps with `seq`. A
+client can reconnect, or the server can disconnect it as a slow consumer. In
+both cases, the client must reconnect with backoff and fetch again what it
+shows, for example with `GET /channels/{id}/posts?since=<last create_at>`.

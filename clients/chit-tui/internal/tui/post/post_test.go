@@ -13,11 +13,15 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
 
-func testRenderer() *glamour.TermRenderer {
-	r, _ := glamour.NewTermRenderer(
+func testRenderer(t *testing.T) *glamour.TermRenderer {
+	t.Helper()
+	r, err := glamour.NewTermRenderer(
 		glamour.WithStyles(markdown.StyleConfig(theme.TokyoNight())),
 		glamour.WithWordWrap(76),
 	)
+	if err != nil {
+		t.Fatalf("new renderer: %v", err)
+	}
 	return r
 }
 
@@ -66,7 +70,7 @@ func TestPostView_NilPost(t *testing.T) {
 
 func TestPostView_WithRenderer(t *testing.T) {
 	p := &model.Post{ID: "p1", Content: "Hello", CreateAt: 1700000000000}
-	m := post.New(p, "alice", testutil.Styles(), 80, testRenderer(), "", 0, nil)
+	m := post.New(p, "alice", testutil.Styles(), 80, testRenderer(t), "", 0, nil)
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "Hello") {
 		t.Errorf("expected content with renderer, got:\n%s", view)

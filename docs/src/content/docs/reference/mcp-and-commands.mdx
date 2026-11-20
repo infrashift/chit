@@ -3,17 +3,17 @@ title: MCP and Slash Commands
 description: The chit-mcp tools, resources and prompts, the server's slash commands, and the command webhook wire format.
 ---
 
-This page covers the two ways a program other than a chat client acts on
-Chit: the `chit-mcp` MCP server, which gives an AI agent tools over the REST
-API, and the server's slash commands, with the CloudEvents webhook they can
-emit.
+This page tells about two ways for a program other than a chat client to act
+on Chit. The first is the `chit-mcp` MCP server: it gives an AI agent tools
+over the REST API. The second is the server's slash commands, with the
+CloudEvents webhook that they can emit.
 
 ## MCP server (`chit-mcp`)
 
 `chit-mcp` (`cmd/chit-mcp`, `internal/mcp`) is an MCP server that speaks
 JSON-RPC over **stdio**, so an MCP host launches it as a subprocess. It holds
-no database connection: every tool is a call to chitd's REST API made as the
-agent's user, so chitd applies the same authorization as for any other user.
+no database connection. Every tool is a call to chitd's REST API as the
+agent's user. So chitd applies the same authorization as for any other user.
 It also keeps a WebSocket connection to chitd open and buffers the agent's
 events for the `get_new_events` tool. Logs go to stderr.
 
@@ -27,22 +27,23 @@ in one of two modes:
 | OAuth2 client credentials (preferred) | `CHIT_MCP_OAUTH_CLIENT_ID` is set | `CHIT_MCP_OAUTH_CLIENT_ID`, `CHIT_MCP_OAUTH_CLIENT_SECRET` and `CHIT_MCP_OAUTH_TOKEN_URL` (all required); `CHIT_MCP_OAUTH_SCOPES` (default `chit:read chit:write`); `CHIT_MCP_OAUTH_AUDIENCE` (default `chit`) | Hydra issues a token; Oathkeeper introspects it and forwards `X-Client-Id`; chitd resolves the client to its machine actor. `CHIT_MCP_SERVER_URL` points at Oathkeeper. |
 | Trusted header (local development) | `CHIT_MCP_AGENT_KRATOS_ID` is set | `CHIT_MCP_AGENT_KRATOS_ID` (required); `CHIT_MCP_PROXY_SECRET` (must match `CHIT_TRUSTED_PROXY_SECRET` when chitd sets one) | `chit-mcp` sends the agent's Kratos identity ID as `X-User-Id` directly to chitd. |
 
-`CHIT_MCP_SERVER_URL` defaults to `http://localhost:8065`. Exactly one
-mode may be configured: with both `CHIT_MCP_OAUTH_CLIENT_ID` and
-`CHIT_MCP_AGENT_KRATOS_ID` set, with neither, or with OAuth missing its secret
-or token URL, `chit-mcp` refuses to start. At
-startup it warns when the user it acts as is not `actor_type=agent`.
+`CHIT_MCP_SERVER_URL` defaults to `http://localhost:8065`. The operator must
+configure exactly one mode. `chit-mcp` refuses to start if the environment has
+both `CHIT_MCP_OAUTH_CLIENT_ID` and `CHIT_MCP_AGENT_KRATOS_ID`, or neither of
+them. It also refuses to start if the OAuth mode has no secret or no token URL. At startup, `chit-mcp`
+warns when its user is not `actor_type=agent`.
 
 ### Tools
 
 Every tool returns JSON text from chitd, or an error result (`error: ...`)
-that carries chitd's error. Posts come back as `id`, `channel_id`, `root_id`,
-`user_id`, `content`, `type`, `is_pinned`, `edited` and `create_at` only:
-the rest of a post (its props in particular, which on an agent's replies hold
-session IDs, hop counts and usage figures) would cost the model tokens and
-tell it nothing it can act on. Lists keep the `{"order": [...]}` shape. `page` and `per_page` are optional everywhere:
-`page` defaults to `0`, `per_page` to `60` (`25` for `get_my_threads`) and is
-capped at 200.
+with chitd's error. A post comes back with only these fields: `id`,
+`channel_id`, `root_id`, `user_id`, `content`, `type`, `is_pinned`, `edited`
+and `create_at`. The other fields of a post cost the model tokens and give it
+nothing it can act on. An example is its props: on an agent's replies, they
+hold session IDs, hop counts and token counts. Lists keep the
+`{"order": [...]}` shape. `page` and `per_page` are optional everywhere. `page`
+defaults to `0`. `per_page` defaults to `60` (`25` for `get_my_threads`), and
+its maximum is 200.
 
 | Tool | Purpose | Arguments | REST call |
 |---|---|---|---|
@@ -70,25 +71,27 @@ capped at 200.
 | `mark_channel_viewed` | Mark a channel read | `channel_id` | `POST /channels/{id}/members/me/view` |
 | `get_new_events` | Drain buffered real-time events | `since_seq`, `types` (both optional) | none (local buffer) |
 
-Because `create_post` and `reply_to_thread` go through `POST /posts`, content
-starting with a slash command is executed as one, not posted.
+`create_post` and `reply_to_thread` go through `POST /posts`. So, if the
+content starts with a slash command, chitd runs the command and does not post
+the content.
 
 ### The event buffer
 
 `chit-mcp` connects to chitd's `/api/v1/websocket` as the agent and
-reconnects with backoff (from 1 s, doubling to about 30 s). chitd's hub already limits
-what arrives to the agent's channels, teams and user-targeted events (see
+reconnects with backoff (from 1 s, two times longer each time, to about
+30 s). chitd's hub already sends only the events for the agent's channels,
+teams and user (see
 [WebSocket Protocol](/chit/api-reference/websocket-protocol/)).
-`command_response` events are discarded; everything else is buffered.
+`chit-mcp` discards `command_response` events and buffers all other events.
 
-The buffer holds the newest **1,000** events; older ones are evicted. Each
-event gets a sequence number (`seq`) as it enters the buffer: this is the only
-place Chit numbers events. `get_new_events` returns the buffered events with
-`seq` greater than `since_seq` (all of them for `0` or no argument) and
-removes them all from the buffer. Only the types named in `types` are
-returned, by default `posted`, `post_edited` and `post_deleted`; the rest are
-discarded. A `posted` or `post_edited` event's post is trimmed to the fields
-above. With nothing to return it says `No new events`.
+The buffer holds the newest **1,000** events and removes older ones. Each
+event gets a sequence number (`seq`) when it goes into the buffer. This is the
+only place where Chit numbers events. `get_new_events` returns the buffered
+events with `seq` greater than `since_seq` (all of them for `0` or no
+argument). It removes them all from the buffer. It returns only the types in
+`types`, by default `posted`, `post_edited` and `post_deleted`, and discards
+the rest. For a `posted` or `post_edited` event, it trims the post to the
+fields above. With nothing to return it says `No new events`.
 
 ### Resources
 
@@ -118,16 +121,17 @@ ordinary post.
 
 ### Where commands run
 
-Commands are intercepted **only by `POST /api/v1/posts`**, which the
-`chit-tui` input, `chit-mcp`'s `create_post`, and any API client use. The
-request needs channel membership first, like any post. Then:
+**Only `POST /api/v1/posts`** intercepts commands. The `chit-tui` input,
+`chit-mcp`'s `create_post`, and all API clients use it. The request needs
+channel membership first, like any post. Then:
 
 1. An unknown command answers ``Unknown command `/x`. Type `/help` for
    available commands.``
-2. Ory Keto is asked whether `Actor:<users.id>` has `execute` on
-   `Command:<id>` in the `chit/command` namespace. A denial answers ``You do
-   not have permission to use `/x`.``; a Keto failure denies too (``Permission
-   check failed for `/x`.``). Both are written to the audit log.
+2. chitd asks Ory Keto if `Actor:<users.id>` has `execute` on
+   `Command:<id>` in the `chit/command` namespace.
+   A denial answers ``You do not have permission to use `/x`.``.
+   A Keto failure also denies (``Permission check failed for `/x`.``).
+   chitd writes both to the audit log.
 3. The command's handler runs. A command with no handler answers ``/x` is
    registered but has no handler.``
 
@@ -138,16 +142,17 @@ handler ran, chitd also sends the invoker (only) a `command_response`
 WebSocket event: `{"text", "command_slug", "channel_id"}`, addressed to their
 `user_id`.
 
-If the CUE definitions under `CHIT_COMMANDS_CUE_DIR` (default `auth`) fail to
-load, chitd starts with commands disabled: slash text is then posted as an
+The CUE definitions under `CHIT_COMMANDS_CUE_DIR` (default `auth`) can fail
+to load. Then chitd starts with commands off. chitd posts slash text as an
 ordinary message, and `GET /api/v1/commands` returns `[]`.
 
 ### Commands
 
-Who may run a command is decided by Keto, from the roles in `auth/roles/` and
-the actor bindings in `auth/actors/`, pushed into Keto by `chit-reconcile`
+Keto decides who may run a command. It uses the roles in `auth/roles/` and
+the actor bindings in `auth/actors/`, which `chit-reconcile` pushes into Keto
 (see [SPECS-SLASH-COMMANDS.md](https://github.com/infrashift/chit/blob/main/SPECS-SLASH-COMMANDS.md)).
-No actors are bound by default, so until some are, every command is denied.
+By default, the CUE has no actor bindings. Until an operator adds bindings,
+chitd denies every command.
 
 | Command | What it does | Roles granted it (shipped CUE) | Further checks |
 |---|---|---|---|
@@ -177,8 +182,8 @@ or `-` means stderr):
 
 When `CHIT_WEBHOOK_ENABLED=true`, chitd posts a CloudEvent to
 `CHIT_WEBHOOK_URL` after a command that changed something: a successful
-`/invite`, `/kick`, or `/topic <text>`. `/help`, reading the topic, denials and
-failures send nothing. The switch is global; there is no per-channel opt-in.
+`/invite`, `/kick`, or `/topic <text>`. `/help`, `/topic` without text, denials
+and failures send nothing. The switch is global; there is no per-channel opt-in.
 
 ### Wire format
 
@@ -222,18 +227,18 @@ X-Chit-Signature: <hex HMAC-SHA256 of the body>
 
 ### Signature
 
-When `CHIT_WEBHOOK_SECRET` is set, `X-Chit-Signature` is the lowercase hex
-HMAC-SHA256 of the exact request body, keyed with the secret, with no prefix.
-Verify it over the raw bytes before parsing. Without a secret, the header is
-not sent.
+When the operator sets `CHIT_WEBHOOK_SECRET`, `X-Chit-Signature` is the
+lowercase hex HMAC-SHA256 of the exact request body, keyed with the secret,
+with no prefix. Verify it over the raw bytes before you parse the body.
+Without a secret, chitd does not send the header.
 
 ### Delivery
 
 - `CHIT_WEBHOOK_WORKER_COUNT` workers (default `4`) take events from a queue
-  of `CHIT_WEBHOOK_QUEUE_SIZE` (default `1024`). If the queue is full, the
-  event is dropped and a warning logged.
+  of `CHIT_WEBHOOK_QUEUE_SIZE` (default `1024`). If the queue is full, chitd
+  drops the event and logs a warning.
 - Each request times out after `CHIT_WEBHOOK_TIMEOUT_SEC` seconds (default
   `10`). Any 2xx is success.
-- Delivery is **best-effort with no retry**: a network error or a status of
-  300 or above is logged and the event is gone. Use the audit log as the
+- Delivery is **best-effort with no retry**. chitd logs a network error or a
+  status of 300 or above, and the event is gone. Use the audit log as the
   durable record.

@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
 
+	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/config"
+	"github.com/infrashift/chit/clients/chit-tui/internal/errlog"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
 
@@ -24,6 +27,7 @@ type options struct {
 // parseFlags parses argv. It takes the output writer and arg slice so the
 // parsing is testable without touching the real command line.
 func parseFlags(out io.Writer, args []string) (options, error) {
+	assert.That(out != nil, "parseFlags: nil output")
 	var opts options
 
 	fs := flag.NewFlagSet("chit-tui", flag.ContinueOnError)
@@ -37,36 +41,54 @@ func parseFlags(out io.Writer, args []string) (options, error) {
 		"list the available themes and exit")
 
 	fs.Usage = func() {
-		_, _ = fmt.Fprintf(out, "Usage: chit-tui [flags]\n\nFlags:\n")
+		// The text is built in memory and written once, so one error check
+		// covers it. PrintDefaults writes to the flag set's output, which is
+		// pointed at the builder for the call.
+		var b strings.Builder
+		fmt.Fprintf(&b, "Usage: chit-tui [flags]\n\nFlags:\n")
+		fs.SetOutput(&b)
 		fs.PrintDefaults()
-		_, _ = fmt.Fprintf(out, "\nConfiguration is read from %s.\n", config.FilePath())
+		fs.SetOutput(out)
+		fmt.Fprintf(&b, "\nConfiguration is read from %s.\n", config.FilePath())
+		_, err := io.WriteString(out, b.String())
+		errlog.Debug(err, "write usage")
 	}
 
 	if err := fs.Parse(args); err != nil {
 		return opts, err
 	}
+	assert.That(fs.Parsed(), "parseFlags: flags not parsed")
 	return opts, nil
 }
 
 // listThemes writes the available theme names, marking which are bundled.
 func listThemes(out io.Writer) {
+	assert.That(out != nil, "listThemes: nil output")
 	bundled := make(map[string]bool)
 	for _, n := range theme.BuiltinNames() {
 		bundled[n] = true
 	}
+	assert.That(len(bundled) > 0, "listThemes: no bundled themes")
 
+	var b strings.Builder
 	for _, name := range theme.ListAvailable(config.ThemesDir()) {
 		if bundled[name] {
-			_, _ = fmt.Fprintf(out, "%s\n", name)
+			fmt.Fprintf(&b, "%s\n", name)
 			continue
 		}
-		_, _ = fmt.Fprintf(out, "%s (local)\n", name)
+		fmt.Fprintf(&b, "%s (local)\n", name)
 	}
+	_, err := io.WriteString(out, b.String())
+	errlog.Debug(err, "write theme list")
 }
 
 // resolveTheme turns the command line and configuration into a theme.
-func resolveTheme(opts options, cfg *config.Config) (theme.Theme, []string, error) {
-	req, err := themeRequest(opts, cfg)
+// system answers whether the terminal is dark when the appearance is
+// "system".
+func resolveTheme(opts options, cfg *config.Config, system theme.DarkDetector) (theme.Theme, []string, error) {
+	assert.That(cfg != nil, "resolveTheme: nil config")
+	assert.That(system != nil, "resolveTheme: nil dark detector")
+	req, err := themeRequest(opts, cfg, system)
 	if err != nil {
 		return theme.Theme{}, nil, err
 	}
@@ -75,15 +97,21 @@ func resolveTheme(opts options, cfg *config.Config) (theme.Theme, []string, erro
 
 // themeSetting is the config key a theme picked in the client is saved under,
 // which depends on the appearance in effect.
-func themeSetting(opts options, cfg *config.Config) string {
-	req, err := themeRequest(opts, cfg)
+func themeSetting(opts options, cfg *config.Config, system theme.DarkDetector) string {
+	assert.That(cfg != nil, "themeSetting: nil config")
+	assert.That(system != nil, "themeSetting: nil dark detector")
+	req, err := themeRequest(opts, cfg, system)
 	if err != nil {
 		return "theme"
 	}
-	return cfg.ThemeSettingKey(req.Dark())
+	key := cfg.ThemeSettingKey(req.Dark())
+	assert.That(key == "theme" || strings.HasPrefix(key, "theme_"), "themeSetting: not a theme setting key")
+	return key
 }
 
-func themeRequest(opts options, cfg *config.Config) (theme.Request, error) {
+func themeRequest(opts options, cfg *config.Config, system theme.DarkDetector) (theme.Request, error) {
+	assert.That(cfg != nil, "themeRequest: nil config")
+	assert.That(system != nil, "themeRequest: nil dark detector")
 	flagAppearance, err := theme.ParseAppearance(opts.appearance)
 	if err != nil {
 		return theme.Request{}, err
@@ -91,7 +119,10 @@ func themeRequest(opts options, cfg *config.Config) (theme.Request, error) {
 
 	// A bad appearance in the config file is a warning, not a failure, so it
 	// is parsed leniently here and simply left unset when invalid.
-	cfgAppearance, _ := theme.ParseAppearance(cfg.Appearance)
+	cfgAppearance, err := theme.ParseAppearance(cfg.Appearance)
+	if err != nil {
+		cfgAppearance = theme.AppearanceUnset
+	}
 
 	return theme.Request{
 		FlagTheme:        opts.theme,
@@ -101,8 +132,25 @@ func themeRequest(opts options, cfg *config.Config) (theme.Request, error) {
 		FlagAppearance:   flagAppearance,
 		ConfigAppearance: cfgAppearance,
 		ThemesDir:        config.ThemesDir(),
-		SystemIsDark:     detectSystemDark,
+		System:           system,
 	}, nil
+}
+
+// terminalBackground is the theme.DarkDetector for the real terminal. main
+// makes one and hands it to every theme lookup, so the terminal is asked at
+// most once: both the theme and where a picked theme is saved depend on the
+// answer, and the two must agree.
+type terminalBackground struct {
+	once sync.Once
+	dark bool
+}
+
+// IsDark reports whether the terminal has a dark background. The first call
+// asks the terminal; later calls return the same answer.
+func (b *terminalBackground) IsDark() bool {
+	assert.That(b != nil, "terminalBackground.IsDark: nil detector")
+	b.once.Do(func() { b.dark = detectSystemDark() })
+	return b.dark
 }
 
 // detectSystemDark asks the terminal whether it has a dark background.
@@ -111,12 +159,9 @@ func themeRequest(opts options, cfg *config.Config) (theme.Request, error) {
 // escape sequence and its reply would otherwise arrive as input, which is the
 // same class of leakage termResponseRe exists to filter. When stdin or stdout
 // is not a terminal there is nobody to ask, and dark is the safer assumption.
-//
-// It asks once: both the theme and where a picked theme is saved depend on
-// the answer.
-var detectSystemDark = sync.OnceValue(func() bool {
+func detectSystemDark() bool {
 	if !isatty.IsTerminal(os.Stdin.Fd()) || !isatty.IsTerminal(os.Stdout.Fd()) {
 		return true
 	}
 	return lipgloss.HasDarkBackground()
-})
+}

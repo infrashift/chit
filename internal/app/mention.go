@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"log/slog"
+	"slices"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 	"github.com/infrashift/chit/internal/pubsub"
 )
@@ -17,6 +19,8 @@ const maxMentionNames = 50
 // It handles @all/@channel by collecting all channel members.
 // Self-mentions and non-channel-members are filtered out.
 func (a *App) processMentions(ctx context.Context, post *model.Post) ([]string, error) {
+	assert.That(post != nil, "App.processMentions: nil post")
+	assert.That(a.Store != nil, "App.processMentions: nil store")
 	usernames := model.ParseMentions(post.Content)
 	if len(usernames) == 0 {
 		return nil, nil
@@ -31,6 +35,7 @@ func (a *App) processMentions(ctx context.Context, post *model.Post) ([]string, 
 			individual = append(individual, u)
 		}
 	}
+	assert.That(len(individual) <= maxMentionNames, "App.processMentions: more names than maxMentionNames")
 
 	mentioned := make(map[string]struct{})
 	if broadcastAll {
@@ -61,6 +66,8 @@ func (a *App) processMentions(ctx context.Context, post *model.Post) ([]string, 
 	for id := range mentioned {
 		result = append(result, id)
 	}
+	assert.That(len(result) == len(mentioned), "App.processMentions: result lost an id")
+	assert.That(!slices.Contains(result, post.UserID), "App.processMentions: author mentions themselves")
 	slog.Debug("processMentions: resolved mentions",
 		"count", len(result), "channel_id", post.ChannelID, "post_user_id", post.UserID)
 	return result, nil
@@ -70,6 +77,9 @@ func (a *App) processMentions(ctx context.Context, post *model.Post) ([]string, 
 // table rather than one per user, and sends each user a targeted WebSocket
 // event.
 func (a *App) notifyMentionedUsers(ctx context.Context, post *model.Post, userIDs []string) {
+	assert.That(post != nil && post.ID != "", "App.notifyMentionedUsers: post is not saved")
+	assert.That(len(userIDs) > 0, "App.notifyMentionedUsers: no users to notify")
+	assert.That(a.Store != nil, "App.notifyMentionedUsers: nil store")
 	if err := a.Store.Channel().IncrementMentionCounts(ctx, post.ChannelID, userIDs); err != nil {
 		slog.Warn("notifyMentionedUsers: failed to increment channel mention counts",
 			"channel_id", post.ChannelID, "error", err)
@@ -84,6 +94,7 @@ func (a *App) notifyMentionedUsers(ctx context.Context, post *model.Post, userID
 	}
 
 	for _, userID := range userIDs {
+		assert.That(userID != post.UserID, "App.notifyMentionedUsers: author notified of their own post")
 		a.publishEvent(ctx, &model.WebSocketEvent{
 			Event: model.WebSocketEventMentioned,
 			Data: map[string]any{

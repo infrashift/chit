@@ -6,9 +6,9 @@ description: How to install Chit TUI from source.
 ## Prerequisites
 
 - **Go 1.26.10+** — [Install Go](https://go.dev/doc/install)
-- **A Chit server** — A running instance of [Chit](https://github.com/infrashift/chit)
+- **A Chit server** — A live instance of [Chit](https://github.com/infrashift/chit)
 - **An account on that server** — You sign in from the TUI's login screen
-  (or supply a token with `CHIT_SESSION_TOKEN`)
+  (or give a token with `CHIT_SESSION_TOKEN`)
 
 ## Build from Source
 
@@ -25,7 +25,7 @@ The binary is output to `bin/chit-tui`.
 
 ## Verify the Build
 
-Run the full quality suite to confirm everything is working:
+Run the full quality suite to verify that all parts work:
 
 ```bash
 make all   # lint + test + build
@@ -36,7 +36,7 @@ make all   # lint + test + build
 
 ## Install to PATH
 
-Copy the binary somewhere in your `$PATH`:
+Copy the binary to a directory in the `$PATH`:
 
 ```bash
 cp bin/chit-tui ~/.local/bin/

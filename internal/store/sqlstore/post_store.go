@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 )
 
@@ -16,10 +17,15 @@ type SqlPostStore struct {
 }
 
 func (s *SqlPostStore) Save(ctx context.Context, post *model.Post) (*model.Post, error) {
+	assert.That(post != nil, "SqlPostStore.Save: nil post")
+	assert.That(s.sqlStore != nil, "SqlPostStore.Save: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlPostStore.Save: nil pool")
 	post.PreSave()
 	if err := post.IsValid(); err != nil {
 		return nil, err
 	}
+	assert.That(post.ID != "" && post.UpdateAt > 0, "SqlPostStore.Save: PreSave left no id or time")
+	assert.That(post.Props != nil, "SqlPostStore.Save: PreSave left nil props")
 
 	query := `INSERT INTO posts (id, channel_id, user_id, root_id, content, type, props, hashtags, is_pinned, edit_at, create_at, update_at, delete_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
@@ -33,7 +39,7 @@ func (s *SqlPostStore) Save(ctx context.Context, post *model.Post) (*model.Post,
 	if err != nil {
 		return nil, fmt.Errorf("save post: begin: %w", err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer rollback(ctx, tx)
 
 	_, err = tx.Exec(ctx, query,
 		post.ID, post.ChannelID, post.UserID, rootID, post.Content,
@@ -58,9 +64,11 @@ func (s *SqlPostStore) Save(ctx context.Context, post *model.Post) (*model.Post,
 // between the app's checks and this statement is not attached: the count
 // then falls short and the post is not saved either (409).
 func attachFiles(ctx context.Context, tx pgx.Tx, post *model.Post) error {
+	assert.That(tx != nil && post != nil, "attachFiles: nil transaction or post")
 	if len(post.FileIDs) == 0 {
 		return nil
 	}
+	assert.That(post.ID != "" && post.ChannelID != "", "attachFiles: post has no id or channel")
 	tag, err := tx.Exec(ctx,
 		`INSERT INTO post_files (post_id, file_id, position)
 		 SELECT $1, f.id, ids.ord - 1
@@ -84,26 +92,31 @@ func attachFiles(ctx context.Context, tx pgx.Tx, post *model.Post) error {
 }
 
 // postColumns is the one SELECT list for posts, and scanPost its one reader.
-// root_id is nullable and comes back as ”. Prefix it with postsAlias when the
-// query joins posts under an alias.
-var postColumns = `id, channel_id, user_id, COALESCE(root_id::text, ''), content, type, props,
+// root_id is nullable and comes back as ”. Use postColumnsAs when the query
+// joins posts under an alias.
+func postColumns() string {
+	return `id, channel_id, user_id, COALESCE(root_id::text, ''), content, type, props,
 	hashtags, is_pinned, edit_at, create_at, update_at, delete_at, ` + postFileIDs("posts")
+}
 
 // postFileIDs reads the IDs of the files attached to the post alias, in
 // order.
 func postFileIDs(alias string) string {
+	assert.That(alias != "", "postFileIDs: empty alias")
 	return `COALESCE((SELECT array_agg(pf.file_id::text ORDER BY pf.position) FROM post_files pf WHERE pf.post_id = ` +
 		alias + `.id), '{}')`
 }
 
 // postColumnsAs is postColumns with every column qualified by alias.
 func postColumnsAs(alias string) string {
+	assert.That(alias != "", "postColumnsAs: empty alias")
 	return alias + `.id, ` + alias + `.channel_id, ` + alias + `.user_id, COALESCE(` + alias + `.root_id::text, ''), ` +
 		alias + `.content, ` + alias + `.type, ` + alias + `.props, ` + alias + `.hashtags, ` + alias + `.is_pinned, ` +
 		alias + `.edit_at, ` + alias + `.create_at, ` + alias + `.update_at, ` + alias + `.delete_at, ` + postFileIDs(alias)
 }
 
 func scanPost(row pgx.Row) (*model.Post, error) {
+	assert.That(row != nil, "scanPost: nil row")
 	p := &model.Post{}
 	err := row.Scan(
 		&p.ID, &p.ChannelID, &p.UserID, &p.RootID, &p.Content,
@@ -117,11 +130,13 @@ func scanPost(row pgx.Row) (*model.Post, error) {
 }
 
 func (s *SqlPostStore) Get(ctx context.Context, id string) (*model.Post, error) {
+	assert.That(s.sqlStore != nil, "SqlPostStore.Get: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlPostStore.Get: nil pool")
 	// A non-UUID matches nothing; sent as-is it fails the uuid cast as a 500.
 	if !model.IsValidID(id) {
 		return nil, model.NewNotFoundError("SqlPostStore.Get", id)
 	}
-	p, err := scanPost(s.sqlStore.pool.QueryRow(ctx, `SELECT `+postColumns+` FROM posts WHERE id = $1 AND delete_at = 0`, id))
+	p, err := scanPost(s.sqlStore.pool.QueryRow(ctx, `SELECT `+postColumns()+` FROM posts WHERE id = $1 AND delete_at = 0`, id))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, model.NewNotFoundError("SqlPostStore.Get", id)
@@ -135,14 +150,17 @@ func (s *SqlPostStore) Get(ctx context.Context, id string) (*model.Post, error) 
 // GetByIDs returns the live posts among ids, in no particular order. Missing
 // and deleted posts are skipped.
 func (s *SqlPostStore) GetByIDs(ctx context.Context, ids []string) ([]*model.Post, error) {
+	assert.That(s.sqlStore != nil, "SqlPostStore.GetByIDs: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlPostStore.GetByIDs: nil pool")
 	// A non-UUID names no post, and in the array it would fail the whole
 	// query's cast.
-	ids = slices.DeleteFunc(slices.Clone(ids), func(id string) bool { return !model.IsValidID(id) })
-	if len(ids) == 0 {
+	valid := slices.DeleteFunc(slices.Clone(ids), func(id string) bool { return !model.IsValidID(id) })
+	assert.That(len(valid) <= len(ids), "SqlPostStore.GetByIDs: filtering added ids")
+	if len(valid) == 0 {
 		return nil, nil
 	}
 	rows, err := s.sqlStore.pool.Query(ctx,
-		`SELECT `+postColumns+` FROM posts WHERE id = ANY($1::uuid[]) AND delete_at = 0`, ids)
+		`SELECT `+postColumns()+` FROM posts WHERE id = ANY($1::uuid[]) AND delete_at = 0`, valid)
 	if err != nil {
 		return nil, fmt.Errorf("get posts by ids: %w", err)
 	}
@@ -151,8 +169,12 @@ func (s *SqlPostStore) GetByIDs(ctx context.Context, ids []string) ([]*model.Pos
 }
 
 func (s *SqlPostStore) Update(ctx context.Context, post *model.Post) (*model.Post, error) {
+	assert.That(post != nil, "SqlPostStore.Update: nil post")
+	assert.That(s.sqlStore != nil, "SqlPostStore.Update: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlPostStore.Update: nil pool")
 	post.PreUpdate()
 	post.EditAt = post.UpdateAt
+	assert.That(post.EditAt > 0, "SqlPostStore.Update: PreUpdate left no time")
 
 	query := `UPDATE posts SET content = $1, props = $2, hashtags = $3, edit_at = $4, update_at = $5
 		WHERE id = $6 AND delete_at = 0`
@@ -174,6 +196,9 @@ func (s *SqlPostStore) Update(ctx context.Context, post *model.Post) (*model.Pos
 // files and soft-deletes them: a deleted message's images stop being served
 // at once, and the sweep removes their objects later.
 func (s *SqlPostStore) Delete(ctx context.Context, id string, deleteAt int64) error {
+	assert.That(s.sqlStore != nil, "SqlPostStore.Delete: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlPostStore.Delete: nil pool")
+	assert.That(deleteAt > 0, "SqlPostStore.Delete: deleteAt is not a time")
 	if !model.IsValidID(id) {
 		return model.NewNotFoundError("SqlPostStore.Delete", id)
 	}
@@ -181,7 +206,7 @@ func (s *SqlPostStore) Delete(ctx context.Context, id string, deleteAt int64) er
 	if err != nil {
 		return fmt.Errorf("delete post: begin: %w", err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer rollback(ctx, tx)
 
 	query := `UPDATE posts SET delete_at = $1, update_at = $1 WHERE id = $2 AND delete_at = 0`
 	tag, err := tx.Exec(ctx, query, deleteAt, id)
@@ -204,6 +229,8 @@ func (s *SqlPostStore) Delete(ctx context.Context, id string, deleteAt int64) er
 }
 
 func (s *SqlPostStore) GetPostsForChannel(ctx context.Context, channelID string, opts model.GetPostsOptions) (*model.PostList, error) {
+	assert.That(s.sqlStore != nil, "SqlPostStore.GetPostsForChannel: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlPostStore.GetPostsForChannel: nil pool")
 	perPage := opts.PerPage
 	if perPage <= 0 {
 		perPage = 60
@@ -219,8 +246,9 @@ func (s *SqlPostStore) GetPostsForChannel(ctx context.Context, channelID string,
 	if opts.Since > 0 {
 		order = "ASC"
 	}
+	assert.That(page >= 0 && perPage >= 1, "SqlPostStore.GetPostsForChannel: pagination not clamped")
 
-	query := `SELECT ` + postColumns + `
+	query := `SELECT ` + postColumns() + `
 		FROM posts
 		WHERE channel_id = $1 AND delete_at = 0 AND ($2::bigint = 0 OR create_at > $2)
 		ORDER BY create_at ` + order + `
@@ -241,7 +269,9 @@ func (s *SqlPostStore) GetPostsForChannel(ctx context.Context, channelID string,
 }
 
 func (s *SqlPostStore) GetPostsForThread(ctx context.Context, rootID string) (*model.PostList, error) {
-	query := `SELECT ` + postColumns + `
+	assert.That(s.sqlStore != nil, "SqlPostStore.GetPostsForThread: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlPostStore.GetPostsForThread: nil pool")
+	query := `SELECT ` + postColumns() + `
 		FROM posts
 		WHERE (id = $1 OR root_id = $1) AND delete_at = 0
 		ORDER BY create_at ASC`
@@ -261,7 +291,9 @@ func (s *SqlPostStore) GetPostsForThread(ctx context.Context, rootID string) (*m
 }
 
 func (s *SqlPostStore) GetPinnedPosts(ctx context.Context, channelID string) (*model.PostList, error) {
-	query := `SELECT ` + postColumns + `
+	assert.That(s.sqlStore != nil, "SqlPostStore.GetPinnedPosts: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlPostStore.GetPinnedPosts: nil pool")
+	query := `SELECT ` + postColumns() + `
 		FROM posts
 		WHERE channel_id = $1 AND is_pinned = TRUE AND delete_at = 0
 		ORDER BY create_at DESC`
@@ -281,6 +313,8 @@ func (s *SqlPostStore) GetPinnedPosts(ctx context.Context, channelID string) (*m
 }
 
 func (s *SqlPostStore) SetPinned(ctx context.Context, id string, pinned bool) error {
+	assert.That(s.sqlStore != nil, "SqlPostStore.SetPinned: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlPostStore.SetPinned: nil pool")
 	query := `UPDATE posts SET is_pinned = $1, update_at = $2 WHERE id = $3 AND delete_at = 0`
 	tag, err := s.sqlStore.pool.Exec(ctx, query, pinned, model.GetMillis(), id)
 	if err != nil {
@@ -296,6 +330,8 @@ func (s *SqlPostStore) SetPinned(ctx context.Context, id string, pinned bool) er
 // remove them from derived indexes) after the cursor in (update_at, id) order,
 // updated no later than until.
 func (s *SqlPostStore) GetPostsSince(ctx context.Context, after model.PostCursor, until int64, limit int) ([]*model.Post, error) {
+	assert.That(s.sqlStore != nil, "SqlPostStore.GetPostsSince: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlPostStore.GetPostsSince: nil pool")
 	if limit <= 0 {
 		limit = 100
 	}
@@ -303,8 +339,10 @@ func (s *SqlPostStore) GetPostsSince(ctx context.Context, after model.PostCursor
 	if afterID == "" {
 		afterID = "00000000-0000-0000-0000-000000000000"
 	}
+	assert.That(limit > 0, "SqlPostStore.GetPostsSince: limit not defaulted")
+	assert.That(afterID != "", "SqlPostStore.GetPostsSince: empty cursor id")
 
-	query := `SELECT ` + postColumns + `
+	query := `SELECT ` + postColumns() + `
 		FROM posts
 		WHERE (update_at, id) > ($1, $2::uuid) AND update_at <= $3
 		ORDER BY update_at ASC, id ASC
@@ -324,14 +362,19 @@ func (s *SqlPostStore) GetPostsSince(ctx context.Context, after model.PostCursor
 // so a page is never short because hits outside the scope were dropped after
 // the fact. An empty ChannelIDs matches nothing.
 func (s *SqlPostStore) Search(ctx context.Context, q *model.PostSearch) ([]*model.Post, error) {
+	assert.That(q != nil, "SqlPostStore.Search: nil query")
+	assert.That(s.sqlStore != nil, "SqlPostStore.Search: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlPostStore.Search: nil pool")
 	if len(q.ChannelIDs) == 0 {
 		return nil, nil
 	}
+	assert.That(q.Page >= 0, "SqlPostStore.Search: negative page")
+	assert.That(q.PerPage >= 1, "SqlPostStore.Search: per page below 1")
 	pattern := ""
 	if q.Terms != "" {
 		pattern = likePattern(q.Terms)
 	}
-	query := `SELECT ` + postColumns + `
+	query := `SELECT ` + postColumns() + `
 		FROM posts
 		WHERE delete_at = 0
 			AND channel_id = ANY($1::uuid[])
@@ -359,6 +402,7 @@ func (s *SqlPostStore) Search(ctx context.Context, q *model.PostSearch) ([]*mode
 }
 
 func scanPosts(rows pgx.Rows) ([]*model.Post, error) {
+	assert.That(rows != nil, "scanPosts: nil rows")
 	var posts []*model.Post
 	for rows.Next() {
 		p, err := scanPost(rows)

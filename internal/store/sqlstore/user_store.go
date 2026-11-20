@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 )
 
@@ -15,10 +16,14 @@ type SqlUserStore struct {
 }
 
 func (s *SqlUserStore) Save(ctx context.Context, user *model.User) (*model.User, error) {
+	assert.That(user != nil, "SqlUserStore.Save: nil user")
+	assert.That(s.sqlStore != nil, "SqlUserStore.Save: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlUserStore.Save: nil pool")
 	user.PreSave()
 	if err := user.IsValid(); err != nil {
 		return nil, err
 	}
+	assert.That(user.ID != "" && user.UpdateAt > 0, "SqlUserStore.Save: PreSave left no id or time")
 
 	// NULLIF on all three of the OPTIONAL identity columns: each is UNIQUE, and
 	// Postgres allows many NULLs but only one ''. oauth_client_id is NULL for a
@@ -42,14 +47,18 @@ func (s *SqlUserStore) Save(ctx context.Context, user *model.User) (*model.User,
 }
 
 func (s *SqlUserStore) Get(ctx context.Context, id string) (*model.User, error) {
+	assert.That(s.sqlStore != nil, "SqlUserStore.Get: nil store")
 	return s.getBy(ctx, "id", id)
 }
 
 func (s *SqlUserStore) GetByKratosID(ctx context.Context, kratosID string) (*model.User, error) {
+	assert.That(s.sqlStore != nil, "SqlUserStore.GetByKratosID: nil store")
 	return s.getBy(ctx, "kratos_id", kratosID)
 }
 
 func (s *SqlUserStore) KratosIDDeactivated(ctx context.Context, kratosID string) (bool, error) {
+	assert.That(s.sqlStore != nil, "SqlUserStore.KratosIDDeactivated: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlUserStore.KratosIDDeactivated: nil pool")
 	if !model.IsValidID(kratosID) {
 		return false, nil
 	}
@@ -63,6 +72,7 @@ func (s *SqlUserStore) KratosIDDeactivated(ctx context.Context, kratosID string)
 }
 
 func (s *SqlUserStore) GetByUsername(ctx context.Context, username string) (*model.User, error) {
+	assert.That(s.sqlStore != nil, "SqlUserStore.GetByUsername: nil store")
 	return s.getBy(ctx, "username", username)
 }
 
@@ -70,6 +80,7 @@ func (s *SqlUserStore) GetByUsername(ctx context.Context, username string) (*mod
 // Unlike GetByKratosID there is no just-in-time provisioning fallback: an
 // unrecognised client must fail authentication rather than mint a user.
 func (s *SqlUserStore) GetByOAuthClientID(ctx context.Context, clientID string) (*model.User, error) {
+	assert.That(s.sqlStore != nil, "SqlUserStore.GetByOAuthClientID: nil store")
 	if clientID == "" {
 		return nil, model.NewNotFoundError("SqlUserStore.GetByOAuthClientID", clientID)
 	}
@@ -85,6 +96,7 @@ const userColumns = `id, COALESCE(kratos_id::text, ''), username, display_name, 
 	roles, actor_type, COALESCE(oauth_client_id, ''), create_at, update_at, delete_at`
 
 func scanUser(row pgx.Row) (*model.User, error) {
+	assert.That(row != nil, "scanUser: nil row")
 	u := &model.User{}
 	err := row.Scan(
 		&u.ID, &u.KratosID, &u.Username, &u.DisplayName, &u.Email,
@@ -95,6 +107,9 @@ func scanUser(row pgx.Row) (*model.User, error) {
 }
 
 func (s *SqlUserStore) getBy(ctx context.Context, column, value string) (*model.User, error) {
+	assert.That(s.sqlStore != nil, "SqlUserStore.getBy: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlUserStore.getBy: nil pool")
+	assert.That(column == "id" || column == "kratos_id" || column == "username" || column == "oauth_client_id", "SqlUserStore.getBy: column is not a user lookup column")
 	// id and kratos_id are uuid columns. A value that is not a UUID can match
 	// nothing, and sent as-is Postgres rejects the cast (SQLSTATE 22P02),
 	// which surfaced as a 500 for GET /users/not-a-uuid.
@@ -114,7 +129,11 @@ func (s *SqlUserStore) getBy(ctx context.Context, column, value string) (*model.
 }
 
 func (s *SqlUserStore) Update(ctx context.Context, user *model.User) (*model.User, error) {
+	assert.That(user != nil, "SqlUserStore.Update: nil user")
+	assert.That(s.sqlStore != nil, "SqlUserStore.Update: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlUserStore.Update: nil pool")
 	user.PreUpdate()
+	assert.That(user.UpdateAt > 0, "SqlUserStore.Update: PreUpdate left no time")
 
 	query := `UPDATE users SET username = $1, display_name = $2, email = NULLIF($3, ''), roles = $4, actor_type = $5, update_at = $6
 		WHERE id = $7 AND delete_at = 0`
@@ -138,6 +157,10 @@ func (s *SqlUserStore) Update(ctx context.Context, user *model.User) (*model.Use
 // but which users match still answered "does anyone's address contain X",
 // one guess at a time, which is enough to recover an address.
 func (s *SqlUserStore) Search(ctx context.Context, term string, page, perPage int) ([]*model.User, error) {
+	assert.That(s.sqlStore != nil, "SqlUserStore.Search: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlUserStore.Search: nil pool")
+	assert.That(page >= 0, "SqlUserStore.Search: negative page")
+	assert.That(perPage >= 1, "SqlUserStore.Search: per page below 1")
 	query := `SELECT ` + userColumns + `
 		FROM users
 		WHERE delete_at = 0 AND (username ILIKE $1 ESCAPE '\' OR display_name ILIKE $1 ESCAPE '\')
@@ -154,6 +177,8 @@ func (s *SqlUserStore) Search(ctx context.Context, term string, page, perPage in
 }
 
 func (s *SqlUserStore) GetByIDs(ctx context.Context, ids []string) ([]*model.User, error) {
+	assert.That(s.sqlStore != nil, "SqlUserStore.GetByIDs: nil store")
+	assert.That(s.sqlStore.pool != nil, "SqlUserStore.GetByIDs: nil pool")
 	query := `SELECT ` + userColumns + ` FROM users WHERE id = ANY($1) AND delete_at = 0`
 
 	rows, err := s.sqlStore.pool.Query(ctx, query, ids)
@@ -166,6 +191,7 @@ func (s *SqlUserStore) GetByIDs(ctx context.Context, ids []string) ([]*model.Use
 }
 
 func scanUsers(rows pgx.Rows) ([]*model.User, error) {
+	assert.That(rows != nil, "scanUsers: nil rows")
 	var users []*model.User
 	for rows.Next() {
 		u, err := scanUser(rows)

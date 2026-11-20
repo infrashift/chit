@@ -107,7 +107,7 @@ func TestTagPicker_CursorNavigation(t *testing.T) {
 		t.Fatal("expected command")
 	}
 	msg := cmd()
-	toggled := msg.(tagpicker.TagToggledMsg)
+	toggled := mustMsg[tagpicker.TagToggledMsg](t, msg)
 	if toggled.TagID != "t2" {
 		t.Errorf("expected t2, got %q", toggled.TagID)
 	}
@@ -180,7 +180,7 @@ func TestTagPicker_CursorUpAtTop(t *testing.T) {
 		t.Fatal("expected command")
 	}
 	msg := cmd()
-	toggled := msg.(tagpicker.TagToggledMsg)
+	toggled := mustMsg[tagpicker.TagToggledMsg](t, msg)
 	if toggled.TagID != "t1" {
 		t.Errorf("expected t1 (first), got %q", toggled.TagID)
 	}
@@ -200,7 +200,7 @@ func TestTagPicker_CursorDownAtBottom(t *testing.T) {
 		t.Fatal("expected command")
 	}
 	msg := cmd()
-	toggled := msg.(tagpicker.TagToggledMsg)
+	toggled := mustMsg[tagpicker.TagToggledMsg](t, msg)
 	if toggled.TagID != "t3" {
 		t.Errorf("expected t3 (last), got %q", toggled.TagID)
 	}
@@ -249,7 +249,7 @@ func TestTagPicker_ToggleOffAppliedTag(t *testing.T) {
 		t.Fatal("expected command")
 	}
 	msg := cmd()
-	toggled := msg.(tagpicker.TagToggledMsg)
+	toggled := mustMsg[tagpicker.TagToggledMsg](t, msg)
 	if toggled.Applied {
 		t.Error("expected Applied=false for toggling off")
 	}
@@ -269,7 +269,7 @@ func TestTagPicker_CtrlTMakesTheNewTagPrivate(t *testing.T) {
 			m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 		}
 		m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
-		return m, cmd().(tagpicker.TagCreateRequestMsg)
+		return m, mustMsg[tagpicker.TagCreateRequestMsg](t, cmd())
 	}
 
 	m.Open("p1", testTags(), nil)
@@ -304,4 +304,14 @@ func TestTagPicker_MarksPrivateTags(t *testing.T) {
 	if !strings.Contains(view, "#mine (private)") || strings.Contains(view, "#ours (private)") {
 		t.Errorf("view does not mark only the private tag:\n%s", view)
 	}
+}
+
+// mustMsg returns msg as a T, failing the test when it is something else.
+func mustMsg[T any](t *testing.T, msg tea.Msg) T {
+	t.Helper()
+	got, ok := msg.(T)
+	if !ok {
+		t.Fatalf("msg = %T, want %T", msg, got)
+	}
+	return got
 }

@@ -1,6 +1,10 @@
 package model
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/infrashift/chit/internal/assert"
+)
 
 const PostMaxContentSize = 65535
 
@@ -24,6 +28,7 @@ type Post struct {
 }
 
 func (p *Post) IsValid() *AppError {
+	assert.That(p != nil, "Post.IsValid: nil post")
 	if !IsValidID(p.ID) {
 		return NewAppError("Post.IsValid", "invalid post id", "", http.StatusBadRequest)
 	}
@@ -69,10 +74,14 @@ func (p *Post) PreSave() {
 	if p.Props == nil {
 		p.Props = make(map[string]any)
 	}
+	assert.That(p.ID != "" && p.CreateAt != 0, "Post.PreSave: post left without id or create_at")
+	assert.That(p.UpdateAt == now && p.Props != nil, "Post.PreSave: update_at or props not set")
 }
 
 func (p *Post) PreUpdate() {
+	assert.That(p != nil, "Post.PreUpdate: nil post")
 	p.UpdateAt = GetMillis()
+	assert.That(p.UpdateAt > 0, "Post.PreUpdate: update_at not set")
 }
 
 // PostCursor is a position in update order: the (update_at, id) of the last

@@ -7,9 +7,13 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/infrashift/chit/internal/assert"
 )
 
 func (s *ChitMCPServer) registerResources() {
+	assert.That(s.server != nil, "ChitMCPServer.registerResources: nil MCP server")
+	assert.That(s.client != nil, "ChitMCPServer.registerResources: resources registered without a chitd client")
 	// Static resource: agent's own identity
 	s.server.AddResource(&mcp.Resource{
 		URI:         "chit://agent/identity",
@@ -52,11 +56,19 @@ func (s *ChitMCPServer) registerResources() {
 }
 
 func (s *ChitMCPServer) handleAgentIdentity(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	assert.That(ctx != nil, "ChitMCPServer.handleAgentIdentity: nil context")
+	assert.That(s.client != nil, "ChitMCPServer.handleAgentIdentity: nil chitd client")
+	assert.That(req != nil && req.Params != nil, "ChitMCPServer.handleAgentIdentity: nil request")
+	assert.That(strings.HasPrefix(req.Params.URI, "chit://agent/identity"), "ChitMCPServer.handleAgentIdentity: URI outside the registered template")
 	user, err := s.client.Me(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get agent user: %w", err)
 	}
-	data, _ := json.Marshal(user)
+	assert.That(user != nil, "ChitMCPServer.handleAgentIdentity: nil user without an error")
+	data, err := json.Marshal(user)
+	if err != nil {
+		return nil, fmt.Errorf("marshal agent user: %w", err)
+	}
 	return &mcp.ReadResourceResult{
 		Contents: []*mcp.ResourceContents{
 			{URI: req.Params.URI, MIMEType: "application/json", Text: string(data)},
@@ -65,6 +77,10 @@ func (s *ChitMCPServer) handleAgentIdentity(ctx context.Context, req *mcp.ReadRe
 }
 
 func (s *ChitMCPServer) handleChannelResource(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	assert.That(ctx != nil, "ChitMCPServer.handleChannelResource: nil context")
+	assert.That(s.client != nil, "ChitMCPServer.handleChannelResource: nil chitd client")
+	assert.That(req != nil && req.Params != nil, "ChitMCPServer.handleChannelResource: nil request")
+	assert.That(strings.HasPrefix(req.Params.URI, "chit://channels/"), "ChitMCPServer.handleChannelResource: URI outside the registered template")
 	channelID := extractURIParam(req.Params.URI, "chit://channels/", "")
 	if channelID == "" {
 		return nil, fmt.Errorf("invalid channel URI: %s", req.Params.URI)
@@ -73,7 +89,11 @@ func (s *ChitMCPServer) handleChannelResource(ctx context.Context, req *mcp.Read
 	if err != nil {
 		return nil, fmt.Errorf("get channel: %w", err)
 	}
-	data, _ := json.Marshal(channel)
+	assert.That(channel != nil, "ChitMCPServer.handleChannelResource: nil channel without an error")
+	data, err := json.Marshal(channel)
+	if err != nil {
+		return nil, fmt.Errorf("marshal channel: %w", err)
+	}
 	return &mcp.ReadResourceResult{
 		Contents: []*mcp.ResourceContents{
 			{URI: req.Params.URI, MIMEType: "application/json", Text: string(data)},
@@ -82,6 +102,10 @@ func (s *ChitMCPServer) handleChannelResource(ctx context.Context, req *mcp.Read
 }
 
 func (s *ChitMCPServer) handleChannelRecentResource(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	assert.That(ctx != nil, "ChitMCPServer.handleChannelRecentResource: nil context")
+	assert.That(s.client != nil, "ChitMCPServer.handleChannelRecentResource: nil chitd client")
+	assert.That(req != nil && req.Params != nil, "ChitMCPServer.handleChannelRecentResource: nil request")
+	assert.That(strings.HasPrefix(req.Params.URI, "chit://channels/"), "ChitMCPServer.handleChannelRecentResource: URI outside the registered template")
 	// The URI has the form chit://channels/{channel_id}/recent.
 	channelID := extractURIParam(req.Params.URI, "chit://channels/", "/recent")
 	if channelID == "" {
@@ -91,7 +115,11 @@ func (s *ChitMCPServer) handleChannelRecentResource(ctx context.Context, req *mc
 	if err != nil {
 		return nil, fmt.Errorf("get channel posts: %w", err)
 	}
-	data, _ := json.Marshal(viewPostList(posts))
+	assert.That(posts != nil, "ChitMCPServer.handleChannelRecentResource: nil post list without an error")
+	data, err := json.Marshal(viewPostList(posts))
+	if err != nil {
+		return nil, fmt.Errorf("marshal channel posts: %w", err)
+	}
 	return &mcp.ReadResourceResult{
 		Contents: []*mcp.ResourceContents{
 			{URI: req.Params.URI, MIMEType: "application/json", Text: string(data)},
@@ -100,6 +128,10 @@ func (s *ChitMCPServer) handleChannelRecentResource(ctx context.Context, req *mc
 }
 
 func (s *ChitMCPServer) handleThreadResource(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	assert.That(ctx != nil, "ChitMCPServer.handleThreadResource: nil context")
+	assert.That(s.client != nil, "ChitMCPServer.handleThreadResource: nil chitd client")
+	assert.That(req != nil && req.Params != nil, "ChitMCPServer.handleThreadResource: nil request")
+	assert.That(strings.HasPrefix(req.Params.URI, "chit://threads/"), "ChitMCPServer.handleThreadResource: URI outside the registered template")
 	postID := extractURIParam(req.Params.URI, "chit://threads/", "")
 	if postID == "" {
 		return nil, fmt.Errorf("invalid thread URI: %s", req.Params.URI)
@@ -108,7 +140,10 @@ func (s *ChitMCPServer) handleThreadResource(ctx context.Context, req *mcp.ReadR
 	if err != nil {
 		return nil, fmt.Errorf("get thread: %w", err)
 	}
-	data, _ := json.Marshal(viewPosts(posts))
+	data, err := json.Marshal(viewPosts(posts))
+	if err != nil {
+		return nil, fmt.Errorf("marshal thread: %w", err)
+	}
 	return &mcp.ReadResourceResult{
 		Contents: []*mcp.ResourceContents{
 			{URI: req.Params.URI, MIMEType: "application/json", Text: string(data)},
@@ -117,6 +152,10 @@ func (s *ChitMCPServer) handleThreadResource(ctx context.Context, req *mcp.ReadR
 }
 
 func (s *ChitMCPServer) handleTeamChannelsResource(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	assert.That(ctx != nil, "ChitMCPServer.handleTeamChannelsResource: nil context")
+	assert.That(s.client != nil, "ChitMCPServer.handleTeamChannelsResource: nil chitd client")
+	assert.That(req != nil && req.Params != nil, "ChitMCPServer.handleTeamChannelsResource: nil request")
+	assert.That(strings.HasPrefix(req.Params.URI, "chit://teams/"), "ChitMCPServer.handleTeamChannelsResource: URI outside the registered template")
 	// The URI has the form chit://teams/{team_id}/channels.
 	teamID := extractURIParam(req.Params.URI, "chit://teams/", "/channels")
 	if teamID == "" {
@@ -126,7 +165,10 @@ func (s *ChitMCPServer) handleTeamChannelsResource(ctx context.Context, req *mcp
 	if err != nil {
 		return nil, fmt.Errorf("get team channels: %w", err)
 	}
-	data, _ := json.Marshal(channels)
+	data, err := json.Marshal(channels)
+	if err != nil {
+		return nil, fmt.Errorf("marshal team channels: %w", err)
+	}
 	return &mcp.ReadResourceResult{
 		Contents: []*mcp.ResourceContents{
 			{URI: req.Params.URI, MIMEType: "application/json", Text: string(data)},
@@ -137,6 +179,8 @@ func (s *ChitMCPServer) handleTeamChannelsResource(ctx context.Context, req *mcp
 // extractURIParam extracts the dynamic segment from a URI given a prefix and suffix.
 // For example: extractURIParam("chit://channels/abc-123/recent", "chit://channels/", "/recent") => "abc-123"
 func extractURIParam(uri, prefix, suffix string) string {
+	assert.That(strings.HasPrefix(prefix, "chit://") && strings.HasSuffix(prefix, "/"), "extractURIParam: prefix is not a chit:// path")
+	assert.That(suffix == "" || strings.HasPrefix(suffix, "/"), "extractURIParam: suffix is not a path segment")
 	s := strings.TrimPrefix(uri, prefix)
 	if suffix != "" {
 		s = strings.TrimSuffix(s, suffix)
@@ -146,5 +190,6 @@ func extractURIParam(uri, prefix, suffix string) string {
 	if s == "" || s == uri {
 		return ""
 	}
+	assert.That(!strings.HasSuffix(s, "/") && len(s) < len(uri), "extractURIParam: parameter keeps a slash or the prefix")
 	return s
 }

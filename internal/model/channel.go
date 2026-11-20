@@ -3,6 +3,8 @@ package model
 import (
 	"net/http"
 	"regexp"
+
+	"github.com/infrashift/chit/internal/assert"
 )
 
 const (
@@ -12,6 +14,7 @@ const (
 	ChannelGroup   = "G"
 )
 
+// semscope: allow(NASA-P10-06) compiled once, never changed
 var validChannelNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$`)
 
 type Channel struct {
@@ -31,6 +34,7 @@ type Channel struct {
 }
 
 func (c *Channel) IsValid() *AppError {
+	assert.That(c != nil, "Channel.IsValid: nil channel")
 	if !IsValidID(c.ID) {
 		return NewAppError("Channel.IsValid", "invalid channel id", "", http.StatusBadRequest)
 	}
@@ -72,10 +76,14 @@ func (c *Channel) PreSave() {
 		c.CreateAt = now
 	}
 	c.UpdateAt = now
+	assert.That(c.ID != "" && c.CreateAt != 0, "Channel.PreSave: channel left without id or create_at")
+	assert.That(c.UpdateAt > 0, "Channel.PreSave: update_at not set")
 }
 
 func (c *Channel) PreUpdate() {
+	assert.That(c != nil, "Channel.PreUpdate: nil channel")
 	c.UpdateAt = GetMillis()
+	assert.That(c.UpdateAt > 0, "Channel.PreUpdate: update_at not set")
 }
 
 type ChannelMember struct {
@@ -90,6 +98,7 @@ type ChannelMember struct {
 }
 
 func (cm *ChannelMember) IsValid() *AppError {
+	assert.That(cm != nil, "ChannelMember.IsValid: nil member")
 	if !IsValidID(cm.ChannelID) {
 		return NewAppError("ChannelMember.IsValid", "invalid channel_id", "", http.StatusBadRequest)
 	}
@@ -109,6 +118,8 @@ func (cm *ChannelMember) PreSave() {
 	if cm.NotifyProps == nil {
 		cm.NotifyProps = make(map[string]any)
 	}
+	assert.That(cm.Roles != "" && cm.CreateAt != 0, "ChannelMember.PreSave: roles or create_at not set")
+	assert.That(cm.NotifyProps != nil, "ChannelMember.PreSave: nil notify props")
 }
 
 // GetPostsOptions defines pagination and filtering options for post queries.

@@ -82,6 +82,39 @@ func TestPostStoreIntegration_GetPostsForChannelClampsPagination(t *testing.T) {
 // Search applies scope, author, terms and tags in the query, before LIMIT.
 func TestPostStoreIntegration_Search(t *testing.T) {
 	ss := testStore(t)
+	for _, tc := range searchCases(seedSearch(t, ss)) {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ss.Post().Search(t.Context(), &tc.q)
+			if err != nil {
+				t.Fatalf("Search: %v", err)
+			}
+			ids := make([]string, 0, len(got))
+			for _, p := range got {
+				ids = append(ids, p.ID)
+			}
+			if !slices.Equal(ids, tc.want) {
+				t.Errorf("got %v, want %v", ids, tc.want)
+			}
+		})
+	}
+}
+
+// searchFixture names what seedSearch saves.
+type searchFixture struct {
+	channel, other, a, b, c, pct, bug, urgent string
+}
+
+// searchCase is one Search query and the post IDs it returns, in order.
+type searchCase struct {
+	name string
+	q    model.PostSearch
+	want []string
+}
+
+// seedSearch saves posts by two authors in two channels, with tags on some
+// of them.
+func seedSearch(t *testing.T, ss *SqlStore) *searchFixture {
+	t.Helper()
 	user, channel := newTestChannelFixture(t, ss)
 	other, err := ss.User().Save(t.Context(), newTestUser("searchother"))
 	if err != nil {
@@ -114,36 +147,21 @@ func TestPostStoreIntegration_Search(t *testing.T) {
 			t.Fatalf("AddTagToPost: %v", err)
 		}
 	}
+	return &searchFixture{channel: channel.ID, other: other.ID, a: a.ID, b: b.ID, c: c.ID,
+		pct: pct.ID, bug: bug.ID, urgent: urgent.ID}
+}
 
-	scope := []string{channel.ID}
-	cases := []struct {
-		name string
-		q    model.PostSearch
-		want []string
-	}{
-		{"terms, newest first", model.PostSearch{Terms: "needle", ChannelIDs: scope, PerPage: 10}, []string{c.ID, b.ID, a.ID}},
-		{"pagination is after scoping", model.PostSearch{Terms: "needle", ChannelIDs: scope, Page: 1, PerPage: 2}, []string{a.ID}},
-		{"author", model.PostSearch{Terms: "needle", ChannelIDs: scope, AuthorID: other.ID, PerPage: 10}, []string{b.ID}},
-		{"one tag", model.PostSearch{TagIDs: []string{bug.ID}, ChannelIDs: scope, PerPage: 10}, []string{c.ID, a.ID}},
-		{"every tag must match", model.PostSearch{TagIDs: []string{bug.ID, urgent.ID}, ChannelIDs: scope, PerPage: 10}, []string{a.ID}},
-		{"terms and tags", model.PostSearch{Terms: "three", TagIDs: []string{bug.ID}, ChannelIDs: scope, PerPage: 10}, []string{c.ID}},
-		{"% is literal", model.PostSearch{Terms: "0%", ChannelIDs: scope, PerPage: 10}, []string{pct.ID}},
+func searchCases(f *searchFixture) []searchCase {
+	scope := []string{f.channel}
+	return []searchCase{
+		{"terms, newest first", model.PostSearch{Terms: "needle", ChannelIDs: scope, PerPage: 10}, []string{f.c, f.b, f.a}},
+		{"pagination is after scoping", model.PostSearch{Terms: "needle", ChannelIDs: scope, Page: 1, PerPage: 2}, []string{f.a}},
+		{"author", model.PostSearch{Terms: "needle", ChannelIDs: scope, AuthorID: f.other, PerPage: 10}, []string{f.b}},
+		{"one tag", model.PostSearch{TagIDs: []string{f.bug}, ChannelIDs: scope, PerPage: 10}, []string{f.c, f.a}},
+		{"every tag must match", model.PostSearch{TagIDs: []string{f.bug, f.urgent}, ChannelIDs: scope, PerPage: 10}, []string{f.a}},
+		{"terms and tags", model.PostSearch{Terms: "three", TagIDs: []string{f.bug}, ChannelIDs: scope, PerPage: 10}, []string{f.c}},
+		{"% is literal", model.PostSearch{Terms: "0%", ChannelIDs: scope, PerPage: 10}, []string{f.pct}},
 		{"empty scope matches nothing", model.PostSearch{Terms: "needle", PerPage: 10}, nil},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := ss.Post().Search(t.Context(), &tc.q)
-			if err != nil {
-				t.Fatalf("Search: %v", err)
-			}
-			ids := make([]string, 0, len(got))
-			for _, p := range got {
-				ids = append(ids, p.ID)
-			}
-			if !slices.Equal(ids, tc.want) {
-				t.Errorf("got %v, want %v", ids, tc.want)
-			}
-		})
 	}
 }
 

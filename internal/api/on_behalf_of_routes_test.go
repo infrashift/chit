@@ -36,8 +36,8 @@ func TestOnBehalfOf_RouteListMatchesTheSpec(t *testing.T) {
 			}
 		}
 	}
-	listed := make([]string, 0, len(onBehalfOfRoutes))
-	for _, route := range onBehalfOfRoutes {
+	listed := make([]string, 0, len(onBehalfOfRoutes()))
+	for _, route := range onBehalfOfRoutes() {
 		listed = append(listed, normalizePath(route.name))
 	}
 	slices.Sort(declared)
@@ -58,8 +58,8 @@ func TestOnBehalfOf_TheRouteList(t *testing.T) {
 		"POST /channels/{id}/files", "GET /files/{id}",
 		"POST /channels", "POST /channels/{id}/members", "GET /users/me",
 	}
-	got := make([]string, 0, len(onBehalfOfRoutes))
-	for _, route := range onBehalfOfRoutes {
+	got := make([]string, 0, len(onBehalfOfRoutes()))
+	for _, route := range onBehalfOfRoutes() {
 		got = append(got, route.name)
 	}
 	slices.Sort(want)
@@ -115,23 +115,29 @@ func TestOnBehalfOf_TagRoutes(t *testing.T) {
 			if code != http.StatusOK {
 				t.Fatalf("the allowlisted client: %d %s", code, out)
 			}
-			// What the person's own Tag did shows that it ran as them.
-			switch req.method {
-			case http.MethodGet:
-				if !strings.Contains(out, e.mine.ID) {
-					t.Fatalf("the person's private tag is missing: %s", out)
-				}
-			case http.MethodDelete:
-				_, after := e.call(t, http.MethodGet, strings.Replace(req.path, "/"+e.mine.ID, "", 1), "user:"+aliceKratos, "", nil)
-				if strings.Contains(after, e.mine.ID) {
-					t.Fatalf("the tag is still there: %s", after)
-				}
-			default:
-				if !strings.Contains(out, e.mine.ID) && !strings.Contains(out, testChannelID) {
-					t.Fatalf("the result does not reflect the person's tag: %s", out)
-				}
-			}
+			e.checkRanAsPerson(t, req, out)
 		})
+	}
+}
+
+// checkRanAsPerson checks that what the person's own Tag did shows that the
+// request ran as them; out is the response body of the request.
+func (e *tagRouteEnv) checkRanAsPerson(t *testing.T, req oboRequest, out string) {
+	t.Helper()
+	switch req.method {
+	case http.MethodGet:
+		if !strings.Contains(out, e.mine.ID) {
+			t.Fatalf("the person's private tag is missing: %s", out)
+		}
+	case http.MethodDelete:
+		_, after := e.call(t, http.MethodGet, strings.Replace(req.path, "/"+e.mine.ID, "", 1), "user:"+aliceKratos, "", nil)
+		if strings.Contains(after, e.mine.ID) {
+			t.Fatalf("the tag is still there: %s", after)
+		}
+	default:
+		if !strings.Contains(out, e.mine.ID) && !strings.Contains(out, testChannelID) {
+			t.Fatalf("the result does not reflect the person's tag: %s", out)
+		}
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/infrashift/chit/internal/app"
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 )
 
@@ -20,15 +21,19 @@ import (
 // When CHIT_TRUSTED_PROXY_SECRET is set, the proxy must also present it in
 // X-Proxy-Secret; this prevents header spoofing if the backend is reachable
 // without going through the proxy.
+//
+// semscope: allow(NASA-P10-09) chi's Router.Use requires func(http.Handler) http.Handler.
 func AuthExtract(a *app.App) func(http.Handler) http.Handler {
+	// The routes are compiled once, here, and shared by every request.
+	assert.That(a != nil && a.Config != nil, "AuthExtract: nil app or config")
+	routes := onBehalfOfRoutes()
+	routeList := onBehalfOfRouteList(routes)
+	assert.That(len(routes) > 0 && routeList != "", "AuthExtract: no on-behalf-of routes")
 	return func(next http.Handler) http.Handler {
+		assert.That(next != nil, "AuthExtract: nil next handler")
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if secret := a.Config.TrustedProxySecret; secret != "" {
-				presented := r.Header.Get("X-Proxy-Secret")
-				if subtle.ConstantTimeCompare([]byte(presented), []byte(secret)) != 1 {
-					WriteError(w, model.NewUnauthorizedError("AuthExtract", "invalid proxy credentials"))
-					return
-				}
+			if !checkProxySecret(a, w, r) {
+				return
 			}
 
 			// A machine actor authenticated by client-credentials wins over
@@ -36,61 +41,99 @@ func AuthExtract(a *app.App) func(http.Handler) http.Handler {
 			// request and blanks the other, so honouring the client header
 			// first means a forged X-User-Id cannot ride along with a
 			// legitimately introspected token.
+			var ok bool
 			if clientID := r.Header.Get(a.Config.TrustedClientHeader); clientID != "" {
-				user, err := a.ResolveOAuthClient(r.Context(), clientID)
-				if err != nil {
-					slog.Warn("auth: unknown oauth client", "client_id", clientID, "error", err)
-					WriteError(w, model.NewUnauthorizedError("AuthExtract", "unknown oauth client"))
-					return
-				}
-				if principalID, ok := onBehalfOf(r); ok {
-					if !onBehalfOfRoute(r) {
-						WriteError(w, model.NewBadRequestError("AuthExtract",
-							OnBehalfOfHeader+" is accepted only on "+onBehalfOfRouteList))
-						return
-					}
-					principal, err := a.ResolvePrincipal(r.Context(), user, principalID)
-					if err != nil {
-						slog.Warn("auth: on-behalf-of refused", "client_id", clientID, "principal_id", principalID, "error", err)
-						WriteAppError(w, "AuthExtract", err)
-						return
-					}
-					// Authorized as the person from here on; the client is
-					// kept beside them for the record.
-					r = ContextSetActor(ContextSetUser(r, principal), user)
-					next.ServeHTTP(w, r)
-					return
-				}
-				r = ContextSetUser(r, user)
+				r, ok = authenticateClient(a, routes, routeList, w, r, clientID)
+			} else {
+				r, ok = authenticatePerson(a, w, r)
+			}
+			if ok {
 				next.ServeHTTP(w, r)
-				return
 			}
-
-			// A person's session never acts for somebody else. Refused rather
-			// than ignored, so a caller that meant it learns it did not happen.
-			if _, ok := onBehalfOf(r); ok {
-				WriteError(w, model.NewForbiddenError("AuthExtract",
-					OnBehalfOfHeader+" is only for allowlisted OAuth2 clients"))
-				return
-			}
-
-			kratosID := r.Header.Get(a.Config.TrustedProxyHeader)
-			if kratosID == "" {
-				WriteError(w, model.NewUnauthorizedError("AuthExtract", "missing authentication header"))
-				return
-			}
-
-			user, err := a.ProvisionUser(r.Context(), kratosID)
-			if err != nil {
-				slog.Error("auth: failed to provision user", "kratos_id", kratosID, "error", err)
-				WriteAppError(w, "AuthExtract", err)
-				return
-			}
-
-			r = ContextSetUser(r, user)
-			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// checkProxySecret answers 401 and returns false when
+// CHIT_TRUSTED_PROXY_SECRET is set and the request does not present it.
+func checkProxySecret(a *app.App, w http.ResponseWriter, r *http.Request) bool {
+	assert.That(a != nil && a.Config != nil, "checkProxySecret: nil app or config")
+	assert.That(r != nil, "checkProxySecret: nil request")
+	secret := a.Config.TrustedProxySecret
+	if secret == "" {
+		return true
+	}
+	presented := r.Header.Get("X-Proxy-Secret")
+	if subtle.ConstantTimeCompare([]byte(presented), []byte(secret)) != 1 {
+		WriteError(w, model.NewUnauthorizedError("AuthExtract", "invalid proxy credentials"))
+		return false
+	}
+	return true
+}
+
+// authenticateClient resolves the machine actor behind an OAuth2 client ID,
+// and the person it acts for when X-On-Behalf-Of is present. It returns the
+// request carrying them, or false once it has written the error response.
+func authenticateClient(a *app.App, routes []onBehalfOfRouteSpec, routeList string,
+	w http.ResponseWriter, r *http.Request, clientID string,
+) (*http.Request, bool) {
+	assert.That(clientID != "", "authenticateClient: empty client id")
+	assert.That(len(routes) > 0, "authenticateClient: no on-behalf-of routes")
+	user, err := a.ResolveOAuthClient(r.Context(), clientID)
+	if err != nil {
+		slog.Warn("auth: unknown oauth client", "client_id", clientID, "error", err)
+		WriteError(w, model.NewUnauthorizedError("AuthExtract", "unknown oauth client"))
+		return r, false
+	}
+	assert.That(user != nil, "authenticateClient: ResolveOAuthClient returned nil without an error")
+	principalID, ok := onBehalfOf(r)
+	if !ok {
+		return ContextSetUser(r, user), true
+	}
+	if !onBehalfOfRoute(routes, r) {
+		WriteError(w, model.NewBadRequestError("AuthExtract",
+			OnBehalfOfHeader+" is accepted only on "+routeList))
+		return r, false
+	}
+	principal, err := a.ResolvePrincipal(r.Context(), user, principalID)
+	if err != nil {
+		slog.Warn("auth: on-behalf-of refused", "client_id", clientID, "principal_id", principalID, "error", err)
+		WriteAppError(w, "AuthExtract", err)
+		return r, false
+	}
+	assert.That(principal != nil, "authenticateClient: ResolvePrincipal returned nil without an error")
+	// Authorized as the person from here on; the client is
+	// kept beside them for the record.
+	return ContextSetActor(ContextSetUser(r, principal), user), true
+}
+
+// authenticatePerson provisions or retrieves the local user named by the
+// Kratos header. It returns the request carrying the user, or false once it
+// has written the error response.
+func authenticatePerson(a *app.App, w http.ResponseWriter, r *http.Request) (*http.Request, bool) {
+	assert.That(a != nil && a.Config != nil, "authenticatePerson: nil app or config")
+	// A person's session never acts for somebody else. Refused rather
+	// than ignored, so a caller that meant it learns it did not happen.
+	if _, ok := onBehalfOf(r); ok {
+		WriteError(w, model.NewForbiddenError("AuthExtract",
+			OnBehalfOfHeader+" is only for allowlisted OAuth2 clients"))
+		return r, false
+	}
+
+	kratosID := r.Header.Get(a.Config.TrustedProxyHeader)
+	if kratosID == "" {
+		WriteError(w, model.NewUnauthorizedError("AuthExtract", "missing authentication header"))
+		return r, false
+	}
+
+	user, err := a.ProvisionUser(r.Context(), kratosID)
+	if err != nil {
+		slog.Error("auth: failed to provision user", "kratos_id", kratosID, "error", err)
+		WriteAppError(w, "AuthExtract", err)
+		return r, false
+	}
+	assert.That(user != nil, "authenticatePerson: ProvisionUser returned nil without an error")
+	return ContextSetUser(r, user), true
 }
 
 // OnBehalfOfHeader names the person an allowlisted OAuth2 client acts for.
@@ -100,6 +143,7 @@ const OnBehalfOfHeader = "X-On-Behalf-Of"
 // present at all: present and empty is a request to act for nobody, and is
 // refused, not read as "no header".
 func onBehalfOf(r *http.Request) (string, bool) {
+	assert.That(r != nil, "onBehalfOf: nil request")
 	values, ok := r.Header[http.CanonicalHeaderKey(OnBehalfOfHeader)]
 	if !ok {
 		return "", false
@@ -110,51 +154,62 @@ func onBehalfOf(r *http.Request) (string, bool) {
 	return values[0], true
 }
 
-// onBehalfOfRoutes are the only requests that may act on behalf of a person.
-// Everything else a client does, it does as itself. Keep in step with the
-// routes in api.go and with OnBehalfOfHeader in api/openapi.yaml.
-var onBehalfOfRoutes = []struct {
+// onBehalfOfRouteSpec is one route on which a client may act for a person.
+type onBehalfOfRouteSpec struct {
 	method, name string
 	path         *regexp.Regexp
-}{
-	// Posting, and saying that a reply is being produced.
-	{http.MethodPost, "POST /posts", regexp.MustCompile(`^/api/v1/posts$`)},
-	{http.MethodPost, "POST /channels/{id}/stream_status", regexp.MustCompile(`^/api/v1/channels/[^/]+/stream_status$`)},
-	// Tags: halod reads, creates, applies and removes a person's Tags for
-	// them, profile/ Tags included, and sees only what the person sees:
-	// their own private Tags and the channel Tags of their channels.
-	{http.MethodPost, "POST /tags", regexp.MustCompile(`^/api/v1/tags$`)},
-	{http.MethodGet, "GET /tags", regexp.MustCompile(`^/api/v1/tags$`)},
-	{http.MethodPost, "POST /posts/{id}/tags", regexp.MustCompile(`^/api/v1/posts/[^/]+/tags$`)},
-	{http.MethodDelete, "DELETE /posts/{id}/tags/{tag_id}", regexp.MustCompile(`^/api/v1/posts/[^/]+/tags/[^/]+$`)},
-	{http.MethodPost, "POST /channels/{id}/tags", regexp.MustCompile(`^/api/v1/channels/[^/]+/tags$`)},
-	{http.MethodGet, "GET /channels/{id}/tags", regexp.MustCompile(`^/api/v1/channels/[^/]+/tags$`)},
-	{http.MethodDelete, "DELETE /channels/{id}/tags/{tag_id}", regexp.MustCompile(`^/api/v1/channels/[^/]+/tags/[^/]+$`)},
-	{http.MethodPost, "POST /tags/posts", regexp.MustCompile(`^/api/v1/tags/posts$`)},
-	{http.MethodPost, "POST /tags/channels", regexp.MustCompile(`^/api/v1/tags/channels$`)},
-	// Attachments: halod uploads a person's image, and fetches an image
-	// for the person it shows it to (halod proxies downloads).
-	{http.MethodPost, "POST /channels/{id}/files", regexp.MustCompile(`^/api/v1/channels/[^/]+/files$`)},
-	{http.MethodGet, "GET /files/{id}", regexp.MustCompile(`^/api/v1/files/[^/]+$`)},
-	// Conversations: halod creates a person's private channel and adds
-	// itself to it, as the person. GET /users/me returns the person, which
-	// is how halod learns the user ID of a kratos: principal.
-	{http.MethodPost, "POST /channels", regexp.MustCompile(`^/api/v1/channels$`)},
-	{http.MethodPost, "POST /channels/{id}/members", regexp.MustCompile(`^/api/v1/channels/[^/]+/members$`)},
-	{http.MethodGet, "GET /users/me", regexp.MustCompile(`^/api/v1/users/me$`)},
+}
+
+// onBehalfOfRoutes returns the only requests that may act on behalf of a
+// person. Everything else a client does, it does as itself. Keep in step with
+// the routes in api.go and with OnBehalfOfHeader in api/openapi.yaml.
+// It compiles each pattern; call it once, when the middleware is built.
+func onBehalfOfRoutes() []onBehalfOfRouteSpec {
+	return []onBehalfOfRouteSpec{
+		// Posting, and saying that a reply is being produced.
+		{http.MethodPost, "POST /posts", regexp.MustCompile(`^/api/v1/posts$`)},
+		{http.MethodPost, "POST /channels/{id}/stream_status", regexp.MustCompile(`^/api/v1/channels/[^/]+/stream_status$`)},
+		// Tags: halod reads, creates, applies and removes a person's Tags for
+		// them, profile/ Tags included, and sees only what the person sees:
+		// their own private Tags and the channel Tags of their channels.
+		{http.MethodPost, "POST /tags", regexp.MustCompile(`^/api/v1/tags$`)},
+		{http.MethodGet, "GET /tags", regexp.MustCompile(`^/api/v1/tags$`)},
+		{http.MethodPost, "POST /posts/{id}/tags", regexp.MustCompile(`^/api/v1/posts/[^/]+/tags$`)},
+		{http.MethodDelete, "DELETE /posts/{id}/tags/{tag_id}", regexp.MustCompile(`^/api/v1/posts/[^/]+/tags/[^/]+$`)},
+		{http.MethodPost, "POST /channels/{id}/tags", regexp.MustCompile(`^/api/v1/channels/[^/]+/tags$`)},
+		{http.MethodGet, "GET /channels/{id}/tags", regexp.MustCompile(`^/api/v1/channels/[^/]+/tags$`)},
+		{http.MethodDelete, "DELETE /channels/{id}/tags/{tag_id}", regexp.MustCompile(`^/api/v1/channels/[^/]+/tags/[^/]+$`)},
+		{http.MethodPost, "POST /tags/posts", regexp.MustCompile(`^/api/v1/tags/posts$`)},
+		{http.MethodPost, "POST /tags/channels", regexp.MustCompile(`^/api/v1/tags/channels$`)},
+		// Attachments: halod uploads a person's image, and fetches an image
+		// for the person it shows it to (halod proxies downloads).
+		{http.MethodPost, "POST /channels/{id}/files", regexp.MustCompile(`^/api/v1/channels/[^/]+/files$`)},
+		{http.MethodGet, "GET /files/{id}", regexp.MustCompile(`^/api/v1/files/[^/]+$`)},
+		// Conversations: halod creates a person's private channel and adds
+		// itself to it, as the person. GET /users/me returns the person, which
+		// is how halod learns the user ID of a kratos: principal.
+		{http.MethodPost, "POST /channels", regexp.MustCompile(`^/api/v1/channels$`)},
+		{http.MethodPost, "POST /channels/{id}/members", regexp.MustCompile(`^/api/v1/channels/[^/]+/members$`)},
+		{http.MethodGet, "GET /users/me", regexp.MustCompile(`^/api/v1/users/me$`)},
+	}
 }
 
 // onBehalfOfRouteList names the routes, for the refusal message.
-var onBehalfOfRouteList = func() string {
-	names := make([]string, len(onBehalfOfRoutes))
-	for i, route := range onBehalfOfRoutes {
+func onBehalfOfRouteList(routes []onBehalfOfRouteSpec) string {
+	assert.That(len(routes) > 0, "onBehalfOfRouteList: no routes")
+	names := make([]string, len(routes))
+	for i, route := range routes {
+		assert.That(route.name != "", "onBehalfOfRouteList: unnamed route")
 		names[i] = route.name
 	}
 	return strings.Join(names, ", ")
-}()
+}
 
-func onBehalfOfRoute(r *http.Request) bool {
-	for _, route := range onBehalfOfRoutes {
+// onBehalfOfRoute reports whether r is one of routes.
+func onBehalfOfRoute(routes []onBehalfOfRouteSpec, r *http.Request) bool {
+	assert.That(r != nil && r.URL != nil, "onBehalfOfRoute: nil request or URL")
+	for _, route := range routes {
+		assert.That(route.path != nil, "onBehalfOfRoute: route without a pattern")
 		if r.Method == route.method && route.path.MatchString(r.URL.Path) {
 			return true
 		}
@@ -164,6 +219,7 @@ func onBehalfOfRoute(r *http.Request) bool {
 
 // StructuredLogger logs each request using slog.
 func StructuredLogger(next http.Handler) http.Handler {
+	assert.That(next != nil, "StructuredLogger: nil next handler")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
@@ -187,6 +243,7 @@ type responseWriter struct {
 }
 
 func (rw *responseWriter) WriteHeader(code int) {
+	assert.That(rw.ResponseWriter != nil, "responseWriter.WriteHeader: nil underlying writer")
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
 }
@@ -194,6 +251,7 @@ func (rw *responseWriter) WriteHeader(code int) {
 // Hijack implements http.Hijacker so that WebSocket upgrades work through
 // the logging middleware.
 func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	assert.That(rw.ResponseWriter != nil, "responseWriter.Hijack: nil underlying writer")
 	h, ok := rw.ResponseWriter.(http.Hijacker)
 	if !ok {
 		return nil, nil, fmt.Errorf("underlying ResponseWriter does not implement http.Hijacker")

@@ -28,6 +28,9 @@ import (
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
+
+	"github.com/infrashift/chit/internal/assert"
+	"github.com/infrashift/chit/internal/errlog"
 )
 
 // Actor types in a Request. Chit calls a person "user"; the hook contract
@@ -108,6 +111,7 @@ type Hook struct {
 
 // New returns a Hook, or an error when cfg is incomplete.
 func New(cfg *Config) (*Hook, error) {
+	assert.That(cfg != nil, "memberhook.New: nil config")
 	u, err := url.Parse(cfg.URL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, fmt.Errorf("membership hook URL %q is not an absolute http or https URL", cfg.URL)
@@ -126,7 +130,7 @@ func New(cfg *Config) (*Hook, error) {
 			return http.ErrUseLastResponse
 		}}
 	}
-	return &Hook{
+	h := &Hook{
 		url:     cfg.URL,
 		timeout: cfg.Timeout,
 		http:    client,
@@ -139,7 +143,9 @@ func New(cfg *Config) (*Hook, error) {
 			// token_endpoint_auth_method; auto-detect finds it.
 			AuthStyle: oauth2.AuthStyleAutoDetect,
 		},
-	}, nil
+	}
+	assert.That(h.http != nil && h.creds != nil && h.timeout > 0, "memberhook.New: hook not complete")
+	return h, nil
 }
 
 // Check asks the hook about req. It returns an error, and no decision, when
@@ -147,6 +153,9 @@ func New(cfg *Config) (*Hook, error) {
 // other than 200, a timeout, a network error or a body that is not the
 // expected JSON. The caller must refuse the add then.
 func (h *Hook) Check(ctx context.Context, req *Request) (Decision, error) {
+	assert.That(h != nil && h.http != nil && h.creds != nil, "Hook.Check: not built by New")
+	assert.That(h.timeout > 0, "Hook.Check: no timeout")
+	assert.That(req != nil, "Hook.Check: nil request")
 	ctx, cancel := context.WithTimeout(ctx, h.timeout)
 	defer cancel()
 
@@ -175,12 +184,16 @@ func (h *Hook) Check(ctx context.Context, req *Request) (Decision, error) {
 	if status != http.StatusOK {
 		return Decision{}, fmt.Errorf("membership hook answered %d", status)
 	}
+	assert.That(d.Allow || d.Reason != "", "Hook.Check: a refusal without a reason")
 	return d, nil
 }
 
 // ask sends one request to the hook. It returns the status, and the decoded
 // decision when the status is 200.
 func (h *Hook) ask(ctx context.Context, token string, body []byte) (int, Decision, error) {
+	assert.That(token != "", "Hook.ask: empty token")
+	assert.That(len(body) > 0, "Hook.ask: empty body")
+	assert.That(h.url != "" && h.http != nil, "Hook.ask: no URL or client")
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, h.url, bytes.NewReader(body))
 	if err != nil {
 		return 0, Decision{}, fmt.Errorf("create membership hook request: %w", err)
@@ -194,8 +207,10 @@ func (h *Hook) ask(ctx context.Context, token string, body []byte) (int, Decisio
 	}
 	// The rest of the body is read so that the connection can be reused.
 	defer func() {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBytes))
-		_ = resp.Body.Close()
+		if _, drainErr := io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBytes)); drainErr != nil {
+			errlog.Debug(drainErr, "drain membership hook response")
+		}
+		errlog.Close(resp.Body, "membership hook response body")
 	}()
 	if resp.StatusCode != http.StatusOK {
 		return resp.StatusCode, Decision{}, nil
@@ -207,6 +222,7 @@ func (h *Hook) ask(ctx context.Context, token string, body []byte) (int, Decisio
 // decode reads the answer: {"allow":true}, or {"allow":false,"reason":...,
 // "detail":...}. allow must be present and a boolean.
 func decode(r io.Reader) (Decision, error) {
+	assert.That(r != nil, "decode: nil reader")
 	var answer struct {
 		Allow  *bool  `json:"allow"`
 		Reason string `json:"reason"`
@@ -232,12 +248,15 @@ func decode(r io.Reader) (Decision, error) {
 	if d.Reason == "" {
 		d.Reason = DefaultReason
 	}
+	assert.That(d.Reason != "" && len(d.Reason) <= MaxReasonBytes, "decode: reason empty or too long")
+	assert.That(len(d.Detail) <= MaxDetailBytes, "decode: detail too long")
 	return d, nil
 }
 
 // cut shortens s to at most n bytes, on a rune boundary, and drops invalid
 // UTF-8.
 func cut(s string, n int) string {
+	assert.That(n >= 0, "cut: negative length")
 	s = strings.ToValidUTF8(s, "")
 	if len(s) <= n {
 		return s
@@ -245,12 +264,15 @@ func cut(s string, n int) string {
 	for n > 0 && !utf8.RuneStart(s[n]) {
 		n--
 	}
+	assert.That(utf8.ValidString(s[:n]), "cut: split a rune")
 	return s[:n]
 }
 
 // accessToken returns the cached token, or fetches one when there is none
 // or it is near its expiry.
 func (h *Hook) accessToken(ctx context.Context) (string, error) {
+	assert.That(ctx != nil, "Hook.accessToken: nil context")
+	assert.That(h.creds != nil && h.http != nil, "Hook.accessToken: not built by New")
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	now := time.Now()
@@ -266,6 +288,7 @@ func (h *Hook) accessToken(ctx context.Context) (string, error) {
 	}
 	h.token = tok.AccessToken
 	h.refreshAt = refreshTime(now, tok.Expiry)
+	assert.That(h.token != "" && !h.refreshAt.IsZero(), "Hook.accessToken: token cached without a refresh time")
 	return h.token, nil
 }
 
@@ -273,16 +296,21 @@ func (h *Hook) accessToken(ctx context.Context) (string, error) {
 // tokenRefreshMargin before it, or halfway through a shorter life. A token
 // with no expiry is kept until the hook refuses it.
 func refreshTime(now, expiry time.Time) time.Time {
+	assert.That(!now.IsZero(), "refreshTime: zero now")
 	if expiry.IsZero() {
 		return now.Add(100 * 365 * 24 * time.Hour)
 	}
 	margin := min(tokenRefreshMargin, expiry.Sub(now)/2)
-	return expiry.Add(-margin)
+	at := expiry.Add(-margin)
+	// A token that expires in the future is replaced no later than then.
+	assert.That(!expiry.After(now) || !at.After(expiry), "refreshTime: refresh after a future expiry")
+	return at
 }
 
 // forget drops token from the cache, unless another request has already
 // replaced it.
 func (h *Hook) forget(token string) {
+	assert.That(token != "", "Hook.forget: empty token")
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.token == token {

@@ -14,7 +14,7 @@ import (
 func TestModel_TeamsLoadedFetchesChannelsForAllTeams(t *testing.T) {
 	m := testModel()
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	_, cmd := m.Update(tui.TeamsLoadedMsg{Teams: []*model.Team{
 		{ID: "t1", DisplayName: "Engineering"},
@@ -40,15 +40,15 @@ func TestModel_SelectChannelFromOtherTeamSwitchesActiveTeam(t *testing.T) {
 		{ID: "t1", DisplayName: "Engineering"},
 		{ID: "t2", DisplayName: "Design"},
 	}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 	updated, _ = m.Update(tui.ChannelsLoadedMsg{TeamID: "t2", Channels: []*model.Channel{
 		{ID: "c2", DisplayName: "Mockups", TeamID: "t2"},
 	}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	// Selecting the team-2 channel should switch the active team context.
 	updated, _ = m.Update(palette.ChannelChosenMsg{Channel: &model.Channel{ID: "c2", DisplayName: "Mockups", TeamID: "t2"}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "Design > Mockups") {
@@ -61,7 +61,7 @@ func TestModel_SelectDMChannelKeepsActiveTeam(t *testing.T) {
 
 	dmCh := &model.Channel{ID: "dm1", Name: "u1__u2", Type: model.ChannelDirect}
 	updated, _ := m.Update(palette.ChannelChosenMsg{Channel: dmCh})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	view := testutil.StripANSI(m.View())
 	if !strings.Contains(view, "Engineering") {
@@ -77,7 +77,7 @@ func TestModel_WSPostIncrementsRootUnread(t *testing.T) {
 		Sequence: 1,
 		Data:     map[string]any{"id": "p9", "channel_id": "other", "user_id": "u2", "content": "hi"},
 	}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if got := m.UnreadCount("other"); got != 1 {
 		t.Errorf("expected root unread count 1 for inactive channel, got %d", got)
@@ -92,10 +92,10 @@ func TestModel_ChannelViewedResetsRootCounts(t *testing.T) {
 		Sequence: 1,
 		Data:     map[string]any{"id": "p9", "channel_id": "other", "user_id": "u2", "content": "hi"},
 	}})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	updated, _ = m.Update(tui.ChannelViewedMsg{ChannelID: "other"})
-	m = updated.(tui.Model)
+	m = asModel(t, updated)
 
 	if got := m.UnreadCount("other"); got != 0 {
 		t.Errorf("expected unread reset to 0 after ChannelViewedMsg, got %d", got)

@@ -4,6 +4,7 @@ import (
 	"log"
 	"log/slog"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/config"
 	"github.com/infrashift/chit/internal/server"
 )
@@ -14,11 +15,13 @@ func main() {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
+	assert.That(cfg != nil, "chitd: nil config without an error")
 	srv, err := server.New(cfg)
 	if err != nil {
 		log.Fatalf("failed to create server: %v", err)
 	}
 
+	assert.That(srv != nil, "chitd: nil server without an error")
 	slog.Info("chit server starting")
 	if err := srv.Start(); err != nil {
 		log.Fatalf("server error: %v", err)

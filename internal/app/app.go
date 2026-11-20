@@ -13,7 +13,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/blob"
+	"github.com/infrashift/chit/internal/errlog"
 	"github.com/infrashift/chit/internal/jobs/workers"
 	"github.com/infrashift/chit/internal/keto"
 
@@ -71,9 +73,13 @@ func (a *App) writeKetoMembersAsync(channelID string, userIDs []string) {
 	if len(userIDs) == 0 {
 		return
 	}
+	assert.That(channelID != "", "App.writeKetoMembersAsync: empty channel id")
+	assert.That(a.keto != nil, "App.writeKetoMembersAsync: nil keto client")
 	ids := slices.Clone(userIDs)
+	assert.That(len(ids) == len(userIDs), "App.writeKetoMembersAsync: clone lost ids")
 	a.background.Add(1)
 	go func() {
+		defer errlog.Recover("keto mirror")
 		defer a.background.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), ketoAsyncTimeout)
 		defer cancel()
@@ -93,6 +99,8 @@ func (a *App) writeKetoMembersAsync(channelID string, userIDs []string) {
 // channel_members best-effort and a failure does not fail the request, but a
 // silent one lets the mirror drift unnoticed.
 func (a *App) logKeto(err error, channelID, userID string) {
+	assert.That(channelID != "", "App.logKeto: empty channel id")
+	assert.That(userID != "", "App.logKeto: empty user id")
 	if err != nil {
 		slog.Warn("keto: failed to mirror channel membership",
 			"channel_id", channelID, "user_id", userID, "error", err)
@@ -108,6 +116,7 @@ func (a *App) WaitBackground() {
 // searchClient returns a shared ZincSearch client (the SearchIndexer type
 // doubles as the query client), created on first use.
 func (a *App) searchClient() *workers.SearchIndexer {
+	assert.That(a.Config != nil, "App.searchClient: nil config")
 	a.zincOnce.Do(func() {
 		a.zincClient = workers.NewSearchIndexer(
 			a.Config.ZincSearchURL,
@@ -115,11 +124,13 @@ func (a *App) searchClient() *workers.SearchIndexer {
 			a.Config.ZincSearchPassword,
 		)
 	})
+	assert.That(a.zincClient != nil, "App.searchClient: no client after first use")
 	return a.zincClient
 }
 
 // New creates a new App instance.
 func New(s store.Store, hub *websocket.Hub, ps pubsub.PubSub, cfg *config.Config) *App {
+	assert.That(cfg != nil, "app.New: nil config")
 	userCache, err := cache.NewLRU[string, *model.User](cfg.CacheSize, cfg.CacheTTL)
 	if err != nil {
 		// Invalid cache config (size <= 0): run uncached rather than fail.
@@ -127,7 +138,7 @@ func New(s store.Store, hub *websocket.Hub, ps pubsub.PubSub, cfg *config.Config
 		userCache = nil
 	}
 
-	return &App{
+	a := &App{
 		Store:      s,
 		Hub:        hub,
 		PubSub:     ps,
@@ -136,64 +147,54 @@ func New(s store.Store, hub *websocket.Hub, ps pubsub.PubSub, cfg *config.Config
 		httpClient: &http.Client{Timeout: 5 * time.Second},
 		userCache:  userCache,
 	}
+	assert.That(a.keto != nil, "app.New: nil keto client")
+	assert.That(a.httpClient != nil, "app.New: nil http client")
+	return a
 }
 
 // ErrKratosIdentityNotFound is FetchKratosIdentity's error when Kratos has
 // no identity with the ID (Kratos answers 404).
+//
+// semscope: allow(NASA-P10-06) sentinel error: errors.Is needs one identity
 var ErrKratosIdentityNotFound = errors.New("kratos identity not found")
 
 // ErrKratosIdentityInactive is FetchKratosIdentity's error when the identity
 // is not active. Kratos gives such an identity no session, so it cannot reach
 // chitd from a browser; it must not be provisioned another way either.
+//
+// semscope: allow(NASA-P10-06) sentinel error: errors.Is needs one identity
 var ErrKratosIdentityInactive = errors.New("kratos identity is not active")
+
+// TWO SCHEMAS, ONE READER. chit's own deploy/kratos/identity.schema.json
+// calls the human-readable name `display_name`; the shared cluster schema
+// this deployment authenticates against
+// (terraform/live/ory-identity/config/kratos/identity.schema.json.tftpl)
+// calls it `name` and additionally carries `role` and `kind`.
+//
+// Both are decoded and display_name wins, so neither deployment needs a
+// build flag. Getting this wrong is not a visible error: an identity that
+// authenticates perfectly would be provisioned with an EMPTY display name,
+// and the first thing anyone would notice is a blank author on a post.
+type kratosIdentity struct {
+	// active or inactive. Older Kratos versions leave it out, which
+	// is read as active.
+	State  string `json:"state"`
+	Traits struct {
+		Username    string `json:"username"`
+		DisplayName string `json:"display_name"`
+		Name        string `json:"name"`
+		Email       string `json:"email"`
+		Kind        string `json:"kind"`
+	} `json:"traits"`
+}
 
 // FetchKratosIdentity retrieves identity traits from Kratos Admin API.
 func (a *App) FetchKratosIdentity(ctx context.Context, kratosID string) (username, displayName, email string, err error) {
-	url := fmt.Sprintf("%s/admin/identities/%s", a.Config.KratosAdminURL, neturl.PathEscape(kratosID))
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	assert.That(ctx != nil, "App.FetchKratosIdentity: nil context")
+	assert.That(kratosID != "", "App.FetchKratosIdentity: empty kratos id")
+	identity, err := a.getKratosIdentity(ctx, kratosID)
 	if err != nil {
-		return "", "", "", fmt.Errorf("create kratos request: %w", err)
-	}
-
-	resp, err := a.httpClient.Do(req)
-	if err != nil {
-		return "", "", "", fmt.Errorf("fetch kratos identity: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return "", "", "", fmt.Errorf("%w: %s", ErrKratosIdentityNotFound, kratosID)
-	}
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return "", "", "", fmt.Errorf("kratos identity fetch failed: status %d, body: %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	// TWO SCHEMAS, ONE READER. chit's own deploy/kratos/identity.schema.json
-	// calls the human-readable name `display_name`; the shared cluster schema
-	// this deployment authenticates against
-	// (terraform/live/ory-identity/config/kratos/identity.schema.json.tftpl)
-	// calls it `name` and additionally carries `role` and `kind`.
-	//
-	// Both are decoded and display_name wins, so neither deployment needs a
-	// build flag. Getting this wrong is not a visible error: an identity that
-	// authenticates perfectly would be provisioned with an EMPTY display name,
-	// and the first thing anyone would notice is a blank author on a post.
-	var identity struct {
-		// active or inactive. Older Kratos versions leave it out, which
-		// is read as active.
-		State  string `json:"state"`
-		Traits struct {
-			Username    string `json:"username"`
-			DisplayName string `json:"display_name"`
-			Name        string `json:"name"`
-			Email       string `json:"email"`
-			Kind        string `json:"kind"`
-		} `json:"traits"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&identity); err != nil {
-		return "", "", "", fmt.Errorf("decode kratos identity: %w", err)
+		return "", "", "", err
 	}
 	if identity.State != "" && identity.State != "active" {
 		return "", "", "", fmt.Errorf("%w: %s is %s", ErrKratosIdentityInactive, kratosID, identity.State)
@@ -208,8 +209,42 @@ func (a *App) FetchKratosIdentity(ctx context.Context, kratosID string) (usernam
 		// is a far better fallback than a blank byline.
 		displayName = identity.Traits.Username
 	}
+	assert.That(displayName != "" || identity.Traits.Username == "", "App.FetchKratosIdentity: display name fallback skipped the username")
 
 	slog.Info("fetched kratos identity", "kratos_id", kratosID, "username", identity.Traits.Username)
 
 	return identity.Traits.Username, displayName, identity.Traits.Email, nil
+}
+
+// getKratosIdentity GETs one identity from the Kratos Admin API and decodes it.
+func (a *App) getKratosIdentity(ctx context.Context, kratosID string) (kratosIdentity, error) {
+	assert.That(a.Config != nil, "App.getKratosIdentity: nil config")
+	assert.That(a.httpClient != nil, "App.getKratosIdentity: nil http client")
+	var identity kratosIdentity
+	url := fmt.Sprintf("%s/admin/identities/%s", a.Config.KratosAdminURL, neturl.PathEscape(kratosID))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return identity, fmt.Errorf("create kratos request: %w", err)
+	}
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return identity, fmt.Errorf("fetch kratos identity: %w", err)
+	}
+	defer func() { errlog.Debug(resp.Body.Close(), "close kratos identity response body") }()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return identity, fmt.Errorf("%w: %s", ErrKratosIdentityNotFound, kratosID)
+	}
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		errlog.Debug(readErr, "read kratos identity error body")
+		return identity, fmt.Errorf("kratos identity fetch failed: status %d, body: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&identity); err != nil {
+		return identity, fmt.Errorf("decode kratos identity: %w", err)
+	}
+	return identity, nil
 }

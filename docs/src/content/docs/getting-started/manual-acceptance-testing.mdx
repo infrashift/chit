@@ -26,7 +26,7 @@ This builds the container images, starts PostgreSQL, runs migrations, seeds
 chit test data, and starts all services (Kratos, Oathkeeper, Keto, chitd,
 ZincSearch).
 
-Watch the server logs to confirm all services are ready:
+Watch the server logs to verify that all services are ready:
 
 ```bash
 podman logs -f chit-uat-app-chitd
@@ -34,14 +34,14 @@ podman logs -f chit-uat-app-chitd
 
 ### Seed Kratos identities
 
-After the pod is fully running, create Kratos identities so users can log in:
+After the pod fully starts, create Kratos identities so users can log in:
 
 ```bash
 make uat-seed-kratos
 ```
 
 This creates password-based identities in Kratos for all 5 test users.
-The script waits for Kratos to be ready before proceeding. It is idempotent
+The script waits until Kratos is ready, then continues. It is idempotent
 and safe to run multiple times.
 
 ## Verify
@@ -83,7 +83,7 @@ environment.
 
 :::note
 chit-tui lives in this monorepo under `clients/chit-tui` (a nested Go
-module). Build it with `make -C clients/chit-tui build` before following
+module). Build it with `make -C clients/chit-tui build` before you do
 the steps below.
 :::
 
@@ -94,9 +94,9 @@ export CHIT_SERVER_URL=http://localhost:4455
 ./clients/chit-tui/bin/chit-tui
 ```
 
-The login screen will appear. Enter any user's email and password from the
-table above. After successful login, the session token is stored at
-`~/.config/chit/session.json` and reused on subsequent launches.
+The login screen appears. Enter any user's email and password from the
+table above. After a successful login, chit-tui stores the session token at
+`~/.config/chit/session.json` and reuses it on subsequent launches.
 
 To force a fresh login, clear the stored session:
 
@@ -108,13 +108,14 @@ Or use the `/logout` slash command in chit-tui.
 
 ## Running several clients at once
 
-Anything involving two people — a mention arriving, a membership change
-broadcasting, a reply appearing in someone else's thread — needs more than one
-client. You can run as many as you like on a single machine.
+Some tests involve two people. Examples are a mention that arrives, a
+membership change that chitd broadcasts, and a reply in another person's
+thread. These tests need more than one client. You can run as many as you like
+on a single machine.
 
 :::caution[This is why a second client appears impossible]
 Every client writes its session to the same file, `~/.config/chit/session.json`,
-unless told otherwise. Start a second client without changing that and it
+unless told otherwise. A second client that writes to the same file
 overwrites the first one's token: both windows end up logged in as whoever
 authenticated last. Give each client its own `CHIT_SESSION_FILE` and they stay
 independent.
@@ -150,9 +151,9 @@ to type into the wrong one and misread the result.
 
 ### Skipping the login screen
 
-Logging in three times is tedious. Point the client at chitd directly (port
-8065, bypassing Oathkeeper) and present the user's Kratos ID as a header —
-`CHIT_SESSION_TOKEN` is sent as whatever `CHIT_AUTH_HEADER` names:
+To log in three times is tedious. Point the client at chitd directly (port
+8065, around Oathkeeper). Then present the user's Kratos ID as a header. The
+client sends `CHIT_SESSION_TOKEN` as the header that `CHIT_AUTH_HEADER` names:
 
 ```bash
 CHIT_SERVER_URL=http://localhost:8065 \
@@ -190,15 +191,15 @@ tmux attach -t uat-alice                          # watch interactively
 tmux kill-session -t uat-alice                    # done
 ```
 
-`capture-pane -p -e` keeps the ANSI escapes, which is how you verify a theme
-actually applied rather than just that the client started.
+`capture-pane -p -e` keeps the ANSI escapes. With them, you can verify that a
+theme applied, and not only that the client started.
 
 ## Enabling slash commands
 
-Slash commands are authorized through Keto, and a freshly seeded environment
-grants nobody anything — `/invite`, `/kick` and even `/help` are all denied
-until two things happen. Both are needed; the symptom of missing either is a
-silent refusal with `"authorized":false` in the chitd log.
+Keto authorizes slash commands, and a freshly seeded environment grants
+nobody anything. Keto denies `/invite`, `/kick` and even `/help` until two
+things happen. You must do both. If one is absent, the symptom is a silent
+refusal with `"authorized":false` in the chitd log.
 
 ### 1. Push the command grants
 
@@ -213,8 +214,8 @@ CHIT_KETO_READ_URL=http://localhost:4466 CHIT_KETO_WRITE_URL=http://localhost:44
 
 ### 2. Bind the seeded users to roles
 
-The reconciler reads actor→role bindings from `auth/actors/`, which ships with
-its example commented out because user IDs are generated per environment. Bind
+The reconciler reads actor→role bindings from `auth/actors/`. Its example ships
+commented out because each environment generates its own user IDs. Bind
 the seeded users directly:
 
 ```bash
@@ -241,7 +242,7 @@ done < <(podman exec chit-uat-db-postgres psql -U chit -d chit \
 Note the namespace is `chit/command`, not `command`; the wrong one returns
 `404 Unknown namespace`.
 
-Confirm a user can execute a command before testing through the UI:
+Verify that a user can execute a command before you test through the UI:
 
 ```bash
 curl -s -X POST http://localhost:4466/relation-tuples/check \
@@ -255,7 +256,7 @@ Use the chit **user** ID here (the `users.id` column), not the Kratos ID.
 
 ### Worked example: `/invite`
 
-With two clients running and the steps above done:
+Start two clients and do the steps above. Then:
 
 1. As alice, create a channel bob is not in. An open channel automatically
    includes the whole team, so remove him first:
@@ -269,7 +270,7 @@ With two clients running and the steps above done:
    persisted.
 4. In bob's client, press `Ctrl+K` — the channel now appears in his list.
 
-Confirm server-side:
+Verify server-side:
 
 ```bash
 podman exec chit-uat-db-postgres psql -U chit -d chit -tAc \
@@ -280,14 +281,14 @@ podman exec chit-uat-db-postgres psql -U chit -d chit -tAc \
     where c.name = '<channel-name>';"
 ```
 
-`/kick` follows the same flow. Removing yourself is leaving and any member may
-do it; removing somebody else requires the `system_admin` role, so it succeeds
-as alice and returns 403 as anyone else.
+`/kick` follows the same flow. To kick yourself is to leave, and any member may
+do it. To remove another user, the caller must have the `system_admin` role. So
+it succeeds as alice and returns 403 as anyone else.
 
 ## Testing with curl
 
-For direct API testing, you can still bypass auth by hitting the chitd server
-directly (port 8065) with the `X-User-Id` header:
+For direct API tests, you can still bypass auth. Send requests to the chitd
+server directly (port 8065) with the `X-User-Id` header:
 
 ```bash
 ALICE="X-User-Id: a11ce000-0000-4000-a000-000000000001"
@@ -295,7 +296,7 @@ BOB="X-User-Id: b0b00000-0000-4000-a000-000000000002"
 ```
 
 :::caution[These IDs change once you seed Kratos]
-The values above are the placeholders `scripts/seed-uat` assigns. Running
+The values above are the placeholders `scripts/seed-uat` assigns.
 `make uat-seed-kratos` creates real Kratos identities and rebinds each user to
 a new random ID, after which these headers resolve to nobody. Read the current
 values instead:
@@ -330,7 +331,7 @@ curl -H "$ALICE" http://localhost:8065/api/v1/channels/CHANNEL_ID/posts
 
 ### Reply to a thread
 
-Use the `root_id` field with the ID of the post you're replying to:
+Use the `root_id` field with the ID of the post that you reply to:
 
 ```bash
 curl -X POST -H "$BOB" -H 'Content-Type: application/json' \
@@ -340,8 +341,8 @@ curl -X POST -H "$BOB" -H 'Content-Type: application/json' \
 
 ### The thread inbox
 
-Replying to a thread starts following it, and the author of the root post
-follows it from its first reply (unless they have unfollowed). Either Alice's
+When a user replies to a thread, the user starts to follow it. The author of
+the root post follows it from its first reply (unless they have unfollowed). Either Alice's
 or Bob's header works here:
 
 ```bash
@@ -359,10 +360,11 @@ Each entry carries the root post, `last_viewed_at`, and `unread_mentions`. A
 thread is unread when `thread.last_reply_at` is greater than `last_viewed_at`;
 a never-read thread has `last_viewed_at` of `0`.
 
-In chit-tui both lists are `/threads`: the active team's threads first, then a
-**Direct messages** section (it works with no team selected, showing only the
-DM threads). `enter` opens a thread (switching channels if it lives
-elsewhere, and marking it read), `u` unfollows it, `esc` closes the overlay.
+In chit-tui both lists are `/threads`. The active team's threads come first,
+then a **Direct messages** section. With no team selected, `/threads` shows only
+the DM threads. `enter` opens a thread. If the thread is in another channel,
+chit-tui switches to that channel. It also marks the thread read. `u` unfollows
+it, and `esc` closes the overlay.
 
 ### Search users
 
@@ -401,7 +403,7 @@ curl -H "$ALICE" http://localhost:8065/api/v1/teams/TEAM_ID/channels
 
 ### Authenticated curl via Oathkeeper
 
-To test the full auth flow with curl, first obtain a session token from Kratos:
+To test the full auth flow with curl, first get a session token from Kratos:
 
 ```bash
 # 1. Init a login flow
@@ -420,7 +422,7 @@ curl -H "X-Session-Token: $TOKEN" http://localhost:4455/api/v1/users/me
 
 ## How auth works
 
-In the UAT environment, the full Ory stack is running:
+In the UAT environment, the full Ory stack runs:
 
 1. **Oathkeeper** (port 4455) — auth proxy for all requests
 2. **Kratos** (ports 4433/4434) — manages user identities and sessions
@@ -434,12 +436,12 @@ The request flow is:
 5. chitd's `AuthExtract` middleware reads `X-User-Id` and calls `ProvisionUser`
 
 A request without a session token still passes the UAT Oathkeeper (its rules
-keep an anonymous `noop` fallback), arrives with no `X-User-Id`, and is
-answered 401 by chitd unless the route is public, such as `/system/ping`.
+keep an anonymous `noop` fallback). It arrives with no `X-User-Id`. chitd
+answers 401 unless the route is public, such as `/system/ping`.
 
 Direct access to chitd on port 8065 bypasses Oathkeeper entirely. Since the
 seed program pre-creates users with known Kratos IDs, `ProvisionUser` finds
-them without calling Kratos.
+them and does not call Kratos.
 
 ## Tear down
 
@@ -457,8 +459,8 @@ make uat-clean
 
 ## Next steps
 
-- [User Management](/chit/deployment/user-management/) — creating and managing
-  user identities
+- [Manage users](/chit/deployment/user-management/) — create user
+  identities and change them
 - [REST API Reference](/chit/api-reference/rest-api/) — full endpoint
   documentation
 - [WebSocket Protocol](/chit/api-reference/websocket-protocol/) — connect for

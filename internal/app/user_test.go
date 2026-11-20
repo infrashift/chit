@@ -21,7 +21,9 @@ func fakeKratos(t *testing.T, f *fixture, traits map[string]string, status int) 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		w.WriteHeader(status)
-		_ = json.NewEncoder(w).Encode(map[string]any{"traits": traits})
+		if err := json.NewEncoder(w).Encode(map[string]any{"traits": traits}); err != nil {
+			t.Errorf("encode identity: %v", err)
+		}
 	}))
 	t.Cleanup(srv.Close)
 	f.app.Config.KratosAdminURL = srv.URL
@@ -57,7 +59,11 @@ func TestProvisionUser(t *testing.T) {
 			t.Fatalf("got %v, created=%v, %v after %d Kratos calls", u, created, err, calls.Load())
 		}
 	})
+}
 
+// TestProvisionUser_Refusals covers the identities ProvisionUser must not
+// turn into a user.
+func TestProvisionUser_Refusals(t *testing.T) {
 	t.Run("a Kratos failure is an error, not a nameless user", func(t *testing.T) {
 		f := newFixture(t)
 		fakeKratos(t, f, nil, http.StatusNotFound)
@@ -70,7 +76,9 @@ func TestProvisionUser(t *testing.T) {
 	t.Run("an inactive Kratos identity is not provisioned", func(t *testing.T) {
 		f := newFixture(t)
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write([]byte(`{"state":"inactive","traits":{"username":"idle","email":"idle@example.com"}}`))
+			if _, err := w.Write([]byte(`{"state":"inactive","traits":{"username":"idle","email":"idle@example.com"}}`)); err != nil {
+				t.Errorf("write: %v", err)
+			}
 		}))
 		t.Cleanup(srv.Close)
 		f.app.Config.KratosAdminURL = srv.URL
@@ -102,7 +110,9 @@ func TestProvisionUser(t *testing.T) {
 			t.Fatalf("Kratos called %d times for a deactivated user", calls.Load())
 		}
 	})
+}
 
+func TestProvisionUser_CreationRace(t *testing.T) {
 	// Two first requests from the same person race to create their row. The
 	// loser's Save fails on the unique kratos_id and must return the
 	// winner's row rather than an error.

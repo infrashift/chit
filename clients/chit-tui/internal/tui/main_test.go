@@ -1,13 +1,12 @@
 package tui_test
 
 import (
-	"io"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/adrg/xdg"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui"
 )
 
 // TestMain moves every user directory into a temporary one. The model writes
@@ -27,7 +26,12 @@ func run(m *testing.M) int {
 	if err != nil {
 		panic(err)
 	}
-	defer func() { _ = os.RemoveAll(dir) }()
+	defer func() {
+		// Too late to fail the run; say so, so the leftover can be found.
+		if err := os.RemoveAll(dir); err != nil {
+			fmt.Fprintf(os.Stderr, "remove test home %s: %v\n", dir, err)
+		}
+	}()
 
 	for k, v := range map[string]string{
 		"HOME":             dir,
@@ -40,7 +44,6 @@ func run(m *testing.M) int {
 	}
 	// xdg resolves its directories once, at init, before TestMain runs.
 	xdg.Reload()
-	tui.SetClipboardOutput(io.Discard)
 
 	return m.Run()
 }

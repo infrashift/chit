@@ -13,6 +13,9 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+
+	"github.com/infrashift/chit/internal/assert"
+	"github.com/infrashift/chit/internal/errlog"
 )
 
 // Client talks to Keto's read and write (admin) APIs.
@@ -26,11 +29,16 @@ type Client struct {
 // URLs. A write also reads (see WriteRelation), so a writer needs both; a
 // caller that only checks or lists may leave the write URL empty.
 func New(readURL, writeURL string, httpClient *http.Client) *Client {
+	assert.That(httpClient != nil, "keto.New: nil HTTP client")
 	return &Client{readURL: readURL, writeURL: writeURL, http: httpClient}
 }
 
 // Check reports whether subjectID has relation on namespace:object.
 func (c *Client) Check(ctx context.Context, namespace, object, relation, subjectID string) (bool, error) {
+	assert.That(c.http != nil, "Client.Check: nil HTTP client")
+	assert.That(namespace != "" && relation != "", "Client.Check: empty namespace or relation")
+	assert.That(object != "", "Client.Check: empty object")
+	assert.That(subjectID != "", "Client.Check: empty subject")
 	var result struct {
 		Allowed bool `json:"allowed"`
 	}
@@ -54,6 +62,9 @@ func (c *Client) Check(ctx context.Context, namespace, object, relation, subject
 // at the same moment can still both write, and leave one duplicate row.
 // A duplicate changes no check result, and a delete removes every copy.
 func (c *Client) WriteRelation(ctx context.Context, namespace, object, relation, subjectID string) error {
+	assert.That(c.http != nil, "Client.WriteRelation: nil HTTP client")
+	assert.That(namespace != "" && relation != "", "Client.WriteRelation: empty namespace or relation")
+	assert.That(object != "", "Client.WriteRelation: empty object")
 	q := url.Values{
 		"namespace": {namespace}, "object": {object}, "relation": {relation}, "subject_id": {subjectID},
 	}
@@ -76,6 +87,10 @@ func (c *Client) WriteRelation(ctx context.Context, namespace, object, relation,
 // writes only when the tuple is absent, with the same narrow race.
 func (c *Client) WriteSubjectSetRelation(ctx context.Context, namespace, object, relation,
 	subjectNamespace, subjectObject, subjectRelation string) error {
+	assert.That(c.http != nil, "Client.WriteSubjectSetRelation: nil HTTP client")
+	assert.That(namespace != "" && relation != "", "Client.WriteSubjectSetRelation: empty namespace or relation")
+	assert.That(object != "", "Client.WriteSubjectSetRelation: empty object")
+	assert.That(subjectNamespace != "" && subjectRelation != "", "Client.WriteSubjectSetRelation: empty subject set")
 	q := url.Values{
 		"namespace": {namespace}, "object": {object}, "relation": {relation},
 		"subject_set.namespace": {subjectNamespace},
@@ -101,6 +116,8 @@ func (c *Client) WriteSubjectSetRelation(ctx context.Context, namespace, object,
 // filters on every field it is given, so one result is enough. It reads
 // through the read API: the write port answers a list with 405.
 func (c *Client) exists(ctx context.Context, q url.Values) (bool, error) {
+	assert.That(q != nil, "Client.exists: nil query")
+	assert.That(q.Get("namespace") != "" && q.Get("relation") != "", "Client.exists: query names no tuple")
 	q.Set("page_size", "1")
 	var page struct {
 		Tuples []Tuple `json:"relation_tuples"`
@@ -113,6 +130,7 @@ func (c *Client) exists(ctx context.Context, q url.Values) (bool, error) {
 
 // DeleteRelation deletes the tuple namespace:object#relation@subjectID.
 func (c *Client) DeleteRelation(ctx context.Context, namespace, object, relation, subjectID string) error {
+	assert.That(c.http != nil, "Client.DeleteRelation: nil HTTP client")
 	q := url.Values{
 		"namespace": {namespace}, "object": {object}, "relation": {relation}, "subject_id": {subjectID},
 	}
@@ -126,6 +144,9 @@ func (c *Client) DeleteRelation(ctx context.Context, namespace, object, relation
 // (when non-nil). Any status of 300 or above is an error: a check must not
 // read an error page as "not allowed", nor a failed write as done.
 func (c *Client) do(ctx context.Context, method, target string, body, out any) error {
+	assert.That(c.http != nil, "Client.do: nil HTTP client")
+	assert.That(method != "", "Client.do: empty method")
+	assert.That(target != "", "Client.do: empty target")
 	var reader io.Reader = http.NoBody
 	if body != nil {
 		data, err := json.Marshal(body)
@@ -146,7 +167,7 @@ func (c *Client) do(ctx context.Context, method, target string, body, out any) e
 	if err != nil {
 		return err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() { errlog.Debug(resp.Body.Close(), "close keto response body") }()
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("status %d", resp.StatusCode)
 	}
@@ -189,12 +210,18 @@ func (t *Tuple) String() string {
 // listPageSize is how many tuples one list request asks for.
 const listPageSize = 500
 
+// listMaxPages caps ListRelations at 1,000 pages (500,000 tuples), so the
+// loop has a fixed bound (Power of 10 rule 2).
+const listMaxPages = 1000
+
 // ListRelations returns every tuple in namespace, following Keto's pagination.
 // Listing is a read-API call: Keto's write port answers it with 405.
 func (c *Client) ListRelations(ctx context.Context, namespace string) ([]Tuple, error) {
+	assert.That(c.http != nil, "Client.ListRelations: nil HTTP client")
+	assert.That(namespace != "", "Client.ListRelations: empty namespace")
 	var all []Tuple
 	token := ""
-	for {
+	for range listMaxPages {
 		q := url.Values{"namespace": {namespace}, "page_size": {strconv.Itoa(listPageSize)}}
 		if token != "" {
 			q.Set("page_token", token)
@@ -212,10 +239,13 @@ func (c *Client) ListRelations(ctx context.Context, namespace string) ([]Tuple, 
 		}
 		token = page.Next
 	}
+	return nil, fmt.Errorf("keto list: %s has more than %d pages", namespace, listMaxPages)
 }
 
 // DeleteTuple deletes t, whichever kind of subject it has.
 func (c *Client) DeleteTuple(ctx context.Context, t *Tuple) error {
+	assert.That(t != nil, "Client.DeleteTuple: nil tuple")
+	assert.That(c.http != nil, "Client.DeleteTuple: nil HTTP client")
 	if t.SubjectSet == nil {
 		return c.DeleteRelation(ctx, t.Namespace, t.Object, t.Relation, t.SubjectID)
 	}

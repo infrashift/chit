@@ -30,7 +30,7 @@ func BenchmarkModel_OpenAndCloseThread(b *testing.B) {
 		tui.PostsLoadedMsg{ChannelID: "c1", Posts: &model.PostList{Order: order}},
 	} {
 		updated, _ := m.Update(msg)
-		m = updated.(tui.Model)
+		m = asModel(b, updated)
 	}
 	root := order[0]
 	esc := tea.KeyMsg{Type: tea.KeyEscape}
@@ -38,7 +38,7 @@ func BenchmarkModel_OpenAndCloseThread(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		updated, _ := m.Update(viewport.PostSelectedMsg{Post: root})
-		updated, _ = updated.(tui.Model).Update(esc)
-		m = updated.(tui.Model)
+		updated, _ = asModel(b, updated).Update(esc)
+		m = asModel(b, updated)
 	}
 }

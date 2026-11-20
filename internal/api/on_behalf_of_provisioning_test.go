@@ -47,9 +47,11 @@ func (e *bridgeEnv) fakeKratos(t *testing.T) *atomic.Int32 {
 			http.Error(w, `{"error":{"code":404}}`, http.StatusNotFound)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"id": strings.TrimPrefix(r.URL.Path, "/admin/identities/"), "state": state, "traits": traits,
-		})
+		}); err != nil {
+			t.Errorf("encode identity: %v", err)
+		}
 	}))
 	t.Cleanup(srv.Close)
 	e.a.Config.KratosAdminURL = srv.URL
@@ -293,27 +295,41 @@ func TestOnBehalfOf_ConversationFlow(t *testing.T) {
 		t.Fatalf("post author %q, want %q", post.UserID, person.ID)
 	}
 
+	e.checkConversationReads(t, ch.ID, post.ID)
+	e.checkConversationAudit(t, ch.ID, self.ID, person.ID)
+}
+
+// checkConversationReads asserts that halod reads the conversation's post as
+// itself, a member, and that another machine actor, not a member, may not.
+func (e *bridgeEnv) checkConversationReads(t *testing.T, channelID, postID string) {
+	t.Helper()
 	// halod reads as itself, a member.
-	w = e.do(t, http.MethodGet, "/api/v1/channels/"+ch.ID+"/posts", halod, "", nil)
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), post.ID) {
+	w := e.do(t, http.MethodGet, "/api/v1/channels/"+channelID+"/posts", halod, "", nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), postID) {
 		t.Fatalf("read as halod: %d %s", w.Code, w.Body.String())
 	}
 	// Another machine actor, not a member, may not.
-	w = e.do(t, http.MethodGet, "/api/v1/channels/"+ch.ID+"/posts", "client:"+otherClientID, "", nil)
+	w = e.do(t, http.MethodGet, "/api/v1/channels/"+channelID+"/posts", "client:"+otherClientID, "", nil)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("read as a non-member machine actor: %d, want 403", w.Code)
 	}
+}
 
+// checkConversationAudit asserts that the conversation flow left one
+// channel_created and one channel_member_added record, each naming halod's
+// agent and client as the actor and the person as the principal.
+func (e *bridgeEnv) checkConversationAudit(t *testing.T, channelID, selfID, personID string) {
+	t.Helper()
 	for action, attrs := range map[string]map[string]any{
-		"channel_created":      {"channel_id": ch.ID},
-		"channel_member_added": {"channel_id": ch.ID, "user_id": self.ID},
+		"channel_created":      {"channel_id": channelID},
+		"channel_member_added": {"channel_id": channelID, "user_id": selfID},
 	} {
 		recs := e.auditRecords(t, action)
 		if len(recs) != 1 {
 			t.Fatalf("%d %s records, want 1", len(recs), action)
 		}
 		r := recs[0]
-		if r["actor_id"] != haloAgentID || r["client_id"] != haloClientID || r["principal_id"] != person.ID {
+		if r["actor_id"] != haloAgentID || r["client_id"] != haloClientID || r["principal_id"] != personID {
 			t.Errorf("%s record = %v", action, r)
 		}
 		for k, v := range attrs {

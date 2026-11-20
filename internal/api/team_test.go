@@ -150,7 +150,10 @@ func TestUpdateTeam(t *testing.T) {
 			if w.Code != tc.want {
 				t.Fatalf("expected %d, got %d; body: %s", tc.want, w.Code, w.Body.String())
 			}
-			team, _ := ms.Teams.Get(t.Context(), testTeamID)
+			team, err := ms.Teams.Get(t.Context(), testTeamID)
+			if err != nil {
+				t.Fatalf("get team: %v", err)
+			}
 			if tc.want != http.StatusOK && team.DisplayName != "Engineering" {
 				t.Fatalf("a rejected update still changed display_name to %q", team.DisplayName)
 			}
@@ -161,7 +164,10 @@ func TestUpdateTeam(t *testing.T) {
 func TestUpdateTeam_ClearsDescription(t *testing.T) {
 	a, ms, cleanup := setupTestApp(t)
 	defer cleanup()
-	team, _ := ms.Teams.Get(t.Context(), testTeamID)
+	team, err := ms.Teams.Get(t.Context(), testTeamID)
+	if err != nil {
+		t.Fatalf("get team: %v", err)
+	}
 	team.Description = "old"
 	ms.Teams.Seed(team)
 
@@ -169,7 +175,11 @@ func TestUpdateTeam_ClearsDescription(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
 	}
-	if team, _ := ms.Teams.Get(t.Context(), testTeamID); team.Description != "" {
+	team, err = ms.Teams.Get(t.Context(), testTeamID)
+	if err != nil {
+		t.Fatalf("get team: %v", err)
+	}
+	if team.Description != "" {
 		t.Fatal("an explicit empty description should clear it")
 	}
 }

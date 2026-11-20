@@ -8,6 +8,8 @@ import (
 
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/v2"
+
+	"github.com/infrashift/chit/internal/assert"
 )
 
 // Config holds all configuration for the chit server.
@@ -118,7 +120,7 @@ type Config struct {
 
 // Defaults returns a Config populated with default values.
 func Defaults() *Config {
-	return &Config{
+	cfg := &Config{
 		ListenAddress:       ":8065",
 		DBMaxOpenConn:       25,
 		DBMaxIdleConn:       10,
@@ -163,6 +165,9 @@ func Defaults() *Config {
 		FileSweepBatch:          100,
 		MembershipHookTimeout:   5 * time.Second,
 	}
+	assert.That(cfg.validate() == nil, "Defaults: the defaults do not validate")
+	assert.That(cfg.DBMaxIdleConn <= cfg.DBMaxOpenConn, "Defaults: more idle than open connections")
+	return cfg
 }
 
 // Load reads configuration for a process that SERVES chit, and requires
@@ -175,6 +180,7 @@ func Defaults() *Config {
 // a field it never reads.
 func Load() (*Config, error) {
 	cfg, err := load()
+	assert.That((cfg == nil) != (err == nil), "Load: want exactly one of config and error")
 	if err != nil {
 		return nil, err
 	}
@@ -184,21 +190,26 @@ func Load() (*Config, error) {
 		// function already returns an error for every other failure.
 		return nil, errors.New("CHIT_DATABASE_URL is required")
 	}
+	assert.That(cfg != nil && cfg.DatabaseURL != "", "Load: config without a database URL")
 	return cfg, nil
 }
 
 // LoadWithoutDatabase reads the same configuration for a tool that never opens
 // the database. Everything else is validated identically.
 func LoadWithoutDatabase() (*Config, error) {
-	return load()
+	cfg, err := load()
+	assert.That((cfg == nil) != (err == nil), "LoadWithoutDatabase: want exactly one of config and error")
+	return cfg, err
 }
 
 // load reads configuration from environment variables prefixed with CHIT_.
 func load() (*Config, error) {
 	k := koanf.New(".")
 	cfg := Defaults()
+	assert.That(k != nil && cfg != nil, "config.load: nil koanf or defaults")
 
 	err := k.Load(env.ProviderWithValue("CHIT_", ".", func(key, value string) (string, any) {
+		assert.That(strings.HasPrefix(key, "CHIT_"), "config.load: env provider passed a key without the prefix")
 		key = strings.ToLower(strings.TrimPrefix(key, "CHIT_"))
 		if key == "allowed_origins" || key == "on_behalf_of_clients" {
 			parts := strings.Split(value, ",")
@@ -208,6 +219,7 @@ func load() (*Config, error) {
 					origins = append(origins, p)
 				}
 			}
+			assert.That(len(origins) <= len(parts), "config.load: more list items than parts")
 			return key, origins
 		}
 		return key, value
@@ -222,6 +234,7 @@ func load() (*Config, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
+	assert.That(cfg.TrustedProxyHeader != "" && cfg.CacheSize > 0, "config.load: validated config breaks its rules")
 
 	return cfg, nil
 }
@@ -240,17 +253,13 @@ const (
 // zero cache TTL expires every entry at once, and a misspelt pubsub backend
 // silently fell back to pgnotify.
 func (c *Config) validate() error {
+	assert.That(c != nil, "Config.validate: nil config")
 	var errs []error
-	positive := func(name string, v int64) {
-		if v <= 0 {
-			errs = append(errs, fmt.Errorf("%s must be positive, got %d", name, v))
-		}
-	}
-	positive("CHIT_WS_PING_INTERVAL", int64(c.WSPingInterval))
-	positive("CHIT_WS_WRITE_TIMEOUT", int64(c.WSWriteTimeout))
-	positive("CHIT_CACHE_SIZE", int64(c.CacheSize))
-	positive("CHIT_CACHE_TTL", int64(c.CacheTTL))
-	positive("CHIT_DB_MAX_OPEN_CONN", int64(c.DBMaxOpenConn))
+	errs = positive(errs, "CHIT_WS_PING_INTERVAL", int64(c.WSPingInterval))
+	errs = positive(errs, "CHIT_WS_WRITE_TIMEOUT", int64(c.WSWriteTimeout))
+	errs = positive(errs, "CHIT_CACHE_SIZE", int64(c.CacheSize))
+	errs = positive(errs, "CHIT_CACHE_TTL", int64(c.CacheTTL))
+	errs = positive(errs, "CHIT_DB_MAX_OPEN_CONN", int64(c.DBMaxOpenConn))
 	if c.DBMaxIdleConn < 0 || c.DBMaxIdleConn > c.DBMaxOpenConn {
 		errs = append(errs, fmt.Errorf("CHIT_DB_MAX_IDLE_CONN must be between 0 and CHIT_DB_MAX_OPEN_CONN (%d), got %d",
 			c.DBMaxOpenConn, c.DBMaxIdleConn))
@@ -266,18 +275,10 @@ func (c *Config) validate() error {
 		errs = append(errs, fmt.Errorf("CHIT_PUBSUB_BACKEND must be pgnotify or nats, got %q", c.PubSubBackend))
 	}
 
-	rateLimit := func(name string, perSecond float64, burstName string, burst int) {
-		// Written so that NaN fails too: every comparison with NaN is false.
-		if !(perSecond > 0 && perSecond <= MaxRateLimitPerSecond) {
-			errs = append(errs, fmt.Errorf("%s must be more than 0 and at most %d, got %v",
-				name, MaxRateLimitPerSecond, perSecond))
-		}
-		if burst < 1 || burst > MaxRateLimitBurst {
-			errs = append(errs, fmt.Errorf("%s must be between 1 and %d, got %d", burstName, MaxRateLimitBurst, burst))
-		}
-	}
-	rateLimit("CHIT_RATE_LIMIT_USER_PER_SECOND", c.RateLimitUserPerSecond, "CHIT_RATE_LIMIT_USER_BURST", c.RateLimitUserBurst)
-	rateLimit("CHIT_RATE_LIMIT_CLIENT_PER_SECOND", c.RateLimitClientPerSecond, "CHIT_RATE_LIMIT_CLIENT_BURST", c.RateLimitClientBurst)
+	errs = append(errs, rateLimitErrors("CHIT_RATE_LIMIT_USER_PER_SECOND", c.RateLimitUserPerSecond,
+		"CHIT_RATE_LIMIT_USER_BURST", c.RateLimitUserBurst)...)
+	errs = append(errs, rateLimitErrors("CHIT_RATE_LIMIT_CLIENT_PER_SECOND", c.RateLimitClientPerSecond,
+		"CHIT_RATE_LIMIT_CLIENT_BURST", c.RateLimitClientBurst)...)
 
 	if c.TrustedProxyHeader == "" {
 		errs = append(errs, errors.New("CHIT_TRUSTED_PROXY_HEADER must not be empty"))
@@ -293,23 +294,71 @@ func (c *Config) validate() error {
 		errs = append(errs, fmt.Errorf("CHIT_LOG_FORMAT must be json or text, got %q", c.LogFormat))
 	}
 
+	errs = append(errs, c.attachmentErrors()...)
+	errs = append(errs, c.hookErrors()...)
+	assert.That(c.DBMaxOpenConn > 0 || len(errs) > 0, "Config.validate: no open connections and no error")
+	err := errors.Join(errs...)
+	assert.That((err == nil) == (len(errs) == 0), "Config.validate: join lost the errors")
+	return err
+}
+
+// positive appends an error to errs when the setting name is not positive.
+func positive(errs []error, name string, v int64) []error {
+	assert.That(name != "", "positive: unnamed setting")
+	n := len(errs)
+	if v <= 0 {
+		errs = append(errs, fmt.Errorf("%s must be positive, got %d", name, v))
+	}
+	assert.That((len(errs) > n) == (v <= 0), "positive: an error exactly when the value is not positive")
+	return errs
+}
+
+// rateLimitErrors checks one rate limit and its burst.
+func rateLimitErrors(name string, perSecond float64, burstName string, burst int) []error {
+	assert.That(name != "" && burstName != "", "rateLimitErrors: unnamed setting")
+	var errs []error
+	// Written so that NaN fails too: every comparison with NaN is false.
+	if !(perSecond > 0 && perSecond <= MaxRateLimitPerSecond) {
+		errs = append(errs, fmt.Errorf("%s must be more than 0 and at most %d, got %v",
+			name, MaxRateLimitPerSecond, perSecond))
+	}
+	if burst < 1 || burst > MaxRateLimitBurst {
+		errs = append(errs, fmt.Errorf("%s must be between 1 and %d, got %d", burstName, MaxRateLimitBurst, burst))
+	}
+	assert.That(len(errs) <= 2, "rateLimitErrors: more errors than checks")
+	return errs
+}
+
+// attachmentErrors checks the attachment settings, when CHIT_S3_ENDPOINT
+// turns attachments on.
+func (c *Config) attachmentErrors() []error {
+	assert.That(c != nil, "Config.attachmentErrors: nil config")
+	var errs []error
 	if c.S3Endpoint != "" {
 		if c.S3Bucket == "" || c.S3Region == "" || c.S3AccessKeyID == "" || c.S3SecretAccessKey == "" {
 			errs = append(errs, errors.New("CHIT_S3_BUCKET, CHIT_S3_REGION, CHIT_S3_ACCESS_KEY_ID and "+
 				"CHIT_S3_SECRET_ACCESS_KEY are required when CHIT_S3_ENDPOINT is set"))
 		}
-		positive("CHIT_FILE_QUOTA_BYTES", c.FileQuotaBytes)
-		positive("CHIT_FILE_ORPHAN_GRACE", int64(c.FileOrphanGrace))
-		positive("CHIT_FILE_SWEEP_INTERVAL", int64(c.FileSweepInterval))
-		positive("CHIT_FILE_SWEEP_BATCH", int64(c.FileSweepBatch))
+		errs = positive(errs, "CHIT_FILE_QUOTA_BYTES", c.FileQuotaBytes)
+		errs = positive(errs, "CHIT_FILE_ORPHAN_GRACE", int64(c.FileOrphanGrace))
+		errs = positive(errs, "CHIT_FILE_SWEEP_INTERVAL", int64(c.FileSweepInterval))
+		errs = positive(errs, "CHIT_FILE_SWEEP_BATCH", int64(c.FileSweepBatch))
 	}
+	assert.That(c.S3Endpoint != "" || len(errs) == 0, "Config.attachmentErrors: an error with attachments off")
+	return errs
+}
 
+// hookErrors checks the membership hook and the webhook settings, each when
+// it is on.
+func (c *Config) hookErrors() []error {
+	assert.That(c != nil, "Config.hookErrors: nil config")
+	var errs []error
 	if c.MembershipHookURL != "" {
 		if c.MembershipHookTokenURL == "" || c.MembershipHookClientID == "" || c.MembershipHookClientSecret == "" {
 			errs = append(errs, errors.New("CHIT_MEMBERSHIP_HOOK_TOKEN_URL, CHIT_MEMBERSHIP_HOOK_CLIENT_ID and "+
 				"CHIT_MEMBERSHIP_HOOK_CLIENT_SECRET are required when CHIT_MEMBERSHIP_HOOK_URL is set"))
 		}
-		positive("CHIT_MEMBERSHIP_HOOK_TIMEOUT", int64(c.MembershipHookTimeout))
+		errs = positive(errs, "CHIT_MEMBERSHIP_HOOK_TIMEOUT", int64(c.MembershipHookTimeout))
 	}
 
 	if c.WebhookEnabled {
@@ -317,9 +366,11 @@ func (c *Config) validate() error {
 		if c.WebhookURL == "" {
 			errs = append(errs, errors.New("CHIT_WEBHOOK_URL is required when CHIT_WEBHOOK_ENABLED=true"))
 		}
-		positive("CHIT_WEBHOOK_WORKER_COUNT", int64(c.WebhookWorkerCount))
-		positive("CHIT_WEBHOOK_QUEUE_SIZE", int64(c.WebhookQueueSize))
-		positive("CHIT_WEBHOOK_TIMEOUT_SEC", int64(c.WebhookTimeoutSec))
+		errs = positive(errs, "CHIT_WEBHOOK_WORKER_COUNT", int64(c.WebhookWorkerCount))
+		errs = positive(errs, "CHIT_WEBHOOK_QUEUE_SIZE", int64(c.WebhookQueueSize))
+		errs = positive(errs, "CHIT_WEBHOOK_TIMEOUT_SEC", int64(c.WebhookTimeoutSec))
 	}
-	return errors.Join(errs...)
+	assert.That(c.MembershipHookURL != "" || c.WebhookEnabled || len(errs) == 0,
+		"Config.hookErrors: an error with both hooks off")
+	return errs
 }

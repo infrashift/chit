@@ -32,8 +32,10 @@ Thumbs.db
 dist/
 tmp/
 
-# Claude Code
-.claude/
+# Claude Code: commit the okfw skill, keep the local settings private
+**/.claude/settings.local.json
+# The TUI verify skill stays local, as before.
+clients/chit-tui/.claude/
 
 # Docs
 docs/node_modules/

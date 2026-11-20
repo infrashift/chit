@@ -64,15 +64,26 @@ func TestNotifyMentionedUsers_CountsInBulk(t *testing.T) {
 	}
 
 	for name, want := range map[string]int64{"alice": 1, "bob": 1, "carol": 0, "author": 0} {
-		m, _ := f.store.Channels.GetMember(t.Context(), f.channel.ID, f.user(name).ID)
+		m, err := f.store.Channels.GetMember(t.Context(), f.channel.ID, f.user(name).ID)
+		if err != nil {
+			t.Fatalf("%s channel member: %v", name, err)
+		}
 		if m.MentionCount != want {
 			t.Errorf("%s channel mentions = %d, want %d", name, m.MentionCount, want)
 		}
 	}
-	if m, _ := f.store.Threads.GetMembership(t.Context(), root.ID, f.user("alice").ID); m.UnreadMentionCount != 1 {
+	m, err := f.store.Threads.GetMembership(t.Context(), root.ID, f.user("alice").ID)
+	if err != nil {
+		t.Fatalf("alice's thread membership: %v", err)
+	}
+	if m.UnreadMentionCount != 1 {
 		t.Errorf("follower's thread mentions = %d, want 1", m.UnreadMentionCount)
 	}
-	if m, _ := f.store.Threads.GetMembership(t.Context(), root.ID, f.user("bob").ID); m.UnreadMentionCount != 0 {
+	m, err = f.store.Threads.GetMembership(t.Context(), root.ID, f.user("bob").ID)
+	if err != nil {
+		t.Fatalf("bob's thread membership: %v", err)
+	}
+	if m.UnreadMentionCount != 0 {
 		t.Errorf("non-follower's thread mentions = %d, want 0", m.UnreadMentionCount)
 	}
 }

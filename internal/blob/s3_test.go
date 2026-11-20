@@ -44,6 +44,7 @@ func TestURIEncode(t *testing.T) {
 // fakeS3 is a path-style bucket that insists on a SigV4 Authorization
 // header from the right key.
 type fakeS3 struct {
+	t       *testing.T
 	mu      sync.Mutex
 	bucket  bool
 	objects map[string]string
@@ -76,8 +77,8 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodPut:
-		b, _ := io.ReadAll(r.Body)
-		if r.Header.Get("X-Amz-Content-Sha256") != sha256Hex(b) {
+		b, err := io.ReadAll(r.Body)
+		if err != nil || r.Header.Get("X-Amz-Content-Sha256") != sha256Hex(b) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -89,7 +90,9 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		_, _ = io.WriteString(w, v)
+		if _, err := io.WriteString(w, v); err != nil {
+			f.t.Errorf("fake S3: write object %s: %v", key, err) // the server's goroutine: not t.Fatal
+		}
 	case http.MethodDelete:
 		delete(f.objects, key)
 		w.WriteHeader(http.StatusNoContent)
@@ -97,7 +100,7 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func TestS3_RoundTrip(t *testing.T) {
-	fake := &fakeS3{objects: map[string]string{}, types: map[string]string{}}
+	fake := &fakeS3{t: t, objects: map[string]string{}, types: map[string]string{}}
 	srv := httptest.NewServer(fake)
 	defer srv.Close()
 	s, err := NewS3(&S3Config{Endpoint: srv.URL, Bucket: "chit-files", Region: "us-east-1", AccessKeyID: "AK", SecretAccessKey: "SK"})
@@ -123,8 +126,13 @@ func TestS3_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _ := io.ReadAll(rc)
-	_ = rc.Close()
+	b, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("read object: %v", err)
+	}
+	if err := rc.Close(); err != nil {
+		t.Fatalf("close object: %v", err)
+	}
 	if string(b) != "bytes" || n != 5 {
 		t.Fatalf("got %q (%d)", b, n)
 	}

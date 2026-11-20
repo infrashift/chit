@@ -14,6 +14,7 @@ import (
 	gws "github.com/gorilla/websocket"
 
 	"github.com/infrashift/chit/internal/model"
+	"github.com/infrashift/chit/internal/pubsub"
 )
 
 // Scoped Tags (P-CHIT-7). The privacy tests are the point: a private Tag
@@ -246,9 +247,11 @@ func wsAs(t *testing.T, srv *httptest.Server, kratosID string) *gws.Conn {
 		t.Fatalf("dial: %v", err)
 	}
 	if resp != nil && resp.Body != nil {
-		_ = resp.Body.Close()
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close handshake response body: %v", err)
+		}
 	}
-	t.Cleanup(func() { _ = conn.Close() })
+	t.Cleanup(func() { closeOK(t, conn, "websocket") })
 	return conn
 }
 
@@ -257,7 +260,7 @@ func wsAs(t *testing.T, srv *httptest.Server, kratosID string) *gws.Conn {
 func drainUntil(t *testing.T, conn *gws.Conn, sentinel string) []model.WebSocketEvent {
 	t.Helper()
 	var got []model.WebSocketEvent
-	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	readDeadlineOK(t, conn, 3*time.Second)
 	for {
 		var evt model.WebSocketEvent
 		if err := conn.ReadJSON(&evt); err != nil {
@@ -328,8 +331,16 @@ func TestTagPrivacy_ChannelTagEventCarriesEachReadersView(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("alice got %d events, want 1: %+v", len(events), events)
 	}
-	for _, raw := range events[0].Data["tags"].([]any) {
-		if raw.(map[string]any)["id"] == private.ID {
+	tags, ok := events[0].Data["tags"].([]any)
+	if !ok {
+		t.Fatalf("alice's event has no tag list: %+v", events[0].Data)
+	}
+	for _, raw := range tags {
+		tag, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("tag %v is not an object", raw)
+		}
+		if tag["id"] == private.ID {
 			t.Error("alice's post_tags_updated lists bob's private tag")
 		}
 	}
@@ -348,8 +359,8 @@ func (p *recordingPubSub) Publish(_ context.Context, _ string, data []byte) erro
 	p.msgs = append(p.msgs, string(data))
 	return nil
 }
-func (p *recordingPubSub) Subscribe(_ context.Context, _ string, _ func([]byte)) error { return nil }
-func (p *recordingPubSub) Close() error                                                { return nil }
+func (p *recordingPubSub) Subscribe(_ context.Context, _ string, _ pubsub.Handler) error { return nil }
+func (p *recordingPubSub) Close() error                                                  { return nil }
 
 func TestTagPrivacy_PrivateTagChangesAreNotPublished(t *testing.T) {
 	e := newTagEnv(t)

@@ -1,4 +1,4 @@
-.PHONY: keto-validate test-keto build build-mcp build-reconcile build-claude build-tui build-all run test test-integration test-tui test-all test-container test-e2e test-e2e-tui test-e2e-clean lint vuln lint-tui check-deps validate-spec cue-validate reconcile migrate-up migrate-down kube-migrate kube-build kube-up kube-down kube-restart kube-logs kube-clean uat-up uat-seed-kratos uat-down uat-clean docs-dev clean
+.PHONY: semscope docs-lexis wiki check keto-validate test-keto build build-mcp build-reconcile build-claude build-tui build-all run test test-integration test-tui test-all test-container test-e2e test-e2e-tui test-e2e-clean lint vuln lint-tui check-deps validate-spec cue-validate reconcile migrate-up migrate-down kube-migrate kube-build kube-up kube-down kube-restart kube-logs kube-clean uat-up uat-seed-kratos uat-down uat-clean docs-dev clean
 
 BINARY=bin/chitd
 MCP_BINARY=bin/chit-mcp
@@ -91,6 +91,36 @@ GOLANGCI_LINT?=$(shell command -v golangci-lint 2>/dev/null || echo $(shell go e
 lint:
 	GOWORK=off $(GOLANGCI_LINT) run --build-tags integration,e2e ./...
 
+# semscope checks the NASA Power of 10 rules (ADR-0002, ADR-0003 in
+# .okfw/decisions) on both Go modules with the overlay .semscope.cue. It runs
+# only when it is on the PATH: CI cannot install it yet.
+SEMSCOPE ?= semscope
+semscope:
+	if command -v $(SEMSCOPE) >/dev/null 2>&1; then $(SEMSCOPE) scan -r nasa-p10 -r .semscope.cue --fail-level warning .; else echo "semscope: $(SEMSCOPE) not found, so golangci-lint checks the rules alone"; fi
+
+# lexis checks the Markdown documentation and the wiki against ASD-STE100
+# with vocabulary.cue (ADR-0005). It runs only when it is on the PATH. Each
+# finding fails it. The changelogs, the TUI history and the daily notes keep
+# their words.
+LEXIS ?= lexis
+DOCS_LEXIS_FLAGS := --ruleset ste-100 --ruleset vocabulary.cue --fail-on note \
+	--exclude 'changelog.mdx' --exclude 'index.md' --exclude 'log.md' \
+	--exclude 'daily' --exclude 'ephemeral'
+DOCS_LEXIS_PATHS := README.md CLAUDE.md PLAN.md PRD.md PRD-SLASH-COMMANDS.md \
+	SPECS-SLASH-COMMANDS.md ROADMAP.md tests/e2e/README.md \
+	clients/chit-tui/README.md clients/chit-tui/CLAUDE.md clients/chit-tui/TODO.md \
+	docs/src/content/docs .okfw
+docs-lexis:
+	if command -v $(LEXIS) >/dev/null 2>&1; then $(LEXIS) scan $(DOCS_LEXIS_FLAGS) $(DOCS_LEXIS_PATHS); else echo "docs-lexis: $(LEXIS) not found, so nothing checks the style"; fi
+
+# The OKF wiki: frontmatter schema, OKF conformance and links (ADR-0001).
+wiki:
+	okfw validate --all
+	okfw validate --okf
+
+# check runs every gate that needs no container (test-integration needs Podman).
+check: check-deps lint lint-tui semscope test test-tui docs-lexis wiki
+
 vuln:
 	GOWORK=off go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
@@ -144,7 +174,7 @@ check-deps:
 	@echo "check-deps: all dependency boundaries hold"
 
 lint-tui:
-	$(MAKE) -C clients/chit-tui lint
+	$(MAKE) -C clients/chit-tui lint GOLANGCI_LINT=$(GOLANGCI_LINT)
 
 test-e2e-tui:
 	$(MAKE) -C clients/chit-tui test-e2e

@@ -4,7 +4,7 @@ description: Built-in color themes for Chit TUI, and how the active theme is cho
 ---
 
 Chit TUI ships with eight bundled themes: four families, each with a dark and
-a light variant. You can also write your own — see
+a light variant. You can also write a theme — see
 [Custom Themes](/chit/tui/guides/custom-themes/).
 
 | Family | Dark | Light |
@@ -20,13 +20,13 @@ There are four ways to pick one:
 
 - **In the client** — type `/theme` (or its alias `/skin`) and pick from the
   list with `↑`/`↓` (or `j`/`k`) and `Enter`. The new theme applies at once,
-  with no restart, and is saved to the config file (see below).
+  with no restart. The client also saves it to the config file (see below).
 - **For one run** — `chit-tui --theme kanagawa`.
 - **In the config file** — `theme = "kanagawa"` in
   `~/.config/chit/config.toml`.
 - **In the environment** — `export CHIT_THEME=kanagawa`.
 
-To follow the terminal instead of fixing one theme, set a theme per
+To follow the terminal instead of one fixed theme, set a theme for each
 appearance and leave `theme` unset:
 
 ```toml
@@ -36,11 +36,11 @@ theme_light = "kanagawa-lotus"
 ```
 
 `chit-tui --list-themes` prints every theme name you can use: the bundled
-ones, then your own, marked `(local)`. The `/theme` picker lists the same set.
+ones, then the local ones, marked `(local)`. The `/theme` picker lists the same set.
 
 ## How the Theme Is Chosen
 
-The first of these that is set wins:
+The first of these settings that has a value wins:
 
 1. `--theme` on the command line
 2. `theme` — from `CHIT_THEME` if set, otherwise from the config file
@@ -53,34 +53,36 @@ then `system`. With `system`, chit-tui asks the terminal whether its
 background is dark, once, before the interface starts. When stdin or stdout is
 not a terminal there is nobody to ask, and it assumes dark.
 
-Appearance only matters for steps 3 and 4. If a theme is named outright by
-`--theme` or `theme`, a configured appearance is ignored with a warning.
+Appearance only matters for steps 3 and 4. If `--theme` or `theme` names a
+theme outright, the client ignores a configured appearance with a warning.
 
-A name passed to `--theme` that does not exist is an error and the client
-stops, listing the bundled themes. A configured name that does not resolve is
-only a warning, and resolution falls through to the next step. Someone who
-just typed a name wants to know it was wrong; a config file that has aged out
-of date should not stop the client from starting.
+A name passed to `--theme` that does not exist is an error. The client stops
+and lists the bundled themes. A configured name that does not resolve is
+only a warning. In that case, resolution falls through to the next step. A
+person who typed a name a moment before wants to know that the name is wrong.
+A config file that is out of date must not stop the client when it starts.
 
-Theme names are matched without regard to case: `--theme Kanagawa` works.
+The client matches theme names without regard to case: `--theme Kanagawa`
+works.
 
 ## How `/theme` Saves Your Choice
 
-A theme picked with `/theme` is written to the config file so it survives a
-restart. Only that one line is rewritten; your comments and the order of the
-other keys are kept. The file is created if it does not exist.
+The client writes a theme picked with `/theme` to the config file, so the
+choice survives a restart. The client changes only that one line. It keeps the
+comments and the order of the other keys. If the file does not exist, the
+client creates it.
 
-Which key it writes depends on how you configured themes:
+The key that the client writes depends on the theme settings:
 
-- If `theme_dark` or `theme_light` is set and no fixed `theme` is, the pick
-  is saved to the key for the **current** appearance. Picking a theme on a
-  light terminal sets `theme_light` and leaves `theme_dark` alone. Saving to
-  `theme` instead would outrank both and turn appearance switching off for
-  good.
-- Otherwise it is saved as `theme`.
+- If `theme_dark` or `theme_light` has a value and `theme` has no value, the
+  client saves the pick to the key for the **current** appearance. A pick on
+  a light terminal sets `theme_light` and does not change `theme_dark`. A
+  value in `theme` outranks both keys. It can turn off the change between
+  appearances permanently, so the client does not write `theme` in this case.
+- If not, the client saves the pick as `theme`.
 
-`CHIT_THEME` still overrides the file, so if it is set in your shell, the
-saved choice is not what you get on the next start.
+`CHIT_THEME` still overrides the file. If the shell sets `CHIT_THEME`, the
+next start does not use the saved choice.
 
 ## Tokyo Night (default)
 
@@ -122,7 +124,7 @@ chit-tui --theme tokyo-night-day
 
 ## Catppuccin Mocha
 
-A soothing pastel palette from [Catppuccin](https://github.com/catppuccin/nvim). Lavender blues and mauve purples on a warm dark base.
+A soft pastel palette from [Catppuccin](https://github.com/catppuccin/nvim). Lavender blues and mauve purples on a warm dark base.
 
 ```bash
 chit-tui --theme catppuccin

@@ -10,6 +10,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Behaviour changes an operator must act on or know about:
 
+- **Run chitd under a supervisor that restarts it.** chitd now asserts its
+  own invariants (NASA Power of 10 rule 5, ADR-0011 in `.okfw/`). A failed
+  assertion in a request gives a `500`, and one in a single connection's or
+  thread's goroutine ends only that goroutine; one in a central loop (the
+  WebSocket hub, the scheduler, the pg LISTEN listener, the search indexer)
+  stops the process, to be restarted with clean state. The kube files
+  already set `restartPolicy: Always`.
 - **Rate limits are configurable, and an on-behalf-of client has an
   aggregate limit of its own (P-CHIT-8 for HALO).** A person, and a machine
   actor not in `CHIT_ON_BEHALF_OF_CLIENTS`, keeps 10 requests a second in
@@ -200,6 +207,11 @@ Behaviour changes an operator must act on or know about:
 
 ### Added
 
+- Project knowledge base: an OKF wiki in `.okfw/` (architecture, specs,
+  ADRs, issues, daily notes) managed by okfw, with its MCP server in
+  `.mcp.json`. New gates: `make semscope` (NASA Power of 10 rules),
+  `make docs-lexis` (ASD-STE100 for the docs and the wiki), `make wiki`, and
+  `make check`, which runs every gate that needs no container.
 - Configurable rate limits, and an aggregate limit for each on-behalf-of
   client (P-CHIT-8 for HALO). halod acts for every Subject through one
   machine actor, and its own requests (history and member reads,
@@ -424,6 +436,15 @@ Behaviour changes an operator must act on or know about:
 
 ### Changed
 
+- The code of both modules follows the NASA Power of 10 rules as ADR-0002
+  adapts them to Go: no recursion, a bound or exit condition on every loop,
+  functions of 60 lines or fewer, two assertions per function on average,
+  no mutable package state, no function types in chit's own code, and every
+  return value checked. golangci-lint enforces the matching linters in CI.
+  Two new limits: Keto `ListRelations` fails after 1,000 pages, and the
+  search indexer handles at most 100 batches (20,000 posts) per tick.
+- The documentation and the wiki are written in ASD-STE100 Simplified
+  Technical English; `vocabulary.cue` lists the project terms.
 - A deactivated user's Kratos identity is refused with `403` before
   Kratos is asked. chitd used to fetch the identity and fail to save a
   second user for it (`409`).
@@ -530,6 +551,12 @@ Behaviour changes an operator must act on or know about:
 
 ### Fixed
 
+- A `profile/` tag name that spells the prefix with a letter whose lowercase
+  is shorter in UTF-8, such as `profİle/coder`, was refused with `400`: the
+  prefix was cut from the name by its byte length in the key. It is now cut
+  by runes.
+- The Keto integration test cleanup used `t.Context()`, which is already
+  cancelled when cleanups run, so its deletes never happened.
 - `chit-claude` no longer answers another agent as a human after one failed
   author lookup. Failures were cached for the life of the process, which
   lifted `REPLY_TO_AGENTS` and the hop cap for that agent.

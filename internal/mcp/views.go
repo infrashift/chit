@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"slices"
 
+	"github.com/infrashift/chit/internal/assert"
 	"github.com/infrashift/chit/internal/model"
 )
 
@@ -52,6 +53,7 @@ func viewPosts(posts []*model.Post) *postListView {
 	for _, p := range posts {
 		out.Order = append(out.Order, viewPost(p))
 	}
+	assert.That(len(out.Order) == len(posts), "viewPosts: a post was dropped or added")
 	return out
 }
 
@@ -62,23 +64,27 @@ func viewPostList(list *model.PostList) *postListView {
 	return viewPosts(list.Order)
 }
 
-// defaultEventTypes are the events get_new_events returns when the caller
-// names none: the ones that change what was said. Typing, read state,
+// defaultEventTypes returns the events get_new_events returns when the
+// caller names none: the ones that change what was said. Typing, read state,
 // membership and the rest are discarded unless asked for.
-var defaultEventTypes = []string{
-	model.WebSocketEventPosted,
-	model.WebSocketEventPostEdited,
-	model.WebSocketEventPostDeleted,
+func defaultEventTypes() []string {
+	return []string{
+		model.WebSocketEventPosted,
+		model.WebSocketEventPostEdited,
+		model.WebSocketEventPostDeleted,
+	}
 }
 
 // viewEvents keeps the events of the wanted types, slimming the post that
 // posted and post_edited events carry whole.
 func viewEvents(events []*model.WebSocketEvent, types []string) []*model.WebSocketEvent {
 	if len(types) == 0 {
-		types = defaultEventTypes
+		types = defaultEventTypes()
 	}
+	assert.That(len(types) > 0, "viewEvents: no event types to keep")
 	var out []*model.WebSocketEvent
 	for _, e := range events {
+		assert.That(e != nil, "viewEvents: nil buffered event")
 		if !slices.Contains(types, e.Event) {
 			continue
 		}
@@ -87,6 +93,7 @@ func viewEvents(events []*model.WebSocketEvent, types []string) []*model.WebSock
 		}
 		out = append(out, e)
 	}
+	assert.That(len(out) <= len(events), "viewEvents: more events out than in")
 	return out
 }
 
@@ -109,5 +116,7 @@ func slimPostData(data map[string]any) map[string]any {
 	if json.Unmarshal(raw, &out) != nil {
 		return data
 	}
+	_, hasProps := out["props"]
+	assert.That(!hasProps, "slimPostData: slimmed post still carries props")
 	return out
 }

@@ -3,8 +3,8 @@ title: Quick Start
 description: Get the full Chit stack running in under five minutes.
 ---
 
-This guide walks you through starting the complete Chit stack, chitd included,
-with Podman Kube, verifying it, and registering a user.
+This guide shows how to start the complete Chit stack, chitd included,
+with Podman Kube. Then it shows how to verify the stack and register a user.
 
 ## 1. Start the stack
 
@@ -22,10 +22,10 @@ This builds the chitd image (`localhost/chit:latest`, from
   (full-text search) and **chitd** on `:8065`
 
 Kratos, Keto, Hydra and Chit schema migrations run automatically in init
-containers before the services start; no separate migration step is needed.
+containers before the services start. You do not need a separate migration step.
 
 :::tip
-If you later pull new Chit migration files, apply them to the running pod
+If you later pull new Chit migration files, apply them to the pod while it runs
 with `make kube-migrate`. It runs a one-shot migrate container against the
 pod's PostgreSQL, no restart required.
 :::
@@ -44,16 +44,16 @@ Expected response:
 {"status":"OK"}
 ```
 
-Through the Oathkeeper gateway on `:4455`, every `/api/v1` route, this one
-included, needs a Kratos session token or a Hydra access token, so the same
-request there answers 401.
+Through the Oathkeeper gateway on `:4455`, every `/api/v1` route needs a
+Kratos session token or a Hydra access token. This route is no exception, so
+the same request there answers 401.
 
 Follow chitd's logs with `make kube-log-chitd`.
 
 ## 3. Register a user
 
-Kratos API registration is two steps: create a registration flow, then submit
-the form to the URL the flow returns. The identity schema requires `email`,
+To register a user through the Kratos API, do two steps. First create a
+flow at `/self-service/registration/api`. Then submit the form to the URL the flow returns. The identity schema requires `email`,
 `username` (lowercase) and `display_name`:
 
 ```bash
@@ -90,9 +90,9 @@ the Kratos identity.
 
 ## Develop against a local chitd
 
-The pod's chitd already holds `:8065`, so `make run` cannot bind while it is
-running. Stop that container (Podman does not restart a container you stopped
-yourself), then run your own build in its place:
+The pod's chitd already holds `:8065`, so `make run` cannot bind while the pod's
+chitd runs. Stop that container. Podman does not restart a container that you
+stopped yourself. Then run the local build in its place:
 
 ```bash
 podman stop chit-app-chitd
@@ -103,10 +103,10 @@ make run
 
 `make run` builds `bin/chitd` and starts it with the variables from `.env`,
 whose defaults point at the pod's services. Oathkeeper forwards to
-`localhost:8065`, so requests through the gateway now reach your build.
+`localhost:8065`, so requests through the gateway now reach the local build.
 
 To go back to the containerized chitd, stop `make run` and
-`podman start chit-app-chitd`. To run the pod with your changes instead,
+`podman start chit-app-chitd`. To run the pod with the local changes instead,
 `make kube-restart` rebuilds the image and recreates the pods.
 
 ## Next steps
