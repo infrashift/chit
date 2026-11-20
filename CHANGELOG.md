@@ -551,6 +551,10 @@ Behaviour changes an operator must act on or know about:
 
 ### Fixed
 
+- Creating a team with a taken name, or a channel with a name that a live
+  channel in the same team already has, gave `500`. The store now maps the
+  unique violation to `409` with the ID `SqlTeamStore.Save` or
+  `SqlChannelStore.Save` (ISSUE-016).
 - `make kube-up` and `make uat-up` no longer wait forever on a PostgreSQL
   volume from the old DHI image. The `postgresql17` image (UID 26) cannot
   write to a volume of UID 70, so PostgreSQL restarted in a loop and the

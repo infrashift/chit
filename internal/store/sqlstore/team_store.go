@@ -33,6 +33,10 @@ func (s *SqlTeamStore) Save(ctx context.Context, team *model.Team) (*model.Team,
 		team.CreatorID, team.CreateAt, team.UpdateAt, team.DeleteAt,
 	)
 	if err != nil {
+		if isUniqueViolation(err) {
+			// teams.name is UNIQUE over deleted teams too.
+			return nil, model.NewConflictError("SqlTeamStore.Save", "team name is already taken")
+		}
 		return nil, fmt.Errorf("save team: %w", err)
 	}
 

@@ -534,6 +534,10 @@ Behaviour changes an operator must act on or know about:
 
 ### Fixed
 
+- Creating a team with a taken name, or a channel with a name that a live
+  channel in the same team already has, gave `500`. The store now maps the
+  unique violation to `409` with the ID `SqlTeamStore.Save` or
+  `SqlChannelStore.Save` (ISSUE-016).
 - `chit-claude` no longer answers another agent as a human after one failed
   author lookup. Failures were cached for the life of the process, which
   lifted `REPLY_TO_AGENTS` and the hop cap for that agent.
