@@ -20,4 +20,5 @@
 * [ISSUE-014: Merge main and bring its new code under the gates](issue-014-merge-main-and-bring-its-new-code-under-the-gates--01a1f5dc77bc.md) - Merge origin/main (attachments, the membership hook, the rate limits) and make its new code and docs pass every gate before the pull request.
 * [ISSUE-015: make kube-up waits forever on an old PostgreSQL volume](issue-015-make-kube-up-waits-forever-on-an-old-postgresql-volume--01a1f6332767.md) - make kube-up and make uat-up hang without an error when the PostgreSQL volume is from an older image that runs as another UID.
 * [ISSUE-016: A duplicate team or channel name gives a 500](issue-016-a-duplicate-team-or-channel-name-gives-a-500--01a1f63e23c0.md) - Creating a team, or a channel in a team, with a name that already exists gives a 500 instead of a 409, because the store does not map the unique violation.
+* [ISSUE-017: The e2e script fails on a used PostgreSQL volume](issue-017-the-e2e-script-fails-on-a-used-postgresql-volume--01a1f751fa53.md) - tests/e2e/test_e2e.sh passes only on a new chit-pgdata volume, because scenarios 10 to 12 make people, a team and channels with names that a previous run already used.
 
