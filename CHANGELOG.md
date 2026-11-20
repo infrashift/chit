@@ -551,6 +551,13 @@ Behaviour changes an operator must act on or know about:
 
 ### Fixed
 
+- `make kube-up` and `make uat-up` no longer wait forever on a PostgreSQL
+  volume from the old DHI image. The `postgresql17` image (UID 26) cannot
+  write to a volume of UID 70, so PostgreSQL restarted in a loop and the
+  `wait-postgres` init container waited for it with no limit. A new check,
+  `scripts/check-pgdata.sh`, stops both targets before Podman starts and
+  says how to keep or remove the data. `wait-postgres` now gives up after
+  3 minutes, so any PostgreSQL that cannot start fails `podman kube play`.
 - A `profile/` tag name that spells the prefix with a letter whose lowercase
   is shorter in UTF-8, such as `profİle/coder`, was refused with `400`: the
   prefix was cut from the name by its byte length in the key. It is now cut
