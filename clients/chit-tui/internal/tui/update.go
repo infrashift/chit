@@ -62,6 +62,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if next, cmd, ok := m.routeLookupMsg(msg); ok {
 		return next, cmd
 	}
+	if next, cmd, ok := m.routeBubbleMsg(msg); ok {
+		return next, cmd
+	}
 	return m, nil
 }
 

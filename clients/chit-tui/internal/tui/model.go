@@ -25,6 +25,7 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/tagpicker"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/thread"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/threadinbox"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/confirm"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/viewport"
 	"github.com/infrashift/chit/clients/chit-tui/internal/ws"
@@ -154,8 +155,9 @@ type Model struct {
 	scope *requestScope
 	// pendingJumpID is a search hit to select once its channel has loaded.
 	pendingJumpID string
-	// confirmDeleteID is the post awaiting a second delete keypress.
-	confirmDeleteID string
+	// confirm asks the y/N questions: a post delete, a tag delete. Its
+	// subjects are in bubbles.go.
+	confirm confirm.Model
 	// threadRootID is the root of the thread in the main pane, set as soon
 	// as it opens, before the thread itself has loaded.
 	threadRootID string
@@ -194,6 +196,7 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 		skinPicker:   skinpicker.New(s),
 		chCreator:    chcreator.New(s),
 		tagPicker:    tagpicker.New(s),
+		confirm:      confirm.New(s, questionTTL),
 		loginModel:   login.New(s, kratosClient),
 		themeSetting: "theme",
 		clipboardOut: os.Stdout,
@@ -256,6 +259,9 @@ func (m *Model) setError(err error) tea.Cmd {
 	m.errSeq++
 	assert.That(m.errSeq > 0, "setError: error sequence wrapped")
 	m.err = err
+	// The status line shows one thing. An error pushes an open question
+	// off it, and a key must not answer a question that is not shown.
+	m.confirm.Cancel()
 	seq := m.errSeq
 	return tea.Tick(10*time.Second, func(_ time.Time) tea.Msg {
 		return ClearErrMsg{Seq: seq}

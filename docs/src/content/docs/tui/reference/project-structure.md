@@ -208,6 +208,21 @@ Tag picker overlay for the tags of a post. Filter by prefix, toggle tags on/off,
 Decides which rows of a list an overlay draws, so the cursor stays on screen
 however long the list is. Shared by the pickers.
 
+### Reusable Bubbles in `tui/ui/`
+
+Each of these packages is a Bubble that more than one feature uses. A Bubble
+imports no package of the TUI other than `assert` and `ui/styles`. It has no
+fields of function type. It sends its results as `tea.Msg` types, and the
+root model routes them in `bubbles.go` (ADR-0015).
+
+| Package | Purpose | Users |
+|---------|---------|-------|
+| `ui/confirm` | One y/N question in the action bar. The yes key answers Yes, and each other key closes the question. The question also closes after 10 seconds. | Post delete |
+| `ui/chips` | An ordered list of chips with a cap and no duplicates. Backspace removes the last chip. The view wraps to the width. | The member picker |
+| `ui/prompt` | A one-line text overlay. Enter sends the value, and the parent checks it or shows an error. Esc cancels. | Later phases: tag rename, alt text |
+| `ui/activity` | A capped set of short-lived items on one line, each with a timer | Later phases: `stream_status` |
+| `ui/filepick` | The file picker of bubbles in an overlay, with a list of file types and a size cap | Later phases: `/attach` |
+
 ### `tui/ui/markdown/`
 
 Theme-aware Glamour style config builder. Maps theme colors to the Markdown styles of headings, links, code, and syntax highlights.

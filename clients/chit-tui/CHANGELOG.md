@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tag names checked first** — the TUI refuses a tag name that the server refuses, and tells why
 - **HALO contract** — the models and the API client know attachments, provenance, on-behalf-of posts, actor types, tag rename and delete, and channel tags
 - **Unicode #tags** — a `#tag` can hold the letters and digits of each script
+- **Reusable Bubbles** — `ui/confirm`, `ui/chips`, `ui/prompt`, `ui/activity` and `ui/filepick`; the post delete and the member picker use the first two
 
 - **Config file** — `~/.config/chit/config.toml` (or `CHIT_CONFIG_FILE`), checked against a CUE schema; an invalid setting is a warning, not a failure. The environment still overrides the file
 - **Theme flags and appearance** — `--theme`, `--appearance` and `--list-themes`; `theme_dark` and `theme_light` choose a theme by the terminal's appearance

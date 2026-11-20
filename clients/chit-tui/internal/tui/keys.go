@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"errors"
-
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
@@ -20,7 +18,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if key.Matches(msg, m.keys.Quit) {
 		return m, tea.Quit
 	}
-	if cmd, ok := m.confirmPendingDelete(msg); ok {
+	if cmd, ok := m.answerQuestion(msg); ok {
 		return m, cmd
 	}
 	if cmd, ok := m.routeOverlayKey(msg); ok {
@@ -47,33 +45,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Delegate to focused component
 	return m.delegateKey(msg)
-}
-
-// confirmPendingDelete settles a pending delete. It is confirmed by
-// pressing the key again on the same post, while the question is still on
-// screen; once it has timed out or been replaced, nothing is being asked.
-// Anything else cancels it and then does what it does, so only a
-// confirmation reports the key as handled.
-func (m *Model) confirmPendingDelete(msg tea.KeyMsg) (tea.Cmd, bool) {
-	assert.That(m.appState == AppStateRunning, "confirmPendingDelete: not signed in")
-	id := m.confirmDeleteID
-	if id == "" {
-		return nil, false
-	}
-	m.confirmDeleteID = ""
-	asking := errors.Is(m.err, errConfirmDelete)
-	if asking {
-		m.err = nil
-	}
-	if !asking || !key.Matches(msg, m.keys.Delete) || m.focus != FocusViewport {
-		return nil, false
-	}
-	if p := m.ownSelectedPost(); p != nil && p.ID == id {
-		assert.That(m.scope != nil, "confirmPendingDelete: nil request scope")
-		assert.That(m.client != nil, "confirmPendingDelete: nil client")
-		return DeletePost(m.reqCtx(), m.client, p.ID), true
-	}
-	return nil, false
 }
 
 // routeOverlayKey gives the key to a visible overlay or the mention popup.
@@ -165,8 +136,7 @@ func (m *Model) viewportPostKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 	// it asks first.
 	if key.Matches(msg, m.keys.Delete) {
 		if p := m.ownSelectedPost(); p != nil {
-			m.confirmDeleteID = p.ID
-			return m.setError(errConfirmDelete), true
+			return m.confirm.Ask(subjectDeletePost+p.ID, questionDeletePost, m.keys.Delete), true
 		}
 	}
 	// Pinning is a channel-level act, so unlike edit and delete it works

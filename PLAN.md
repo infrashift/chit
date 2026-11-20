@@ -86,9 +86,9 @@ Tracking: [ISSUE-018](.okfw/issues/issue-018-the-tui-client-does-not-model-the-h
 ## Phase 13: Reusable Bubbles
 Tracking: [ISSUE-019](.okfw/issues/issue-019-the-tui-has-no-reusable-bubbles-for-confirm-chips-prompt-activity-and-file-pick--01a1f77112be.md)
 
-- [ ] Add the packages `ui/confirm`, `ui/chips`, `ui/prompt`, `ui/activity` and `ui/filepick`.
-- [ ] Move the post delete and the member picker to the new packages.
-- [ ] Record the contract of a Bubble in an ADR.
+- [x] Add the packages `ui/confirm`, `ui/chips`, `ui/prompt`, `ui/activity` and `ui/filepick`.
+- [x] Move the post delete and the member picker to the new packages.
+- [x] Record the contract of a Bubble in an ADR.
 
 ## Phase 14: Runtime themes
 Tracking: [ISSUE-020](.okfw/issues/issue-020-a-theme-change-does-not-restyle-all-of-the-tui-and-edited-themes-need-a-restart--01a1f77112c7.md)

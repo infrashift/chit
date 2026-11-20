@@ -125,3 +125,66 @@ func lastFrame(t *testing.T, tm *teatest.TestModel) string {
 	}
 	return testutil.StripANSI(buf.String())
 }
+
+// programWith runs the model with client in a real Bubble Tea program.
+func programWith(t *testing.T, client *mockClient) *teatest.TestModel {
+	t.Helper()
+	m := tui.NewModel(&config.Config{ServerURL: "http://localhost:8065"}, client, nil,
+		testutil.Styles(), nil, nil, nil)
+	m.SetClipboardOutput(io.Discard)
+	return teatest.NewTestModel(t, m, teatest.WithInitialTermSize(120, 40))
+}
+
+func flowClient() *mockClient {
+	return &mockClient{
+		me:       &model.User{ID: "u1", Username: "alice"},
+		teams:    []*model.Team{{ID: "t1", DisplayName: "Engineering"}},
+		channels: []*model.Channel{{ID: "c1", TeamID: "t1", DisplayName: "General"}},
+		posts: &model.PostList{Order: []*model.Post{
+			{ID: "p1", ChannelID: "c1", UserID: "u1", Content: "welcome aboard", CreateAt: 1700000000000},
+		}},
+		users: []*model.User{{ID: "u1", Username: "alice"}},
+	}
+}
+
+// The delete question (ui/confirm) shows in the action bar, and the second
+// d deletes the post.
+func TestFlow_DeleteAsksThenDeletes(t *testing.T) {
+	client := flowClient()
+	tm := programWith(t, client)
+	waitForScreen(t, tm, "welcome aboard")
+
+	tm.Send(tea.KeyMsg{Type: tea.KeyTab})
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	waitForScreen(t, tm, "delete this message?")
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+
+	finalViewAfter(t, tm, "welcome aboard")
+	if strings.Join(client.deletedPosts, ",") != "p1" {
+		t.Errorf("deleted = %v, want [p1]", client.deletedPosts)
+	}
+}
+
+// /group picks people as chips (ui/chips); Backspace in the empty search
+// box removes the last pick.
+func TestFlow_GroupPickerChips(t *testing.T) {
+	client := flowClient()
+	client.searchUsers = []*model.User{{ID: "u2", Username: "bob", DisplayName: "Bob"}}
+	tm := programWith(t, client)
+	waitForScreen(t, tm, "welcome aboard")
+
+	tm.Type("/group")
+	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitForScreen(t, tm, "Search users")
+	tm.Type("bo")
+	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitForScreen(t, tm, "[ ] @bob (Bob)")
+	tm.Send(tea.KeyMsg{Type: tea.KeyTab})
+	waitForScreen(t, tm, "[x] @bob (Bob)")
+	tm.Send(tea.KeyMsg{Type: tea.KeyBackspace})
+
+	view := finalViewAfter(t, tm, "[ ] @bob (Bob)")
+	if !strings.Contains(view, "[ ] @bob (Bob)") {
+		t.Errorf("Backspace did not remove the pick:\n%s", view)
+	}
+}

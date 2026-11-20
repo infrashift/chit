@@ -20,8 +20,6 @@ var (
 	errDisconnected = errors.New("connection lost — reconnecting")
 	errReconnected  = errors.New("reconnected — reloading messages")
 	errDesynced     = errors.New("fell behind the server — reloading messages")
-	// Not a failure, but the status line is the only place to ask.
-	errConfirmDelete = errors.New("delete this message? Press d again to confirm, any other key to cancel")
 )
 
 func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {

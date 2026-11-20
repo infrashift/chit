@@ -218,6 +218,11 @@ func (m *Model) syncActionBar() {
 	if m.err != nil {
 		errStr = api.UserMessage(m.err)
 	}
+	// An open question is on screen until a key, its time or an error
+	// closes it (setError).
+	if q := m.confirm.Question(); q != "" {
+		errStr = q
+	}
 	m.actionBar.SetContext(team, m.activeChannelDisplayName(), user)
 	m.actionBar.SetError(errStr)
 	m.actionBar.SetConnected(m.wsConnected)
@@ -338,6 +343,7 @@ func (m Model) handleThemeChosen(msg skinpicker.SkinSelectedMsg) (tea.Model, tea
 	m.mention.SetStyles(newStyles)
 	m.actionBar.SetStyles(newStyles)
 	m.loginModel.SetStyles(newStyles)
+	m.confirm.SetStyles(newStyles)
 	for _, o := range m.overlays() {
 		o.setStyles(newStyles)
 	}
