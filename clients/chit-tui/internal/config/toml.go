@@ -32,6 +32,8 @@ type FileSettings struct {
 	// or "" when the file does not set them.
 	ThemeWatch string
 	ThemePaint string
+	// DownloadDir is where the client saves the files of a post.
+	DownloadDir string
 }
 
 // fileKeys returns the recognized TOML keys; anything absent from them is
@@ -48,6 +50,7 @@ func fileKeys() []string {
 		"appearance",
 		"theme_watch",
 		"theme_paint",
+		"download_dir",
 	}
 }
 
@@ -79,6 +82,8 @@ func setFileKey(s *FileSettings, key, v string) bool {
 		s.ThemeWatch = v
 	case "theme_paint":
 		s.ThemePaint = v
+	case "download_dir":
+		s.DownloadDir = v
 	default:
 		return false
 	}
@@ -176,4 +181,19 @@ func apply(raw map[string]any, settings *FileSettings) {
 			assert.That(handled, "apply: setFileKey does not handle a recognized key")
 		}
 	}
+}
+
+// DefaultDownloadDir is the XDG download directory, or ~/Downloads when XDG
+// names none.
+func DefaultDownloadDir() string {
+	if d := xdg.UserDirs.Download; d != "" {
+		return d
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return "Downloads"
+	}
+	out := filepath.Join(home, "Downloads")
+	assert.That(filepath.IsAbs(out), "DefaultDownloadDir: not an absolute path")
+	return out
 }

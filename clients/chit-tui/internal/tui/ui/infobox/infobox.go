@@ -136,6 +136,7 @@ func (m Model) visibleRows() int { return listwin.Rows(m.height) }
 
 // View draws the title, the rows that fit and the key hints.
 func (m Model) View() string {
+	assert.That(m.offset >= 0 && m.offset <= len(m.rows), "infobox.View: offset outside the rows")
 	if !m.visible {
 		return ""
 	}
@@ -159,6 +160,7 @@ func (m Model) View() string {
 
 // hints names the keys: the actions, the scroll when there is more, and Esc.
 func (m Model) hints(end int) string {
+	assert.That(end >= m.offset && end <= len(m.rows), "infobox.hints: window outside the rows")
 	var parts []string
 	for _, a := range m.actions {
 		if a.Label != "" {

@@ -135,6 +135,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 // View draws the overlay: the title, the input, then the error or the hint.
 func (m Model) View() string {
+	assert.That(m.input.CharLimit > 0, "prompt.View: input without a limit")
 	if !m.visible {
 		return ""
 	}

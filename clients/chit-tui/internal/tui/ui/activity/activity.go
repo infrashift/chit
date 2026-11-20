@@ -100,6 +100,7 @@ func (m *Model) ClearAll() { m.items = nil }
 // Expire removes the item that msg names, unless a later Set refreshed it.
 // It reports whether it removed one.
 func (m *Model) Expire(msg ExpiredMsg) bool {
+	assert.That(msg.key != "", "activity.Expire: a timer without a key")
 	assert.That(msg.seq <= m.seq, "activity.Expire: a timer from the future")
 	i := m.index(msg.key)
 	if i < 0 || m.items[i].seq != msg.seq {
@@ -140,6 +141,8 @@ func (m Model) View(width int) string {
 }
 
 func (m Model) index(key string) int {
+	assert.That(key != "", "activity.index: empty key")
+	assert.That(len(m.items) <= m.max, "activity.index: set over its cap")
 	for i, it := range m.items {
 		if it.key == key {
 			return i

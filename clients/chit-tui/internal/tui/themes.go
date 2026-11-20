@@ -66,6 +66,7 @@ func (m *Model) restyle(s styles.Styles) tea.Cmd {
 	m.confirm.SetStyles(s)
 	m.activity.SetStyles(s)
 	m.chanChips.SetStyles(s)
+	m.attachTray.SetStyles(s)
 	for _, o := range m.overlays() {
 		o.setStyles(s)
 	}

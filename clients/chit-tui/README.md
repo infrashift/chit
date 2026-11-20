@@ -13,6 +13,7 @@ Fuller documentation lives on the docs site, under [`docs/src/content/docs/tui/`
 - **History** — older messages load as you scroll up
 - **Copy** — `y` copies the selection or the selected post through OSC 52, which works over SSH
 - **Mouse** — scroll with the wheel, click on the action bar and palette, drag to select; everything also works from the keyboard
+- **Attachments** — `/attach` sends an image to the server, with alt text. The files wait in a tray until the next post takes them. `s` in the post details saves the files of a post to `download_dir`
 - **Agents and bots** — badges mark agents and bots, a post that a client made for a person (`[via @client]`), and provenance. Each attached file has a line. `i` opens the post details. A line shows when an agent writes a reply
 - **Themes** — eight bundled themes in dark and light pairs that follow the terminal's appearance, plus the user's own TOML themes
 
@@ -45,6 +46,7 @@ The client reads settings from `~/.config/chit/config.toml` (set `CHIT_CONFIG_FI
 | `theme_dark`, `theme_light` | — | — | Themes for dark and light terminals, used when `theme` is not set |
 | `theme_watch` | — | `true` | Apply each change to the active local theme file while the client runs |
 | `theme_paint` | — | `true` | Set the default colors of the terminal to the colors of the theme |
+| `download_dir` | `CHIT_DOWNLOAD_DIR` | XDG download directory | Where `s` in the post details saves files |
 | `appearance` | — | `system` | `dark`, `light`, or `system` (ask the terminal) |
 
 ```toml

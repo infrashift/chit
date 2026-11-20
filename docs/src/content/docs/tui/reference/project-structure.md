@@ -219,10 +219,10 @@ root model routes them in `bubbles.go` (ADR-0015).
 |---------|---------|-------|
 | `ui/confirm` | One y/N question in the action bar. The yes key answers Yes, and each other key closes the question. The question also closes after 10 seconds. | Post delete |
 | `ui/chips` | An ordered list of chips with a cap and no duplicates. Backspace removes the last chip. The view wraps to the width. | The member picker |
-| `ui/prompt` | A one-line text overlay. Enter sends the value, and the parent checks it or shows an error. Esc cancels. | Later phases: tag rename, alt text |
+| `ui/prompt` | A one-line text overlay. Enter sends the value, and the parent checks it or shows an error. Esc cancels. | Tag rename, the alt text of an attachment |
 | `ui/activity` | A capped set of short-lived items on one line, each with a timer | The `stream_status` indicator |
 | `ui/infobox` | An overlay of label and value rows that scrolls, with action keys that send `ActionMsg` | The post details (`i`) |
-| `ui/filepick` | The file picker of bubbles in an overlay, with a list of file types and a size cap | Later phases: `/attach` |
+| `ui/filepick` | The file picker of bubbles in an overlay, with a list of file types and a size cap | `/attach` with no path |
 
 ### `tui/ui/markdown/`
 

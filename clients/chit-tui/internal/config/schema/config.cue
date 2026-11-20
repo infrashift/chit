@@ -24,4 +24,8 @@
 	// theme. Both are on when absent.
 	theme_watch?: bool
 	theme_paint?: bool
+
+	// Attachments. download_dir is where "s" in the post details saves the
+	// files of a post. It defaults to the XDG download directory.
+	download_dir?: string
 }

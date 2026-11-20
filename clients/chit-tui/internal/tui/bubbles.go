@@ -8,6 +8,7 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/activity"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/confirm"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/filepick"
 )
 
 // The y/N questions of the root model (ui/confirm). A subject is a prefix
@@ -31,6 +32,20 @@ func (m Model) routeBubbleMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	case activity.ExpiredMsg:
 		m.activity.Expire(msg)
 		return m, nil, true
+	case filepick.PickedMsg:
+		return handled(m.handleFilePicked(msg))
+	case filepick.CancelledMsg:
+		return m, nil, true
+	case FileUploadedMsg:
+		return handled(m.handleFileUploaded(msg))
+	case FilesSavedMsg:
+		return handled(m.handleFilesSaved(msg))
+	}
+	// The file picker reads directories with messages of its own.
+	if m.filePick.Visible() {
+		var cmd tea.Cmd
+		m.filePick, cmd = m.filePick.Update(msg)
+		return m, cmd, true
 	}
 	return m, nil, false
 }

@@ -5,12 +5,17 @@ package e2e_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"os"
+	"path/filepath"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/teatest"
 	"github.com/infrashift/chit/clients/chit-tui/internal/config"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
@@ -31,13 +36,20 @@ func tuiAsAlice(t *testing.T) *teatest.TestModel {
 // tuiAs starts the TUI for the user kratosID and opens town-square.
 func tuiAs(t *testing.T, kratosID string) *teatest.TestModel {
 	t.Helper()
+	return tuiWith(t, kratosID, t.TempDir())
+}
+
+// tuiWith starts the TUI for kratosID, which saves files to downloadDir,
+// and opens town-square.
+func tuiWith(t *testing.T, kratosID, downloadDir string) *teatest.TestModel {
+	t.Helper()
 	client := newTestClient(kratosID)
 	channelID := mustGetTownSquareID(t, client)
 	ch, err := channelOf(client, channelID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := &config.Config{ServerURL: serverURL()}
+	cfg := &config.Config{ServerURL: serverURL(), DownloadDir: downloadDir}
 	m := tui.NewModel(cfg, client, newTestWSClient(kratosID, 256), testutil.Styles(), nil, nil, nil)
 	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(160, 50))
 	t.Cleanup(func() {
@@ -171,5 +183,72 @@ func TestTUI_TagChangesArriveLive(t *testing.T) {
 	final := testutil.StripANSI(tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second)).View())
 	if strings.Contains(final, "#"+renamed) {
 		t.Errorf("a deleted tag still shows:\n%s", final)
+	}
+}
+
+// Alice attaches an image in her TUI, sends it with no text, and saves it
+// again from the post details. The server holds the post with the file,
+// and the saved bytes match the sha256 of the server.
+func TestTUI_AttachSendAndSave(t *testing.T) {
+	ctx := context.Background()
+	alice := newTestClient(aliceKratosID)
+	channelID := mustGetTownSquareID(t, alice)
+	dir, dl := t.TempDir(), t.TempDir()
+	name := unique("tui-attach") + ".png"
+	if err := os.WriteFile(filepath.Join(dir, name), pngBytes(t), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tm := tuiWith(t, aliceKratosID, dl)
+	time.Sleep(time.Second) // the channel opens
+	tm.Type("/attach " + filepath.Join(dir, name))
+	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitScreen(t, tm, "Alt text for "+name)
+	tm.Type("a red line")
+	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitScreen(t, tm, "backspace removes")
+	tm.Send(tea.KeyMsg{Type: tea.KeyEnter}) // the files alone
+	waitScreen(t, tm, "[file] "+name+"  image/png")
+
+	posts, err := alice.GetChannelPosts(ctx, channelID, 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fileID string
+	for _, p := range posts.Order {
+		if len(p.FileIDs) == 1 && p.Content == "" {
+			if info, err := alice.GetFileInfo(ctx, p.FileIDs[0]); err == nil && info.Name == name {
+				fileID = info.ID
+				if info.AltText != "a red line" {
+					t.Errorf("alt text = %q", info.AltText)
+				}
+			}
+		}
+	}
+	if fileID == "" {
+		t.Fatal("the server holds no post with the file")
+	}
+
+	// The cursor of the history stays where it was when a post arrives,
+	// so it moves down to the newest post first.
+	tm.Send(tea.KeyMsg{Type: tea.KeyTab})
+	for range 30 {
+		tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	}
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	waitScreen(t, tm, "save the files to")
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	waitScreen(t, tm, "saved 1 file")
+	data, err := os.ReadFile(filepath.Join(dl, name))
+	if err != nil {
+		t.Fatalf("the saved file: %v", err)
+	}
+	info, err := alice.GetFileInfo(ctx, fileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(data)
+	if hex.EncodeToString(sum[:]) != info.SHA256 {
+		t.Error("the saved bytes do not match the sha256 of the server")
 	}
 }

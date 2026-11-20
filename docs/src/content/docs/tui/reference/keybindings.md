@@ -156,6 +156,8 @@ chit-tui itself runs these commands, and they never reach the server:
 | `/theme` (alias `/skin`) | Open the theme picker (see [Themes](/chit/tui/guides/themes/)) |
 | `/theme <name>` | Apply and save one theme |
 | `/theme reload` | Read the active theme file again |
+| `/attach [path]` | Attach an image to the next post; with no path, open a file picker (see [Attachments](/chit/tui/guides/attachments/)) |
+| `/detach` | Remove the files that wait for the next post |
 | `/chtag add <name>`, `rm <name>`, `find <name>…` | Change or find the tags of channels (see [Tags](/chit/tui/guides/tags/)) |
 | `/group` | Start a group conversation with three or more people |
 | `/nick <display name>` | Change your display name |

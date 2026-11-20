@@ -275,3 +275,21 @@ func TestLoad_ThemeSwitchesDefaultOn(t *testing.T) {
 		t.Errorf("ThemeWatch = %v, ThemePaint = %v; want true, false", cfg.ThemeWatch, cfg.ThemePaint)
 	}
 }
+
+func TestLoad_DownloadDir(t *testing.T) {
+	t.Setenv("CHIT_SERVER_URL", "http://localhost:8065")
+	t.Setenv("CHIT_CONFIG_FILE", writeFile(t, "config.toml", "download_dir = \"/srv/chit\"\n"))
+	cfg, _, err := config.Load()
+	if err != nil || cfg.DownloadDir != "/srv/chit" {
+		t.Errorf("DownloadDir = %q, %v; want /srv/chit", cfg.DownloadDir, err)
+	}
+	t.Setenv("CHIT_DOWNLOAD_DIR", "/env/wins")
+	if cfg, _, err = config.Load(); err != nil || cfg.DownloadDir != "/env/wins" {
+		t.Errorf("the environment did not win: %q, %v", cfg.DownloadDir, err)
+	}
+	t.Setenv("CHIT_DOWNLOAD_DIR", "")
+	t.Setenv("CHIT_CONFIG_FILE", writeFile(t, "empty.toml", ""))
+	if cfg, _, err = config.Load(); err != nil || cfg.DownloadDir == "" || cfg.DownloadDir != config.DefaultDownloadDir() {
+		t.Errorf("no default: %q, %v", cfg.DownloadDir, err)
+	}
+}

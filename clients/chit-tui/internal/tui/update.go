@@ -85,7 +85,7 @@ func (m Model) routeBlink(blink cursor.BlinkMsg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 	m.chCreator, cmd = m.chCreator.Update(blink)
 	cmds = append(cmds, cmd)
-	m.tagPrompt, cmd = m.tagPrompt.Update(blink)
+	m.textPrompt, cmd = m.textPrompt.Update(blink)
 	cmds = append(cmds, cmd)
 	assert.That(len(cmds) == 6, "routeBlink: one command for each editor")
 	return m, tea.Batch(cmds...)

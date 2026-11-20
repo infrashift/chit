@@ -11,6 +11,7 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/skinpicker"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/tagpicker"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/threadinbox"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/filepick"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/infobox"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/prompt"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
@@ -23,8 +24,10 @@ import (
 func modelWithEveryOverlayOpen() Model {
 	s := styles.New(theme.TokyoNight())
 	var m Model
-	m.tagPrompt = prompt.New(s, 50)
-	m.tagPrompt.Open("rename-tag:t1", "Rename #x", "x", "")
+	m.textPrompt = prompt.New(s, 50)
+	m.textPrompt.Open("rename-tag:t1", "Rename #x", "x", "")
+	m.filePick = filepick.New(s, "Attach", []string{".png"}, 1024)
+	m.filePick.Open(".")
 	m.dmPicker = dmpicker.New(s)
 	m.dmPicker.OpenForMembers()
 	m.threadInbox = threadinbox.New(s)

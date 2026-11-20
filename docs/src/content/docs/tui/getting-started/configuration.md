@@ -54,6 +54,7 @@ configuration error is an absent server URL.
 | `appearance` | — | `system` | `dark`, `light`, or `system` (ask the terminal) |
 | `theme_watch` | — | `true` | Apply each change to the active local theme file while the client runs |
 | `theme_paint` | — | `true` | Set the default colors of the terminal to the colors of the theme |
+| `download_dir` | `CHIT_DOWNLOAD_DIR` | the XDG download directory, else `~/Downloads` | Where `s` in the post details saves the files of a post |
 | — | `CHIT_SESSION_TOKEN` | — | Pre-set session token (skips interactive login) |
 
 `CHIT_SESSION_TOKEN` has no config-file key; it can only come from the

@@ -21,6 +21,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if cmd, ok := m.answerQuestion(msg); ok {
 		return m, cmd
 	}
+	if m.popTray(msg) {
+		return m, nil
+	}
 	if cmd, ok := m.routeOverlayKey(msg); ok {
 		return m, cmd
 	}

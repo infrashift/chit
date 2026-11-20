@@ -131,6 +131,8 @@ func clientCommands() []binding {
 	bs := []binding{
 		{"/theme", "choose a theme; /theme <name> sets one, /theme reload reads it again (alias: /skin)"},
 		{"/chtag", "channel tags: add <name>, rm <name>, find <name>…"},
+		{"/attach", "attach an image to the next post (a picker when no path)"},
+		{"/detach", "remove the files that wait for the next post"},
 		{"/group", "start a group conversation with three or more people"},
 		{"/nick", "change your display name"},
 		{"/username", "change your username (breaks existing @mentions)"},

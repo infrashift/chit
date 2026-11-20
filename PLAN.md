@@ -116,8 +116,8 @@ Tracking: [ISSUE-022](.okfw/issues/issue-022-the-tui-does-not-manage-tags-as-the
 ## Phase 17: Attachments
 Tracking: [ISSUE-023](.okfw/issues/issue-023-the-tui-cannot-attach-or-save-files--01a1f77112e5.md)
 
-- [ ] Add /attach, the file tray and a post with files.
-- [ ] Save the files of a post to download_dir.
+- [x] Add /attach, the file tray and a post with files.
+- [x] Save the files of a post to download_dir.
 
 ## Phase 18: Verify the TUI against the HALO stack
 Tracking: [ISSUE-024](.okfw/issues/issue-024-the-tui-e2e-suite-and-the-live-run-do-not-cover-the-halo-features--01a1f77112ef.md)

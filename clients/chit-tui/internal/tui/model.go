@@ -28,6 +28,7 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/activity"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/chips"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/confirm"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/filepick"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/infobox"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/prompt"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
@@ -174,10 +175,16 @@ type Model struct {
 	activity activity.Model
 	// The tag rename prompt and the channel tags (tagmanage.go,
 	// chantags.go).
-	tagPrompt     prompt.Model
+	textPrompt    prompt.Model
 	channelTags   []*model.Tag
 	chanChips     chips.Model
 	foundChannels []*model.Channel
+	// Attachments (attach.go, save.go): the file picker, the tray of the
+	// next post, the post in the details, and where saved files go.
+	filePick    filepick.Model
+	attachTray  chips.Model
+	infoPost    *model.Post
+	downloadDir string
 	// infoBox shows facts in an overlay: the post details (postinfo.go) and
 	// the channels that /chtag find found (chantags.go).
 	infoBox infobox.Model
@@ -234,8 +241,11 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 		confirm:      confirm.New(s, questionTTL),
 		activity:     activity.New(s, maxStreams, streamTTL),
 		infoBox:      infobox.New(s),
-		tagPrompt:    prompt.New(s, model.MaxTagLength),
+		textPrompt:   prompt.New(s, model.MaxTagLength),
 		chanChips:    chips.New(s, chips.RoleTag, maxChannelTags),
+		filePick:     filepick.New(s, "Attach an image", imageExts(), model.MaxFileBytes),
+		attachTray:   chips.New(s, chips.RolePlain, model.MaxPostFiles),
+		downloadDir:  downloadDirOf(cfg),
 		loginModel:   login.New(s, kratosClient),
 		themeSetting: "theme",
 		themeWatch:   cfg != nil && cfg.ThemeWatch,
@@ -260,6 +270,16 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 	assert.That(m.appState != AppStateReLogin, "NewModel: a new model starts in re-login")
 	assert.That(m.focus == FocusInput, "NewModel: input does not start focused")
 	return m
+}
+
+// downloadDirOf returns the download directory of cfg, or the default.
+func downloadDirOf(cfg *config.Config) string {
+	if cfg != nil && cfg.DownloadDir != "" {
+		return cfg.DownloadDir
+	}
+	dir := config.DefaultDownloadDir()
+	assert.That(dir != "", "downloadDirOf: no default directory")
+	return dir
 }
 
 // seedPalette gives a new palette the client commands and the shared maps.

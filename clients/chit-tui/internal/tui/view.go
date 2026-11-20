@@ -35,6 +35,7 @@ func (m Model) View() string {
 	)
 	layout = m.placeActivity(layout)
 	layout = m.placeChannelTags(layout)
+	layout = m.placeTray(layout)
 
 	// Composite the centered floating overlays. The first overlay of the
 	// table takes the keys first, so it is drawn last, on top: the rename
@@ -96,7 +97,8 @@ const focusKeep FocusArea = -1
 type overlayID int
 
 const (
-	overlayTagPrompt overlayID = iota
+	overlayTextPrompt overlayID = iota
+	overlayFilePick
 	overlayDMPicker
 	overlayThreadInbox
 	overlaySkinPicker
@@ -180,7 +182,8 @@ func (m *Model) overlays() []overlayRef {
 	}
 	refs := []overlayRef{
 		// The rename prompt opens over the tag picker, so it is first.
-		{id: overlayTagPrompt, model: &m.tagPrompt, closeFocus: focusKeep},
+		{id: overlayTextPrompt, model: &m.textPrompt, closeFocus: focusKeep},
+		{id: overlayFilePick, model: &m.filePick, closeFocus: focusKeep},
 		{id: overlayDMPicker, model: &m.dmPicker, closeFocus: FocusInput},
 		{id: overlayThreadInbox, model: &m.threadInbox, closeFocus: FocusInput},
 		{id: overlaySkinPicker, model: &m.skinPicker, closeFocus: FocusInput},
@@ -199,12 +202,14 @@ func (m *Model) overlays() []overlayRef {
 // in the Model.
 func (m *Model) updateOverlay(id overlayID, msg tea.KeyMsg) tea.Cmd {
 	assert.That(m != nil, "updateOverlay: nil model")
-	assert.That(id >= overlayTagPrompt, "updateOverlay: overlay ID before the first")
+	assert.That(id >= overlayTextPrompt, "updateOverlay: overlay ID before the first")
 	assert.That(id <= overlayHelp, "updateOverlay: overlay ID past the last")
 	var cmd tea.Cmd
 	switch id {
-	case overlayTagPrompt:
-		m.tagPrompt, cmd = m.tagPrompt.Update(msg)
+	case overlayTextPrompt:
+		m.textPrompt, cmd = m.textPrompt.Update(msg)
+	case overlayFilePick:
+		m.filePick, cmd = m.filePick.Update(msg)
 	case overlayDMPicker:
 		m.dmPicker, cmd = m.dmPicker.Update(msg)
 	case overlayThreadInbox:

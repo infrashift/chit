@@ -186,6 +186,7 @@ func (m Model) handleSend(msg input.SendMsg) (tea.Model, tea.Cmd) {
 			UserID:    m.me.ID,
 			RootID:    m.threadRootID,
 			Content:   msg.Content,
+			FileIDs:   m.attachTray.IDs(),
 		}
 		cmds = append(cmds, CreatePost(m.reqCtx(), m.client, reply))
 		return m, tea.Batch(cmds...)
@@ -206,6 +207,7 @@ func (m Model) handleSend(msg input.SendMsg) (tea.Model, tea.Cmd) {
 		ChannelID: m.activeChan.ID,
 		UserID:    m.me.ID,
 		Content:   content,
+		FileIDs:   m.attachTray.IDs(),
 	}
 	// The tags travel with the request, since only its response knows
 	// the new post's ID.
@@ -298,6 +300,11 @@ func (m Model) handlePostCreated(msg PostCreatedMsg) (tea.Model, tea.Cmd) {
 			m.input.SetValue(msg.Draft)
 		}
 		return m, m.setError(msg.Err)
+	}
+	// The post took the files of the tray. A refused post keeps them, so
+	// the user can send them again.
+	if msg.Post != nil && len(msg.Post.FileIDs) > 0 {
+		m.clearTray()
 	}
 	// Show the message immediately rather than waiting for the WebSocket
 	// echo. With the socket down the echo never arrives, so the input

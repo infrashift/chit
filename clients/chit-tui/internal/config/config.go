@@ -23,6 +23,8 @@ type Config struct {
 	ThemeWatch bool
 	// ThemePaint sets the terminal's default colors to the theme's.
 	ThemePaint bool
+	// DownloadDir is where the client saves the files of a post.
+	DownloadDir string
 }
 
 // defaults
@@ -57,6 +59,7 @@ func Load() (*Config, []string, error) {
 		SessionFile:  firstNonEmpty(os.Getenv("CHIT_SESSION_FILE"), file.SessionFile),
 		ThemeWatch:   file.ThemeWatch != "false",
 		ThemePaint:   file.ThemePaint != "false",
+		DownloadDir:  firstNonEmpty(os.Getenv("CHIT_DOWNLOAD_DIR"), file.DownloadDir, DefaultDownloadDir()),
 	}
 
 	if err := cfg.Validate(); err != nil {

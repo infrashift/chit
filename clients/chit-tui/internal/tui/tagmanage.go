@@ -34,7 +34,9 @@ func (m Model) routeTagManageMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	case prompt.SubmittedMsg:
 		return handled(m.handlePromptSubmitted(msg))
 	case prompt.CancelledMsg:
-		m.tagPicker.Focus()
+		if strings.HasPrefix(msg.Key, subjectRenameTag) {
+			m.tagPicker.Focus()
+		}
 		return m, nil, true
 	case TagRenamedMsg:
 		return handled(m.handleTagRenamed(msg))
@@ -76,8 +78,8 @@ func (m Model) askRenameTag(msg tagpicker.TagRenameRequestMsg) (tea.Model, tea.C
 		return m, m.setError(err)
 	}
 	m.tagPicker.Blur()
-	cmd := m.tagPrompt.Open(subjectRenameTag+t.ID, "Rename #"+t.Name, t.Name, "enter saves · esc cancels")
-	assert.That(m.tagPrompt.Visible(), "askRenameTag: prompt not open")
+	cmd := m.textPrompt.Open(subjectRenameTag+t.ID, "Rename #"+t.Name, t.Name, "enter saves · esc cancels")
+	assert.That(m.textPrompt.Visible(), "askRenameTag: prompt not open")
 	return m, cmd
 }
 
@@ -96,12 +98,15 @@ func (m Model) askDeleteTag(msg tagpicker.TagDeleteRequestMsg) (tea.Model, tea.C
 // handlePromptSubmitted checks the new name, then renames.
 func (m Model) handlePromptSubmitted(msg prompt.SubmittedMsg) (tea.Model, tea.Cmd) {
 	assert.That(msg.Key != "", "handlePromptSubmitted: prompt without a key")
+	if path, ok := strings.CutPrefix(msg.Key, subjectAltText); ok {
+		return m.uploadWithAltText(path, msg.Value)
+	}
 	id, ok := strings.CutPrefix(msg.Key, subjectRenameTag)
 	if !ok {
 		return m, nil
 	}
 	if err := model.ValidTagName(msg.Value); err != nil {
-		m.tagPrompt.SetError(err.Error())
+		m.textPrompt.SetError(err.Error())
 		return m, nil
 	}
 	assert.That(id != "", "handlePromptSubmitted: empty tag ID")
@@ -112,14 +117,14 @@ func (m Model) handlePromptSubmitted(msg prompt.SubmittedMsg) (tea.Model, tea.Cm
 func (m Model) handleTagRenamed(msg TagRenamedMsg) (tea.Model, tea.Cmd) {
 	assert.That(m.appState == AppStateRunning, "handleTagRenamed: not signed in")
 	if msg.Err != nil {
-		if m.tagPrompt.Visible() {
-			m.tagPrompt.SetError(api.UserMessage(msg.Err))
+		if m.textPrompt.Visible() {
+			m.textPrompt.SetError(api.UserMessage(msg.Err))
 			return m, nil
 		}
 		return m, m.setError(msg.Err)
 	}
 	assert.That(msg.Tag != nil, "handleTagRenamed: no tag and no error")
-	m.tagPrompt.Close()
+	m.textPrompt.Close()
 	m.tagPicker.Focus()
 	m.replaceTag(msg.Tag)
 	return m, nil

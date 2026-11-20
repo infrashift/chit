@@ -38,6 +38,7 @@ func (m *Model) openPostInfo() (tea.Cmd, bool) {
 	if p == nil {
 		return nil, false
 	}
+	m.infoPost = p
 	m.infoBox.Open(subjectPostInfo+p.ID, "Post details", m.postInfoRows(p), m.postInfoActions(p))
 	assert.That(m.infoBox.Visible(), "openPostInfo: overlay not open")
 	return nil, true
@@ -45,9 +46,12 @@ func (m *Model) openPostInfo() (tea.Cmd, bool) {
 
 // postInfoActions are the keys that the overlay offers for p.
 func (m Model) postInfoActions(p *model.Post) []infobox.Action {
-	assert.That(len(p.FileIDs) <= model.MaxPostFiles, "postInfoActions: more files than a post can carry")
 	assert.That(p != nil, "postInfoActions: nil post")
-	return nil
+	assert.That(len(p.FileIDs) <= model.MaxPostFiles, "postInfoActions: more files than a post can carry")
+	if len(p.FileIDs) == 0 {
+		return nil
+	}
+	return []infobox.Action{{Key: "s", Label: "save the files to " + m.downloadDir}}
 }
 
 // postInfoRows lists the facts of p: the author, the client that posted

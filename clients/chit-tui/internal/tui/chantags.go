@@ -231,6 +231,9 @@ func foundActions(n int) []infobox.Action {
 func (m Model) handleInfoAction(msg infobox.ActionMsg) (tea.Model, tea.Cmd) {
 	assert.That(msg.Subject != "" && msg.Key != "", "handleInfoAction: empty subject or key")
 	assert.That(len(m.foundChannels) <= 9, "handleInfoAction: more found channels than digit keys")
+	if strings.HasPrefix(msg.Subject, subjectPostInfo) && msg.Key == "s" {
+		return m.saveInfoFiles()
+	}
 	if msg.Subject != subjectFoundChannels {
 		return m, nil
 	}

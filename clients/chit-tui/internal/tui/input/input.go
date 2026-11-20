@@ -39,6 +39,15 @@ type Model struct {
 	width        int
 	height       int
 	prevAtActive bool
+	// sendEmpty lets Enter send empty text: a post of files alone.
+	sendEmpty bool
+}
+
+// SetSendEmpty lets Enter send a message with no text, while files wait
+// to go with it.
+func (m *Model) SetSendEmpty(on bool) {
+	m.sendEmpty = on
+	assert.That(m.sendEmpty == on, "Model.SetSendEmpty: flag not set")
 }
 
 // New creates a new input model.
@@ -122,6 +131,31 @@ func (m *Model) Reset() {
 	assert.That(m.textarea.Line() == 0, "Model.Reset: cursor not on the first line")
 }
 
+// enter handles Enter: Alt+Enter adds a line; Enter sends the text as a
+// slash command or a message, or sends empty text while files wait.
+func (m Model) enter(alt bool) (Model, tea.Cmd) {
+	assert.That(m.focused, "Model.enter: Enter reached a blurred input")
+	if alt {
+		var cmd tea.Cmd
+		m.textarea, cmd = m.textarea.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\n'}})
+		assert.That(m.textarea.Line() < m.textarea.LineCount(), "Model.enter: cursor past the last line after a newline")
+		return m, cmd
+	}
+	content := strings.TrimSpace(m.textarea.Value())
+	switch {
+	case content == "" && !m.sendEmpty:
+		return m, nil
+	case content == "":
+		return m, func() tea.Msg { return SendMsg{Content: ""} }
+	}
+	m.textarea.Reset()
+	assert.That(m.textarea.Value() == "", "Model.enter: sent text left in the input")
+	if strings.HasPrefix(content, "/") {
+		return m, func() tea.Msg { return SlashTriggerMsg{Input: content} }
+	}
+	return m, func() tea.Msg { return SendMsg{Content: content} }
+}
+
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	if !m.focused {
@@ -137,31 +171,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	keyMsg, ok := msg.(tea.KeyMsg)
-	if ok {
-		switch keyMsg.Type {
-		case tea.KeyEnter:
-			if keyMsg.Alt {
-				// Alt+Enter: insert newline
-				var cmd tea.Cmd
-				m.textarea, cmd = m.textarea.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\n'}})
-				assert.That(m.textarea.Line() < m.textarea.LineCount(), "Model.Update: cursor past the last line after a newline")
-				return m, cmd
-			}
-			content := strings.TrimSpace(m.textarea.Value())
-			if content == "" {
-				return m, nil
-			}
-			// Check for slash command
-			if strings.HasPrefix(content, "/") {
-				m.textarea.Reset()
-				assert.That(m.textarea.Value() == "", "Model.Update: slash command left in the input")
-				return m, func() tea.Msg { return SlashTriggerMsg{Input: content} }
-			}
-			m.textarea.Reset()
-			assert.That(m.textarea.Value() == "", "Model.Update: sent message left in the input")
-			return m, func() tea.Msg { return SendMsg{Content: content} }
-		}
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyEnter {
+		return m.enter(keyMsg.Alt)
 	}
 
 	var cmd tea.Cmd

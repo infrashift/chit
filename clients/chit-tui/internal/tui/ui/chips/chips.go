@@ -72,6 +72,7 @@ func (m *Model) Add(c Chip) bool {
 // Toggle removes c when the list holds it, and adds it when not. It reports
 // whether the list holds c after the call.
 func (m *Model) Toggle(c Chip) bool {
+	assert.That(len(m.chips) <= m.max, "chips.Toggle: list over its cap")
 	assert.That(c.ID != "", "chips.Toggle: empty ID")
 	if m.Remove(c.ID) {
 		return false
@@ -95,6 +96,7 @@ func (m *Model) Remove(id string) bool {
 // Pop removes the last chip and returns it, and false when the list is
 // empty.
 func (m *Model) Pop() (Chip, bool) {
+	assert.That(len(m.chips) <= m.max, "chips.Pop: list over its cap")
 	if len(m.chips) == 0 {
 		return Chip{}, false
 	}
@@ -106,6 +108,8 @@ func (m *Model) Pop() (Chip, bool) {
 
 // Has reports whether the list holds id.
 func (m Model) Has(id string) bool {
+	assert.That(id != "", "chips.Has: empty ID")
+	assert.That(len(m.chips) <= m.max, "chips.Has: list over its cap")
 	for _, c := range m.chips {
 		if c.ID == id {
 			return true
@@ -116,6 +120,7 @@ func (m Model) Has(id string) bool {
 
 // Set replaces the list with cs, to the cap, without duplicate IDs.
 func (m *Model) Set(cs []Chip) {
+	assert.That(m.max > 0, "chips.Set: list not made by New")
 	m.chips = nil
 	for _, c := range cs {
 		m.Add(c)

@@ -28,6 +28,7 @@ func NewDirectory() Directory {
 // Username returns the name of id, or the start of id when the name has
 // not loaded.
 func (d Directory) Username(id string) string {
+	assert.That(d.Names != nil, "Directory.Username: directory not made by NewDirectory")
 	if name := d.Names[id]; name != "" {
 		return name
 	}
