@@ -37,6 +37,11 @@ func (m *Model) selectChannel(ch *model.Channel) tea.Cmd {
 	}
 	m.activeChan = ch
 	m.channelAutoSelected = true
+	// A stream indicator and the channel tags belong to the old channel.
+	m.activity.ClearAll()
+	m.setChannelTags(nil)
+	m.clearTray()
+	cmds = append(cmds, FetchChannelTags(m.reqCtx(), m.client, ch.ID))
 	m.pendingJumpID = ""
 	m.cancelEdit()
 	// A highlight from a search in the previous channel would otherwise

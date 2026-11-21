@@ -69,9 +69,16 @@ func main() {
 
 	m := newModel(cfg, styles.New(activeTheme))
 	m.SetThemeSetting(themeSetting(opts, cfg, background))
+	m.SetActiveTheme(activeTheme)
 
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg { return filterInput(msg) }))
-	if _, err := p.Run(); err != nil {
+	_, err = p.Run()
+	// The client set the terminal's colors to the theme (theme_paint). The
+	// terminal gets its own back, also after an error.
+	if cfg.ThemePaint {
+		tui.ResetTerminalColors(os.Stdout)
+	}
+	if err != nil {
 		stderr.Printf("error: %v\n", err)
 		os.Exit(1)
 	}

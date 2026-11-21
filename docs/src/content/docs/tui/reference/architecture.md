@@ -132,6 +132,41 @@ When it starts, the TUI gets the channels of **every team** that the user
 belongs to (`channelsByTeam` on the root model). If the TUI loaded more than
 one team, the palette shows a `· team` suffix on channel rows.
 
+The client also uses the routes that the HALO work added to the server:
+
+| Area | Methods |
+|------|---------|
+| Tags | `GetTags` (the tags of one channel), `RenameTag`, `DeleteTag` |
+| Channel tags | `GetChannelTags`, `AddChannelTag`, `RemoveChannelTag`, `FindChannelsByTags` |
+| Files | `UploadFile`, `GetFileInfo`, `DownloadFile` |
+
+`UploadFile` and `DownloadFile` read at most 10 MB, the limit of the
+server. The client does not send a file that is larger.
+
+### Server Errors
+
+The client reads each error response into an `APIError`. The error keeps
+the status, the server's error ID and message, and the `reason` and
+`detail` of a membership refusal. For a `429`, it also keeps the wait from
+the `Retry-After` header, to a maximum of 60 seconds.
+
+The action bar shows `api.UserMessage(err)`. This function gives a short
+message for each error that the server marks with a stable ID or status:
+
+| Error | Message |
+|-------|---------|
+| `429` | `too many requests: try again in Ns` |
+| `409` | `that name is in use: …` |
+| `channel.membership_refused` | `the membership policy refused this: …` |
+| `file.too_large`, `file.quota_exceeded` | The file is too large, or the quota is full |
+| `file.svg`, `file.unsupported_type`, `file.type_mismatch` | The server accepts only PNG, JPEG, WebP and GIF images |
+| `file.disabled` | Attachments are off on this server |
+
+The TUI also checks a tag name before it sends it. `model.ValidTagName`
+applies the rules of the server: 1 to 50 characters, and only letters,
+digits, spaces, `-`, `_` and `.`. The server keeps the `profile/` prefix
+for machines, so the TUI refuses it too.
+
 ### WebSocket Client
 
 The `WSClient` interface gives a real-time stream of events:

@@ -151,13 +151,11 @@ func (m *Model) afterPostsLoaded(posts []*model.Post) tea.Cmd {
 	assert.That(m.scope != nil, "afterPostsLoaded: nil request scope")
 	assert.That(m.users != nil, "afterPostsLoaded: nil users cache")
 	var cmds []tea.Cmd
-	m.resolvePostUsers(posts)
+	m.notePosts(posts)
 	if ids := postIDs(posts); len(ids) > 0 {
 		cmds = append(cmds, FetchPostsTags(m.reqCtx(), m.client, ids))
 	}
-	if fetchCmd := m.fetchMissingUsers(); fetchCmd != nil {
-		cmds = append(cmds, fetchCmd)
-	}
+	cmds = append(cmds, m.fetchMissingRefs())
 	return tea.Batch(cmds...)
 }
 
@@ -188,6 +186,7 @@ func (m Model) handleSend(msg input.SendMsg) (tea.Model, tea.Cmd) {
 			UserID:    m.me.ID,
 			RootID:    m.threadRootID,
 			Content:   msg.Content,
+			FileIDs:   m.attachTray.IDs(),
 		}
 		cmds = append(cmds, CreatePost(m.reqCtx(), m.client, reply))
 		return m, tea.Batch(cmds...)
@@ -208,6 +207,7 @@ func (m Model) handleSend(msg input.SendMsg) (tea.Model, tea.Cmd) {
 		ChannelID: m.activeChan.ID,
 		UserID:    m.me.ID,
 		Content:   content,
+		FileIDs:   m.attachTray.IDs(),
 	}
 	// The tags travel with the request, since only its response knows
 	// the new post's ID.
@@ -301,6 +301,11 @@ func (m Model) handlePostCreated(msg PostCreatedMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.setError(msg.Err)
 	}
+	// The post took the files of the tray. A refused post keeps them, so
+	// the user can send them again.
+	if msg.Post != nil && len(msg.Post.FileIDs) > 0 {
+		m.clearTray()
+	}
 	// Show the message immediately rather than waiting for the WebSocket
 	// echo. With the socket down the echo never arrives, so the input
 	// cleared and the message simply vanished.
@@ -308,10 +313,8 @@ func (m Model) handlePostCreated(msg PostCreatedMsg) (tea.Model, tea.Cmd) {
 		m.activeChan != nil && msg.Post.ChannelID == m.activeChan.ID &&
 		!m.viewport.HasPost(msg.Post.ID) {
 		m.viewport.AppendPost(msg.Post)
-		m.resolvePostUsers([]*model.Post{msg.Post})
-		if fetchCmd := m.fetchMissingUsers(); fetchCmd != nil {
-			cmds = append(cmds, fetchCmd)
-		}
+		m.notePosts([]*model.Post{msg.Post})
+		cmds = append(cmds, m.fetchMissingRefs())
 	}
 
 	// Likewise a reply in the open thread: the echo is not guaranteed.

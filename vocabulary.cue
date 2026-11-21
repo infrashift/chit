@@ -42,6 +42,8 @@ vocabulary: {
 	validation:   true // request validation against the OpenAPI document
 	pinning:      true // the message pinning feature
 	rendering:    true // Markdown rendering in a client
+	attachment:   true // an image file on a post (P-CHIT-5, file_ids, attachment_ids)
+	provenance:   true // props.provenance: what produced an agent's message
 
 	// The TUI and the test process.
 	appearance: true // the appearance setting of chit-tui: dark or light

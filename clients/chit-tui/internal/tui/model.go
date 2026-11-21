@@ -25,7 +25,14 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/tagpicker"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/thread"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/threadinbox"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/activity"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/chips"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/confirm"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/filepick"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/infobox"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/prompt"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/viewport"
 	"github.com/infrashift/chit/clients/chit-tui/internal/ws"
 )
@@ -139,12 +146,48 @@ type Model struct {
 	// themeSetting is the config key a theme picked in the client is saved
 	// under; see config.Config.ThemeSettingKey.
 	themeSetting string
+	// The active theme and its runtime state (themes.go).
+	themeKey  string
+	themePath string
+	themeMod  time.Time
+	// previewFrom is the theme before the first preview of a picker
+	// session, or nil when no preview is on screen.
+	previewFrom *themeState
+	// themeCache holds the themes resolved during one picker session, so
+	// a preview does not read a file for each cursor move.
+	themeCache map[string]theme.Theme
+	themeWatch bool
+	themePaint bool
+	// watchSeq names the one live theme-file watch loop (themes.go).
+	watchSeq uint64
 	// clipboardOut is where copying writes its OSC 52 sequence: the
 	// terminal, except in tests, which would otherwise write escape
 	// sequences into their output.
 	clipboardOut io.Writer
 	// usersRequested marks user IDs already looked up.
 	usersRequested map[string]bool
+	// The file records that posts show (files.go).
+	files          map[string]*model.File
+	filesRequested map[string]bool
+	fileQueue      []string
+	fileFetching   bool
+	// activity shows the stream_status indicators (stream.go).
+	activity activity.Model
+	// The tag rename prompt and the channel tags (tagmanage.go,
+	// chantags.go).
+	textPrompt    prompt.Model
+	channelTags   []*model.Tag
+	chanChips     chips.Model
+	foundChannels []*model.Channel
+	// Attachments (attach.go, save.go): the file picker, the tray of the
+	// next post, the post in the details, and where saved files go.
+	filePick    filepick.Model
+	attachTray  chips.Model
+	infoPost    *model.Post
+	downloadDir string
+	// infoBox shows facts in an overlay: the post details (postinfo.go) and
+	// the channels that /chtag find found (chantags.go).
+	infoBox infobox.Model
 	// commandAuthors names the pseudo-author of each command's output, by
 	// user ID; commandResponses numbers the outputs so each has its own ID.
 	commandAuthors   map[string]string
@@ -154,8 +197,9 @@ type Model struct {
 	scope *requestScope
 	// pendingJumpID is a search hit to select once its channel has loaded.
 	pendingJumpID string
-	// confirmDeleteID is the post awaiting a second delete keypress.
-	confirmDeleteID string
+	// confirm asks the y/N questions: a post delete, a tag delete. Its
+	// subjects are in bubbles.go.
+	confirm confirm.Model
 	// threadRootID is the root of the thread in the main pane, set as soon
 	// as it opens, before the thread itself has loaded.
 	threadRootID string
@@ -194,8 +238,18 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 		skinPicker:   skinpicker.New(s),
 		chCreator:    chcreator.New(s),
 		tagPicker:    tagpicker.New(s),
+		confirm:      confirm.New(s, questionTTL),
+		activity:     activity.New(s, maxStreams, streamTTL),
+		infoBox:      infobox.New(s),
+		textPrompt:   prompt.New(s, model.MaxTagLength),
+		chanChips:    chips.New(s, chips.RoleTag, maxChannelTags),
+		filePick:     filepick.New(s, "Attach an image", imageExts(), model.MaxFileBytes),
+		attachTray:   chips.New(s, chips.RolePlain, model.MaxPostFiles),
+		downloadDir:  downloadDirOf(cfg),
 		loginModel:   login.New(s, kratosClient),
 		themeSetting: "theme",
+		themeWatch:   cfg != nil && cfg.ThemeWatch,
+		themePaint:   cfg != nil && cfg.ThemePaint,
 		clipboardOut: os.Stdout,
 		appState:     state,
 		tokenStore:   tokenStore,
@@ -206,14 +260,7 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 		styles:       s,
 	}
 	m.makeCaches()
-	// Seed the client-local commands rather than waiting for the server
-	// registry, which never contains them and may never arrive at all.
-	m.palette.SetCommands(clientCommands())
-
-	// The palette shares the root's badge and DM-name maps by reference, so
-	// root-side updates are visible without further plumbing.
-	m.palette.SetCounts(m.unread, m.mentions)
-	m.palette.SetDMDisplayNames(m.dmDisplayNames)
+	m.seedPalette()
 	// Focus also returns the first blink, but NewModel cannot run a
 	// command. applyLoadedUser starts the blink when the session starts.
 	firstBlink := m.input.Focus()
@@ -223,6 +270,28 @@ func NewModel(cfg *config.Config, client api.ChitClient, wsClient ws.WSClient, s
 	assert.That(m.appState != AppStateReLogin, "NewModel: a new model starts in re-login")
 	assert.That(m.focus == FocusInput, "NewModel: input does not start focused")
 	return m
+}
+
+// downloadDirOf returns the download directory of cfg, or the default.
+func downloadDirOf(cfg *config.Config) string {
+	if cfg != nil && cfg.DownloadDir != "" {
+		return cfg.DownloadDir
+	}
+	dir := config.DefaultDownloadDir()
+	assert.That(dir != "", "downloadDirOf: no default directory")
+	return dir
+}
+
+// seedPalette gives a new palette the client commands and the shared maps.
+func (m *Model) seedPalette() {
+	assert.That(m.unread != nil && m.mentions != nil, "seedPalette: caches not made")
+	// Seed the client-local commands rather than waiting for the server
+	// registry, which never contains them and may never arrive at all.
+	m.palette.SetCommands(clientCommands())
+	// The palette shares the root's badge and DM-name maps by reference, so
+	// root-side updates are visible without further plumbing.
+	m.palette.SetCounts(m.unread, m.mentions)
+	m.palette.SetDMDisplayNames(m.dmDisplayNames)
 }
 
 // makeCaches gives a new model the empty maps its session fills in.
@@ -239,6 +308,9 @@ func (m *Model) makeCaches() {
 	m.postTags = make(map[string][]*model.Tag)
 	m.commandAuthors = make(map[string]string)
 	m.usersRequested = make(map[string]bool)
+	m.files = make(map[string]*model.File)
+	m.filesRequested = make(map[string]bool)
+	m.fileQueue = nil
 	assert.That(len(m.users) == 0, "makeCaches: users cache not empty")
 	assert.That(len(m.commandAuthors) == 0, "makeCaches: command authors not empty")
 }
@@ -256,6 +328,9 @@ func (m *Model) setError(err error) tea.Cmd {
 	m.errSeq++
 	assert.That(m.errSeq > 0, "setError: error sequence wrapped")
 	m.err = err
+	// The status line shows one thing. An error pushes an open question
+	// off it, and a key must not answer a question that is not shown.
+	m.confirm.Cancel()
 	seq := m.errSeq
 	return tea.Tick(10*time.Second, func(_ time.Time) tea.Msg {
 		return ClearErrMsg{Seq: seq}
@@ -267,10 +342,12 @@ func (m Model) Init() tea.Cmd {
 	assert.That(m.scope != nil, "Init: nil request scope")
 	assert.That(m.appState >= AppStateLogin, "Init: unknown app state")
 	assert.That(m.appState <= AppStateRunning, "Init: app state past running")
+	// The terminal takes the theme's colors before anything else draws.
+	paint := m.paintCmd()
 	if m.appState == AppStateLogin || m.appState == AppStateReLogin {
-		return nil
+		return paint
 	}
-	return m.initRunning()
+	return tea.Batch(paint, m.watchTick(m.watchSeq), m.initRunning())
 }
 
 func (m Model) initRunning() tea.Cmd {

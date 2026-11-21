@@ -1,17 +1,14 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/infrashift/chit/clients/chit-tui/internal/api"
 	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
-	"github.com/infrashift/chit/clients/chit-tui/internal/config"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui/skinpicker"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
-	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
 
 // View renders the full UI.
@@ -36,9 +33,16 @@ func (m Model) View() string {
 		top,
 		m.input.View(),
 	)
+	layout = m.placeActivity(layout)
+	layout = m.placeChannelTags(layout)
+	layout = m.placeTray(layout)
 
-	// Composite the centered floating overlays.
-	for _, o := range m.overlays() {
+	// Composite the centered floating overlays. The first overlay of the
+	// table takes the keys first, so it is drawn last, on top: the rename
+	// prompt over the tag picker.
+	refs := m.overlays()
+	for i := len(refs) - 1; i >= 0; i-- {
+		o := refs[i]
 		if !o.visible() {
 			continue
 		}
@@ -65,6 +69,21 @@ func (m Model) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, layout, m.actionBar.View())
 }
 
+// placeActivity draws the stream indicators on the lower border of the
+// main pane, just above the input. An overlay draws over them.
+func (m Model) placeActivity(layout string) string {
+	line := m.activity.View(max(m.width-8, 0))
+	if line == "" {
+		return layout
+	}
+	y := m.height - inputHeight - 2
+	assert.That(y < m.height, "placeActivity: row below the screen")
+	if y < 0 {
+		return layout
+	}
+	return placeOverlay(3, y, " "+line+" ", layout)
+}
+
 // overlayY is the row where centered floating overlays are anchored.
 const overlayY = 2
 
@@ -78,12 +97,15 @@ const focusKeep FocusArea = -1
 type overlayID int
 
 const (
-	overlayDMPicker overlayID = iota
+	overlayTextPrompt overlayID = iota
+	overlayFilePick
+	overlayDMPicker
 	overlayThreadInbox
 	overlaySkinPicker
 	overlayChannelCreator
 	overlayTagPicker
 	overlayPalette
+	overlayInfoBox
 	overlayHelp
 )
 
@@ -159,13 +181,17 @@ func (m *Model) overlays() []overlayRef {
 		tagPickerReturn = FocusThread
 	}
 	refs := []overlayRef{
+		// The rename prompt opens over the tag picker, so it is first.
+		{id: overlayTextPrompt, model: &m.textPrompt, closeFocus: focusKeep},
+		{id: overlayFilePick, model: &m.filePick, closeFocus: focusKeep},
 		{id: overlayDMPicker, model: &m.dmPicker, closeFocus: FocusInput},
 		{id: overlayThreadInbox, model: &m.threadInbox, closeFocus: FocusInput},
 		{id: overlaySkinPicker, model: &m.skinPicker, closeFocus: FocusInput},
 		{id: overlayChannelCreator, model: &m.chCreator, closeFocus: FocusInput},
 		{id: overlayTagPicker, model: &m.tagPicker, closeFocus: tagPickerReturn},
 		{id: overlayPalette, model: &m.palette, closeFocus: FocusInput},
-		{id: overlayHelp, model: &m.help, closeFocus: focusKeep}, // help never takes focus
+		{id: overlayInfoBox, model: &m.infoBox, closeFocus: focusKeep}, // takes no focus, as help
+		{id: overlayHelp, model: &m.help, closeFocus: focusKeep},       // help never takes focus
 	}
 	assert.That(len(refs) == int(overlayHelp)+1, "overlays: an overlay is missing from the table")
 	assert.That(tagPickerReturn == FocusViewport || tagPickerReturn == FocusThread, "overlays: tag picker returns to no pane")
@@ -176,10 +202,14 @@ func (m *Model) overlays() []overlayRef {
 // in the Model.
 func (m *Model) updateOverlay(id overlayID, msg tea.KeyMsg) tea.Cmd {
 	assert.That(m != nil, "updateOverlay: nil model")
-	assert.That(id >= overlayDMPicker, "updateOverlay: overlay ID before the first")
+	assert.That(id >= overlayTextPrompt, "updateOverlay: overlay ID before the first")
 	assert.That(id <= overlayHelp, "updateOverlay: overlay ID past the last")
 	var cmd tea.Cmd
 	switch id {
+	case overlayTextPrompt:
+		m.textPrompt, cmd = m.textPrompt.Update(msg)
+	case overlayFilePick:
+		m.filePick, cmd = m.filePick.Update(msg)
 	case overlayDMPicker:
 		m.dmPicker, cmd = m.dmPicker.Update(msg)
 	case overlayThreadInbox:
@@ -192,6 +222,8 @@ func (m *Model) updateOverlay(id overlayID, msg tea.KeyMsg) tea.Cmd {
 		m.tagPicker, cmd = m.tagPicker.Update(msg)
 	case overlayPalette:
 		m.palette, cmd = m.palette.Update(msg)
+	case overlayInfoBox:
+		m.infoBox, cmd = m.infoBox.Update(msg)
 	case overlayHelp:
 		m.help, cmd = m.help.Update(msg)
 	}
@@ -215,7 +247,12 @@ func (m *Model) syncActionBar() {
 	}
 	errStr := ""
 	if m.err != nil {
-		errStr = m.err.Error()
+		errStr = api.UserMessage(m.err)
+	}
+	// An open question is on screen until a key, its time or an error
+	// closes it (setError).
+	if q := m.confirm.Question(); q != "" {
+		errStr = q
 	}
 	m.actionBar.SetContext(team, m.activeChannelDisplayName(), user)
 	m.actionBar.SetError(errStr)
@@ -306,39 +343,4 @@ func splitLines(s string) []string {
 	assert.That(len(lines) >= 1, "splitLines: no lines")
 	assert.That(start <= len(s), "splitLines: line start past the end")
 	return lines
-}
-
-// handleThemeChosen restyles everything with the chosen theme and saves the
-// choice.
-func (m Model) handleThemeChosen(msg skinpicker.SkinSelectedMsg) (tea.Model, tea.Cmd) {
-	assert.That(msg.Name != "", "handleThemeChosen: empty theme name")
-	assert.That(m.appState == AppStateRunning, "handleThemeChosen: not signed in")
-	assert.That(m.themeSetting != "", "handleThemeChosen: no setting to save the theme under")
-	t, _, err := theme.ResolveNamed(msg.Name, config.ThemesDir())
-	if err != nil {
-		// The name came from a list this component built, so a failure
-		// here means the file changed underneath us.
-		errCmd := m.setError(fmt.Errorf("load theme %q: %w", msg.Name, err))
-		return m, tea.Batch(m.setFocus(FocusInput), errCmd)
-	}
-
-	// Persist so the choice survives a restart. Failing to write is worth
-	// surfacing but must not undo the theme change for this session.
-	var saveCmd tea.Cmd
-	if err := config.SaveThemeSetting(m.themeSetting, msg.Name); err != nil {
-		saveCmd = m.setError(fmt.Errorf("theme applied but not saved: %w", err))
-	}
-
-	newStyles := styles.New(t)
-	m.styles = newStyles
-	m.viewport.SetStyles(newStyles)
-	m.input.SetStyles(newStyles)
-	m.thread.SetStyles(newStyles)
-	m.mention.SetStyles(newStyles)
-	m.actionBar.SetStyles(newStyles)
-	m.loginModel.SetStyles(newStyles)
-	for _, o := range m.overlays() {
-		o.setStyles(newStyles)
-	}
-	return m, tea.Batch(m.setFocus(FocusInput), saveCmd)
 }

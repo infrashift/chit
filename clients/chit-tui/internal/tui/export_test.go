@@ -1,6 +1,10 @@
 package tui
 
-import "io"
+import (
+	"io"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 // SetClipboardOutput redirects what copying writes, so tests that copy do
 // not print escape sequences into the test output.
@@ -22,3 +26,7 @@ func (m Model) SelectedPostID() string {
 // HasSelection reports whether the history pane holds a selection. Exported
 // for tests, which cannot reach the viewport otherwise.
 func (m Model) HasSelection() bool { return m.viewport.HasSelection() }
+
+// ThemeWatchTick returns the next tick of the live theme-file watch loop of
+// m, so a test need not wait for the timer.
+func ThemeWatchTick(m Model) tea.Msg { return themeWatchMsg{seq: m.watchSeq} }

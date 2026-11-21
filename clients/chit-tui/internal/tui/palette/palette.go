@@ -98,6 +98,7 @@ type Model struct {
 // New creates a new palette.
 func New(s styles.Styles) Model {
 	ti := textinput.New()
+	s.ThemeTextInput(&ti)
 	ti.Placeholder = "Jump to channel — @ people, / commands, ? search"
 	ti.CharLimit = 256
 	m := Model{
@@ -255,7 +256,10 @@ func (m *Model) Blur() {
 }
 
 // SetStyles replaces the styles.
-func (m *Model) SetStyles(s styles.Styles) { m.styles = s }
+func (m *Model) SetStyles(s styles.Styles) {
+	m.styles = s
+	s.ThemeTextInput(&m.input)
+}
 
 // SetSize sets the available screen dimensions.
 func (m *Model) SetSize(w, h int) {
@@ -561,7 +565,7 @@ func (m Model) userRows() []row {
 		if u.DisplayName != "" {
 			label += " (" + u.DisplayName + ")"
 		}
-		rows[i] = row{label: label, user: u}
+		rows[i] = row{label: label + u.KindMark(), user: u}
 	}
 	assert.That(len(rows) == len(m.users), "palette.userRows: one row per user")
 	return rows

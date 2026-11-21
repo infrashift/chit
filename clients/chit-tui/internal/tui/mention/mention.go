@@ -149,6 +149,9 @@ func (m Model) View() string {
 		if e.DisplayName != "" {
 			label += fmt.Sprintf("  %s", e.DisplayName)
 		}
+		if e.Kind != "" {
+			label += " [" + e.Kind + "]"
+		}
 		if i == m.cursor {
 			items = append(items, m.styles.AutocompleteActive.Render(label))
 		} else {

@@ -16,7 +16,7 @@ func TestSkinPicker_OpenClose(t *testing.T) {
 	if m.Visible() {
 		t.Error("should not be visible initially")
 	}
-	m.Open()
+	m.Open("")
 	if !m.Visible() {
 		t.Error("should be visible after Open")
 	}
@@ -30,7 +30,7 @@ func TestSkinPicker_EscapeCloses(t *testing.T) {
 	m := skinpicker.New(testutil.Styles())
 	m.SetSkins([]string{"tokyo-night", "catppuccin"})
 	m.SetSize(80, 40)
-	m.Open()
+	m.Open("")
 
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
 	if m.Visible() {
@@ -42,7 +42,7 @@ func TestSkinPicker_NavigateAndSelect(t *testing.T) {
 	m := skinpicker.New(testutil.Styles())
 	m.SetSkins([]string{"tokyo-night", "catppuccin", "kanagawa"})
 	m.SetSize(80, 40)
-	m.Open()
+	m.Open("")
 
 	// Navigate down twice
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -68,7 +68,7 @@ func TestSkinPicker_JKNavigation(t *testing.T) {
 	m := skinpicker.New(testutil.Styles())
 	m.SetSkins([]string{"tokyo-night", "catppuccin"})
 	m.SetSize(80, 40)
-	m.Open()
+	m.Open("")
 
 	// j moves down
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
@@ -89,7 +89,7 @@ func TestSkinPicker_KNavigatesUp(t *testing.T) {
 	m := skinpicker.New(testutil.Styles())
 	m.SetSkins([]string{"tokyo-night", "catppuccin"})
 	m.SetSize(80, 40)
-	m.Open()
+	m.Open("")
 
 	// j down then k up
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
@@ -108,7 +108,7 @@ func TestSkinPicker_UpBounds(t *testing.T) {
 	m := skinpicker.New(testutil.Styles())
 	m.SetSkins([]string{"tokyo-night", "catppuccin"})
 	m.SetSize(80, 40)
-	m.Open()
+	m.Open("")
 
 	// Up at cursor 0 stays at 0
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
@@ -126,7 +126,7 @@ func TestSkinPicker_DownBounds(t *testing.T) {
 	m := skinpicker.New(testutil.Styles())
 	m.SetSkins([]string{"tokyo-night", "catppuccin"})
 	m.SetSize(80, 40)
-	m.Open()
+	m.Open("")
 
 	// Down past end stays at last
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -145,7 +145,7 @@ func TestSkinPicker_DownBounds(t *testing.T) {
 func TestSkinPicker_EnterEmpty(t *testing.T) {
 	m := skinpicker.New(testutil.Styles())
 	m.SetSize(80, 40)
-	m.Open()
+	m.Open("")
 
 	// Enter with no skins is a no-op
 	var cmd tea.Cmd
@@ -159,7 +159,7 @@ func TestSkinPicker_ViewShowsSkins(t *testing.T) {
 	m := skinpicker.New(testutil.Styles())
 	m.SetSkins([]string{"tokyo-night", "catppuccin"})
 	m.SetSize(80, 40)
-	m.Open()
+	m.Open("")
 
 	view := m.View()
 	if !strings.Contains(view, "Select Theme") {
@@ -195,7 +195,7 @@ func TestSkinPicker_FocusBlur(t *testing.T) {
 	m := skinpicker.New(testutil.Styles())
 	m.SetSkins([]string{"tokyo-night"})
 	m.SetSize(80, 40)
-	m.Open()
+	m.Open("")
 
 	// Blur — should not respond to keys
 	m.Blur()
@@ -219,7 +219,7 @@ func TestSkinPicker_SetStyles(t *testing.T) {
 
 	newStyles := styles.New(theme.Catppuccin())
 	m.SetStyles(newStyles)
-	m.Open()
+	m.Open("")
 
 	// Should still render
 	view := m.View()

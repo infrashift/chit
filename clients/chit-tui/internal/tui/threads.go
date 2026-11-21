@@ -20,6 +20,7 @@ func (m Model) handleThreadLoaded(msg ThreadLoadedMsg) (tea.Model, tea.Cmd) {
 		// post it to the channel, so go back to the channel instead.
 		return m, tea.Batch(m.leaveThread(), m.setError(msg.Err))
 	}
+	var cmd tea.Cmd
 	if msg.Posts != nil && len(msg.Posts.Order) > 0 {
 		root := msg.Posts.Order[0]
 		var replies []*model.Post
@@ -27,14 +28,17 @@ func (m Model) handleThreadLoaded(msg ThreadLoadedMsg) (tea.Model, tea.Cmd) {
 			replies = msg.Posts.Order[1:]
 		}
 		m.thread.SetThread(root, replies)
-		m.thread.SetUsernames(m.usernameMap())
+		m.pushPeople()
+		m.pushFiles()
+		m.notePosts(msg.Posts.Order)
+		cmd = m.fetchMissingRefs()
 		assert.That(len(replies) == len(msg.Posts.Order)-1, "handleThreadLoaded: replies lost")
 		assert.That(m.threadCounts != nil, "handleThreadLoaded: nil thread counts")
 		m.threadCounts[msg.PostID] = len(replies)
 		m.viewport.SetThreadCounts(m.threadCounts)
 		m.resizeComponents()
 	}
-	return m, nil
+	return m, cmd
 }
 
 // handleThreadChosen opens a thread from the inbox, switching to its

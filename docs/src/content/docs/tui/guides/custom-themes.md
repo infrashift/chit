@@ -26,6 +26,14 @@ or `theme = "dracula"` (or `theme_dark` / `theme_light`) in
 appear in the `/theme` picker and in `chit-tui --list-themes`, marked
 `(local)`.
 
+### Edit a Theme While the Client Runs
+
+You can edit the file of the active theme while the client runs. The client
+examines the file every 2 seconds and applies each saved change. To apply a
+change at once, type `/theme reload`. If the file has an error, the client
+shows the error in the action bar and keeps the current theme. Set
+`theme_watch = false` in the config file to stop the automatic reload.
+
 ### Naming Rules
 
 - **Lowercase file names only.** The client changes a name to lowercase

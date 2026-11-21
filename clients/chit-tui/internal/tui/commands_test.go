@@ -3,6 +3,7 @@ package tui_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/infrashift/chit/clients/chit-tui/internal/api"
@@ -50,7 +51,17 @@ type mockClient struct {
 	// that reached the server from one that only left the list.
 	followCalls []followCall
 	readThreads []string
-	err         error
+	// The HALO routes (mock_halo_test.go).
+	channelTags   map[string][]*model.Tag // channel ID -> its tags
+	files         map[string]*model.File  // file ID -> its record
+	fileBytes     map[string][]byte       // file ID -> its bytes
+	renamedTags   []string                // "tagID=name" passed to RenameTag
+	deletedTags   []string                // tag IDs passed to DeleteTag
+	chanTagCalls  []string                // "+chanID#tagID" or "-chanID#tagID"
+	fileInfoCalls []string                // file IDs passed to GetFileInfo
+	uploads       []string                // "chanID/name/type/alt" passed to UploadFile
+	foundChannels []*model.TaggedChannel
+	err           error
 }
 
 type followCall struct {
@@ -590,5 +601,20 @@ func TestCreateTagAndApplyCmd_ChannelTagByDefault(t *testing.T) {
 				t.Errorf("applied %v", client.taggedPosts)
 			}
 		})
+	}
+}
+
+// A #tag name the server would refuse is refused here, with the reason, and
+// the server never sees it.
+func TestCreateTagAndApplyCmd_RefusesABadName(t *testing.T) {
+	client := &mockClient{}
+	long := strings.Repeat("x", model.MaxTagLength+1)
+	msg := tui.CreateTagAndApplyCmd(context.Background(), client, long, "p1", "c1", false)()
+	created, ok := msg.(tui.TagCreatedMsg)
+	if !ok || created.Err == nil || !strings.Contains(created.Err.Error(), "1 to 50") {
+		t.Fatalf("msg = %#v, want a TagCreatedMsg with the length error", msg)
+	}
+	if len(client.tagsCreated) != 0 {
+		t.Errorf("CreateTag was called: %v", client.tagsCreated)
 	}
 }

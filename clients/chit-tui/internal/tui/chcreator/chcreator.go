@@ -64,6 +64,9 @@ func New(s styles.Styles) Model {
 	pp.Placeholder = "Purpose (optional)"
 	pp.CharLimit = 250
 
+	for _, ti := range []*textinput.Model{&dn, &nm, &pp} {
+		s.ThemeTextInput(ti)
+	}
 	m := Model{
 		displayName: dn,
 		name:        nm,
@@ -130,7 +133,12 @@ func (m *Model) Blur() {
 }
 
 // SetStyles replaces the styles.
-func (m *Model) SetStyles(s styles.Styles) { m.styles = s }
+func (m *Model) SetStyles(s styles.Styles) {
+	m.styles = s
+	for _, ti := range []*textinput.Model{&m.displayName, &m.name, &m.purpose} {
+		s.ThemeTextInput(ti)
+	}
+}
 
 // SetSize sets dimensions.
 func (m *Model) SetSize(w, h int) {

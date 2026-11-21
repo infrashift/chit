@@ -20,6 +20,7 @@ These keys work in all panes:
 | `Ctrl+S` | Open the palette in message-search mode (`?`) |
 | `Ctrl+D` | Open the palette in people mode (`@`) |
 | `Ctrl+N` | Create a new team channel |
+| `Ctrl+T` | Open the theme picker |
 | `?` | Help overlay (only when the history or thread pane is focused) |
 | `Esc` | Close overlay → leave thread → from the input, cancel an edit in progress and move focus to history |
 
@@ -80,6 +81,7 @@ When the message history has focus:
 | `k` / `↑` | Move post selection up |
 | `Enter` | Open the thread for the selected post (fills the main pane) |
 | `t` | Open tag picker for the selected post |
+| `i` | Open the details of the selected post (see [Agents and Bots](/chit/tui/guides/agents-and-bots/)) |
 | `y` | Copy the mouse selection, or the selected post if nothing is selected |
 | `e` | Edit the selected post (your own posts only) |
 | `d` `d` | Delete the selected post (your own posts only); press `d` twice |
@@ -151,7 +153,12 @@ chit-tui itself runs these commands, and they never reach the server:
 
 | Command | Action |
 |---------|--------|
-| `/theme` (alias `/skin`) | Choose a theme (see [Themes](/chit/tui/guides/themes/)) |
+| `/theme` (alias `/skin`) | Open the theme picker (see [Themes](/chit/tui/guides/themes/)) |
+| `/theme <name>` | Apply and save one theme |
+| `/theme reload` | Read the active theme file again |
+| `/attach [path]` | Attach an image to the next post; with no path, open a file picker (see [Attachments](/chit/tui/guides/attachments/)) |
+| `/detach` | Remove the files that wait for the next post |
+| `/chtag add <name>`, `rm <name>`, `find <name>…` | Change or find the tags of channels (see [Tags](/chit/tui/guides/tags/)) |
 | `/group` | Start a group conversation with three or more people |
 | `/nick <display name>` | Change your display name |
 | `/username <handle>` | Change your username (breaks existing @mentions) |
@@ -218,6 +225,8 @@ When the tag picker overlay is open (`t` from the history or thread pane):
 | `Enter` | Toggle tag on/off for the selected post |
 | `Ctrl+N` | Create a new tag from the filter text, and apply it |
 | `Ctrl+T` | Switch what `Ctrl+N` creates: a **channel** tag (the default), shared with the channel's members, or a **private** tag that only you see |
+| `Ctrl+R` | Rename the tag under the cursor (your own tags only) |
+| `Ctrl+X` | Delete the tag under the cursor; push `Ctrl+X` again to confirm (your own tags only) |
 | `Esc` | Close tag picker |
 
 The picker lists the channel's tags and the private tags of the user, which it marks
@@ -226,13 +235,13 @@ that name, created in the channel if it does not exist.
 
 ## Theme Picker
 
-When the theme picker is open (`/theme`):
+When the theme picker is open (`Ctrl+T` or `/theme`):
 
 | Key | Action |
 |-----|--------|
-| `↑` / `↓` or `k` / `j` | Move selection |
-| `Enter` | Apply and save the theme |
-| `Esc` | Close without changing the theme |
+| `↑` / `↓` or `k` / `j` | Move the selection and show that theme |
+| `Enter` | Keep the theme and save it |
+| `Esc` | Close, and put back the theme from before the picker |
 
 ## Help Overlay
 

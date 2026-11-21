@@ -15,8 +15,14 @@ import (
 // image/color.Color so palettes can be derived arithmetically; a nil slot means
 // "terminal default" and the style helpers skip the attribute entirely.
 type Theme struct {
-	Name          string
-	Author        string
+	Name   string
+	Author string
+	// Key is the name that ResolveNamed takes to load this theme again: the
+	// bundled name, or the file name of a local theme without its
+	// extension. Name can differ, because a local file names itself.
+	Key string
+	// Path is the file of a local or legacy theme, or "" for a bundled one.
+	Path          string
 	Background    color.Color
 	Foreground    color.Color
 	Subtle        color.Color

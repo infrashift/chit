@@ -564,6 +564,84 @@ from a failed login, and the TUI handles Kratos errors.
 **What this validates:** Mouse support (action-bar hit-testing, palette row
 clicks, wheel scroll), the help overlay, keyboard/mouse parity.
 
+#### Scenario 23: Theme Preview and Undo
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Press `Ctrl+T` | The theme picker opens on the active theme |
+| 2 | Press `↓` two times | The full screen takes each theme as the cursor moves |
+| 3 | Press `Esc` | The theme from before the picker comes back |
+| 4 | Type `/theme kanagawa` and press `Enter` | The Kanagawa theme applies, with no restart |
+| 5 | Type `/theme catpp` and press `Enter` | The action bar shows `no theme "catpp": try catppuccin, catppuccin-latte` |
+
+**What this validates:** The preview, the undo and `/theme <name>`
+([Themes](/chit/tui/guides/themes/)).
+
+#### Scenario 24: Rename and Delete a Tag
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | As Alice, press `t` on a post and make the tag `#draft` with `Ctrl+N` | The post shows `#draft` |
+| 2 | In the picker, move to `#draft` and press `Ctrl+R` | A prompt opens with the name |
+| 3 | Type `final` and press `Enter` | The prompt closes. Alice and Bob both see `#final` at once |
+| 4 | Press `Ctrl+X`, then `Ctrl+X` again | The tag goes from the post in both terminals |
+| 5 | As Bob, press `Ctrl+R` on a tag of Alice | The action bar shows `only the owner can change` |
+
+**What this validates:** Tag rename and delete for the owner, and the
+`tag_updated` and `tag_deleted` events ([Tags](/chit/tui/guides/tags/)).
+
+#### Scenario 25: Channel Tags
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Type `/chtag add release` and press `Enter` | `#release` shows on the upper border of the history pane, in both terminals |
+| 2 | Type `/chtag find release` and press `Enter` | A list shows the channels that carry `#release` |
+| 3 | Press `1` | The TUI opens the first channel of the list |
+| 4 | Type `/chtag rm release`, then press `y` | `#release` goes from the border |
+
+**What this validates:** Channel tags, `channel_tags_updated` and the find
+by tags.
+
+#### Scenario 26: Attach an Image
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Type `/attach ~/Pictures/photo.png` and press `Enter` | A prompt asks for the alt text |
+| 2 | Type `a photo` and press `Enter` | `uploading photo.png…`, then `[file] photo.png` on the upper border of the input |
+| 3 | Press `Enter` in the empty input | The post shows `[file] photo.png  image/png  …  "a photo"` |
+| 4 | Type `/attach` with no path and press `Enter` | A file picker opens. `Esc` closes it |
+| 5 | Type `/attach notes.txt` and press `Enter` | The action bar shows `attach a PNG, JPEG, WebP or GIF image` |
+
+**What this validates:** The upload, the alt text, the tray and a post of
+files alone ([Attachments](/chit/tui/guides/attachments/)).
+
+#### Scenario 27: Save the Files of a Post
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Focus the history pane and press `j` until the post of Scenario 26 is selected | The post is selected |
+| 2 | Press `i` | The post details show the author, the time and the file |
+| 3 | Press `s` | The action bar shows `saved 1 file to ~/Downloads` |
+| 4 | Press `i` and `s` again | The directory now holds `photo.png` and `photo (1).png` |
+
+**What this validates:** The save to `download_dir`, with no overwrite.
+
+#### Scenario 28: Agent Posts and Streamed Replies
+
+The seed data has the agent `chit-agent`. Send its posts with `curl` to
+chitd on port 8065, with its Kratos ID in `X-User-Id`.
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | As the agent, post to `town-square` with `props.provenance.model` set | The post shows `chit-agent [agent]` and `[provenance]` |
+| 2 | Press `i` on the post | The details show the model |
+| 3 | As the agent, send `POST /channels/{id}/stream_status` with `{"status":"started"}` | `chit-agent is responding…` shows on the lower border of the history pane |
+| 4 | Send `{"status":"finished"}` | The line goes |
+| 5 | Press `Ctrl+D` and type `chit` | The palette shows `@chit-agent [agent]` |
+
+**What this validates:** The actor types, provenance and `stream_status`
+([Agents and Bots](/chit/tui/guides/agents-and-bots/)).
+
 ### Step 4: Tear Down the UAT Server
 
 When you finish the tests, stop the UAT environment from the root of the Chit
@@ -725,6 +803,40 @@ server broadcasts real-time events to connected channel members.
 
 **WebSocket:** `ws://localhost:8065/api/v1/websocket`
 **HTTP Endpoint:** `POST /api/v1/posts`
+
+#### HALO Tests
+
+`halo_test.go` checks the HALO contract against chitd and SeaweedFS:
+
+- the actor types, provenance, and a post that a machine actor makes on behalf of a person
+- the upload, the info and the download of a file, and the file refusals
+- the tag rename and delete, with `tag_updated` and `tag_deleted`
+- the channel tags, with `channel_tags_updated`
+- `stream_status`, a `409` for a taken name and a `429` with `Retry-After`
+
+The e2e pod runs SeaweedFS, a machine actor that can post on behalf of a
+person, and a wider rate limit.
+
+#### TUI Tests
+
+`tui_test.go` runs the real TUI model, with the real API and WebSocket
+clients, in a Bubble Tea program against chitd:
+
+- **TestTUI_ShowsTheHALOData**: the agent badge, `[via @…]`, `[provenance]`, a file line and the stream indicator.
+- **TestTUI_TagChangesArriveLive**: a tag, its rename and its delete arrive in the TUI of Bob as Alice makes them.
+- **TestTUI_AttachSendAndSave**: `/attach`, a post of files alone, and `s` in the post details. The saved bytes match the sha256 of the server.
+
+### The Live Check
+
+`live_test.go` checks the full stack. Start it with `make kube-up`, and run
+`tests/e2e/test_e2e.sh` for the Kratos users. Then run:
+
+```bash
+CHIT_LIVE_PROXY_URL=http://localhost:4455 GOWORK=off go test -tags e2e -run TestLive ./tests/e2e/
+```
+
+The TUI signs in on its own sign-in screen through Kratos and Oathkeeper.
+It attaches a file, sees a tag rename arrive, and changes the theme.
 
 ## Troubleshooting
 

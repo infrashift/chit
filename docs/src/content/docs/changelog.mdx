@@ -204,6 +204,19 @@ Behaviour changes an operator must act on or know about:
 
 ### Added
 
+- **chit-tui works with the HALO server.** The TUI client models the HALO
+  contract and shows it: `[agent]`, `[bot]`, `[via @client]` and
+  `[provenance]` badges, a line for each attached file, the post details
+  (`i`) and a `… is responding` line for `stream_status`. `/attach` uploads
+  an image with alt text, and `s` in the post details saves the files.
+  Tags: live rename and delete events, rename and delete for the owner,
+  and channel tags with `/chtag`. Themes change at run time (`Ctrl+T`, a
+  preview, `/theme <name>`, `/theme reload`, a theme-file watch), and the
+  terminal's own colors follow the theme. Errors name their cause: a `429`
+  with its wait, a `409`, a membership refusal. Six reusable Bubbles are in
+  `clients/chit-tui/internal/tui/ui`. The TUI e2e suite runs the real TUI
+  against chitd and SeaweedFS, and a live check runs it through Kratos and
+  Oathkeeper (ADR-0015 to ADR-0018).
 - Configurable rate limits, and an aggregate limit for each on-behalf-of
   client (P-CHIT-8 for HALO). halod acts for every Subject through one
   machine actor, and its own requests (history and member reads,

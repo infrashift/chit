@@ -74,3 +74,54 @@ Tracking: [ISSUE-014](.okfw/issues/issue-014-merge-main-and-bring-its-new-code-u
 - [x] Make the new code pass semscope and golangci-lint, with assertions.
 - [x] Write the new docs in STE, and update the wiki.
 - [x] Run every gate and every e2e suite, then push and open the pull request.
+
+## Phase 12: The TUI contract layer
+Tracking: [ISSUE-018](.okfw/issues/issue-018-the-tui-client-does-not-model-the-halo-server-contract--01a1f77112b4.md)
+
+- [x] Add the HALO fields and types to the TUI models.
+- [x] Add Reason, Detail and RetryAfter to APIError, and add UserMessage.
+- [x] Add the file, tag and channel-tag methods to the API client and to the test doubles.
+- [x] Add ValidTagName, and accept Unicode letters in a hashtag.
+
+## Phase 13: Reusable Bubbles
+Tracking: [ISSUE-019](.okfw/issues/issue-019-the-tui-has-no-reusable-bubbles-for-confirm-chips-prompt-activity-and-file-pick--01a1f77112be.md)
+
+- [x] Add the packages `ui/confirm`, `ui/chips`, `ui/prompt`, `ui/activity` and `ui/filepick`.
+- [x] Move the post delete and the member picker to the new packages.
+- [x] Record the contract of a Bubble in an ADR.
+
+## Phase 14: Runtime themes
+Tracking: [ISSUE-020](.okfw/issues/issue-020-a-theme-change-does-not-restyle-all-of-the-tui-and-edited-themes-need-a-restart--01a1f77112c7.md)
+
+- [x] Make one restyle path, and test that a theme change equals a fresh start.
+- [x] Add the preview in the picker, /theme <name> and /theme reload.
+- [x] Add the theme-file watch and the theme_watch setting.
+- [x] Tell users about /theme in the help overlay and the docs.
+
+## Phase 15: Show the HALO data
+Tracking: [ISSUE-021](.okfw/issues/issue-021-the-tui-does-not-show-agents-provenance-attachments-or-stream-status--01a1f77112d1.md)
+
+- [x] Show the actor, via and provenance badges, and the attachment lines.
+- [x] Get file information in batches that obey the rate limit.
+- [x] Show stream_status above the input.
+- [x] Add the post detail overlay.
+
+## Phase 16: Tag parity
+Tracking: [ISSUE-022](.okfw/issues/issue-022-the-tui-does-not-manage-tags-as-the-halo-server-permits--01a1f77112db.md)
+
+- [x] Handle tag_updated, tag_deleted and channel_tags_updated.
+- [x] Rename and delete a tag from the tag picker.
+- [x] Show the channel tags, and add /chtag.
+
+## Phase 17: Attachments
+Tracking: [ISSUE-023](.okfw/issues/issue-023-the-tui-cannot-attach-or-save-files--01a1f77112e5.md)
+
+- [x] Add /attach, the file tray and a post with files.
+- [x] Save the files of a post to download_dir.
+
+## Phase 18: Verify the TUI against the HALO stack
+Tracking: [ISSUE-024](.okfw/issues/issue-024-the-tui-e2e-suite-and-the-live-run-do-not-cover-the-halo-features--01a1f77112ef.md)
+
+- [x] Add the TUI e2e tests for the HALO routes and events.
+- [x] Do a live run through Oathkeeper.
+- [x] Update the verify skill, the UAT tutorial and the changelogs.

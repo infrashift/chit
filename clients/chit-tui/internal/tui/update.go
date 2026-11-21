@@ -62,6 +62,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if next, cmd, ok := m.routeLookupMsg(msg); ok {
 		return next, cmd
 	}
+	if next, cmd, ok := m.routeBubbleMsg(msg); ok {
+		return next, cmd
+	}
 	return m, nil
 }
 
@@ -70,7 +73,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // ignores it, so the one editor that owns the blink schedules the next.
 func (m Model) routeBlink(blink cursor.BlinkMsg) (tea.Model, tea.Cmd) {
 	assert.That(m.appState == AppStateRunning, "routeBlink: not signed in")
-	cmds := make([]tea.Cmd, 0, 5)
+	cmds := make([]tea.Cmd, 0, 6)
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(blink)
 	cmds = append(cmds, cmd)
@@ -82,7 +85,9 @@ func (m Model) routeBlink(blink cursor.BlinkMsg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 	m.chCreator, cmd = m.chCreator.Update(blink)
 	cmds = append(cmds, cmd)
-	assert.That(len(cmds) == 5, "routeBlink: one command for each editor")
+	m.textPrompt, cmd = m.textPrompt.Update(blink)
+	cmds = append(cmds, cmd)
+	assert.That(len(cmds) == 6, "routeBlink: one command for each editor")
 	return m, tea.Batch(cmds...)
 }
 
@@ -130,6 +135,12 @@ func (m Model) routeSessionMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return handled(m.handleProfileUpdated(msg))
 	case skinpicker.SkinSelectedMsg:
 		return handled(m.handleThemeChosen(msg))
+	case skinpicker.SkinPreviewMsg:
+		return handled(m.handleThemePreview(msg))
+	case skinpicker.SkinCancelledMsg:
+		return handled(m.handleThemeCancelled())
+	case themeWatchMsg:
+		return handled(m.handleThemeWatch(msg))
 	case clipboardCopiedMsg:
 		return handled(m.handleClipboardCopied(msg))
 	case ClearErrMsg:
@@ -249,7 +260,7 @@ func (m Model) routeTagMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	case TagRemovedFromPostMsg:
 		return handled(m.handleTagRemovedFromPost(msg))
 	}
-	return m, nil, false
+	return m.routeTagManageMsg(msg)
 }
 
 // routeLookupMsg routes the palette, search, mention and user-search
@@ -279,6 +290,10 @@ func (m Model) routeLookupMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return handled(m.handleSearchHit(msg))
 	case input.AtTriggerMsg:
 		return handled(m.handleAtTrigger(msg))
+	case FileInfosLoadedMsg:
+		return handled(m.handleFileInfosLoaded(msg))
+	case fileRetryMsg:
+		return m, m.fetchMissingFiles(), true
 	case input.AtDismissMsg:
 		m.mention.Hide()
 		return m, nil, true

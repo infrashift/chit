@@ -27,7 +27,7 @@ type PostSelectedMsg struct {
 type Model struct {
 	viewport        bvp.Model
 	posts           []*model.Post
-	usernames       map[string]string
+	dir             post.Directory
 	currentUsername string
 	threadCounts    map[string]int
 	postTags        map[string][]string // postID -> tag names
@@ -65,7 +65,7 @@ func New(s styles.Styles) Model {
 	assert.That(s.SelectedPost.GetPaddingLeft() > 0, "viewport.New: styles without the selected-post padding")
 	m := Model{
 		viewport:     bvp.New(0, 0),
-		usernames:    make(map[string]string),
+		dir:          post.NewDirectory(),
 		threadCounts: make(map[string]int),
 		postTags:     make(map[string][]string),
 		// No post is selected until one is loaded.
@@ -243,18 +243,39 @@ func (m Model) AtTop() bool {
 // displayed username actually changed.
 func (m *Model) SetUsernames(names map[string]string) {
 	assert.That(names != nil, "Model.SetUsernames: nil map")
-	// Invalidate cache entries where the username changed.
+	next := m.dir
+	next.Names = names
+	m.setDirectory(next)
+}
+
+// SetUserKinds sets the actor types of the agents and bots.
+func (m *Model) SetUserKinds(kinds map[string]string) {
+	assert.That(kinds != nil, "Model.SetUserKinds: nil map")
+	next := m.dir
+	next.Kinds = kinds
+	m.setDirectory(next)
+}
+
+// SetFiles sets the file records that the posts show.
+func (m *Model) SetFiles(files map[string]*model.File) {
+	assert.That(files != nil, "Model.SetFiles: nil map")
+	next := m.dir
+	next.Files = files
+	m.setDirectory(next)
+}
+
+// setDirectory replaces the directory and re-renders only the posts that
+// show something that changed: a name, an actor type, a file record.
+func (m *Model) setDirectory(next post.Directory) {
 	for _, p := range m.posts {
-		oldName := m.usernames[p.UserID]
-		newName := names[p.UserID]
-		if oldName != newName {
+		if m.dir.Shows(p) != next.Shows(p) {
 			delete(m.cache, p.ID)
 		}
 	}
-	m.usernames = names
+	m.dir = next
 	m.updateContent()
-	assert.That(len(m.postLineOffsets) == len(m.posts), "Model.SetUsernames: a line offset for each post")
-	assert.That(len(m.cache) <= len(m.posts), "Model.SetUsernames: cache holds posts that are not shown")
+	assert.That(len(m.postLineOffsets) == len(m.posts), "Model.setDirectory: a line offset for each post")
+	assert.That(len(m.cache) <= len(m.posts), "Model.setDirectory: cache holds posts that are not shown")
 }
 
 // SetCurrentUsername sets the current user's username for mention highlighting.
@@ -624,11 +645,8 @@ func (m *Model) render(p *model.Post) renderedPost {
 	assert.That(m.cache != nil, "Model.render: cache not made by New")
 	rp, ok := m.cache[p.ID]
 	if !ok {
-		username := m.usernames[p.UserID]
-		if username == "" {
-			username = p.UserID[:min(8, len(p.UserID))]
-		}
-		pb := post.New(p, username, m.styles, m.width-4, m.renderer, m.currentUsername, m.threadCounts[p.ID], m.postTagNames(p.ID))
+		username := m.dir.Username(p.UserID)
+		pb := post.New(p, username, m.styles, m.width-4, m.renderer, m.currentUsername, m.threadCounts[p.ID], m.postTagNames(p.ID)).With(m.dir.Extra(p))
 		rp.text = pb.View()
 		rp.plain = plainLinesOf(rp.text)
 	}

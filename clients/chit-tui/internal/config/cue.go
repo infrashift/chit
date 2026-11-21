@@ -30,12 +30,14 @@ const maxVetPasses = 64
 // key with no message.
 func keyMessage(key string) (string, bool) {
 	switch key {
-	case "server_url", "auth_header", "session_file", "theme", "theme_dark", "theme_light":
+	case "server_url", "auth_header", "session_file", "theme", "theme_dark", "theme_light", "download_dir":
 		return "must be a string", true
 	case "ws_scheme":
 		return `must be "ws" or "wss"`, true
 	case "appearance":
 		return `must be "dark", "light", or "system"`, true
+	case "theme_watch", "theme_paint":
+		return "must be true or false", true
 	default:
 		return "", false
 	}

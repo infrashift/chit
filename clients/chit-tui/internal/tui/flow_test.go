@@ -125,3 +125,108 @@ func lastFrame(t *testing.T, tm *teatest.TestModel) string {
 	}
 	return testutil.StripANSI(buf.String())
 }
+
+// programWith runs the model with client in a real Bubble Tea program.
+func programWith(t *testing.T, client *mockClient) *teatest.TestModel {
+	t.Helper()
+	m := tui.NewModel(&config.Config{ServerURL: "http://localhost:8065"}, client, nil,
+		testutil.Styles(), nil, nil, nil)
+	m.SetClipboardOutput(io.Discard)
+	return teatest.NewTestModel(t, m, teatest.WithInitialTermSize(120, 40))
+}
+
+func flowClient() *mockClient {
+	return &mockClient{
+		me:       &model.User{ID: "u1", Username: "alice"},
+		teams:    []*model.Team{{ID: "t1", DisplayName: "Engineering"}},
+		channels: []*model.Channel{{ID: "c1", TeamID: "t1", DisplayName: "General"}},
+		posts: &model.PostList{Order: []*model.Post{
+			{ID: "p1", ChannelID: "c1", UserID: "u1", Content: "welcome aboard", CreateAt: 1700000000000},
+		}},
+		users: []*model.User{{ID: "u1", Username: "alice"}},
+	}
+}
+
+// The delete question (ui/confirm) shows in the action bar, and the second
+// d deletes the post.
+func TestFlow_DeleteAsksThenDeletes(t *testing.T) {
+	client := flowClient()
+	tm := programWith(t, client)
+	waitForScreen(t, tm, "welcome aboard")
+
+	tm.Send(tea.KeyMsg{Type: tea.KeyTab})
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	waitForScreen(t, tm, "delete this message?")
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+
+	finalViewAfter(t, tm, "welcome aboard")
+	if strings.Join(client.deletedPosts, ",") != "p1" {
+		t.Errorf("deleted = %v, want [p1]", client.deletedPosts)
+	}
+}
+
+// /group picks people as chips (ui/chips); Backspace in the empty search
+// box removes the last pick.
+func TestFlow_GroupPickerChips(t *testing.T) {
+	client := flowClient()
+	client.searchUsers = []*model.User{{ID: "u2", Username: "bob", DisplayName: "Bob"}}
+	tm := programWith(t, client)
+	waitForScreen(t, tm, "welcome aboard")
+
+	tm.Type("/group")
+	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitForScreen(t, tm, "Search users")
+	tm.Type("bo")
+	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitForScreen(t, tm, "[ ] @bob (Bob)")
+	tm.Send(tea.KeyMsg{Type: tea.KeyTab})
+	waitForScreen(t, tm, "[x] @bob (Bob)")
+	tm.Send(tea.KeyMsg{Type: tea.KeyBackspace})
+
+	view := finalViewAfter(t, tm, "[ ] @bob (Bob)")
+	if !strings.Contains(view, "[ ] @bob (Bob)") {
+		t.Errorf("Backspace did not remove the pick:\n%s", view)
+	}
+}
+
+// Ctrl+T opens the theme picker in a real program; a move previews the next
+// theme and Esc puts the first one back.
+func TestFlow_ThemePreviewAndUndo(t *testing.T) {
+	tm := programWith(t, flowClient())
+	waitForScreen(t, tm, "welcome aboard")
+
+	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlT})
+	waitForScreen(t, tm, "Esc undo")
+	tm.Send(tea.KeyMsg{Type: tea.KeyDown})
+	tm.Send(tea.KeyMsg{Type: tea.KeyEscape})
+
+	view := finalViewAfter(t, tm, "Type a message")
+	if strings.Contains(view, "Select Theme") {
+		t.Errorf("Esc left the theme picker open:\n%s", view)
+	}
+}
+
+// An agent post with provenance and a file, in a real program: the badges
+// show, the file record loads, and a stream shows its indicator.
+func TestFlow_AgentPostFileAndStream(t *testing.T) {
+	client := flowClient()
+	client.users = append(client.users, &model.User{ID: "agent1", Username: "chit-agent", ActorType: model.ActorTypeAgent})
+	client.posts = &model.PostList{Order: []*model.Post{{
+		ID: "p1", ChannelID: "c1", UserID: "agent1", Content: "the chart", FileIDs: []string{"file-1"}, CreateAt: 1700000000000,
+		Props: map[string]any{model.PropProvenance: map[string]any{"model": "m"}},
+	}}}
+	client.files = map[string]*model.File{"file-1": {ID: "file-1", Name: "chart.png", ContentType: "image/png", SizeBytes: 10}}
+	tm := programWith(t, client)
+	teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
+		plain := testutil.StripANSI(string(out))
+		return strings.Contains(plain, "[file] chart.png") && strings.Contains(plain, "chit-agent [agent]")
+	}, teatest.WithDuration(5*time.Second))
+
+	tm.Send(tui.WebSocketEventMsg{Event: model.WebSocketEvent{Event: model.WebSocketEventStreamStatus, Data: map[string]any{
+		"channel_id": "c1", "user_id": "agent1", "status": model.StreamStarted, "stream_id": "s1",
+	}}})
+	view := finalViewAfter(t, tm, "is responding")
+	if !strings.Contains(view, "chit-agent is responding…") || !strings.Contains(view, "[provenance]") {
+		t.Errorf("no indicator or badge:\n%s", view)
+	}
+}

@@ -1,0 +1,11 @@
+{
+  "identities": [
+    {
+      "name": "chitd",
+      "credentials": [
+        {"accessKey": "chit-dev-access-key", "secretKey": "chit-dev-secret-key"}
+      ],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

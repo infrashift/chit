@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Clear server errors** — the action bar tells the cause of a `429` (with the wait from `Retry-After`), a `409`, a membership refusal (with its detail) and each attachment refusal
+- **Tag names checked first** — the TUI refuses a tag name that the server refuses, and tells why
+- **HALO contract** — the models and the API client know attachments, provenance, on-behalf-of posts, actor types, tag rename and delete, and channel tags
+- **Unicode #tags** — a `#tag` can hold the letters and digits of each script
+- **Attachments** — `/attach [path]` uploads an image (a file picker when no path, `ui/filepick`; alt text in `ui/prompt`). A tray of up to four files waits on the input border (`ui/chips`); `Enter` in an empty input sends the files alone; `Backspace` and `/detach` remove them. `s` in the post details saves the files to `download_dir`, never over another file
+- **Tag parity** — `tag_updated`, `tag_deleted` and `channel_tags_updated` apply at once. `Ctrl+R` renames and `Ctrl+X` deletes your own tag in the picker (`ui/prompt`, `ui/confirm`). The tags of the open channel show on the upper border, and `/chtag add`, `rm` and `find` change and find them (`ui/chips`, `ui/infobox`)
+- **Agents and bots** — `[agent]`/`[bot]` badges on posts and in the people lists, `[via @client]` for an on-behalf-of post, `[provenance]`, a line for each attached file (records fetched 40 at a time, waiting out a 429), `i` opens the post details (`ui/infobox`), and `stream_status` shows `… is responding` on the lower border of the main pane (`ui/activity`)
+- **Thread authors load** — the authors of thread replies are looked up, so they no longer show as an ID
+- **Runtime themes** — `Ctrl+T` opens the theme picker, which shows each theme as the cursor moves; `Esc` undoes the preview. `/theme <name>` and `/theme reload`. An edited local theme file applies by itself (`theme_watch`). The terminal's own colors follow the theme (`theme_paint`, OSC 10/11)
+- **Reusable Bubbles** — `ui/confirm`, `ui/chips`, `ui/prompt`, `ui/activity` and `ui/filepick`; the post delete and the member picker use the first two
+
 - **Config file** — `~/.config/chit/config.toml` (or `CHIT_CONFIG_FILE`), checked against a CUE schema; an invalid setting is a warning, not a failure. The environment still overrides the file
 - **Theme flags and appearance** — `--theme`, `--appearance` and `--list-themes`; `theme_dark` and `theme_light` choose a theme by the terminal's appearance
 - **Light themes** — `tokyo-night-day`, `catppuccin-latte`, `kanagawa-lotus` and `dayfox` join the four dark themes
@@ -27,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Functional tests** — flows run in a real Bubble Tea program with teatest; benchmarks cover rendering
 
 ### Changed
+
+- **Themed text boxes** — the message input and each search box take the colors of the theme, not those of bubbles. The cursor line of the input lost its black or white background
 
 - **Session file location** — the stored session moves from `~/.config/chit-tui/session.json` to `~/.config/chit/session.json`, beside the config and themes. An existing session is moved over on first start, so nobody is signed out
 - **Slash commands go to the server** — anything but the client's own commands is sent as typed, rather than opening the palette and discarding the text

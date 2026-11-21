@@ -20,8 +20,6 @@ var (
 	errDisconnected = errors.New("connection lost — reconnecting")
 	errReconnected  = errors.New("reconnected — reloading messages")
 	errDesynced     = errors.New("fell behind the server — reloading messages")
-	// Not a failure, but the status line is the only place to ask.
-	errConfirmDelete = errors.New("delete this message? Press d again to confirm, any other key to cancel")
 )
 
 func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
@@ -37,6 +35,9 @@ func (m Model) handleWSEvent(msg WebSocketEventMsg) (tea.Model, tea.Cmd) {
 func (m *Model) applyWSEvent(evt model.WebSocketEvent) []tea.Cmd {
 	assert.That(m != nil, "applyWSEvent: nil model")
 	assert.That(m.appState == AppStateRunning, "applyWSEvent: not signed in")
+	if m.applyTagEvent(evt) {
+		return nil
+	}
 	switch evt.Event {
 	case model.WebSocketEventPosted:
 		return m.onPosted(evt)
@@ -62,8 +63,6 @@ func (m *Model) applyWSEvent(evt model.WebSocketEvent) []tea.Cmd {
 		return m.onUserRemoved(evt)
 	case model.WebSocketEventCommandResponse:
 		m.onCommandResponse(evt)
-	case model.WebSocketEventPostTagsUpdated:
-		m.onPostTagsUpdated(evt)
 	case model.WebSocketEventThreadUpdated:
 		m.onThreadUpdated(evt)
 	case model.WebSocketEventMentioned:
@@ -72,6 +71,8 @@ func (m *Model) applyWSEvent(evt model.WebSocketEvent) []tea.Cmd {
 		return m.onUserAdded(evt)
 	case model.WebSocketEventChannelCreated:
 		return m.onChannelCreated(evt)
+	case model.WebSocketEventStreamStatus:
+		return m.onStreamStatus(evt)
 	}
 	return nil
 }
@@ -105,6 +106,8 @@ func (m *Model) appendLivePost(p *model.Post) []tea.Cmd {
 	assert.That(p.ID != "", "appendLivePost: post without ID")
 	assert.That(m.activeChan != nil, "appendLivePost: no channel open")
 	assert.That(p.ChannelID == m.activeChan.ID, "appendLivePost: post from another channel")
+	// The reply of a streamed answer has arrived.
+	m.endStreamsOf(p.UserID)
 	// Reply counts are left to thread_updated, which carries the
 	// server's total; counting here as well over-counted each reply.
 	if p.RootID != "" && m.mainPane == paneThread && p.RootID == m.threadRootID {
@@ -115,12 +118,9 @@ func (m *Model) appendLivePost(p *model.Post) []tea.Cmd {
 		return nil
 	}
 	m.viewport.AppendPost(p)
-	m.resolvePostUsers([]*model.Post{p})
+	m.notePosts([]*model.Post{p})
 	assert.That(m.viewport.HasPost(p.ID), "appendLivePost: post not shown")
-	if fetchCmd := m.fetchMissingUsers(); fetchCmd != nil {
-		return []tea.Cmd{fetchCmd}
-	}
-	return nil
+	return []tea.Cmd{m.fetchMissingRefs()}
 }
 
 func (m *Model) onPostEdited(evt model.WebSocketEvent) {
@@ -215,7 +215,7 @@ func (m *Model) onCommandResponse(evt model.WebSocketEvent) {
 		Content:   text,
 		CreateAt:  time.Now().UnixMilli(),
 	})
-	m.viewport.SetUsernames(m.usernameMap())
+	m.pushPeople()
 }
 
 func (m *Model) onPostTagsUpdated(evt model.WebSocketEvent) {

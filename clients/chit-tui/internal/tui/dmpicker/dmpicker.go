@@ -5,7 +5,6 @@ package dmpicker
 
 import (
 	"fmt"
-	"strings"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -13,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/infrashift/chit/clients/chit-tui/internal/assert"
 	"github.com/infrashift/chit/clients/chit-tui/internal/model"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/chips"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/listwin"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 )
@@ -35,9 +35,12 @@ type SearchTriggeredMsg struct {
 
 // Model is the member picker overlay component.
 type Model struct {
-	input    textinput.Model
-	results  []*model.User
-	selected []*model.User
+	input   textinput.Model
+	results []*model.User
+	// chips holds the picked people in order (ui/chips); picked maps each
+	// chip ID back to its user.
+	chips  chips.Model
+	picked map[string]*model.User
 	// lastSearched is the term the current results came from, so Enter can
 	// tell "search this" apart from "I am done picking".
 	lastSearched string
@@ -52,10 +55,13 @@ type Model struct {
 // New creates a new member picker model.
 func New(s styles.Styles) Model {
 	ti := textinput.New()
+	s.ThemeTextInput(&ti)
 	ti.Placeholder = "Search users..."
 	ti.CharLimit = 256
 	m := Model{
 		input:  ti,
+		chips:  chips.New(s, chips.RoleMention, maxGroupSelection),
+		picked: make(map[string]*model.User),
 		styles: s,
 	}
 	assert.That(m.focused == m.input.Focused(), "dmpicker.New: focus flag and search box disagree")
@@ -70,7 +76,7 @@ func (m *Model) OpenForMembers() {
 	m.input.Focus()
 	m.cursor = 0
 	m.results = nil
-	m.selected = nil
+	m.clearPicks()
 	m.lastSearched = ""
 	assert.That(m.input.Focused(), "Model.OpenForMembers: search box not focused")
 	assert.That(m.input.Value() == "", "Model.OpenForMembers: search box not cleared")
@@ -82,8 +88,15 @@ func (m *Model) Close() {
 	m.focused = false
 	m.input.Blur()
 	m.results = nil
-	m.selected = nil
+	m.clearPicks()
 	assert.That(!m.input.Focused(), "Model.Close: search box kept focus")
+}
+
+// clearPicks removes each picked person.
+func (m *Model) clearPicks() {
+	m.chips.Clear()
+	m.picked = make(map[string]*model.User)
+	assert.That(m.chips.Len() == 0 && len(m.picked) == 0, "Model.clearPicks: picks left")
 }
 
 // Visible returns the visibility state.
@@ -104,58 +117,56 @@ func (m *Model) Blur() {
 }
 
 // SetStyles replaces the styles.
-func (m *Model) SetStyles(s styles.Styles) { m.styles = s }
+func (m *Model) SetStyles(s styles.Styles) {
+	m.styles = s
+	m.chips.SetStyles(s)
+	s.ThemeTextInput(&m.input)
+}
 
 // SetSize sets dimensions.
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
 	m.input.Width = w - 8
+	m.chips.SetWidth(max(w-8, 0))
 }
 
 // SetResults sets the user search results.
 func (m *Model) SetResults(users []*model.User) {
 	assert.That(m.visible, "Model.SetResults: results for a closed picker")
-	assert.That(len(m.selected) <= maxGroupSelection, "Model.SetResults: too many people selected")
+	assert.That(m.chips.Len() <= maxGroupSelection, "Model.SetResults: too many people selected")
 	m.results = users
 	m.cursor = 0
 }
 
 // isSelected checks if a user is in the selected list.
 func (m Model) isSelected(userID string) bool {
-	assert.That(len(m.selected) <= maxGroupSelection, "Model.isSelected: too many people selected")
-	for _, u := range m.selected {
-		if u.ID == userID {
-			return true
-		}
-	}
-	return false
+	assert.That(m.chips.Len() == len(m.picked), "Model.isSelected: chips and picks out of step")
+	return m.chips.Has(userID)
 }
 
 // toggleSelected adds or removes a user from the selected list, reporting
 // whether the user ended up selected.
 func (m *Model) toggleSelected(user *model.User) bool {
-	assert.That(len(m.selected) <= maxGroupSelection, "Model.toggleSelected: too many people selected")
-	for i, u := range m.selected {
-		for _, v := range m.selected[i+1:] {
-			assert.That(u.ID != v.ID, "Model.toggleSelected: a person selected twice")
-		}
-	}
-	before := len(m.selected)
-	for i, u := range m.selected {
-		if u.ID == user.ID {
-			m.selected = append(m.selected[:i], m.selected[i+1:]...)
-			assert.That(len(m.selected) == before-1, "Model.toggleSelected: deselect did not remove one person")
-			return false
-		}
-	}
-	if len(m.selected) < maxGroupSelection {
-		m.selected = append(m.selected, user)
-		assert.That(len(m.selected) <= maxGroupSelection, "Model.toggleSelected: selection over the cap")
-		assert.That(m.selected[len(m.selected)-1] == user, "Model.toggleSelected: picked person not last")
+	assert.That(user != nil && user.ID != "", "Model.toggleSelected: no user")
+	if m.chips.Toggle(chips.Chip{ID: user.ID, Label: "@" + user.Username}) {
+		m.picked[user.ID] = user
+		assert.That(m.chips.Len() == len(m.picked), "Model.toggleSelected: chips and picks out of step")
 		return true
 	}
+	delete(m.picked, user.ID)
+	assert.That(m.chips.Len() == len(m.picked), "Model.toggleSelected: chips and picks out of step")
 	return false
+}
+
+// selectedUsers returns the picked people, in the order of the picks.
+func (m Model) selectedUsers() []*model.User {
+	users := make([]*model.User, 0, m.chips.Len())
+	for _, id := range m.chips.IDs() {
+		users = append(users, m.picked[id])
+	}
+	assert.That(len(users) == len(m.picked), "Model.selectedUsers: a user for each chip")
+	return users
 }
 
 // Update handles messages.
@@ -185,7 +196,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	switch msg.Type {
 	case tea.KeyEscape:
 		m.Close()
-		assert.That(!m.visible && len(m.selected) == 0, "Model.handleKey: Esc left the picker open")
+		assert.That(!m.visible && m.chips.Len() == 0, "Model.handleKey: Esc left the picker open")
 		return m, func() tea.Msg { return CancelledMsg{} }, true
 	case tea.KeyTab:
 		m.toggleCursor()
@@ -194,9 +205,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		next, cmd := m.confirm()
 		return next, cmd, true
 	case tea.KeyBackspace:
-		if m.input.Value() == "" && len(m.selected) > 0 {
-			m.selected = m.selected[:len(m.selected)-1]
-			assert.That(len(m.selected) < maxGroupSelection, "Model.handleKey: Backspace left the selection full")
+		if c, ok := m.popPick(); ok {
+			assert.That(!m.chips.Has(c.ID), "Model.handleKey: Backspace left the person picked")
 			return m, nil, true
 		}
 	case tea.KeyUp:
@@ -213,6 +223,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 	return m, nil, false
+}
+
+// popPick removes the last picked person when the search box is empty.
+func (m *Model) popPick() (chips.Chip, bool) {
+	if m.input.Value() != "" {
+		return chips.Chip{}, false
+	}
+	c, ok := m.chips.Pop()
+	if ok {
+		delete(m.picked, c.ID)
+	}
+	assert.That(m.chips.Len() == len(m.picked), "Model.popPick: chips and picks out of step")
+	return c, ok
 }
 
 // toggleCursor selects or deselects the person under the cursor.
@@ -233,7 +256,7 @@ func (m *Model) toggleCursor() {
 		m.lastSearched = ""
 		assert.That(m.input.Value() == "", "Model.toggleCursor: search box not cleared after a pick")
 	}
-	assert.That(len(m.selected) <= maxGroupSelection, "Model.toggleCursor: selection over the cap")
+	assert.That(m.chips.Len() <= maxGroupSelection, "Model.toggleCursor: selection over the cap")
 }
 
 // confirm searches for a new term, or else picks the selected people, or
@@ -248,11 +271,10 @@ func (m Model) confirm() (Model, tea.Cmd) {
 		m.lastSearched = term
 		return m, func() tea.Msg { return SearchTriggeredMsg{Term: term} }
 	}
-	assert.That(len(m.selected) <= maxGroupSelection, "Model.confirm: selection over the cap")
-	if len(m.selected) > 0 {
-		users := make([]*model.User, len(m.selected))
-		n := copy(users, m.selected)
-		assert.That(n == len(m.selected), "Model.confirm: selection not copied whole")
+	assert.That(m.chips.Len() <= maxGroupSelection, "Model.confirm: selection over the cap")
+	if m.chips.Len() > 0 {
+		users := m.selectedUsers()
+		n := len(users)
 		m.Close()
 		assert.That(!m.visible && len(users) == n, "Model.confirm: picker open or picks lost after closing")
 		return m, func() tea.Msg { return MembersPickedMsg{Users: users} }
@@ -274,17 +296,13 @@ func (m Model) View() string {
 	}
 
 	assert.That(m.cursor >= 0 && m.cursor <= max(len(m.results)-1, 0), "Model.View: cursor outside the results")
-	assert.That(len(m.selected) <= maxGroupSelection, "Model.View: selection over the cap")
+	assert.That(m.chips.Len() <= maxGroupSelection, "Model.View: selection over the cap")
 	assert.That(m.focused == m.input.Focused(), "Model.View: focus flag and search box disagree")
 	var items []string
 
 	// Selected chips
-	if len(m.selected) > 0 {
-		var chips []string
-		for _, u := range m.selected {
-			chips = append(chips, m.styles.MentionText.Render("@"+u.Username))
-		}
-		items = append(items, strings.Join(chips, " "))
+	if m.chips.Len() > 0 {
+		items = append(items, m.chips.View())
 	}
 
 	items = append(items, m.input.View())
@@ -295,7 +313,7 @@ func (m Model) View() string {
 	switch term := m.input.Value(); {
 	case term != "" && term != m.lastSearched:
 		items = append(items, m.styles.Timestamp.Render("  Enter to search"))
-	case len(m.selected) > 0:
+	case m.chips.Len() > 0:
 		items = append(items, m.styles.Timestamp.Render(
 			"  Tab to pick · Enter to confirm · type another name to keep searching"))
 	case len(m.results) > 0:
@@ -311,6 +329,7 @@ func (m Model) View() string {
 		if u.DisplayName != "" {
 			label += fmt.Sprintf(" (%s)", u.DisplayName)
 		}
+		label += u.KindMark()
 		if m.isSelected(u.ID) {
 			label = "[x] " + label
 		} else {

@@ -30,6 +30,20 @@ type TagCreateRequestMsg struct {
 	Private bool
 }
 
+// TagRenameRequestMsg asks the parent to rename the tag under the cursor.
+// The parent checks that the user owns it.
+type TagRenameRequestMsg struct {
+	TagID string
+	Name  string
+}
+
+// TagDeleteRequestMsg asks the parent to delete the tag under the cursor.
+// The parent checks that the user owns it, and asks first.
+type TagDeleteRequestMsg struct {
+	TagID string
+	Name  string
+}
+
 // Model is the tag picker overlay component.
 type Model struct {
 	input    textinput.Model
@@ -51,6 +65,7 @@ type Model struct {
 // New creates a new tag picker model.
 func New(s styles.Styles) Model {
 	ti := textinput.New()
+	s.ThemeTextInput(&ti)
 	ti.Placeholder = "Filter tags... (ctrl+n create, ctrl+t private)"
 	ti.CharLimit = 50
 	m := Model{
@@ -134,7 +149,10 @@ func (m *Model) Blur() {
 }
 
 // SetStyles replaces the styles.
-func (m *Model) SetStyles(s styles.Styles) { m.styles = s }
+func (m *Model) SetStyles(s styles.Styles) {
+	m.styles = s
+	s.ThemeTextInput(&m.input)
+}
 
 // SetSize sets dimensions.
 func (m *Model) SetSize(w, h int) {
@@ -192,8 +210,56 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	case tea.KeyCtrlN:
 		return m, m.requestCreate(), true
+	case tea.KeyCtrlR, tea.KeyCtrlX:
+		return m, m.requestChange(msg.Type == tea.KeyCtrlX), true
 	}
 	return m, nil, false
+}
+
+// requestChange asks to rename, or with remove to delete, the tag under
+// the cursor.
+func (m Model) requestChange(remove bool) tea.Cmd {
+	if len(m.filtered) == 0 || m.cursor >= len(m.filtered) {
+		return nil
+	}
+	tag := m.filtered[m.cursor]
+	assert.That(tag != nil && tag.ID != "", "Model.requestChange: no tag under the cursor")
+	id, name := tag.ID, tag.Name
+	if remove {
+		return func() tea.Msg { return TagDeleteRequestMsg{TagID: id, Name: name} }
+	}
+	return func() tea.Msg { return TagRenameRequestMsg{TagID: id, Name: name} }
+}
+
+// ReplaceTag puts t in the place of the tag with its ID, after a rename.
+func (m *Model) ReplaceTag(t *model.Tag) {
+	assert.That(t != nil && t.ID != "", "Model.ReplaceTag: no tag")
+	next := make([]*model.Tag, len(m.allTags))
+	for i, old := range m.allTags {
+		next[i] = old
+		if old.ID == t.ID {
+			next[i] = t
+		}
+	}
+	m.allTags = next
+	m.filter()
+	assert.That(len(m.allTags) == len(next), "Model.ReplaceTag: tags lost")
+}
+
+// RemoveTag takes the tag with id out of the picker, after a delete.
+func (m *Model) RemoveTag(id string) {
+	assert.That(id != "", "Model.RemoveTag: empty ID")
+	next := make([]*model.Tag, 0, len(m.allTags))
+	for _, t := range m.allTags {
+		if t.ID != id {
+			next = append(next, t)
+		}
+	}
+	m.allTags = next
+	delete(m.postTags, id)
+	m.filter()
+	m.cursor = min(m.cursor, max(len(m.filtered)-1, 0))
+	assert.That(m.cursor >= 0, "Model.RemoveTag: negative cursor")
 }
 
 // toggleCursor applies or removes the tag under the cursor.
@@ -253,7 +319,8 @@ func (m Model) View() string {
 	if m.private {
 		mode = "new tags: private (only you see them) · ctrl+t for channel"
 	}
-	items = append(items, m.styles.Timestamp.Render("  "+mode), "")
+	items = append(items, m.styles.Timestamp.Render("  "+mode),
+		m.styles.Timestamp.Render("  ctrl+r rename · ctrl+x delete (your own tags)"), "")
 
 	start, end := listwin.Window(m.cursor, len(m.filtered), listwin.Rows(m.height))
 	assert.That(start >= 0 && start <= end && end <= len(m.filtered), "Model.View: window outside the list")
@@ -275,7 +342,7 @@ func (m Model) View() string {
 		}
 		items = append(items, line)
 	}
-	assert.That(len(items) == 3+end-start, "Model.View: row count does not match the window")
+	assert.That(len(items) == 4+end-start, "Model.View: row count does not match the window")
 
 	if len(m.filtered) == 0 && m.input.Value() != "" {
 		kind := "channel"

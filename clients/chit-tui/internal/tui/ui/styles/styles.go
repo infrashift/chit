@@ -64,7 +64,20 @@ type Styles struct {
 	Selection            lipgloss.Style
 	SearchMatch          lipgloss.Style
 	SearchMatchActive    lipgloss.Style
-	MarkdownStyleConfig  ansi.StyleConfig
+	// The text boxes (ThemeTextInput, ThemeTextArea in inputs.go). Without
+	// them a text box uses the colors of bubbles, which follow the
+	// terminal, not the theme.
+	InputText        lipgloss.Style
+	InputPlaceholder lipgloss.Style
+	InputPrompt      lipgloss.Style
+	InputCursor      lipgloss.Style
+	// TermForeground and TermBackground are the theme's own foreground and
+	// background as "#rrggbb", or "" when the theme leaves the terminal's
+	// color. The client sets the terminal's default colors to them, so the
+	// cells that nothing draws on follow the theme too.
+	TermForeground      string
+	TermBackground      string
+	MarkdownStyleConfig ansi.StyleConfig
 }
 
 // New creates Styles from a Theme.
@@ -74,6 +87,7 @@ func New(t theme.Theme) Styles {
 	s.setText(t)
 	s.setBadges(t)
 	s.setHighlights(t)
+	s.setInputs(t)
 	s.MarkdownStyleConfig = markdown.StyleConfig(t)
 	assert.That(s.Input.GetHorizontalFrameSize() == s.Viewport.GetHorizontalFrameSize(),
 		"styles.New: input and viewport frames differ in width")

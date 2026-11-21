@@ -8,10 +8,13 @@ import (
 )
 
 // hashtagRe matches a #tag at the start of a line or after a space or tab.
-// A tag needs a letter, so "#123" stays an issue or PR reference.
+// A tag needs a letter, so "#123" stays an issue or PR reference. Letters
+// and digits are Unicode, as the server permits. The server also permits
+// '.' and spaces in a name, but a #tag stops at them: "see #docs." does not
+// take the period.
 //
 // semscope: allow(NASA-P10-06) compiled once, never changed
-var hashtagRe = regexp.MustCompile(`(^|[ \t])#([a-zA-Z0-9_-]*[a-zA-Z][a-zA-Z0-9_-]*)`)
+var hashtagRe = regexp.MustCompile(`(^|[ \t])#([\p{L}\p{N}_-]*\p{L}[\p{L}\p{N}_-]*)`)
 
 // ExtractHashtags returns tag names found in content, lowercased and
 // deduplicated. Code, fenced or inline, is quoted verbatim and never holds

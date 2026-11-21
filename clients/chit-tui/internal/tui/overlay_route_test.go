@@ -11,6 +11,9 @@ import (
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/skinpicker"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/tagpicker"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/threadinbox"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/filepick"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/infobox"
+	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/prompt"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/styles"
 	"github.com/infrashift/chit/clients/chit-tui/internal/tui/ui/theme"
 )
@@ -21,18 +24,24 @@ import (
 func modelWithEveryOverlayOpen() Model {
 	s := styles.New(theme.TokyoNight())
 	var m Model
+	m.textPrompt = prompt.New(s, 50)
+	m.textPrompt.Open("rename-tag:t1", "Rename #x", "x", "")
+	m.filePick = filepick.New(s, "Attach", []string{".png"}, 1024)
+	m.filePick.Open(".")
 	m.dmPicker = dmpicker.New(s)
 	m.dmPicker.OpenForMembers()
 	m.threadInbox = threadinbox.New(s)
 	m.threadInbox.Open()
 	m.skinPicker = skinpicker.New(s)
-	m.skinPicker.Open()
+	m.skinPicker.Open("")
 	m.chCreator = chcreator.New(s)
 	m.chCreator.Open("team-1")
 	m.tagPicker = tagpicker.New(s)
 	m.tagPicker.Open("post-1", nil, nil)
 	m.palette = palette.New(s)
 	m.palette.Open("")
+	m.infoBox = infobox.New(s)
+	m.infoBox.Open("post:p1", "Post details", nil, nil)
 	m.help = help.New(s)
 	m.help.Open()
 	return m
