@@ -1,15 +1,15 @@
 ---
-id: "01a1f771-12be-7242-b45c-4755ad21d835"
+x-okfw-id: "01a1f771-12be-7242-b45c-4755ad21d835"
 title: "ISSUE-019: The TUI has no reusable Bubbles for confirm, chips, prompt, activity and file pick"
 type: "Issue"
-kind: "issue"
+x-okfw-kind: "issue"
 tags:
   - "issue"
   - "phase-13"
   - "chit-tui"
   - "closed"
-created: "2026-11-19T23:32:25-06:00"
-timestamp: "2026-11-19T23:55:01-06:00"
+x-okfw-created: "2026-11-19T23:32:25-06:00"
+x-okfw-timestamp: "2026-11-19T23:55:01-06:00"
 description: "The TUI keeps a confirmation, a chip row and other small UI parts inside larger models, so new features cannot use them again."
 ---
 

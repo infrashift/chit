@@ -1,16 +1,16 @@
 ---
-id: "01a1f537-9e3e-7986-9c81-1afde5cd6aa3"
+x-okfw-id: "01a1f537-9e3e-7986-9c81-1afde5cd6aa3"
 title: "ISSUE-003: R7: check each return value"
 type: "Issue"
-kind: "issue"
+x-okfw-kind: "issue"
 tags:
   - "issue"
   - "phase-3"
   - "power-of-10"
   - "r7"
   - "closed"
-created: "2026-11-19T13:10:25-06:00"
-timestamp: "2026-11-19T13:28:23-06:00"
+x-okfw-created: "2026-11-19T13:10:25-06:00"
+x-okfw-timestamp: "2026-11-19T13:28:23-06:00"
 description: "No discarded call result and no dropped error in either Go module."
 ---
 

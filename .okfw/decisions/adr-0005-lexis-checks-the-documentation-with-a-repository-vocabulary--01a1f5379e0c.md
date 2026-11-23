@@ -1,13 +1,13 @@
 ---
-id: "01a1f537-9e0c-71ee-95a3-e988d46249b3"
+x-okfw-id: "01a1f537-9e0c-71ee-95a3-e988d46249b3"
 title: "ADR-0005: lexis checks the documentation with a repository vocabulary"
 type: "ADR"
 tags:
   - "adr"
   - "docs"
   - "ste"
-created: "2026-11-19T13:10:25-06:00"
-timestamp: "2026-11-19T13:10:25-06:00"
+x-okfw-created: "2026-11-19T13:10:25-06:00"
+x-okfw-timestamp: "2026-11-19T13:10:25-06:00"
 description: "make docs-lexis checks the Markdown documentation and the wiki against ASD-STE100 with lexis and vocabulary.cue, and each finding fails it."
 ---
 

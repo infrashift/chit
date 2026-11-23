@@ -1,13 +1,13 @@
 ---
-id: "01a1f537-9e21-74f5-943a-c5a8f51d102f"
+x-okfw-id: "01a1f537-9e21-74f5-943a-c5a8f51d102f"
 title: "ADR-0008: chit-tui is a separate Go module"
 type: "ADR"
 tags:
   - "adr"
   - "tui"
   - "dependencies"
-created: "2026-11-19T13:10:25-06:00"
-timestamp: "2026-11-19T13:10:25-06:00"
+x-okfw-created: "2026-11-19T13:10:25-06:00"
+x-okfw-timestamp: "2026-11-19T13:10:25-06:00"
 description: "clients/chit-tui has its own go.mod so the charmbracelet dependencies stay out of the server build, and make check-deps enforces it."
 ---
 

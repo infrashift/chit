@@ -1,16 +1,16 @@
 ---
-id: "01a1f5dc-77bc-7dd2-9a68-d82d498a36ae"
+x-okfw-id: "01a1f5dc-77bc-7dd2-9a68-d82d498a36ae"
 title: "ISSUE-014: Merge main and bring its new code under the gates"
 type: "Issue"
-kind: "issue"
+x-okfw-kind: "issue"
 tags:
   - "issue"
   - "phase-11"
   - "power-of-10"
   - "ste"
   - "closed"
-created: "2026-11-19T16:10:28-06:00"
-timestamp: "2026-11-19T17:35:32-06:00"
+x-okfw-created: "2026-11-19T16:10:28-06:00"
+x-okfw-timestamp: "2026-11-19T17:35:32-06:00"
 description: "Merge origin/main (attachments, the membership hook, the rate limits) and make its new code and docs pass every gate before the pull request."
 ---
 

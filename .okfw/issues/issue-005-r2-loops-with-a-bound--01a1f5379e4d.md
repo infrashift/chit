@@ -1,16 +1,16 @@
 ---
-id: "01a1f537-9e4d-7dda-9cc7-c2b4802712c3"
+x-okfw-id: "01a1f537-9e4d-7dda-9cc7-c2b4802712c3"
 title: "ISSUE-005: R2: loops with a bound"
 type: "Issue"
-kind: "issue"
+x-okfw-kind: "issue"
 tags:
   - "issue"
   - "phase-5"
   - "power-of-10"
   - "r2"
   - "closed"
-created: "2026-11-19T13:10:25-06:00"
-timestamp: "2026-11-19T13:35:28-06:00"
+x-okfw-created: "2026-11-19T13:10:25-06:00"
+x-okfw-timestamp: "2026-11-19T13:35:28-06:00"
 description: "Each for loop states its exit condition or its maximum count."
 ---
 

@@ -1,5 +1,7 @@
 ---
-okf_version: "0.2"
+okf_version: "0.3"
+description: "Design record for the Chit Go team-chat server: ADRs on Ory auth, pub/sub, machine actors, attachments and rate limits, plus specs and NASA Power of 10 lint issues."
+title: "Chit"
 ---
 
 # /

@@ -1,12 +1,12 @@
 ---
-id: "01a1f537-9de5-78fc-9859-9b01619c308e"
+x-okfw-id: "01a1f537-9de5-78fc-9859-9b01619c308e"
 title: "Slash commands"
 type: "Spec"
 tags:
   - "spec"
   - "commands"
-created: "2026-11-19T13:10:25-06:00"
-timestamp: "2026-11-19T13:10:25-06:00"
+x-okfw-created: "2026-11-19T13:10:25-06:00"
+x-okfw-timestamp: "2026-11-19T13:10:25-06:00"
 description: "CUE files define the slash commands, Keto authorizes each command, and chitd audits each one and replies with a command_response event."
 ---
 

@@ -1,15 +1,15 @@
 ---
-id: "01a1f771-12b4-72b1-a286-0ae6b5588002"
+x-okfw-id: "01a1f771-12b4-72b1-a286-0ae6b5588002"
 title: "ISSUE-018: The TUI client does not model the HALO server contract"
 type: "Issue"
-kind: "issue"
+x-okfw-kind: "issue"
 tags:
   - "issue"
   - "phase-12"
   - "chit-tui"
   - "closed"
-created: "2026-11-19T23:32:25-06:00"
-timestamp: "2026-11-19T23:45:06-06:00"
+x-okfw-created: "2026-11-19T23:32:25-06:00"
+x-okfw-timestamp: "2026-11-19T23:45:06-06:00"
 description: "The TUI models, API client and errors do not know the attachments, provenance, actor types, tag routes, Retry-After or the refusal reason of the HALO server."
 ---
 

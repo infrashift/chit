@@ -1,16 +1,16 @@
 ---
-id: "01a1f537-9e65-711d-9463-cf2d41f95fb7"
+x-okfw-id: "01a1f537-9e65-711d-9463-cf2d41f95fb7"
 title: "ISSUE-008: R4: functions of 60 lines or fewer"
 type: "Issue"
-kind: "issue"
+x-okfw-kind: "issue"
 tags:
   - "issue"
   - "phase-8"
   - "power-of-10"
   - "r4"
   - "closed"
-created: "2026-11-19T13:10:25-06:00"
-timestamp: "2026-11-19T14:06:34-06:00"
+x-okfw-created: "2026-11-19T13:10:25-06:00"
+x-okfw-timestamp: "2026-11-19T14:06:34-06:00"
 description: "Split each function that has more than 60 lines."
 ---
 

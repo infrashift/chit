@@ -1,16 +1,16 @@
 ---
-id: "01a1f537-9e2f-7796-94c2-41a739c70a9b"
+x-okfw-id: "01a1f537-9e2f-7796-94c2-41a739c70a9b"
 title: "ISSUE-001: OKF wiki and MCP server"
 type: "Issue"
-kind: "issue"
+x-okfw-kind: "issue"
 tags:
   - "issue"
   - "phase-1"
   - "wiki"
   - "okf"
   - "closed"
-created: "2026-11-19T13:10:25-06:00"
-timestamp: "2026-11-19T13:11:37-06:00"
+x-okfw-created: "2026-11-19T13:10:25-06:00"
+x-okfw-timestamp: "2026-11-19T13:11:37-06:00"
 description: "chit has an okfw wiki with the zmake layout and the okfw MCP server in .mcp.json."
 ---
 

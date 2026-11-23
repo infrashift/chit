@@ -1,12 +1,12 @@
 ---
-id: "01a1f537-9dd5-76af-9c7b-61622fc40fa8"
+x-okfw-id: "01a1f537-9dd5-76af-9c7b-61622fc40fa8"
 title: "chit architecture overview"
 type: "Architecture"
 tags:
   - "architecture"
   - "overview"
-created: "2026-11-19T13:10:25-06:00"
-timestamp: "2026-11-19T13:10:25-06:00"
+x-okfw-created: "2026-11-19T13:10:25-06:00"
+x-okfw-timestamp: "2026-11-19T13:10:25-06:00"
 description: "The chit binaries, the API to App to Store layers, the Ory security stack, the WebSocket hub and the pub/sub topic."
 ---
 

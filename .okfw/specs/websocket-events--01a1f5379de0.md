@@ -1,12 +1,12 @@
 ---
-id: "01a1f537-9de0-7254-b2fa-32076fce034d"
+x-okfw-id: "01a1f537-9de0-7254-b2fa-32076fce034d"
 title: "WebSocket events"
 type: "Spec"
 tags:
   - "spec"
   - "websocket"
-created: "2026-11-19T13:10:25-06:00"
-timestamp: "2026-11-19T13:10:25-06:00"
+x-okfw-created: "2026-11-19T13:10:25-06:00"
+x-okfw-timestamp: "2026-11-19T13:10:25-06:00"
 description: "chitd sends 19 event types over /api/v1/websocket to the members of the channel or team of each event."
 ---
 

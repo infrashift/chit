@@ -1,15 +1,15 @@
 ---
-id: "01a1f771-12ef-7734-9f5c-84d28ee90e9d"
+x-okfw-id: "01a1f771-12ef-7734-9f5c-84d28ee90e9d"
 title: "ISSUE-024: The TUI e2e suite and the live run do not cover the HALO features"
 type: "Issue"
-kind: "issue"
+x-okfw-kind: "issue"
 tags:
   - "issue"
   - "phase-18"
   - "chit-tui"
   - "closed"
-created: "2026-11-19T23:32:25-06:00"
-timestamp: "2026-11-20T09:22:49-06:00"
+x-okfw-created: "2026-11-19T23:32:25-06:00"
+x-okfw-timestamp: "2026-11-20T09:22:49-06:00"
 description: "The TUI e2e suite tests none of the HALO routes and events, and no live run checks the TUI against the full stack."
 ---
 

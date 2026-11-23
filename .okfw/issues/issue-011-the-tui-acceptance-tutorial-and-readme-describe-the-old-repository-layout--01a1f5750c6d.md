@@ -1,15 +1,15 @@
 ---
-id: "01a1f575-0c6d-725b-91a4-da6dddd183d9"
+x-okfw-id: "01a1f575-0c6d-725b-91a4-da6dddd183d9"
 title: "ISSUE-011: The TUI acceptance tutorial and README describe the old repository layout"
 type: "Issue"
-kind: "issue"
+x-okfw-kind: "issue"
 tags:
   - "issue"
   - "docs"
   - "tui"
   - "closed"
-created: "2026-11-19T14:17:31-06:00"
-timestamp: "2026-11-19T15:22:40-06:00"
+x-okfw-created: "2026-11-19T14:17:31-06:00"
+x-okfw-timestamp: "2026-11-19T15:22:40-06:00"
 description: "The TUI acceptance tutorial describes a separate chit-tui repository, and the README file tree omits newer files."
 ---
 

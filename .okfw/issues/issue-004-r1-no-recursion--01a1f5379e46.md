@@ -1,16 +1,16 @@
 ---
-id: "01a1f537-9e46-72b1-bcd7-a54fb937cc58"
+x-okfw-id: "01a1f537-9e46-72b1-bcd7-a54fb937cc58"
 title: "ISSUE-004: R1: no recursion"
 type: "Issue"
-kind: "issue"
+x-okfw-kind: "issue"
 tags:
   - "issue"
   - "phase-4"
   - "power-of-10"
   - "r1"
   - "closed"
-created: "2026-11-19T13:10:25-06:00"
-timestamp: "2026-11-19T13:30:55-06:00"
+x-okfw-created: "2026-11-19T13:10:25-06:00"
+x-okfw-timestamp: "2026-11-19T13:30:55-06:00"
 description: "Remove the two recursion cycles in chit-tui."
 ---
 

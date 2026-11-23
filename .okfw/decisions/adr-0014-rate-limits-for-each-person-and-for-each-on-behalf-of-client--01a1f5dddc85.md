@@ -1,13 +1,13 @@
 ---
-id: "01a1f5dd-dc85-7e31-b838-9a808031f2f9"
+x-okfw-id: "01a1f5dd-dc85-7e31-b838-9a808031f2f9"
 title: "ADR-0014: Rate limits for each person and for each on-behalf-of client"
 type: "ADR"
 tags:
   - "adr"
   - "rate-limit"
   - "on-behalf-of"
-created: "2026-11-19T16:12:00-06:00"
-timestamp: "2026-11-19T16:12:00-06:00"
+x-okfw-created: "2026-11-19T16:12:00-06:00"
+x-okfw-timestamp: "2026-11-19T16:12:00-06:00"
 description: "Each person keeps a per-user limit, and an on-behalf-of client has an aggregate limit of its own, so halod can act for many people through one machine actor."
 ---
 

@@ -1,15 +1,15 @@
 ---
-id: "01a1f771-12e5-7781-8e2b-50aa21a079c2"
+x-okfw-id: "01a1f771-12e5-7781-8e2b-50aa21a079c2"
 title: "ISSUE-023: The TUI cannot attach or save files"
 type: "Issue"
-kind: "issue"
+x-okfw-kind: "issue"
 tags:
   - "issue"
   - "phase-17"
   - "chit-tui"
   - "closed"
-created: "2026-11-19T23:32:25-06:00"
-timestamp: "2026-11-20T09:14:04-06:00"
+x-okfw-created: "2026-11-19T23:32:25-06:00"
+x-okfw-timestamp: "2026-11-20T09:14:04-06:00"
 description: "The TUI cannot upload an image to a post or save the attachment of a post to disk."
 ---
 

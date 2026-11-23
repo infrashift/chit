@@ -1,13 +1,13 @@
 ---
-id: "01a1f5dd-dc78-70a8-b472-d53b133f081f"
+x-okfw-id: "01a1f5dd-dc78-70a8-b472-d53b133f081f"
 title: "ADR-0012: Attachments in SeaweedFS, checked by imagecheck"
 type: "ADR"
 tags:
   - "adr"
   - "attachments"
   - "security"
-created: "2026-11-19T16:12:00-06:00"
-timestamp: "2026-11-19T16:12:00-06:00"
+x-okfw-created: "2026-11-19T16:12:00-06:00"
+x-okfw-timestamp: "2026-11-19T16:12:00-06:00"
 description: "chitd keeps the bytes of image attachments in an S3 bucket (SeaweedFS), checks and encodes each upload again with pkg/imagecheck, and serves it only to channel members."
 ---
 

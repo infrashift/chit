@@ -1,14 +1,14 @@
 ---
-id: "01a1f751-fa53-7bfb-b153-c968152b05d0"
+x-okfw-id: "01a1f751-fa53-7bfb-b153-c968152b05d0"
 title: "ISSUE-017: The e2e script fails on a used PostgreSQL volume"
 type: "Issue"
-kind: "issue"
+x-okfw-kind: "issue"
 tags:
   - "issue"
   - "bug"
   - "closed"
-created: "2026-11-19T22:58:27-06:00"
-timestamp: "2026-11-19T23:02:53-06:00"
+x-okfw-created: "2026-11-19T22:58:27-06:00"
+x-okfw-timestamp: "2026-11-19T23:02:53-06:00"
 description: "tests/e2e/test_e2e.sh passes only on a new chit-pgdata volume, because scenarios 10 to 12 make people, a team and channels with names that a previous run already used."
 ---
 

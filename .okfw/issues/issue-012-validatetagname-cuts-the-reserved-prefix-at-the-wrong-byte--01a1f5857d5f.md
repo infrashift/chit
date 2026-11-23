@@ -1,15 +1,15 @@
 ---
-id: "01a1f585-7d5f-7145-8f27-8097b59917f0"
+x-okfw-id: "01a1f585-7d5f-7145-8f27-8097b59917f0"
 title: "ISSUE-012: ValidateTagName cuts the reserved prefix at the wrong byte"
 type: "Issue"
-kind: "issue"
+x-okfw-kind: "issue"
 tags:
   - "issue"
   - "bug"
   - "tags"
   - "closed"
-created: "2026-11-19T14:35:28-06:00"
-timestamp: "2026-11-19T15:17:20-06:00"
+x-okfw-created: "2026-11-19T14:35:28-06:00"
+x-okfw-timestamp: "2026-11-19T15:17:20-06:00"
 description: "A profile/ tag name that spells the prefix with a character whose lowercase is shorter, for example İ, keeps the slash after the cut, and chitd refuses it."
 ---
 

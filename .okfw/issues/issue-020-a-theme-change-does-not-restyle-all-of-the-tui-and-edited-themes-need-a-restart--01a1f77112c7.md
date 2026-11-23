@@ -1,15 +1,15 @@
 ---
-id: "01a1f771-12c7-7e98-b925-51571bb65ef9"
+x-okfw-id: "01a1f771-12c7-7e98-b925-51571bb65ef9"
 title: "ISSUE-020: A theme change does not restyle all of the TUI, and edited themes need a restart"
 type: "Issue"
-kind: "issue"
+x-okfw-kind: "issue"
 tags:
   - "issue"
   - "phase-14"
   - "chit-tui"
   - "closed"
-created: "2026-11-19T23:32:25-06:00"
-timestamp: "2026-11-20T08:21:05-06:00"
+x-okfw-created: "2026-11-19T23:32:25-06:00"
+x-okfw-timestamp: "2026-11-20T08:21:05-06:00"
 description: "After /theme some parts keep the old colors, an edited theme file needs a restart, and the theme picker has no preview."
 ---
 

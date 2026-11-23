@@ -1,16 +1,16 @@
 ---
-id: "01a1f537-9e37-7161-9e3c-18eb14314576"
+x-okfw-id: "01a1f537-9e37-7161-9e3c-18eb14314576"
 title: "ISSUE-002: Lint gates for the Power of 10 rules and the documentation"
 type: "Issue"
-kind: "issue"
+x-okfw-kind: "issue"
 tags:
   - "issue"
   - "phase-2"
   - "lint"
   - "tooling"
   - "closed"
-created: "2026-11-19T13:10:25-06:00"
-timestamp: "2026-11-19T13:14:08-06:00"
+x-okfw-created: "2026-11-19T13:10:25-06:00"
+x-okfw-timestamp: "2026-11-19T13:14:08-06:00"
 description: "make check runs golangci-lint, semscope, the tests, lexis and the wiki checks, with the unfixed rules omitted."
 ---
 

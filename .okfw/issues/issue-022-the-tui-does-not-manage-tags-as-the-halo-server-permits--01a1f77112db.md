@@ -1,15 +1,15 @@
 ---
-id: "01a1f771-12db-7a0d-b70b-629c9e731a39"
+x-okfw-id: "01a1f771-12db-7a0d-b70b-629c9e731a39"
 title: "ISSUE-022: The TUI does not manage tags as the HALO server permits"
 type: "Issue"
-kind: "issue"
+x-okfw-kind: "issue"
 tags:
   - "issue"
   - "phase-16"
   - "chit-tui"
   - "closed"
-created: "2026-11-19T23:32:25-06:00"
-timestamp: "2026-11-20T08:55:39-06:00"
+x-okfw-created: "2026-11-19T23:32:25-06:00"
+x-okfw-timestamp: "2026-11-20T08:55:39-06:00"
 description: "The TUI ignores tag_updated, tag_deleted and channel_tags_updated, and it cannot rename or delete a tag or use channel tags."
 ---
 

@@ -1,13 +1,13 @@
 ---
-id: "01a1f537-9dea-7ebd-a5d1-1ce765a9724b"
+x-okfw-id: "01a1f537-9dea-7ebd-a5d1-1ce765a9724b"
 title: "On-behalf-of requests"
 type: "Spec"
 tags:
   - "spec"
   - "auth"
   - "on-behalf-of"
-created: "2026-11-19T13:10:25-06:00"
-timestamp: "2026-11-19T13:10:25-06:00"
+x-okfw-created: "2026-11-19T13:10:25-06:00"
+x-okfw-timestamp: "2026-11-19T13:10:25-06:00"
 description: "An allowlisted machine actor sends X-On-Behalf-Of on an allowlisted route to act as a person, and chitd provisions a person it has not seen."
 ---
 

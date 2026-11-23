@@ -1,5 +1,5 @@
 ---
-id: "01a1f537-9dfe-71bc-9349-e0c32461764b"
+x-okfw-id: "01a1f537-9dfe-71bc-9349-e0c32461764b"
 title: "ADR-0003: semscope checks the Power of 10 rules"
 type: "ADR"
 tags:
@@ -7,8 +7,8 @@ tags:
   - "lint"
   - "power-of-10"
   - "tooling"
-created: "2026-11-19T13:10:25-06:00"
-timestamp: "2026-11-19T13:10:25-06:00"
+x-okfw-created: "2026-11-19T13:10:25-06:00"
+x-okfw-timestamp: "2026-11-19T13:10:25-06:00"
 description: "make semscope runs semscope with the nasa-p10 ruleset and the .semscope.cue overlay on both Go modules when semscope is installed."
 ---
 
