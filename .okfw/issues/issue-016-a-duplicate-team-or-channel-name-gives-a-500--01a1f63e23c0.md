@@ -1,14 +1,14 @@
 ---
-id: "01a1f63e-23c0-7933-9d6c-a2077bf4ab16"
+x-okfw-id: "01a1f63e-23c0-7933-9d6c-a2077bf4ab16"
 title: "ISSUE-016: A duplicate team or channel name gives a 500"
 type: "Issue"
-kind: "issue"
+x-okfw-kind: "issue"
 tags:
   - "issue"
   - "bug"
   - "closed"
-created: "2026-11-19T17:57:09-06:00"
-timestamp: "2026-11-19T22:43:21-06:00"
+x-okfw-created: "2026-11-19T17:57:09-06:00"
+x-okfw-timestamp: "2026-11-19T22:43:21-06:00"
 description: "Creating a team, or a channel in a team, with a name that already exists gives a 500 instead of a 409, because the store does not map the unique violation."
 ---
 

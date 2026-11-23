@@ -1,15 +1,15 @@
 ---
-id: "01a1f771-12d1-7d27-8f8d-a1921bf7db81"
+x-okfw-id: "01a1f771-12d1-7d27-8f8d-a1921bf7db81"
 title: "ISSUE-021: The TUI does not show agents, provenance, attachments or stream status"
 type: "Issue"
-kind: "issue"
+x-okfw-kind: "issue"
 tags:
   - "issue"
   - "phase-15"
   - "chit-tui"
   - "closed"
-created: "2026-11-19T23:32:25-06:00"
-timestamp: "2026-11-20T08:42:27-06:00"
+x-okfw-created: "2026-11-19T23:32:25-06:00"
+x-okfw-timestamp: "2026-11-20T08:42:27-06:00"
 description: "A post that an agent makes for a person looks like the person typed it, attachments are invisible, and the TUI ignores stream_status."
 ---
 

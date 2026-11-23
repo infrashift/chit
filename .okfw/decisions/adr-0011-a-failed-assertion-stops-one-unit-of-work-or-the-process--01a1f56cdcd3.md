@@ -1,5 +1,5 @@
 ---
-id: "01a1f56c-dcd3-7df3-b7a6-7c755f6e18ad"
+x-okfw-id: "01a1f56c-dcd3-7df3-b7a6-7c755f6e18ad"
 title: "ADR-0011: A failed assertion stops one unit of work or the process"
 type: "ADR"
 tags:
@@ -7,8 +7,8 @@ tags:
   - "power-of-10"
   - "r5"
   - "assertions"
-created: "2026-11-19T14:08:34-06:00"
-timestamp: "2026-11-19T14:08:34-06:00"
+x-okfw-created: "2026-11-19T14:08:34-06:00"
+x-okfw-timestamp: "2026-11-19T14:08:34-06:00"
 description: "assert.That panics; a request gives a 500, a guarded goroutine for one connection or thread stops alone, and a loop that the process needs stops the process so that Podman restarts it."
 ---
 

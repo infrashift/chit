@@ -1,16 +1,16 @@
 ---
-id: "01a1f537-9e55-791a-b860-2ac8cc46c460"
+x-okfw-id: "01a1f537-9e55-791a-b860-2ac8cc46c460"
 title: "ISSUE-006: R9: no function types in chit code"
 type: "Issue"
-kind: "issue"
+x-okfw-kind: "issue"
 tags:
   - "issue"
   - "phase-6"
   - "power-of-10"
   - "r9"
   - "closed"
-created: "2026-11-19T13:10:25-06:00"
-timestamp: "2026-11-19T13:46:06-06:00"
+x-okfw-created: "2026-11-19T13:10:25-06:00"
+x-okfw-timestamp: "2026-11-19T13:46:06-06:00"
 description: "Replace function-typed fields and dispatch tables with interfaces or switch statements."
 ---
 

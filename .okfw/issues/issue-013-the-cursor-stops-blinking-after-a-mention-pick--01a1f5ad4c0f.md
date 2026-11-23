@@ -1,15 +1,15 @@
 ---
-id: "01a1f5ad-4c0f-7b90-85fc-96fbde81486f"
+x-okfw-id: "01a1f5ad-4c0f-7b90-85fc-96fbde81486f"
 title: "ISSUE-013: The input cursor of chit-tui never blinks"
 type: "Issue"
-kind: "issue"
+x-okfw-kind: "issue"
 tags:
   - "issue"
   - "bug"
   - "tui"
   - "closed"
-created: "2026-11-19T15:18:57-06:00"
-timestamp: "2026-11-19T15:58:02-06:00"
+x-okfw-created: "2026-11-19T15:18:57-06:00"
+x-okfw-timestamp: "2026-11-19T15:58:02-06:00"
 description: "The root model of chit-tui drops each cursor blink message, so the input cursor never blinks; the blink commands of the input are dead code."
 ---
 

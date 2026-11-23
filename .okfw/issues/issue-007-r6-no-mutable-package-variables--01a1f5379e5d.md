@@ -1,16 +1,16 @@
 ---
-id: "01a1f537-9e5d-74b7-bc9b-7c054a383fef"
+x-okfw-id: "01a1f537-9e5d-74b7-bc9b-7c054a383fef"
 title: "ISSUE-007: R6: no mutable package variables"
 type: "Issue"
-kind: "issue"
+x-okfw-kind: "issue"
 tags:
   - "issue"
   - "phase-7"
   - "power-of-10"
   - "r6"
   - "closed"
-created: "2026-11-19T13:10:25-06:00"
-timestamp: "2026-11-19T13:54:30-06:00"
+x-okfw-created: "2026-11-19T13:10:25-06:00"
+x-okfw-timestamp: "2026-11-19T13:54:30-06:00"
 description: "Move or remove package variables, and suppress only the kinds that ADR-0002 allows."
 ---
 

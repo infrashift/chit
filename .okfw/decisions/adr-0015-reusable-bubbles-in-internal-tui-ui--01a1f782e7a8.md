@@ -1,13 +1,13 @@
 ---
-id: "01a1f782-e7a8-7e44-ada3-1d4d3f136d00"
+x-okfw-id: "01a1f782-e7a8-7e44-ada3-1d4d3f136d00"
 title: "ADR-0015: Reusable Bubbles in internal/tui/ui"
 type: "ADR"
 tags:
   - "adr"
   - "chit-tui"
   - "bubbles"
-created: "2026-11-19T23:51:53-06:00"
-timestamp: "2026-11-19T23:51:53-06:00"
+x-okfw-created: "2026-11-19T23:51:53-06:00"
+x-okfw-timestamp: "2026-11-19T23:51:53-06:00"
 description: "Each small UI part that more than one feature needs is a Bubble in internal/tui/ui, with a fixed contract: no chit imports, no function fields, messages for its output, SetStyles, and its own tests."
 ---
 

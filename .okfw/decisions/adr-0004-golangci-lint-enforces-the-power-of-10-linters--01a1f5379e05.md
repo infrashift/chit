@@ -1,13 +1,13 @@
 ---
-id: "01a1f537-9e05-70e2-8f58-e5b17773cf31"
+x-okfw-id: "01a1f537-9e05-70e2-8f58-e5b17773cf31"
 title: "ADR-0004: golangci-lint enforces the Power of 10 linters"
 type: "ADR"
 tags:
   - "adr"
   - "lint"
   - "power-of-10"
-created: "2026-11-19T13:10:25-06:00"
-timestamp: "2026-11-19T13:10:25-06:00"
+x-okfw-created: "2026-11-19T13:10:25-06:00"
+x-okfw-timestamp: "2026-11-19T13:10:25-06:00"
 description: "Both .golangci.yml files enable funlen, gochecknoglobals, forbidigo, errcheck check-blank and the other linters that match the Power of 10 rules."
 ---
 

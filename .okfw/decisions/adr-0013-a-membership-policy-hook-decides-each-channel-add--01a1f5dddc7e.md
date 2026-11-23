@@ -1,13 +1,13 @@
 ---
-id: "01a1f5dd-dc7e-7f29-9948-59f1ccc44783"
+x-okfw-id: "01a1f5dd-dc7e-7f29-9948-59f1ccc44783"
 title: "ADR-0013: A membership policy hook decides each channel add"
 type: "ADR"
 tags:
   - "adr"
   - "membership"
   - "security"
-created: "2026-11-19T16:12:00-06:00"
-timestamp: "2026-11-19T16:12:00-06:00"
+x-okfw-created: "2026-11-19T16:12:00-06:00"
+x-okfw-timestamp: "2026-11-19T16:12:00-06:00"
 description: "When CHIT_MEMBERSHIP_HOOK_URL is set, chitd asks the hook before each channel add, and only an answer of allow lets the add occur."
 ---
 

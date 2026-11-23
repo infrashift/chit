@@ -1,5 +1,5 @@
 ---
-id: "01a1f53e-0eaa-773d-a97a-f9f1fbcc3194"
+x-okfw-id: "01a1f53e-0eaa-773d-a97a-f9f1fbcc3194"
 title: "ADR-0010: errlog checks the errors that a caller cannot return"
 type: "ADR"
 tags:
@@ -7,8 +7,8 @@ tags:
   - "power-of-10"
   - "r7"
   - "errors"
-created: "2026-11-19T13:17:27-06:00"
-timestamp: "2026-11-19T13:17:27-06:00"
+x-okfw-created: "2026-11-19T13:17:27-06:00"
+x-okfw-timestamp: "2026-11-19T13:17:27-06:00"
 description: "Each module has internal/errlog, which logs with slog the errors of deferred closes and best-effort cleanups, so no error goes to the blank identifier."
 ---
 

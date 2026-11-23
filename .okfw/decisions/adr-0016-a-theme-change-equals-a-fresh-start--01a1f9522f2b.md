@@ -1,13 +1,13 @@
 ---
-id: "01a1f952-2f2b-7b66-8455-ef5180e39c0d"
+x-okfw-id: "01a1f952-2f2b-7b66-8455-ef5180e39c0d"
 title: "ADR-0016: A theme change equals a fresh start"
 type: "ADR"
 tags:
   - "adr"
   - "chit-tui"
   - "themes"
-created: "2026-11-20T08:17:55-06:00"
-timestamp: "2026-11-20T08:17:55-06:00"
+x-okfw-created: "2026-11-20T08:17:55-06:00"
+x-okfw-timestamp: "2026-11-20T08:17:55-06:00"
 description: "chit-tui changes its theme at run time through one restyle path, and a test holds each switched screen equal to a fresh start; the text boxes and the terminal's own colors follow the theme too."
 ---
 

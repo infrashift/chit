@@ -1,14 +1,14 @@
 ---
-id: "01a1f633-2767-7b00-9fdd-5403454635c2"
+x-okfw-id: "01a1f633-2767-7b00-9fdd-5403454635c2"
 title: "ISSUE-015: make kube-up waits forever on an old PostgreSQL volume"
 type: "Issue"
-kind: "issue"
+x-okfw-kind: "issue"
 tags:
   - "issue"
   - "bug"
   - "closed"
-created: "2026-11-19T17:45:09-06:00"
-timestamp: "2026-11-19T17:57:10-06:00"
+x-okfw-created: "2026-11-19T17:45:09-06:00"
+x-okfw-timestamp: "2026-11-19T17:57:10-06:00"
 description: "make kube-up and make uat-up hang without an error when the PostgreSQL volume is from an older image that runs as another UID."
 ---
 

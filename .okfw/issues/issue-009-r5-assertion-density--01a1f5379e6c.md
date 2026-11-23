@@ -1,16 +1,16 @@
 ---
-id: "01a1f537-9e6c-7e21-98c9-9336dbd4289d"
+x-okfw-id: "01a1f537-9e6c-7e21-98c9-9336dbd4289d"
 title: "ISSUE-009: R5: assertion density"
 type: "Issue"
-kind: "issue"
+x-okfw-kind: "issue"
 tags:
   - "issue"
   - "phase-9"
   - "power-of-10"
   - "r5"
   - "closed"
-created: "2026-11-19T13:10:25-06:00"
-timestamp: "2026-11-19T14:37:08-06:00"
+x-okfw-created: "2026-11-19T13:10:25-06:00"
+x-okfw-timestamp: "2026-11-19T14:37:08-06:00"
 description: "Add internal/assert to each module and reach an average of two assertions for each function."
 ---
 

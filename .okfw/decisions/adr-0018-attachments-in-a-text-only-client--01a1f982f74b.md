@@ -1,13 +1,13 @@
 ---
-id: "01a1f982-f74b-744c-98a7-ed73e26b70ec"
+x-okfw-id: "01a1f982-f74b-744c-98a7-ed73e26b70ec"
 title: "ADR-0018: Attachments in a text-only client"
 type: "ADR"
 tags:
   - "adr"
   - "chit-tui"
   - "attachments"
-created: "2026-11-20T09:11:12-06:00"
-timestamp: "2026-11-20T09:11:12-06:00"
+x-okfw-created: "2026-11-20T09:11:12-06:00"
+x-okfw-timestamp: "2026-11-20T09:11:12-06:00"
 description: "chit-tui shows each attachment as one line of text, uploads with /attach and alt text into a tray of up to four files, and saves files to download_dir without overwriting."
 ---
 

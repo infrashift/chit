@@ -1,13 +1,13 @@
 ---
-id: "01a1f537-9e13-728d-915b-47322ab67de8"
+x-okfw-id: "01a1f537-9e13-728d-915b-47322ab67de8"
 title: "ADR-0006: The Ory stack authenticates and chitd authorizes"
 type: "ADR"
 tags:
   - "adr"
   - "auth"
   - "security"
-created: "2026-11-19T13:10:25-06:00"
-timestamp: "2026-11-19T13:10:25-06:00"
+x-okfw-created: "2026-11-19T13:10:25-06:00"
+x-okfw-timestamp: "2026-11-19T13:10:25-06:00"
 description: "Oathkeeper, Kratos and Hydra authenticate each request; chitd checks permissions against PostgreSQL membership, and Keto authorizes slash commands only."
 ---
 

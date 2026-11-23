@@ -1,13 +1,13 @@
 ---
-id: "01a1f972-487b-7e21-b046-617e191908bc"
+x-okfw-id: "01a1f972-487b-7e21-b046-617e191908bc"
 title: "ADR-0017: Tag management in the TUI"
 type: "ADR"
 tags:
   - "adr"
   - "chit-tui"
   - "tags"
-created: "2026-11-20T08:52:58-06:00"
-timestamp: "2026-11-20T08:52:58-06:00"
+x-okfw-created: "2026-11-20T08:52:58-06:00"
+x-okfw-timestamp: "2026-11-20T08:52:58-06:00"
 description: "chit-tui renames and deletes a tag only for its owner, applies the server's tag events at once, shows the channel tags on the pane border and finds channels by tag with /chtag."
 ---
 

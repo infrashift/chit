@@ -1,13 +1,13 @@
 ---
-id: "01a1f537-9df7-7518-9bc8-d0497bca465d"
+x-okfw-id: "01a1f537-9df7-7518-9bc8-d0497bca465d"
 title: "ADR-0002: Adapt the NASA Power of 10 rules to chit"
 type: "ADR"
 tags:
   - "adr"
   - "safety"
   - "power-of-10"
-created: "2026-11-19T13:10:25-06:00"
-timestamp: "2026-11-19T13:10:25-06:00"
+x-okfw-created: "2026-11-19T13:10:25-06:00"
+x-okfw-timestamp: "2026-11-19T13:10:25-06:00"
 description: "chit obeys the NASA/JPL Power of 10 rules as adapted to Go, with a deviation for R3 and framework exceptions for R6 and R9."
 ---
 

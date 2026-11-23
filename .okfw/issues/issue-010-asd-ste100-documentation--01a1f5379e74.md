@@ -1,16 +1,16 @@
 ---
-id: "01a1f537-9e74-7dfc-9d5a-65479eeae041"
+x-okfw-id: "01a1f537-9e74-7dfc-9d5a-65479eeae041"
 title: "ISSUE-010: ASD-STE100 documentation"
 type: "Issue"
-kind: "issue"
+x-okfw-kind: "issue"
 tags:
   - "issue"
   - "phase-10"
   - "docs"
   - "ste"
   - "closed"
-created: "2026-11-19T13:10:25-06:00"
-timestamp: "2026-11-19T14:38:12-06:00"
+x-okfw-created: "2026-11-19T13:10:25-06:00"
+x-okfw-timestamp: "2026-11-19T14:38:12-06:00"
 description: "The Markdown documentation and the wiki give zero lexis findings."
 ---
 

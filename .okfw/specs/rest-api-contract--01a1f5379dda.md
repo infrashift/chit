@@ -1,12 +1,12 @@
 ---
-id: "01a1f537-9dda-7bcf-97d6-eb99d021c124"
+x-okfw-id: "01a1f537-9dda-7bcf-97d6-eb99d021c124"
 title: "REST API contract"
 type: "Spec"
 tags:
   - "spec"
   - "api"
-created: "2026-11-19T13:10:25-06:00"
-timestamp: "2026-11-19T13:10:25-06:00"
+x-okfw-created: "2026-11-19T13:10:25-06:00"
+x-okfw-timestamp: "2026-11-19T13:10:25-06:00"
 description: "api/openapi.yaml is the contract of the chitd REST API under /api/v1; the router and the spec change together."
 ---
 

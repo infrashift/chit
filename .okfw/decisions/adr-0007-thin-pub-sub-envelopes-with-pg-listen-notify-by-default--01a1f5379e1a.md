@@ -1,12 +1,12 @@
 ---
-id: "01a1f537-9e1a-73a7-9466-17105032e02a"
+x-okfw-id: "01a1f537-9e1a-73a7-9466-17105032e02a"
 title: "ADR-0007: Thin pub/sub envelopes with PG LISTEN/NOTIFY by default"
 type: "ADR"
 tags:
   - "adr"
   - "pubsub"
-created: "2026-11-19T13:10:25-06:00"
-timestamp: "2026-11-19T13:10:25-06:00"
+x-okfw-created: "2026-11-19T13:10:25-06:00"
+x-okfw-timestamp: "2026-11-19T13:10:25-06:00"
 description: "chitd publishes thin event envelopes on chit_events through PG LISTEN/NOTIFY or NATS, and WebSocket fan-out stays in-process."
 ---
 

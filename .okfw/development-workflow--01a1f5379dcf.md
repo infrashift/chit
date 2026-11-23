@@ -1,13 +1,13 @@
 ---
-id: "01a1f537-9dcf-7878-973a-3b4821d16f6e"
+x-okfw-id: "01a1f537-9dcf-7878-973a-3b4821d16f6e"
 title: "Development workflow"
 type: "Guide"
 tags:
   - "conventions"
   - "workflow"
   - "meta"
-created: "2026-11-19T13:10:25-06:00"
-timestamp: "2026-11-19T13:10:25-06:00"
+x-okfw-created: "2026-11-19T13:10:25-06:00"
+x-okfw-timestamp: "2026-11-19T13:10:25-06:00"
 description: "The loop for each chit phase: implement, lint, verify until green, update the wiki, then commit."
 ---
 
